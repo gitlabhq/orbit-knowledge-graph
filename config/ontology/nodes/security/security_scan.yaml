@@ -131,8 +131,8 @@ storage:
     - {name: scan_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: latest, type: "Bool", default: "true"}
-    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: build_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}

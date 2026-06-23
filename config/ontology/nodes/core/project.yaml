@@ -156,11 +156,11 @@ storage:
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: visibility_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: full_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: archived, type: "Nullable(Bool)"}
     - {name: star_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: last_activity_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: last_activity_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_archived, column: archived, type: "minmax", granularity: 1}
