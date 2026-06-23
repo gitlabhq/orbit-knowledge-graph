@@ -162,6 +162,10 @@ enum Commands {
         /// Verbose logging to stderr
         #[arg(short, long)]
         verbose: bool,
+
+        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
     },
     #[command(about = descriptions::RUN_SQL_SHORT)]
     Sql {
@@ -237,6 +241,7 @@ async fn main() -> Result<()> {
             threads,
             stats,
             verbose,
+            db,
         } => {
             let level = if verbose { Level::DEBUG } else { Level::WARN };
             let subscriber = tracing_subscriber::fmt()
@@ -255,7 +260,7 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
 
-            run_index(path, threads, stats).await
+            run_index(path, threads, stats, db).await
         }
         Commands::Sql {
             query,
@@ -338,8 +343,13 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
     }
 }
 
-async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
-    for output in index_collect(path, threads, show_stats)? {
+async fn run_index(
+    path: PathBuf,
+    threads: usize,
+    show_stats: bool,
+    db: Option<PathBuf>,
+) -> Result<()> {
+    for output in index_collect(path, threads, show_stats, db)? {
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
     Ok(())
@@ -351,7 +361,9 @@ pub(crate) fn index_collect(
     path: PathBuf,
     threads: usize,
     show_stats: bool,
+    db: Option<PathBuf>,
 ) -> Result<Vec<IndexOutput>> {
+    let db_path = workspace::resolve_db_path(db)?;
     let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
 
@@ -365,7 +377,6 @@ pub(crate) fn index_collect(
     // Ensure schema exists, then drop the connection so we don't hold
     // the write lock during parsing.
     {
-        let db_path = store.db_path();
         let client =
             duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
         client
@@ -396,7 +407,6 @@ pub(crate) fn index_collect(
             }
         };
         let key = git.repo_path.to_string_lossy().to_string();
-        let db_path = store.db_path();
 
         info!(
             "Indexing repository at: {} (branch: {}, commit: {})",
@@ -419,7 +429,7 @@ pub(crate) fn index_collect(
             )?;
         }
 
-        let result = index_repo(&git, &store, &ontology, pipeline_config.clone());
+        let result = index_repo(&git, &db_path, &ontology, pipeline_config.clone());
         match result {
             Ok(result) => {
                 let repo_name = git
@@ -458,7 +468,7 @@ pub(crate) fn index_collect(
 
 fn index_repo(
     git: &workspace::GitInfo,
-    store: &workspace::Workspace,
+    db_path: &std::path::Path,
     ontology: &Ontology,
     pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
@@ -477,9 +487,8 @@ fn index_repo(
             .context("failed to walk repository files")?,
     );
 
-    let db_path = store.db_path();
     let client =
-        duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for writing")?;
+        duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for writing")?;
 
     let node_tables: Vec<String> = ontology
         .local_entity_names()

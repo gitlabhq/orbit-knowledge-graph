@@ -47,6 +47,10 @@ pub struct IndexArgs {
     /// If true, include per-file skip/error breakdowns in the result.
     #[serde(default)]
     pub stats: bool,
+    /// Optional override for the DuckDB file path. Defaults to the workspace
+    /// database (`~/.orbit/graph.duckdb`).
+    #[serde(default)]
+    pub db: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -115,7 +119,7 @@ impl OrbitLocalServer {
         Parameters(args): Parameters<IndexArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         blocking_tool(move || {
-            let outputs = index_collect(args.path, args.threads, args.stats)?;
+            let outputs = index_collect(args.path, args.threads, args.stats, args.db)?;
             serde_json::to_string_pretty(&outputs).context("failed to serialise index output")
         })
         .await

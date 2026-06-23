@@ -184,6 +184,44 @@ fn reindex_idempotent() {
 }
 
 #[test]
+fn index_db_flag_writes_to_custom_path() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let db_path = tmp.path().join("custom.duckdb");
+    let repo = create_test_repo();
+
+    let out = orbit_cmd()
+        .args([
+            "index",
+            repo.path.to_str().unwrap(),
+            "--db",
+            db_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "index --db failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(db_path.exists(), "custom db file should exist");
+
+    let result = orbit_cmd()
+        .args([
+            "sql",
+            "-F",
+            "json",
+            "--db",
+            db_path.to_str().unwrap(),
+            FILES_SIMPLE,
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success());
+    let json: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(rows(&json).len(), 2);
+}
+
+#[test]
 fn indexes_non_parsable_git_tree_files() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
