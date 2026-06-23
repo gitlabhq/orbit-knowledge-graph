@@ -84,11 +84,6 @@ impl Datalake {
         }
     }
 
-    /// Builds an [`ArrowQuery`] from `sql` + `params`. The request-URI length
-    /// guard now lives on the client's dispatch path ([`ArrowQuery`] fetch
-    /// methods), so an over-cap batch fails with [`ClickHouseError::UriTooLong`]
-    /// at dispatch (surfaced here as [`DatalakeError::Query`]) for every caller
-    /// automatically — no per-caller guard (KG#881).
     fn build_query(&self, sql: &str, params: Value) -> ArrowQuery {
         let mut query = self.client.query(sql);
         if let Value::Object(map) = params {
