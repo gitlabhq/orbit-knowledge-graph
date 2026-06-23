@@ -933,7 +933,7 @@ SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_clean
 
 CREATE TABLE IF NOT EXISTS gl_ci_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(T64, ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(T64, ZSTD(1)),
@@ -955,7 +955,7 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     project_id Int64 CODEC(T64, ZSTD(1)),
     branch String CODEC(ZSTD(1)),
-    source_id Int64 CODEC(T64, ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(T64, ZSTD(1)),
@@ -977,7 +977,7 @@ SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_clean
 
 CREATE TABLE IF NOT EXISTS gl_diff_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(T64, ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(T64, ZSTD(1)),
@@ -997,7 +997,7 @@ SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_clean
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(T64, ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(T64, ZSTD(1)),
@@ -1017,7 +1017,7 @@ SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_clean
 
 CREATE TABLE IF NOT EXISTS gl_sec_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(T64, ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(T64, ZSTD(1)),
