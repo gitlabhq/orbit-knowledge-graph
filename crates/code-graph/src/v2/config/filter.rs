@@ -44,6 +44,7 @@ pub enum FilterSkip {
     NotUtf8,
     Minified,
     LineTooLong,
+    NonRegularFile,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -134,6 +135,10 @@ impl FileStreamHooks for CodeFilter {
         } else {
             Decision::Load
         }
+    }
+
+    fn on_non_regular(&mut self, file: &FileInventoryEntry) -> Decision {
+        self.record(file, FilterSkip::NonRegularFile)
     }
 }
 
@@ -251,11 +256,16 @@ mod tests {
         f.on_header(&entry("logo.png", 10));
         f.on_content(&entry("x.bin", 10), b"a\x00b");
         f.on_content(&entry("main.rs", 10), b"fn main() {}\n");
+        f.on_non_regular(&entry("link.rs", 5));
         assert_eq!(
             f.file_reasons().get("logo.png"),
             Some(&FilterSkip::ExcludedExtension)
         );
         assert_eq!(f.file_reasons().get("x.bin"), Some(&FilterSkip::Binary));
+        assert_eq!(
+            f.file_reasons().get("link.rs"),
+            Some(&FilterSkip::NonRegularFile)
+        );
         assert!(!f.file_reasons().contains_key("main.rs"));
     }
 
