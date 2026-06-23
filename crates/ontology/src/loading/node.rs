@@ -553,29 +553,6 @@ fn resolve_etl_marker(marker: Marker, watermark: &str, deleted: &str) -> Resolve
     }
 }
 
-/// Checked on the raw input, not the rendered output, since substitution
-/// reintroduces the very literal we reject.
-fn reject_hardcoded_columns(
-    context: &str,
-    raw: &str,
-    watermark: &str,
-    deleted: &str,
-) -> Result<(), OntologyError> {
-    if raw.contains(watermark) {
-        return Err(OntologyError::Validation(format!(
-            "{context} hardcodes watermark column '{watermark}'; \
-             use {{{{watermark_column}}}} placeholder instead"
-        )));
-    }
-    if raw.contains(deleted) {
-        return Err(OntologyError::Validation(format!(
-            "{context} hardcodes deleted column '{deleted}'; \
-             use {{{{deleted_column}}}} placeholder instead"
-        )));
-    }
-    Ok(())
-}
-
 pub(crate) fn render_etl_placeholders(
     entity: &str,
     field: &str,
@@ -584,7 +561,6 @@ pub(crate) fn render_etl_placeholders(
     deleted: &str,
 ) -> Result<String, OntologyError> {
     let context = format!("entity '{entity}' field '{field}'");
-    reject_hardcoded_columns(&context, raw, watermark, deleted)?;
     let template = QueryTemplate::parse(&context, raw)?;
     Ok(template.render(|marker| resolve_etl_marker(marker, watermark, deleted)))
 }
@@ -659,7 +635,6 @@ impl EtlYaml {
                     )));
                 }
                 let context = format!("entity '{entity_name}': query file '{path}'");
-                reject_hardcoded_columns(&context, raw_sql, &watermark, &deleted)?;
                 let template = QueryTemplate::parse_full(&context, raw_sql)?
                     .resolve(|marker| resolve_etl_marker(marker, &watermark, &deleted));
 
@@ -1303,19 +1278,6 @@ mod tests {
         assert!(
             !sql.contains("{{watermark_column}}") && !sql.contains("{{deleted_column}}"),
             "column placeholders must be resolved: {sql}"
-        );
-    }
-
-    #[test]
-    fn query_file_hardcoding_watermark_is_rejected() {
-        let err = parse_test_node_with_files(
-            SQL_YAML,
-            &[("nodes/test/test.sql", "SELECT id, _siphon_watermark FROM t")],
-        )
-        .expect_err("hardcoded watermark in sql file should fail");
-        assert!(
-            err.to_string().contains("hardcodes watermark column"),
-            "got: {err}"
         );
     }
 

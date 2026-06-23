@@ -898,6 +898,27 @@ mod tests {
     }
 
     #[test]
+    fn embedded_query_files_use_column_placeholders_not_literals() {
+        let ontology = crate::Ontology::load_embedded().expect("embedded ontology loads");
+        let watermark = ontology.default_watermark_column();
+        let deleted = ontology.default_deleted_column();
+
+        for path in EmbeddedOntology::iter().filter(|path| path.ends_with(".sql")) {
+            let sql = EmbeddedReader
+                .read(path.as_ref())
+                .expect("embedded sql reads");
+            assert!(
+                !sql.contains(watermark),
+                "{path} hardcodes watermark column '{watermark}'; use {{{{watermark_column}}}}"
+            );
+            assert!(
+                !sql.contains(deleted),
+                "{path} hardcodes deleted column '{deleted}'; use {{{{deleted_column}}}}"
+            );
+        }
+    }
+
+    #[test]
     fn unregistered_derived_emit_is_rejected() {
         let mut ontology = crate::Ontology::new().with_edges(["MENTIONS"]);
         ontology.derived_entities.insert(
