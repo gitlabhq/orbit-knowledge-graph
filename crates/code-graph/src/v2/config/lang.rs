@@ -217,14 +217,12 @@ define_languages! {
     Swift => {
         support_lang: Swift,
         extensions: ["swift"],
-        exclude: [],
         separator: ".",
         names: ["swift"],
     },
     Lua => {
         support_lang: Lua,
         extensions: ["lua"],
-        exclude: [],
         separator: ".",
         names: ["lua"],
     },
