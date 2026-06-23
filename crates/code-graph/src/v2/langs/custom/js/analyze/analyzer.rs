@@ -748,62 +748,14 @@ fn build_module_info(
 }
 
 impl JsAnalyzer {
-    const MAX_LINE_LENGTH: usize = 64 * 1024;
-    const MAX_AVG_LINE_LENGTH: usize = 16 * 1024;
-    const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
-
     pub fn analyze_file(
         source: &str,
         file_path: &str,
         relative_path: &str,
     ) -> Result<JsFileAnalysis, crate::v2::error::AnalyzerError> {
-        use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
-        // Single pass over lines: longest line + line count. Split on
-        // both `\n` and `\r` so a file that uses classic Mac line
-        // endings (CR-only) cannot bypass the minified heuristic by
-        // looking like one giant line to `source.lines()`.
-        let mut line_count = 0usize;
-        let mut max_line_len = 0usize;
-        let mut current_line_len = 0usize;
-        for byte in source.bytes() {
-            if byte == b'\n' || byte == b'\r' {
-                if current_line_len > max_line_len {
-                    max_line_len = current_line_len;
-                }
-                current_line_len = 0;
-                line_count += 1;
-            } else {
-                current_line_len += 1;
-            }
-            if max_line_len.max(current_line_len) > Self::MAX_LINE_LENGTH {
-                return Err(AnalyzerError::skip(
-                    FileSkip::LineTooLong,
-                    format!(
-                        "{file_path}: line too long ({} bytes, max {})",
-                        max_line_len.max(current_line_len),
-                        Self::MAX_LINE_LENGTH
-                    ),
-                ));
-            }
-        }
-        if current_line_len > max_line_len {
-            max_line_len = current_line_len;
-        }
-        if current_line_len > 0 {
-            line_count += 1;
-        }
-        let _ = max_line_len;
-
-        let line_count = line_count.max(1);
-        let avg_line_len = source.len() / line_count;
-        if avg_line_len > Self::MAX_AVG_LINE_LENGTH && source.len() > Self::MINIFIED_SIZE_THRESHOLD
-        {
-            return Err(AnalyzerError::skip(
-                FileSkip::Minified,
-                format!("{file_path}: avg line {avg_line_len} bytes, {line_count} lines"),
-            ));
-        }
-
+        use crate::v2::error::{AnalyzerError, FileFault};
+        // Minified and long-line bundles are filtered upstream by `CodeFilter`
+        // (the file stream) before reaching the parser.
         let source_type = SourceType::from_path(file_path).map_err(|_| {
             AnalyzerError::fault(
                 FileFault::UnknownSourceType,

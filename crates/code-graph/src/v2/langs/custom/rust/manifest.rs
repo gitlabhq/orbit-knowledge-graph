@@ -1319,10 +1319,9 @@ fn resolve_explicit_target_path(
 }
 
 pub(super) fn repo_local_existing_file(path: PathBuf, repo_root: &Path) -> Option<PathBuf> {
-    let normalized = normalize_existing_path(&path)?;
     let normalized_root =
         normalize_existing_path(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
-    (normalized.is_file() && normalized.starts_with(&normalized_root)).then_some(normalized)
+    gkg_utils::fs::contained_canonical_path(&normalized_root, &path).filter(|p| p.is_file())
 }
 
 fn infer_directory_targets(directory: &Path) -> Vec<(String, PathBuf)> {

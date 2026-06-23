@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
@@ -119,22 +119,11 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
     } else {
         input
     };
-    for component in rel.components() {
-        match component {
-            Component::ParentDir => {
-                return Err(AnalyzerError::skip(
-                    FileSkip::UnsafePath,
-                    format!("refusing `..` in path: {relative_path}"),
-                ));
-            }
-            Component::Prefix(_) | Component::RootDir => {
-                return Err(AnalyzerError::skip(
-                    FileSkip::UnsafePath,
-                    format!("refusing rooted path: {relative_path}"),
-                ));
-            }
-            _ => {}
-        }
+    if !gkg_utils::fs::is_safe_relative_path(rel) {
+        return Err(AnalyzerError::skip(
+            FileSkip::UnsafePath,
+            format!("refusing unsafe path: {relative_path}"),
+        ));
     }
     let joined = Path::new(root_path).join(rel);
     let meta = std::fs::symlink_metadata(&joined).map_err(|err| {
@@ -143,12 +132,6 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
             format!("stat {}: {err}", joined.display()),
         )
     })?;
-    if !meta.file_type().is_file() {
-        return Err(AnalyzerError::skip(
-            FileSkip::NonRegularFile,
-            format!("refusing non-regular file: {}", joined.display()),
-        ));
-    }
     if meta.len() > MAX_FILE_BYTES {
         return Err(AnalyzerError::skip(
             FileSkip::Oversize,
@@ -227,16 +210,8 @@ fn sanitize_panic_message(raw: &str) -> String {
 
 fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, AnalyzerError> {
     let absolute_path = safe_repo_join(root_path, relative_path)?;
-    let source = std::fs::read_to_string(&absolute_path).map_err(|error| {
-        // Distinguish UTF-8 decode failure from raw I/O so the dashboard
-        // can split "couldn't read disk" (FileRead) from "binary blob"
-        // (NotUtf8) — both currently surface here as io::Error.
-        if error.kind() == std::io::ErrorKind::InvalidData {
-            AnalyzerError::skip(FileSkip::NotUtf8, error.to_string())
-        } else {
-            AnalyzerError::fault(FileFault::FileRead, error.to_string())
-        }
-    })?;
+    let source = std::fs::read_to_string(&absolute_path)
+        .map_err(|error| AnalyzerError::fault(FileFault::FileRead, error.to_string()))?;
     let relative_path = normalize_relative_path(relative_path, root_path);
     let extension = extension_for(&relative_path);
     let language = language_for_extension(extension.as_str());

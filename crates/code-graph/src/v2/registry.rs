@@ -23,9 +23,9 @@ use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use crate::v2::langs::generic::swift::{SwiftDsl, SwiftRules};
 use std::sync::Arc;
 
+use crate::v2::inventory::{FamilyFileInput, FileInput};
 use crate::v2::pipeline::{
-    BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguageContext, LanguagePipeline,
-    PipelineContext, PipelineError,
+    BatchTx, GenericPipeline, LanguageContext, LanguagePipeline, PipelineContext, PipelineError,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
