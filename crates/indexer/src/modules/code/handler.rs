@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
@@ -286,15 +287,16 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        let work = self
-            .pipeline
-            .index_project(context, &indexing_request, observer);
-        // Hard wall-clock bound on the job; a timeout is transient (retried, then
-        // DLQ'd), so a stuck repo can't pin a worker or be re-indexed forever.
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is transient (retried, then DLQ'd).
+        let cancel = CancellationToken::new();
+        let work =
+            self.pipeline
+                .index_project(context, &indexing_request, observer, cancel.clone());
         let result = match self.pipeline.job_timeout() {
             Some(timeout) => match tokio::time::timeout(timeout, work).await {
                 Ok(result) => result,
                 Err(_) => {
+                    cancel.cancel();
                     warn!(
                         project_id,
                         branch = %branch,
