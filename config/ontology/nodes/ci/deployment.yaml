@@ -175,9 +175,9 @@ storage:
     - {name: deployable_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: on_stop, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: archived, type: "Bool", default: "false"}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: finished_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: environment_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}

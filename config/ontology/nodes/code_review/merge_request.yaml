@@ -544,31 +544,31 @@ storage:
     - {name: merge_status, type: "LowCardinality(String)", default: "'unchecked'", codec: ["LZ4"]}
     - {name: draft, type: "Bool", default: "false"}
     - {name: squash, type: "Bool", default: "false"}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: merge_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: discussion_locked, type: "Nullable(Bool)"}
-    - {name: prepared_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: prepared_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: merged_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: squash_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: latest_build_finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_deployed_to_production_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: merged_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: latest_closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_comment_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: last_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_build_started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_build_finished_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_deployed_to_production_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: merged_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_closed_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_comment_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_commit_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: last_commit_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: diff_size, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: modified_paths_size, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: commits_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: first_approved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_reassigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_approved_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_reassigned_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: added_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: removed_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: first_contribution, type: "Bool", default: "false"}
-    - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: merge_user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: updated_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}

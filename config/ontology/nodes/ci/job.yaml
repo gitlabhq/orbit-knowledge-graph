@@ -328,10 +328,10 @@ storage:
     - {name: "`when`", type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: retried, type: "Nullable(Bool)"}
     - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: queued_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: finished_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: queued_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: runner_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: timeout, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}

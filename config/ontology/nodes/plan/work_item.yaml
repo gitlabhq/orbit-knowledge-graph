@@ -192,9 +192,9 @@ storage:
     - {name: due_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: start_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: weight, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: closed_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: milestone_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}

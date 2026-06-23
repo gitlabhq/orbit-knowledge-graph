@@ -191,8 +191,8 @@ storage:
     - {name: is_auditor, type: "Bool", default: "false"}
     - {name: is_external, type: "Bool", default: "false"}
     - {name: user_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}
     - {name: idx_user_type, column: user_type, type: "set(26)", granularity: 2}
