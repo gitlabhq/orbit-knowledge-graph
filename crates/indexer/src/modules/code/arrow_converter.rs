@@ -19,6 +19,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::destination::BatchWriterOptions;
+use crate::durability::WriteDurability;
 
 /// ClickHouse row envelope. Adds `traversal_path`, `_version`, `_deleted`
 /// around the core node columns.
@@ -847,8 +848,15 @@ async fn write_loop(
 ) -> WriteOutcome {
     let mut totals: HashMap<String, TableWriteTotals> = HashMap::new();
     while let Some((table, batch)) = rx.recv().await {
+        // async_insert coalesces these many small per-table inserts into fewer
+        // parts; wait_for_async_insert stays on so a run is durable before it checkpoints.
         let writer = destination
-            .new_batch_writer(&table, BatchWriterOptions::default())
+            .new_batch_writer(
+                &table,
+                BatchWriterOptions {
+                    durability: Some(WriteDurability::Durable),
+                },
+            )
             .await
             .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
         writer
