@@ -12,10 +12,11 @@ use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphO
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::destination::BatchWriterOptions;
 
@@ -804,70 +805,67 @@ fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
     batch.project(&indices).expect("column projection")
 }
 
-/// `BatchSink` for ClickHouse that buffers all batches per table in memory
-/// during pipeline execution, then flushes all tables in parallel via
-/// [`flush()`](BufferedClickHouseSink::flush).
-///
-/// This avoids sequential HTTP round-trips during the CPU-bound pipeline
-/// phase and instead issues one concurrent write per distinct table at the
-/// end. Benchmarking shows a ~3x wall-time improvement over the previous
-/// streaming approach.
-pub struct BufferedClickHouseSink {
-    destination: Arc<dyn crate::destination::Destination>,
-    buffers: RwLock<HashMap<String, Vec<RecordBatch>>>,
+/// In-flight batches the sink holds before back-pressuring the parser. Small
+/// on purpose: this bound is what keeps indexer memory flat on huge repos.
+const WRITE_CHANNEL_CAPACITY: usize = 8;
+
+/// Per-table totals the writer task yields, or the first write error.
+type WriteOutcome = Result<Vec<TableWriteTotals>, code_graph::v2::SinkError>;
+
+/// `BatchSink` for ClickHouse that streams each batch to a dedicated async
+/// writer task as the pipeline produces it. The bounded channel back-pressures
+/// the parser when ClickHouse falls behind, so the indexer holds at most a
+/// handful of batches instead of buffering the whole graph until the end.
+pub struct StreamingClickHouseSink {
+    tx: Mutex<Option<mpsc::Sender<(String, RecordBatch)>>>,
+    task: Mutex<Option<tokio::task::JoinHandle<WriteOutcome>>>,
 }
 
-impl BufferedClickHouseSink {
+impl StreamingClickHouseSink {
     pub fn new(destination: Arc<dyn crate::destination::Destination>) -> Self {
+        let (tx, rx) = mpsc::channel(WRITE_CHANNEL_CAPACITY);
+        let task = tokio::runtime::Handle::current().spawn(write_loop(destination, rx));
         Self {
-            destination,
-            buffers: RwLock::new(HashMap::new()),
+            tx: Mutex::new(Some(tx)),
+            task: Mutex::new(Some(task)),
         }
     }
 
-    /// Flush all buffered tables to ClickHouse in parallel. Each table
-    /// gets a single `insert_arrow_streaming` call with all its batches,
-    /// and all tables are written concurrently. Returns the total rows and
-    /// in-memory bytes written across all tables.
-    pub async fn flush(&self) -> Result<Vec<TableWriteTotals>, code_graph::v2::SinkError> {
-        let buffers = std::mem::take(&mut *self.buffers.write());
-        let mut handles = Vec::new();
-        let mut per_table = Vec::new();
+    /// Close the channel, drain the writer task, and return per-table totals.
+    /// Call exactly once, after the pipeline has returned.
+    pub async fn finish(&self) -> WriteOutcome {
+        drop(self.tx.lock().take());
+        let task = self.task.lock().take().expect("finish called exactly once");
+        task.await
+            .map_err(|e| code_graph::v2::SinkError(format!("writer task join: {e}")))?
+    }
+}
 
-        for (table, batches) in buffers {
-            if batches.is_empty() {
-                continue;
-            }
-            let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-            let bytes: u64 = batches
-                .iter()
-                .map(|b| b.get_array_memory_size() as u64)
-                .sum();
-            per_table.push(TableWriteTotals {
-                table: table.clone(),
-                rows,
-                bytes,
+async fn write_loop(
+    destination: Arc<dyn crate::destination::Destination>,
+    mut rx: mpsc::Receiver<(String, RecordBatch)>,
+) -> WriteOutcome {
+    let mut totals: HashMap<String, TableWriteTotals> = HashMap::new();
+    while let Some((table, batch)) = rx.recv().await {
+        let writer = destination
+            .new_batch_writer(&table, BatchWriterOptions::default())
+            .await
+            .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
+        writer
+            .write_batch(std::slice::from_ref(&batch))
+            .await
+            .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
+        let entry = totals
+            .entry(table.clone())
+            .or_insert_with(|| TableWriteTotals {
+                table,
+                rows: 0,
+                bytes: 0,
             });
-            let dest = self.destination.clone();
-            handles.push(tokio::spawn(async move {
-                let writer = dest
-                    .new_batch_writer(&table, BatchWriterOptions::default())
-                    .await
-                    .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
-                writer
-                    .write_batch(&batches)
-                    .await
-                    .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
-                Ok::<(), code_graph::v2::SinkError>(())
-            }));
-        }
-
-        let results = futures::future::join_all(handles).await;
-        for result in results {
-            result.map_err(|e| code_graph::v2::SinkError(format!("flush join: {e}")))??;
-        }
-        Ok(per_table)
+        entry.rows += batch.num_rows() as u64;
+        entry.bytes += batch.get_array_memory_size() as u64;
     }
+    Ok(totals.into_values().collect())
 }
 
 #[derive(Debug, Clone)]
@@ -877,7 +875,7 @@ pub struct TableWriteTotals {
     pub bytes: u64,
 }
 
-impl code_graph::v2::BatchSink for BufferedClickHouseSink {
+impl code_graph::v2::BatchSink for StreamingClickHouseSink {
     fn write_batch(
         &self,
         table: &str,
@@ -886,12 +884,15 @@ impl code_graph::v2::BatchSink for BufferedClickHouseSink {
         if batch.num_rows() == 0 {
             return Ok(());
         }
-        self.buffers
-            .write()
-            .entry(table.to_string())
-            .or_default()
-            .push(batch.clone());
-        Ok(())
+        let tx = self.tx.lock().clone();
+        match tx {
+            Some(tx) => tx
+                .blocking_send((table.to_string(), batch.clone()))
+                .map_err(|_| code_graph::v2::SinkError("streaming sink writer stopped".into())),
+            None => Err(code_graph::v2::SinkError(
+                "streaming sink already finished".into(),
+            )),
+        }
     }
 }
 
@@ -900,22 +901,30 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn flush_returns_per_table_totals() {
+    async fn finish_returns_per_table_totals() {
         use crate::testkit::MockDestination;
         use arrow::array::Int64Array;
         use arrow::datatypes::{DataType, Field, Schema};
         use code_graph::v2::BatchSink;
         use std::collections::HashMap;
 
-        let sink = BufferedClickHouseSink::new(Arc::new(MockDestination::new()));
+        let sink = Arc::new(StreamingClickHouseSink::new(Arc::new(
+            MockDestination::new(),
+        )));
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let batch =
             RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
 
-        sink.write_batch("gl_file", &batch).unwrap();
-        sink.write_batch("gl_definition", &batch).unwrap();
+        // write_batch blocking_sends, so it must run off the runtime threads.
+        let writer = Arc::clone(&sink);
+        tokio::task::spawn_blocking(move || {
+            writer.write_batch("gl_file", &batch).unwrap();
+            writer.write_batch("gl_definition", &batch).unwrap();
+        })
+        .await
+        .unwrap();
 
-        let per_table = sink.flush().await.expect("flush should succeed");
+        let per_table = sink.finish().await.expect("finish should succeed");
         let by_table: HashMap<&str, &TableWriteTotals> =
             per_table.iter().map(|t| (t.table.as_str(), t)).collect();
 

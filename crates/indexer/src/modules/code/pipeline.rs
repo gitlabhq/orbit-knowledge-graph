@@ -360,10 +360,10 @@ impl CodeIndexingPipeline {
                 &self.ontology,
                 self.table_names.clone(),
             ));
-        let buffered_sink = Arc::new(arrow_converter::BufferedClickHouseSink::new(
+        let streaming_sink = Arc::new(arrow_converter::StreamingClickHouseSink::new(
             context.destination.clone(),
         ));
-        let sink: Arc<dyn code_graph::v2::BatchSink> = buffered_sink.clone();
+        let sink: Arc<dyn code_graph::v2::BatchSink> = streaming_sink.clone();
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
@@ -389,7 +389,7 @@ impl CodeIndexingPipeline {
         );
 
         let flush_start = Instant::now();
-        let per_table_writes = match buffered_sink.flush().await {
+        let per_table_writes = match streaming_sink.finish().await {
             Ok(totals) => totals,
             Err(e) => {
                 return Err(HandlerError::Permanent {
