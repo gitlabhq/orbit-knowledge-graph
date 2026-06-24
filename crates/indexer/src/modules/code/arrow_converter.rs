@@ -9,6 +9,7 @@ use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
+use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
@@ -862,50 +863,49 @@ fn record_total(
     entry.bytes += bytes;
 }
 
-/// One ClickHouse insert carrying a table's batches in a single ArrowStream request.
-async fn write_one(
+/// Per-write result: the written table plus its row and byte counts.
+type WriteResult = Result<(String, u64, u64), code_graph::v2::SinkError>;
+
+/// Drain a completed write if at the concurrency cap, then push one insert carrying a
+/// table's batches in a single ArrowStream request.
+async fn emit(
+    inflight: &mut FuturesUnordered<BoxFuture<'static, WriteResult>>,
+    totals: &mut HashMap<String, TableWriteTotals>,
+    max_concurrent_writes: usize,
     destination: Arc<dyn crate::destination::Destination>,
     table: String,
     batches: Vec<RecordBatch>,
-) -> Result<(String, u64, u64), code_graph::v2::SinkError> {
-    let rows = batches.iter().map(|b| b.num_rows() as u64).sum();
-    let bytes = batches
-        .iter()
-        .map(|b| b.get_array_memory_size() as u64)
-        .sum();
-    let writer = destination
-        .new_batch_writer(
-            &table,
-            BatchWriterOptions {
-                durability: Some(WriteDurability::Durable),
-            },
-        )
-        .await
-        .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
-    writer
-        .write_batch(&batches)
-        .await
-        .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
-    Ok((table, rows, bytes))
-}
-
-/// Push a write future, first draining a completed one if we're at the concurrency cap.
-async fn admit<F>(
-    inflight: &mut FuturesUnordered<F>,
-    totals: &mut HashMap<String, TableWriteTotals>,
-    max_concurrent_writes: usize,
-    fut: F,
-) -> Result<(), code_graph::v2::SinkError>
-where
-    F: std::future::Future<Output = Result<(String, u64, u64), code_graph::v2::SinkError>>,
-{
+) -> Result<(), code_graph::v2::SinkError> {
     while inflight.len() >= max_concurrent_writes {
         if let Some(done) = inflight.next().await {
             let (table, rows, bytes) = done?;
             record_total(totals, table, rows, bytes);
         }
     }
-    inflight.push(fut);
+    inflight.push(
+        async move {
+            let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            let bytes: u64 = batches
+                .iter()
+                .map(|b| b.get_array_memory_size() as u64)
+                .sum();
+            let writer = destination
+                .new_batch_writer(
+                    &table,
+                    BatchWriterOptions {
+                        durability: Some(WriteDurability::Durable),
+                    },
+                )
+                .await
+                .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
+            writer
+                .write_batch(&batches)
+                .await
+                .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
+            Ok((table, rows, bytes))
+        }
+        .boxed(),
+    );
     Ok(())
 }
 
@@ -920,7 +920,7 @@ async fn write_loop(
     let slice_rows = slice_rows.max(1);
     let max_concurrent_writes = max_concurrent_writes.max(1);
     let mut totals: HashMap<String, TableWriteTotals> = HashMap::new();
-    let mut inflight = FuturesUnordered::new();
+    let mut inflight: FuturesUnordered<BoxFuture<'static, WriteResult>> = FuturesUnordered::new();
     // Per-table remainders (each < slice_rows) waiting to accumulate a full insert.
     let mut pending: HashMap<String, (Vec<RecordBatch>, usize)> = HashMap::new();
 
@@ -929,8 +929,15 @@ async fn write_loop(
         while batch.num_rows() - offset >= slice_rows {
             let slice = batch.slice(offset, slice_rows);
             offset += slice_rows;
-            let fut = write_one(destination.clone(), table.clone(), vec![slice]);
-            admit(&mut inflight, &mut totals, max_concurrent_writes, fut).await?;
+            emit(
+                &mut inflight,
+                &mut totals,
+                max_concurrent_writes,
+                destination.clone(),
+                table.clone(),
+                vec![slice],
+            )
+            .await?;
         }
         if offset < batch.num_rows() {
             let remainder = batch.slice(offset, batch.num_rows() - offset);
@@ -942,15 +949,29 @@ async fn write_loop(
             entry.1 += rem_rows;
             if entry.1 >= slice_rows {
                 let (batches, _) = pending.remove(&table).expect("entry just inserted");
-                let fut = write_one(destination.clone(), table.clone(), batches);
-                admit(&mut inflight, &mut totals, max_concurrent_writes, fut).await?;
+                emit(
+                    &mut inflight,
+                    &mut totals,
+                    max_concurrent_writes,
+                    destination.clone(),
+                    table.clone(),
+                    batches,
+                )
+                .await?;
             }
         }
     }
 
     for (table, (batches, _)) in pending.drain().collect::<Vec<_>>() {
-        let fut = write_one(destination.clone(), table, batches);
-        admit(&mut inflight, &mut totals, max_concurrent_writes, fut).await?;
+        emit(
+            &mut inflight,
+            &mut totals,
+            max_concurrent_writes,
+            destination.clone(),
+            table,
+            batches,
+        )
+        .await?;
     }
 
     while let Some(done) = inflight.next().await {
