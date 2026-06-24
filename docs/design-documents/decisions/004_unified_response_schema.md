@@ -307,11 +307,11 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
 3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ format_version, query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
-5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
+5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, and `row_count` are typed proto fields. The JSON includes `pagination` metadata for the materialized result window.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.
 7. Ontology is cached. Display metadata (labels, styles, descriptions) comes from the schema, not the response.
 8. `id` and `type` are always included on nodes, even if the user didn't select them.
-9. Pagination uses an agent-driven cursor model (`{ offset, page_size }`) that slices the authorized (post-redaction) result set. `PaginationInfo { has_more, total_rows }` is returned in both the proto metadata and the JSON body.
+9. Pagination uses offset windows (`{ offset, page_size }`) over the authorized (post-redaction) result set when a cursor is present, or the request `limit` otherwise. The JSON body returns `{ has_more, total_rows, truncated? }`; `total_rows` is exact only when `truncated` is absent.
 
 ### Display hint
 

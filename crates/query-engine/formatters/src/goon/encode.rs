@@ -118,6 +118,9 @@ fn write_header(
         if p.has_more {
             out.push_str("has_more:true\n");
         }
+        if p.truncated {
+            out.push_str("truncated:true\n");
+        }
         let _ = writeln!(out, "total_rows:{}", p.total_rows);
     }
     if response.query_type == "aggregation" {

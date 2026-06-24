@@ -209,4 +209,3 @@ commands.
   (imported in `completion.rs` from `query_engine::compiler`).
 - Engine on prod: `SharedReplacingMergeTree`, unpartitioned, sort key
   `(traversal_path, id)`; cluster `default` (10 replicas).
-```

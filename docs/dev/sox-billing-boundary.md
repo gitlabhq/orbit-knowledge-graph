@@ -10,7 +10,7 @@ into the billing path, read this first.
 
 ## Why this boundary exists
 
-The `gkg-billing` crate emits the Snowplow billing events that GitLab's
+The `gkg-billing` crate emits the Snowplow billing events that GitLab
 fulfillment systems use to bill customers for Orbit usage. Changes to the
 billing-emission code path are in scope for SOX (Sarbanes-Oxley) controls:
 the events the system emits must accurately reflect billable activity, and
@@ -116,4 +116,3 @@ inline rules in `.gitlab/duo/mr-review-instructions.yml`. GitLab Duo cannot
 follow file references from its custom review instructions, so the YAML
 file carries its own copy of the rules and must be kept in sync with this
 document.
-

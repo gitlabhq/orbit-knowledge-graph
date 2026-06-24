@@ -415,7 +415,7 @@ structured `PropertyFilter`:
 
 ## Pagination
 
-Add a `cursor`. `offset + page_size` must not exceed `limit`. `page_size` max 100.
+Add a `cursor`. The server autofits the internal fetch window when `offset + page_size` exceeds `limit`. `page_size` max 100.
 
 ```json orbit-query
 {

@@ -61,10 +61,10 @@ The JSON query schema supports four query types through a single unified structu
 | `group_by` | `array` | Group keys for aggregation rows |
 | `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
 | `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
-| `limit` | `integer` | Max results (1-1000, default: 30) |
+| `limit` | `integer` | Max rows to return when `cursor` is omitted (1-1000, default: 30). With `cursor`, `page_size` controls returned rows and the server fetches through `offset + page_size + 1` to detect truncation. |
 | `order_by` | `object` | Result ordering specification |
 | `aggregation_sort` | `object` | Ordering for aggregation outputs |
-| `cursor` | `object` | Agent-driven pagination cursor `{ offset, page_size }`. Slices the authorized (post-redaction) result set. |
+| `cursor` | `object` | Offset pagination cursor `{ offset, page_size }`. Slices the authorized (post-redaction) result set. |
 | `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
 
 ## Node Selectors

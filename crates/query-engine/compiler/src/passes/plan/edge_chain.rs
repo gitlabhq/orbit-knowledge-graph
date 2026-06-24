@@ -238,7 +238,7 @@ pub fn plan(input: &mut Input) -> Plan {
         nodes,
         hops,
         strategy,
-        limit: input.limit,
+        limit: input.fetch_limit(),
         order_by: input.order_by.clone(),
         cursor: input.cursor,
         node_edge_mappings,

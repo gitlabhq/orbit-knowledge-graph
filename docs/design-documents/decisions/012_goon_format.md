@@ -62,8 +62,9 @@ Fields:
 | `rows` | aggregation | Number of rows in `@rows`. |
 | `group_by` | aggregation with `group_by` | Comma-separated descriptors: `name(kind)` or `name(kind:detail)`. Kind is `node` (detail is the entity type, e.g. `severity(node:Vulnerability)`) or `property` (detail is the underlying ontology property when the alias differs, e.g. `severity_bucket(property:severity)`). |
 | `aggregations` | aggregation with metrics | Comma-separated descriptors: `name(function)`, `name(function:target)`, or `name(function:target.property)`. The richest form names both the node alias and the property being aggregated, so `latest_update(max:v.updated_at)` is unambiguous. |
-| `has_more` | when cursor paginated and there are more rows | `true`. |
-| `total_rows` | when cursor paginated | Authorized row count before cursor slicing. |
+| `has_more` | when more materialized rows exist beyond the returned window | `true`. |
+| `truncated` | when more materialized rows exist beyond the returned window | `true`. |
+| `total_rows` | with pagination metadata | Authorized rows materialized before slicing. Exact only when `truncated` is absent. |
 
 ### `@nodes`
 

@@ -494,12 +494,9 @@ fn project_still_uses_id_for_redaction() {
 
 #[test]
 fn cursor_pagination_validation() {
-    use compiler::QueryError;
-
     let ontology = embedded_ontology();
     let ctx = test_ctx();
 
-    // Valid cursor: offset + page_size <= limit
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -512,20 +509,17 @@ fn cursor_pagination_validation() {
     );
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
 
-    // Cursor does not affect SQL — LIMIT comes from the limit field
     let result = result.unwrap();
     let rendered = result.base.render();
-    assert!(rendered.contains("LIMIT 100"));
+    assert!(rendered.contains("LIMIT 101"));
 
-    // Cursor query emits SETTINGS for CH query cache
     assert!(
         result.base.sql.contains("use_query_cache = 1"),
         "cursor query should enable CH query cache: {}",
         result.base.sql
     );
 
-    // offset + page_size > limit rejected
-    let err = compile(
+    let result = compile(
         r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
@@ -535,13 +529,9 @@ fn cursor_pagination_validation() {
         &ontology,
         &ctx,
     )
-    .unwrap_err();
-    assert!(
-        matches!(err, QueryError::PaginationError(_)),
-        "offset + page_size > limit should be a pagination error, got: {err}"
-    );
+    .unwrap();
+    assert!(result.base.render().contains("LIMIT 16"));
 
-    // Cursor on traversal compiles fine (pagination is server-side)
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -561,7 +551,6 @@ fn cursor_pagination_validation() {
         "cursor on traversal should compile: {result:?}"
     );
 
-    // offset + page_size == limit is valid (boundary)
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -577,7 +566,6 @@ fn cursor_pagination_validation() {
         "offset + page_size == limit should be valid"
     );
 
-    // offset == 0, page_size == limit is valid (full window)
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -588,9 +576,22 @@ fn cursor_pagination_validation() {
         &ontology,
         &ctx,
     );
-    assert!(result.is_ok(), "page_size == limit should be valid");
+    let result = result.unwrap();
+    assert!(result.base.render().contains("LIMIT 31"));
 
-    // Missing required cursor fields rejected at deserialization
+    let result = compile(
+        r#"{
+        "query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "limit": 1000,
+        "cursor": {"offset": 999, "page_size": 100}
+    }"#,
+        &ontology,
+        &ctx,
+    )
+    .unwrap();
+    assert!(result.base.render().contains("LIMIT 1100"));
+
     let err = compile(
         r#"{
         "query_type": "traversal",
@@ -613,7 +614,6 @@ fn cursor_pagination_validation() {
     );
     assert!(err.is_err(), "cursor missing offset should fail");
 
-    // Empty cursor object rejected
     let err = compile(
         r#"{
         "query_type": "traversal",
@@ -650,7 +650,10 @@ fn cursor_pagination_validation() {
     assert!(result.is_ok(), "no cursor should compile fine");
     let result = result.unwrap();
     let rendered = result.base.render();
-    assert!(rendered.contains("LIMIT 30"), "default limit should be 30");
+    assert!(
+        rendered.contains("LIMIT 31"),
+        "default limit should overfetch one row"
+    );
     assert!(
         !result.base.sql.contains("use_query_cache"),
         "non-cursor query should not enable query cache: {}",

@@ -18,7 +18,7 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-            "limit": 100,
+            "limit": 2,
             "cursor": {"offset": 0, "page_size": 2}
         }"#,
         &allow_all(),
@@ -27,6 +27,14 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
 
     resp.assert_node_count(2);
     resp.assert_node_order("User", &[1, 2]);
+    let pagination = resp
+        .response
+        .pagination
+        .as_ref()
+        .expect("cursor should return pagination");
+    assert!(pagination.has_more);
+    assert!(pagination.truncated);
+    assert_eq!(pagination.total_rows, 3);
 }
 
 pub(super) async fn cursor_second_page(ctx: &TestContext) {

@@ -37,9 +37,48 @@ Build a dedicated Rust system-notes handler at `crates/indexer/src/modules/sdlc/
 
 Resolve targets with two batched IN-list queries against `siphon_routes` and the entity tables (`siphon_merge_requests`, `siphon_issues`, `siphon_work_items`). Emit `MENTIONS`, `RELATED_TO` (supplemental), `ADDS_COMMIT`, `MERGED_AT_COMMIT`, `CLOSED` (supplemental), `MERGED` (supplemental), and a new `REOPENED` edge kind via the standard `gl_edge` writer.
 
-> **Update (2026-06-17): `CONTAINS` is no longer note-derived.** The note path described below originally co-wrote `WorkItem → WorkItem` `CONTAINS` from the containment actions (`epic_issue_added`, `issue_added_to_epic`, `epic_issue_moved`, hierarchy-shaped `task`). That path was removed: the FK path (`siphon_work_item_parent_links` → `config/ontology/edges/contains.yaml`) is the single current-state source of truth for hierarchy containment, and the note path redundantly co-wrote the same `gl_edge` tuple. Because both writers shared the `ReplacingMergeTree` identity, the note row's wall-clock `_version` (and hardcoded `_deleted = false`) permanently outranked the FK tombstone whenever a child was removed from its parent — resurrecting containment the graph no longer holds. The four containment actions are no longer parsed or routed, and `CONTAINS` is dropped from `config/ontology/derived/core/system_note.yaml`'s `emits:` list (leaving `[MENTIONS, REOPENED]`). The MR only stops *new* note-derived `CONTAINS` writes; existing stale/resurrected rows clear on the next reindex (no `SCHEMA_VERSION` bump, accepted in staging per the maintainer). See `gitlab-org/orbit/knowledge-graph` MR removing note-derived `CONTAINS` and the research verdict in `dgruzd/tasks#2902`. The remaining sections that still mention `CONTAINS` describe the original (now-superseded) note-derived design.
-
-> **Update (2026-06-22): `REOPENED` is sourced from `resource_state_events`, not system notes.** This ADR (and the closed [!1109][prev-mr]) assumed reopen surfaces as a `system_note_metadata.action = "reopened"` row, so the original design routed `REOPENED` through the note path alongside `CLOSED`/`MERGED`. **That premise is wrong:** reopen is never a system-note action — Rails records it as a `resource_state_events` row with `state = 5` (`reopened`), per `app/models/resource_state_event.rb` (`enum :state ... .merge(reopened: 5)`) over the issuable base states in `app/models/concerns/issuable.rb` (`opened: 1, closed: 2, merged: 3, locked: 4`). The note-path `reopened` branch matched nothing, so zero `REOPENED` edges were ever emitted (`gitlab-org/orbit/knowledge-graph#883`). `REOPENED` is now two **standalone edge ETLs** over `siphon_resource_state_events` (one targeting `MergeRequest` via `merge_request_id`, one targeting `WorkItem` via `issue_id`), each filtered to `state = 5`. This relies on the now-merged Siphon replication of `resource_state_events` → `siphon_resource_state_events` (`gitlab-org/gitlab!241505`) and on a small `where:` clause added to standalone edge ETL (the `edgeEtlConfig` gap this ADR noted under input (a) is now closed). The `reopened` action, its parser/emit branches, and the `REOPENED` entry in `emits:` are removed from the note path; `CLOSED`/`MERGED` stay note-derived. Reconciling those lifecycle edges against `resource_state_events` (current-state vs event-history semantics, dedupe/tombstone) is deferred — see `gitlab-org/orbit/knowledge-graph#883` and its follow-up.
+> **Update (2026-06-17): `CONTAINS` is no longer note-derived.** The note path
+> described below originally co-wrote `WorkItem → WorkItem` `CONTAINS` from the
+> containment actions (`epic_issue_added`, `issue_added_to_epic`,
+> `epic_issue_moved`, hierarchy-shaped `task`). That path was removed: the FK
+> path (`siphon_work_item_parent_links` → `config/ontology/edges/contains.yaml`)
+> is the single current-state source of truth for hierarchy containment, and the
+> note path redundantly co-wrote the same `gl_edge` tuple. Because both writers
+> shared the `ReplacingMergeTree` identity, the note row's wall-clock `_version`
+> (and hardcoded `_deleted = false`) permanently outranked the FK tombstone
+> whenever a child was removed from its parent — resurrecting containment the
+> graph no longer holds. The four containment actions are no longer parsed or
+> routed, and `CONTAINS` is dropped from
+> `config/ontology/derived/core/system_note.yaml`'s `emits:` list (leaving
+> `[MENTIONS, REOPENED]`). The MR only stops *new* note-derived `CONTAINS`
+> writes; existing stale/resurrected rows clear on the next reindex (no
+> `SCHEMA_VERSION` bump, accepted in staging per the maintainer). See
+> `gitlab-org/orbit/knowledge-graph` MR removing note-derived `CONTAINS` and the
+> research verdict in `dgruzd/tasks#2902`. The remaining sections that still
+> mention `CONTAINS` describe the original (now-superseded) note-derived design.
+>
+> **Update (2026-06-22): `REOPENED` is sourced from `resource_state_events`, not
+> system notes.** This ADR (and the closed [!1109][prev-mr]) assumed reopen
+> surfaces as a `system_note_metadata.action = "reopened"` row, so the original
+> design routed `REOPENED` through the note path alongside `CLOSED`/`MERGED`.
+> **That premise is wrong:** reopen is never a system-note action — Rails records
+> it as a `resource_state_events` row with `state = 5` (`reopened`), per
+> `app/models/resource_state_event.rb` (`enum :state ... .merge(reopened: 5)`)
+> over the issuable base states in `app/models/concerns/issuable.rb`
+> (`opened: 1, closed: 2, merged: 3, locked: 4`). The note-path `reopened`
+> branch matched nothing, so zero `REOPENED` edges were ever emitted
+> (`gitlab-org/orbit/knowledge-graph#883`). `REOPENED` is now two **standalone
+> edge ETLs** over `siphon_resource_state_events` (one targeting `MergeRequest`
+> via `merge_request_id`, one targeting `WorkItem` via `issue_id`), each filtered
+> to `state = 5`. This relies on the now-merged Siphon replication of
+> `resource_state_events` → `siphon_resource_state_events`
+> (`gitlab-org/gitlab!241505`) and on a small `where:` clause added to standalone
+> edge ETL (the `edgeEtlConfig` gap this ADR noted under input (a) is now
+> closed). The `reopened` action, its parser/emit branches, and the `REOPENED`
+> entry in `emits:` are removed from the note path; `CLOSED`/`MERGED` stay
+> note-derived. Reconciling those lifecycle edges against `resource_state_events`
+> (current-state vs event-history semantics, dedupe/tombstone) is deferred — see
+> `gitlab-org/orbit/knowledge-graph#883` and its follow-up.
 
 Vendor Rails' `ICON_TYPES` constant with a CI drift check modeled on `scripts/check-goon-format-version.sh`. Ship behind a feature flag with staging benchmarks 2–5 (lookup latency, end-to-end pass, edge-density gain) as the gate to GA.
 
@@ -332,7 +371,24 @@ Neither is needed for v1: the measured 3-query plan resolves in 8 ms at batch=1,
 1. **`system_note_metadata` Siphon replication slip.** Longest lead-time item. The Siphon-side MR is filed in parallel with this ADR; if it slips past the implementation MR review, the handler ships in Mode B and flips to Mode A when replication lands. The mode switch is a single config change with no schema impact.
 2. **Parser drift against Rails' `ICON_TYPES` and body templates.** `ICON_TYPES` has grown across releases (now 61 values; prior captures show ~50) and Rails has moved system-note phrasing more than once. Mitigation: vendored constant + CI drift check + `log_and_drop` on unknown actions + regex anchored on the GFM-reference token rather than on the verb phrase (so phrasing changes do not break extraction). E2E validation against a real 75k-note GDK corpus seeded with unknown actions confirmed the `log_and_drop` path silently absorbs unrecognised values without breaking the pass (see [POC results](#poc-results)).
 3. **Custom-handler maintenance cost.** This is the first cross-reference-oriented handler departing from the ontology-first convention. Mitigation: confine the deviation to the *materialization logic* only (edge **kinds** still declare in YAML) and document the rationale in `AGENTS.md` so future ADRs do not treat this as precedent for arbitrary custom handlers.
-4. **Full-table-scan cost on resolver second-hop lookups.** `siphon_routes`, `merge_requests`, and `work_items` are `ORDER BY (traversal_path, ...)`, but the resolver's filter columns (`path`, `source_id`, `(target_project_id, iid)`, `(project_id, iid)`) are not usable PK prefixes — without a `traversal_path` leg, every lookup is a full scan of the shared Siphon datalake. **Mitigation (implemented):** all four resolver queries carry `startsWith(traversal_path, {root_prefix:String})` where `root_prefix` is the source note's top-level namespace prefix (`<org>/<top_level_ns>/`). This turns each full scan into a primary-index range scan bounded to one top-level namespace partition. The trade-off is that v1 resolves only **same-top-level-namespace references**; a cross-top-level reference (`other-group/proj#5`) lives outside the prefix and is silently not resolved (under-counts, never a wrong edge). Cross-top-level resolution is deferred to the graph-DB dictionary lever (see [Future optimization](#future-optimization-graph-db-side-lookup-dictionaries)), which also resolves the cross-namespace edge-visibility (authz) question. The `cross_top_level_reference_is_not_resolved` integration test guards this as a deliberate limitation.
+4. **Full-table-scan cost on resolver second-hop lookups.** `siphon_routes`,
+   `merge_requests`, and `work_items` are `ORDER BY (traversal_path, ...)`, but
+   the resolver's filter columns (`path`, `source_id`, `(target_project_id, iid)`,
+   `(project_id, iid)`) are not usable PK prefixes — without a `traversal_path`
+   leg, every lookup is a full scan of the shared Siphon datalake.
+   **Mitigation (implemented):** all four resolver queries carry
+   `startsWith(traversal_path, {root_prefix:String})` where `root_prefix` is the
+   source note's top-level namespace prefix (`<org>/<top_level_ns>/`). This
+   turns each full scan into a primary-index range scan bounded to one top-level
+   namespace partition. The trade-off is that v1 resolves only
+   **same-top-level-namespace references**; a cross-top-level reference
+   (`other-group/proj#5`) lives outside the prefix and is silently not resolved
+   (under-counts, never a wrong edge). Cross-top-level resolution is deferred to
+   the graph-DB dictionary lever (see
+   [Future optimization](#future-optimization-graph-db-side-lookup-dictionaries)),
+   which also resolves the cross-namespace edge-visibility (authz) question. The
+   `cross_top_level_reference_is_not_resolved` integration test guards this as a
+   deliberate limitation.
 5. **Acceptance threshold vagueness.** [`gitlab-org/orbit/knowledge-graph#499`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499) says "a material increase in edge density (numeric target to be set after initial measurement)". This ADR proposes ≥3× MR<->WorkItem and ≥10× MR<->MR as concrete numeric forms. If review prefers different thresholds, the POC harness (`xtask system-notes-bench`) can re-run cheaply.
 
 ## Coverage and known limitations
@@ -348,7 +404,18 @@ Cross-top-level resolution is deferred to the graph-DB dictionary lever ([§ Fut
 
 ### Implementation shape (post-ADR 015)
 
-The system-notes handler is implemented as a `BlockTransform` (ADR 015) rather than the `EntityPipeline` described in the original decision section. ADR 015 refined ADR 014's extension point: the seam is the **transform stage**, not a custom pipeline. The `SystemNotesTransform` implements `BlockTransform` and is registered via `TransformRegistry::register("system_notes", factory)`. The extract plan is declared as a derived entity in `config/ontology/derived/core/system_note.yaml` and rides the shared `Pipeline` for paging, checkpointing, and streaming writes. Resolver lookups against `siphon_routes`, `merge_requests`, and `work_items` split bound array params into `engine.handlers.entity-handler.system_notes_resolve_lookup_batch_size` chunks and union the decoded rows, because ClickHouse HTTP params are serialized into the request URL.
+The system-notes handler is implemented as a `BlockTransform` (ADR 015) rather
+than the `EntityPipeline` described in the original decision section. ADR 015
+refined ADR 014's extension point: the seam is the **transform stage**, not a
+custom pipeline. The `SystemNotesTransform` implements `BlockTransform` and is
+registered via `TransformRegistry::register("system_notes", factory)`. The
+extract plan is declared as a derived entity in
+`config/ontology/derived/core/system_note.yaml` and rides the shared `Pipeline`
+for paging, checkpointing, and streaming writes. Resolver lookups against
+`siphon_routes`, `merge_requests`, and `work_items` split bound array parameters
+into `engine.handlers.entity-handler.system_notes_resolve_lookup_batch_size`
+chunks and union the decoded rows, because ClickHouse HTTP parameters are
+serialized into the request URL.
 
 ## References
 

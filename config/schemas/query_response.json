@@ -43,7 +43,7 @@
       "items": { "$ref": "#/$defs/row" }
     },
     "pagination": {
-      "description": "Present when the query included a cursor. Tells the agent whether more pages exist and how many total authorized rows are available.",
+      "description": "Pagination metadata for the materialized result window. Tells the agent whether more rows were detected beyond the returned page/window.",
       "$ref": "#/$defs/pagination"
     }
   },
@@ -200,12 +200,16 @@
       "properties": {
         "has_more": {
           "type": "boolean",
-          "description": "True if more authorized rows exist beyond the current page."
+          "description": "True if more materialized authorized rows exist beyond the current page/window."
         },
         "total_rows": {
           "type": "integer",
-          "description": "Total authorized rows before cursor slicing.",
+          "description": "Authorized rows materialized before slicing. Exact only when truncated is false.",
           "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when the server fetched at least one authorized row beyond the returned page/window, so total_rows is a lower bound rather than an exact dataset count."
         }
       }
     }

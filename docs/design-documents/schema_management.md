@@ -349,8 +349,8 @@ Table drop operations are logged at `info` level with the version and table name
 ## Campaign correlation
 
 A migration re-indexes every enabled namespace and project into the new-prefix tables. To make
-that cost attributable, all dispatches produced during a migration carry a **campaign id**: one
-id per "re-index everything" decision, `null` in steady state.
+that cost attributable, all dispatches produced during a migration carry a **campaign ID**: one
+ID per "re-index everything" decision, `null` in steady state.
 
 The campaign lives in process memory (`crates/indexer/src/campaign.rs`, `CampaignState`) — no
 ClickHouse column or external store. `run_dispatcher` runs the migration orchestrator, the
@@ -361,7 +361,7 @@ sufficient:
   campaign to `migration-v<N>` (derived from the target version). Migrations only fire at boot,
   and every dispatcher replica that boots mid-migration re-runs this flow (the re-check only
   skips once a version is `active`, not while it is `migrating`), so each replica opens the same
-  campaign. The id being a pure function of the version is what keeps it consistent without
+  campaign. The ID being a pure function of the version is what keeps it consistent without
   coordination.
 - **Attach** — each dispatcher (`GlobalDispatcher`, `NamespaceDispatcher`,
   `SiphonCodeIndexingTaskDispatcher`, `NamespaceCodeBackfillDispatcher`) reads `campaign.current()`

@@ -49,7 +49,7 @@ un-merges; `Job.status` reverses on retry so is never stable).
 | **K1** | filter in `WHERE`, `argMaxIfOrNull(col,_version,_deleted=false)` in `HAVING` | only for version-stable filter columns |
 | **M** | candidate-prune `id IN (selective-set)` + `argMax(col,_version)` in `HAVING` | yes, any column |
 
-Both resolve latest-version-per-id with `GROUP BY id`, so the hash table is
+Both resolve latest-version-per-ID with `GROUP BY id`, so the hash table is
 sized to the **result cardinality**.
 
 ## Why they were rejected (settled-parts measurements)

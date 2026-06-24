@@ -89,6 +89,12 @@ pub struct GroupColumnDescriptor {
 pub struct PaginationResponse {
     pub has_more: bool,
     pub total_rows: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -215,6 +221,7 @@ impl GraphFormatter {
         let pagination = output.pagination.as_ref().map(|p| PaginationResponse {
             has_more: p.has_more,
             total_rows: p.total_rows,
+            truncated: p.truncated,
         });
 
         GraphResponse {

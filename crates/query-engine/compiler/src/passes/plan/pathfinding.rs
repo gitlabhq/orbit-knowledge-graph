@@ -44,7 +44,7 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
         nodes,
         hops: vec![],
         strategy: Strategy::SingleNode,
-        limit: input.limit,
+        limit: input.fetch_limit(),
         order_by: None,
         cursor: input.cursor,
         node_edge_mappings: HashMap::new(),

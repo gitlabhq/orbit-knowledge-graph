@@ -112,13 +112,13 @@ async fn run_pipeline(
         .expect("pipeline should succeed");
 
     let mut query_result = hydration_output.query_result;
-    let pagination = compiled.input.cursor.map(|cursor| {
-        let total_rows = query_result.authorized_count();
-        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-        query_engine::shared::PaginationMeta {
-            has_more,
-            total_rows,
-        }
+    let (offset, page_size) = compiled.input.response_window();
+    let total_rows = query_result.authorized_count();
+    let has_more = query_result.apply_cursor(offset, page_size);
+    let pagination = Some(query_engine::shared::PaginationMeta {
+        has_more,
+        total_rows,
+        truncated: has_more,
     });
 
     PipelineOutput {

@@ -117,6 +117,7 @@ pub fn pagination(has_more: bool, total_rows: usize) -> PaginationResponse {
     PaginationResponse {
         has_more,
         total_rows,
+        truncated: has_more,
     }
 }
 

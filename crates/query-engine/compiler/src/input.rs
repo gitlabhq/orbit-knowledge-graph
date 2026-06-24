@@ -117,6 +117,21 @@ pub struct Input {
     pub hydration_dynamic: bool,
 }
 
+impl Input {
+    pub fn response_window(&self) -> (u32, u32) {
+        self.cursor
+            .map(|cursor| (cursor.offset, cursor.page_size))
+            .unwrap_or((0, self.limit))
+    }
+
+    pub fn fetch_limit(&self) -> u32 {
+        let (offset, page_size) = self.response_window();
+        self.limit
+            .max(offset.saturating_add(page_size))
+            .saturating_add(1)
+    }
+}
+
 /// Text index metadata for a column, used by the optimizer to rewrite
 /// LIKE patterns to ClickHouse text-index-aware functions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,8 +310,8 @@ fn default_limit() -> u32 {
 }
 
 /// Agent-driven pagination cursor. Slices the authorized (post-redaction)
-/// result set by `offset` and `page_size`. The server re-runs the query,
-/// authorizes all rows up to `limit`, and returns `[offset..offset+page_size]`.
+/// result set by `offset` and `page_size`. The server fetches one extra row
+/// beyond the requested window so response metadata can signal truncation.
 ///
 /// This model avoids SQL-level keyset pagination, which only generalizes to
 /// Search queries and breaks when redaction removes rows from the LIMIT window.

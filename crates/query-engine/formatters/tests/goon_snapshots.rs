@@ -262,6 +262,7 @@ fn snapshot_pagination() {
     r.pagination = Some(PaginationResponse {
         has_more: true,
         total_rows: 100,
+        truncated: true,
     });
     insta::assert_snapshot!(run(r));
 }

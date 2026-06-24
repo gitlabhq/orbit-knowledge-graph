@@ -199,7 +199,7 @@ In addition to authorization filtering, the query engine implements further safe
 
 - **Depth Caps**: Traversals limited to max 3 hops. Enforced in query compiler; queries exceeding this are rejected with error.
 - **Relationship Allow-Lists**: Only pre-defined relationship types are allowed. Unknown relationships trigger validation errors.
-- **Row Limits**: Max 1000 rows per query (configurable). Enforced in SQL generation: `LIMIT 1000`.
+- **Row Limits**: Max 1000 returned rows per query (configurable). SQL generation may fetch one extra row to detect truncation.
 - **Query Timeouts**: All ClickHouse queries have a 30-second timeout via `max_execution_time` setting.
 - **Rate Limiting**: Per-user rate limiting enforced at the GKG web server level (e.g., 100 queries per minute).
 

@@ -54,7 +54,7 @@ Run `mise lint:docs` before pushing any documentation changes.
 
 MR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format:
 
-```text
+```plaintext
 type(scope): short description
 ```
 

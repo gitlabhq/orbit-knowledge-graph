@@ -45,13 +45,13 @@ impl PipelineStage for OutputStage {
 
         let mut query_result = input.query_result.clone();
 
-        let pagination = compiled.input.cursor.map(|cursor| {
-            let total_rows = query_result.authorized_count();
-            let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-            PaginationMeta {
-                has_more,
-                total_rows,
-            }
+        let (offset, page_size) = compiled.input.response_window();
+        let total_rows = query_result.authorized_count();
+        let has_more = query_result.apply_cursor(offset, page_size);
+        let pagination = Some(PaginationMeta {
+            has_more,
+            total_rows,
+            truncated: has_more,
         });
 
         Ok(PipelineOutput {

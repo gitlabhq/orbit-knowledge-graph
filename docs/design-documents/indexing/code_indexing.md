@@ -186,9 +186,26 @@ Example NATS KV:
 - Value: `{ "worker_id": String, "started_at": Instant }`
 - TTL: 60 seconds
 
-After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
+After acquiring the lock, the service downloads the full repository archive from
+the Rails internal API. During archive extraction, the Gitaly archive root
+directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative
+and match the paths used by content resolution's `list_blobs` revisions. After
+indexing completes (or fails), the downloaded files are immediately deleted from
+disk to prevent unbounded storage growth across indexer pods.
 
-The extractor records a repository file inventory from archive metadata before it applies byte-level filtering. That inventory drives `File` and `Directory` node creation, so files do not need to be unpacked or parsed to appear in the graph. After inventory recording, extraction filters each regular file in two phases. The header phase uses an exclusion denylist (`code_graph::v2::config::is_excluded_from_indexing`) and the configured per-file size ceiling to drop obvious binary/media/archive/document/datastore blobs or oversized blobs without reading any content. Files that survive the header phase are sniffed: the first 8000 bytes are inspected and the file is dropped as binary when a NUL byte is present (`code_graph::v2::config::looks_binary`, mirroring git's heuristic, with a UTF BOM rescue so BOM-marked UTF-16/32 text is kept). This catches binary blobs that fall under the size ceiling and carry no telltale extension.
+The extractor records a repository file inventory from archive metadata before
+it applies byte-level filtering. That inventory drives `File` and `Directory`
+node creation, so files do not need to be unpacked or parsed to appear in the
+graph. After inventory recording, extraction filters each regular file in two
+phases. The header phase uses an exclusion denylist
+(`code_graph::v2::config::is_excluded_from_indexing`) and the configured
+per-file size ceiling to drop obvious binary/media/archive/document/datastore
+blobs or oversized blobs without reading any content. Files that survive the
+header phase are sniffed: the first 8000 bytes are inspected and the file is
+dropped as binary when a NUL byte is present
+(`code_graph::v2::config::looks_binary`, mirroring Git's heuristic, with a UTF
+BOM rescue so BOM-marked UTF-16/32 text is kept). This catches binary blobs that
+fall under the size ceiling and carry no telltale extension.
 
 Source files, manifests, lockfiles, dotfiles, unknown extensions, and resolver inputs are intentionally allowed through unless they exceed the size ceiling or look binary. Dropped files remain in the inventory and still appear as `File` nodes; they are simply never written to disk and so are never parsed. Symlinks, hardlinks, and directories bypass the byte filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
 
@@ -208,7 +225,22 @@ The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` a
 - **Python, Kotlin, Java, C#, Go, Ruby, C, C++, PHP, Bash, Elixir, Swift, and Lua** use tree-sitter grammars driven by the declarative DSL in `crates/code-graph/src/v2/langs/generic/`. Contributors adding a new language should follow [`docs/dev/adding-a-language.md`](../../dev/adding-a-language.md). Lua indexes top-level, local, and global `function` declarations as `Function` or `Method` definitions and extracts `require()` calls as runtime imports; `setmetatable`-based OOP is out of scope for v1.
 - **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
-Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`; Swift owns `.swift`; Lua owns `.lua`. Ruby, JavaScript/TypeScript, Python, Kotlin, Java, PHP, Elixir, Swift, and Lua support full reference extraction (PHP resolves `$this`/`self`/`parent`/`static` member and static calls, trait/interface inheritance via `Extends`, and `use` imports; Swift resolves `self`/`super` member calls; Lua resolves dot and colon method calls with receiver tracking). Rust emits `CALLS` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only. Bash/Shell supports function definitions and `source`/`.` sourced-script imports only; cross-file call resolution, variable bindings, and aliases are out of scope. Swift v1 indexes classes, structs, enums, protocols, functions, constructors, and enum entries; extension-scope reattachment is a planned follow-up.
+Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns
+`.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the
+TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline
+owns `.rs`; Swift owns `.swift`; Lua owns `.lua`. Ruby, JavaScript/TypeScript,
+Python, Kotlin, Java, PHP, Elixir, Swift, and Lua support full reference
+extraction (PHP resolves `$this`/`self`/`parent`/`static` member and static
+calls, trait/interface inheritance via `Extends`, and `use` imports; Swift
+resolves `self`/`super` member calls; Lua resolves dot and colon method calls
+with receiver tracking). Rust emits `CALLS` edges from rust-analyzer semantic
+resolution and local SSA flow; it does not currently materialize arbitrary
+non-call reference edges. C# currently supports definitions and imports only.
+Bash/Shell supports function definitions and `source`/`.` sourced-script imports
+only; cross-file call resolution, variable bindings, and aliases are out of
+scope. Swift v1 indexes classes, structs, enums, protocols, functions,
+constructors, and enum entries; extension-scope reattachment is a planned
+follow-up.
 
 For each file, the parser extracts three categories of information:
 

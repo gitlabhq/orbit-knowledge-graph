@@ -236,13 +236,13 @@ async fn run_pipeline_with_security(
         .expect("pipeline should succeed");
 
     let mut query_result = hydration_output.query_result;
-    let pagination = compiled.input.cursor.map(|cursor| {
-        let total_rows = query_result.authorized_count();
-        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-        query_engine::shared::PaginationMeta {
-            has_more,
-            total_rows,
-        }
+    let (offset, page_size) = compiled.input.response_window();
+    let total_rows = query_result.authorized_count();
+    let has_more = query_result.apply_cursor(offset, page_size);
+    let pagination = Some(query_engine::shared::PaginationMeta {
+        has_more,
+        total_rows,
+        truncated: has_more,
     });
 
     let pipeline_output = query_engine::shared::PipelineOutput {
@@ -2320,7 +2320,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-            "limit": 100,
+            "limit": 2,
             "cursor": {"offset": 0, "page_size": 2}
         }"#,
         &allow_all(),
@@ -2334,30 +2334,33 @@ async fn pagination_present_in_response(ctx: &TestContext) {
     let pagination = &value["pagination"];
     assert_eq!(
         pagination["has_more"], true,
-        "5 users, page_size=2 → has_more"
+        "the internal lookahead row should signal another page"
     );
-    assert_eq!(pagination["total_rows"], 5, "5 authorized users total");
+    assert_eq!(pagination["truncated"], true);
+    assert_eq!(pagination["total_rows"], 3);
 
     let nodes = value["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 2, "cursor should slice to 2 nodes");
 }
 
-async fn pagination_absent_without_cursor(ctx: &TestContext) {
+async fn pagination_present_without_cursor(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "limit": 10
+            "limit": 2
         }"#,
         &allow_all(),
     )
     .await;
 
-    assert!(
-        value.get("pagination").is_none(),
-        "response should not include pagination when no cursor"
-    );
+    let pagination = value
+        .get("pagination")
+        .expect("limited response should include pagination");
+    assert_eq!(pagination["has_more"], true);
+    assert_eq!(pagination["truncated"], true);
+    assert_eq!(pagination["total_rows"], 3);
 }
 
 async fn pagination_last_page_has_more_false(ctx: &TestContext) {
@@ -2642,7 +2645,7 @@ async fn graph_formatter_e2e() {
         empty_result_all_fields_present,
         // Pagination
         pagination_present_in_response,
-        pagination_absent_without_cursor,
+        pagination_present_without_cursor,
         pagination_last_page_has_more_false,
         pagination_with_redaction,
     );

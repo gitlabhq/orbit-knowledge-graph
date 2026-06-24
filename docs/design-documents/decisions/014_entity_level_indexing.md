@@ -38,7 +38,7 @@ which gives cross-entity parallelism without per-entity subjects or a new
 message type.
 
 Intra-entity parallelism comes from `partition_overrides`: when configured for
-an entity, the handler computes id-range partitions on the fly during the
+an entity, the handler computes ID-range partitions on the fly during the
 first run and fans them out across a `JoinSet`. Once all partitions complete,
 the partition checkpoints are consolidated into a single completed checkpoint
 and subsequent runs skip partitioning.
@@ -65,7 +65,7 @@ deserializes the existing request types, no new message envelope is needed.
 ### Partitioning
 
 Filters compose via the existing `Filter` trait. A partition range is just
-another filter (half-open id-range), so it belongs on the prepared query:
+another filter (half-open ID-range), so it belongs on the prepared query:
 
 ```rust
 plan.prepare()
@@ -74,7 +74,7 @@ plan.prepare()
     .into_partitions(ranges)  // -> Vec<(PartitionAssignment, PreparedQuery)>
 ```
 
-`PartitionStrategy` holds the partition count, the id column, and the
+`PartitionStrategy` holds the partition count, the ID column, and the
 datalake table needed to probe `min/max`. `PartitionAssignment` carries the
 resulting half-open bounds for one shard.
 
@@ -105,7 +105,7 @@ re-extracting work that already succeeded:
   the current `request.watermark`. Partitions that completed in an earlier
   attempt still hold their original (older) watermark; pinning the parent to
   the minimum keeps the next incremental run covering the
-  `(old_watermark, request.watermark]` window for those id-ranges, so no data
+  `(old_watermark, request.watermark]` window for those ID-ranges, so no data
   is lost.
 
 If every partition is already complete (e.g. the previous attempt finished

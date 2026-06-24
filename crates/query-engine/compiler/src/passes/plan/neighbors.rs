@@ -102,7 +102,7 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         nodes,
         hops: vec![],
         strategy: Strategy::SingleNode,
-        limit: input.limit,
+        limit: input.fetch_limit(),
         order_by: input.order_by.clone(),
         cursor: input.cursor,
         node_edge_mappings,

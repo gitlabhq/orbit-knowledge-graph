@@ -118,13 +118,57 @@ Edge-only traversals do not join node tables for non-group-by nodes, so they can
 
 ### Scope rewrite (traversal_path prefix injection)
 
-Project- and group-scoped queries (`traversal` and `aggregation`) are rewritten to add a tight `startsWith(traversal_path, '<prefix>')` predicate, so the leading primary-key segment prunes the scan rather than a structural-column filter alone. A node pins a scope when it carries a single `id`/`full_path`/`node_ids` for `Project`/`Group`, **or** a single equality filter on a `namespace_anchor` FK column (e.g. `project_id`/`group_id`) — the anchor and its FK columns are read from the ontology's edge scope annotations via `Ontology::is_anchor` / `Ontology::anchor_fk_mappings`, not a hardcoded list. The prefix is the anchor entity's own `traversal_path`, resolved from its `id`/`full_path` through a ClickHouse `CACHE` dictionary over `gl_project`/`gl_group` (`PathResolver`, backed by a short-lived in-process cache; see `crates/gkg-server/src/pipeline/path_resolver.rs`). A resolution failure — a dictionary miss for a not-yet-indexed id, or the `'0/'` sentinel — yields no injection, so the query falls back to the plain filter.
+Project- and group-scoped queries (`traversal` and `aggregation`) are rewritten
+to add a tight `startsWith(traversal_path, '<prefix>')` predicate, so the leading
+primary-key segment prunes the scan rather than a structural-column filter
+alone. A node pins a scope when it carries a single `id`/`full_path`/`node_ids`
+for `Project`/`Group`, **or** a single equality filter on a `namespace_anchor` FK
+column (e.g. `project_id`/`group_id`) — the anchor and its FK columns are read
+from the ontology's edge scope annotations via `Ontology::is_anchor` /
+`Ontology::anchor_fk_mappings`, not a hardcoded list. The prefix is the anchor
+entity's own `traversal_path`, resolved from its `id`/`full_path` through a
+ClickHouse `CACHE` dictionary over `gl_project`/`gl_group` (`PathResolver`,
+backed by a short-lived in-process cache; see
+`crates/gkg-server/src/pipeline/path_resolver.rs`). A resolution failure — a
+dictionary miss for a not-yet-indexed ID, or the `'0/'` sentinel — yields no
+injection, so the query falls back to the plain filter.
 
-**Propagation to reachable edges and payload nodes.** Edge variants are annotated in the ontology YAML with a `scope` (`namespace_anchor`, `same_namespace`, or omitted = cross-namespace; see the scope-annotation MR). Because an edge row's `traversal_path` is its source entity's, and a scope-preserving edge keeps both endpoints in one namespace subtree, a resolved prefix floods across scope-preserving relationships to every reachable node and edge via `Ontology::propagate_scope_prefixes` — a two-pass taint walk that resolves the *exact* variant (`is_scope_preserving_triple`, so mixed-variant edges like `CONTAINS` are handled correctly) and refuses to enter any alias reachable through a cross-namespace edge. The compiler maps each `InputRelationship` into an `ontology::ScopeEdge` (`scope::scope_edges`) for the walk. The webserver attaches the flooded node prefixes to `SecurityContext.scope_prefixes` so their node-table scans inherit the prefix; the compiler's `restrict` pass stamps each edge whose endpoints share a prefix, and the lowerer emits the `startsWith` on the edge scan. Cross-namespace relationships (e.g. `CLOSES` an issue in another project) do not propagate, so multi-edge traversals stay correct — an unannotated relationship confines the prefix conservatively rather than over-pruning. This is what makes a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (the cause of the #601941 timeout).
+**Propagation to reachable edges and payload nodes.** Edge variants are
+annotated in the ontology YAML with a `scope` (`namespace_anchor`,
+`same_namespace`, or omitted = cross-namespace; see the scope-annotation MR).
+Because an edge row's `traversal_path` is its source entity's, and a
+scope-preserving edge keeps both endpoints in one namespace subtree, a resolved
+prefix floods across scope-preserving relationships to every reachable node and
+edge via `Ontology::propagate_scope_prefixes` — a two-pass taint walk that
+resolves the *exact* variant (`is_scope_preserving_triple`, so mixed-variant
+edges like `CONTAINS` are handled correctly) and refuses to enter any alias
+reachable through a cross-namespace edge. The compiler maps each
+`InputRelationship` into an `ontology::ScopeEdge` (`scope::scope_edges`) for the
+walk. The webserver attaches the flooded node prefixes to
+`SecurityContext.scope_prefixes` so their node-table scans inherit the prefix;
+the compiler's `restrict` pass stamps each edge whose endpoints share a prefix,
+and the lowerer emits the `startsWith` on the edge scan. Cross-namespace
+relationships (e.g. `CLOSES` an issue in another project) do not propagate, so
+multi-edge traversals stay correct — an unannotated relationship confines the
+prefix conservatively rather than over-pruning. This is what makes a 2+ edge
+project-scoped traversal seek the project's PK range instead of scanning the
+org-wide edge table (the cause of the #601941 timeout).
 
 The injected prefix is re-validated before use: it is only applied when it is a descendant of one of the caller's authorized traversal paths (`is_descendant`), and it is ANDed with the existing filters. It can therefore only narrow within already-authorized scope; it never widens access or replaces the authorization prefix.
 
-**Bounded staleness on namespace moves.** The prefix is resolved from a cache (dictionary `LIFETIME` plus the in-process TTL) over `gl_project`/`gl_group`, which the graph itself derives from PostgreSQL via CDC and re-indexing. When a project or group is transferred, its rows are re-stamped with the new `traversal_path`, but the cache can briefly keep resolving the pre-transfer prefix. During that window a scoped query can under-prune — return fewer rows than it should — because the stale `startsWith` no longer matches the re-stamped rows. The window self-heals once the cache refreshes; it only ever under-prunes (the surviving `id`/`full_path` filter and the authorization prefix mean it never returns extra or cross-tenant rows); and `is_descendant` limits exposure to callers already authorized over both the old and new locations. It is a performance optimization layered on the graph's existing eventual consistency, not a new correctness or security boundary.
+**Bounded staleness on namespace moves.** The prefix is resolved from a cache
+(dictionary `LIFETIME` plus the in-process TTL) over `gl_project`/`gl_group`,
+which the graph itself derives from PostgreSQL via CDC and re-indexing. When a
+project or group is transferred, its rows are re-stamped with the new
+`traversal_path`, but the cache can briefly keep resolving the pre-transfer
+prefix. During that window a scoped query can under-prune — return fewer rows
+than it should — because the stale `startsWith` no longer matches the re-stamped
+rows. The window self-heals once the cache refreshes; it only ever under-prunes
+(the surviving `id`/`full_path` filter and the authorization prefix mean it never
+returns extra or cross-tenant rows); and `is_descendant` limits exposure to
+callers already authorized over both the old and new locations. It is a
+performance optimization layered on the graph's existing eventual consistency,
+not a new correctness or security boundary.
 
 ## Request Flow (Deployed)
 
@@ -135,7 +179,16 @@ The injected prefix is re-validated before use: it is only applied when it is a 
 
 ### Unified Response Format
 
-After ClickHouse returns rows and redaction completes, the server applies agent-driven cursor pagination (`{ offset, page_size }`) to slice the authorized result set. A query result cache (moka, 60s TTL) stores the full authorized result so subsequent pages skip ClickHouse, authorization, and redaction. The formatting stage then transforms the sliced `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
+After ClickHouse returns rows and redaction completes, the server slices the
+authorized result set with offset pagination (`{ offset, page_size }`) when a
+cursor is present, or the request `limit` otherwise. Query lowering fetches one
+extra row beyond the returned window so the response can set `has_more` and
+`truncated` when more materialized rows exist. The formatting stage then
+transforms the sliced `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md)
+defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`
+shape for all four query types (traversal, aggregation, path_finding,
+neighbors) with deduplicated nodes and instance-level edges. `format_version`
+(semver) lets consumers detect breaking changes.
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 

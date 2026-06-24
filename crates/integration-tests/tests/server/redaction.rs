@@ -3971,8 +3971,8 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
-        query.base.sql.contains("LIMIT 100"),
-        "SQL LIMIT should come from limit field, not cursor: {}",
+        query.base.sql.contains("LIMIT 101"),
+        "SQL LIMIT should overfetch one row beyond the requested limit: {}",
         query.base.sql
     );
 

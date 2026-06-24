@@ -108,7 +108,7 @@ and passes them into `CompilerMetadata`.
 
 The planner estimates rows after filtering:
 
-```
+```plaintext
 estimated_rows = total_row_count * product(selectivity_per_filter)
 ```
 
@@ -128,7 +128,7 @@ Where `total_row_count` comes from the histogram table's `id` column
 | `is_null` | Value frequency | `null_value_count / total_row_count`, fallback 0.01 |
 | (no filter) | -- | 1.0 |
 | (pinned IDs) | -- | `min(len(node_ids), total_row_count) / total_row_count` |
-| (id_range) | Histogram | `sum(buckets in range) / total_row_count` |
+| (`id_range`) | Histogram | `sum(buckets in range) / total_row_count` |
 
 When multiple filters apply to the same node, their selectivities are multiplied
 (independence assumption). This is the standard approach in PostgreSQL, MySQL, and
@@ -138,7 +138,7 @@ genuinely independent.
 
 **Join output estimation** uses the FK-join formula:
 
-```
+```plaintext
 join_output = left_rows * right_rows / max(ndv_left_key, ndv_right_key)
 ```
 
@@ -147,7 +147,7 @@ For edge-to-node joins, the join key is `id` on the node side and `source_id` or
 
 **Example:**
 
-```
+```plaintext
 Query: User(node_ids=[1]) --AUTHORED--> MR(source_branch="main") --IN_PROJECT--> Project
 
 Stats for namespace 1/9970/:
@@ -191,7 +191,7 @@ programming is needed.
 
 The server query pipeline currently runs these stages in order:
 
-```
+```plaintext
 Security → PathResolution → Compilation → ClickHouse → Extraction →
 Authorization → Redaction → Hydration → Output
 ```
@@ -289,6 +289,6 @@ DSL filter patterns with minimal additional complexity.
 - Issue: #826
 - Schema config MR: !1555
 - FilterOnly-to-JOIN profiling (!1533): 70% read reduction on code-graph queries
-- ClickHouse AggregatingMergeTree docs: https://clickhouse.com/docs/engines/table-engines/mergetree-family/aggregatingmergetree
+- ClickHouse AggregatingMergeTree docs: [ClickHouse AggregatingMergeTree](https://clickhouse.com/docs/engines/table-engines/mergetree-family/aggregatingmergetree)
 - Prior art: `config/ontology/schema.yaml` `auxiliary_dictionaries` section
 - Prior art: `crates/ontology/src/loading/mod.rs` materialized view loading
