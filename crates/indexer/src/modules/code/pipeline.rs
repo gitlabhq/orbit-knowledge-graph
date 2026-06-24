@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use code_graph::v2::{Pipeline, PipelineConfig};
+use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
@@ -102,6 +102,11 @@ impl CodeIndexingPipeline {
         Some(self.fetch_concurrency + self.indexing_slot_count)
     }
 
+    /// Hard per-job wall-clock timeout, or `None` when disabled.
+    pub fn job_timeout(&self) -> Option<std::time::Duration> {
+        self.pipeline_config.job_timeout()
+    }
+
     #[tracing::instrument(
         name = "code_indexing_project",
         skip_all,
@@ -117,6 +122,7 @@ impl CodeIndexingPipeline {
         context: &HandlerContext,
         request: &IndexingRequest,
         observer: &mut dyn IndexingObserver,
+        cancel: CancellationToken,
     ) -> Result<IndexOutcome, HandlerError> {
         let Some(namespace_id) =
             gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
@@ -186,7 +192,7 @@ impl CodeIndexingPipeline {
 
         let indexed_at = Utc::now();
         let indexing_result = self
-            .run_indexing(context, request, &repository, indexed_at, observer)
+            .run_indexing(context, request, &repository, indexed_at, observer, cancel)
             .await;
 
         if let Err(error) = self
@@ -252,9 +258,10 @@ impl CodeIndexingPipeline {
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
+        cancel: CancellationToken,
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
-        let config = self.build_pipeline_config(context);
+        let config = self.build_pipeline_config(context, cancel);
         let (result, per_table_writes) = self
             .build_code_graph(context, request, repository, indexed_at, config)
             .await?;
@@ -287,7 +294,11 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
-    fn build_pipeline_config(&self, context: &HandlerContext) -> PipelineConfig {
+    fn build_pipeline_config(
+        &self,
+        context: &HandlerContext,
+        cancel: CancellationToken,
+    ) -> PipelineConfig {
         let to_timeout = |ms: u64| (ms > 0).then(|| std::time::Duration::from_millis(ms));
         let handle = tokio::runtime::Handle::current();
         let progress = context.progress.clone();
@@ -303,6 +314,7 @@ impl CodeIndexingPipeline {
                 phase_cpu_metrics.record_file_phase_cpu(language, cpu)
             }));
         PipelineConfig {
+            cancel,
             max_files: self.pipeline_config.max_files,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,

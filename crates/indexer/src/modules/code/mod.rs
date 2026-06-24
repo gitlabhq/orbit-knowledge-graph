@@ -51,6 +51,16 @@ pub async fn register_handlers(
 
     let code_indexing_task_config = config.engine.handlers.code_indexing_task.clone();
 
+    let job_timeout_secs = code_indexing_task_config.pipeline.job_timeout_secs;
+    let ack_wait_secs = config.nats.ack_wait_secs;
+    if job_timeout_outlives_ack_wait(job_timeout_secs, ack_wait_secs) {
+        tracing::warn!(
+            job_timeout_secs,
+            ack_wait_secs,
+            "code indexing job_timeout_secs is not below nats ack_wait_secs; a long job will be redelivered (and its lock can lapse) before the timeout fires — lower job_timeout_secs below ack_wait_secs"
+        );
+    }
+
     let table_names =
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
 
@@ -118,4 +128,31 @@ pub async fn register_handlers(
     )));
 
     Ok(())
+}
+
+/// True when the job timeout isn't safely below the NATS ack window, so a job is redelivered (and its lock can lapse) before the timeout fires.
+fn job_timeout_outlives_ack_wait(job_timeout_secs: u64, ack_wait_secs: u64) -> bool {
+    job_timeout_secs > 0 && job_timeout_secs >= ack_wait_secs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::job_timeout_outlives_ack_wait;
+
+    #[test]
+    fn job_timeout_must_sit_below_ack_wait() {
+        assert!(!job_timeout_outlives_ack_wait(250, 300), "default is safe");
+        assert!(
+            !job_timeout_outlives_ack_wait(0, 300),
+            "0 disables the timeout"
+        );
+        assert!(
+            job_timeout_outlives_ack_wait(300, 300),
+            "equal leaves no margin"
+        );
+        assert!(
+            job_timeout_outlives_ack_wait(400, 300),
+            "exceeds the ack window"
+        );
+    }
 }

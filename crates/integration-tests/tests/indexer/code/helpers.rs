@@ -127,6 +127,7 @@ struct ProjectData {
     /// matching the production case where Gitaly streams an empty archive for
     /// projects that lack repository content.
     empty_archive_body: bool,
+    slow_archive: bool,
 }
 
 pub struct MockGitlabServer {
@@ -185,6 +186,23 @@ impl MockGitlabServer {
                 default_branch: default_branch.to_string(),
                 archive_files,
                 empty_archive_body: false,
+                slow_archive: false,
+            },
+        );
+    }
+
+    /// Register a project whose archive endpoint sleeps, so a short job timeout fires mid-fetch.
+    pub fn add_project_with_slow_archive(&self, project_id: i64, default_branch: &str) {
+        self.state.projects.lock().insert(
+            project_id,
+            ProjectData {
+                default_branch: default_branch.to_string(),
+                archive_files: vec![(
+                    "src/Main.java".to_string(),
+                    b"public class Main {}".to_vec(),
+                )],
+                empty_archive_body: false,
+                slow_archive: true,
             },
         );
     }
@@ -199,6 +217,7 @@ impl MockGitlabServer {
                 default_branch: default_branch.to_string(),
                 archive_files: Vec::new(),
                 empty_archive_body: true,
+                slow_archive: false,
             },
         );
     }
@@ -243,6 +262,14 @@ async fn handle_download_archive(
     Path(project_id): Path<i64>,
     Query(query): Query<ArchiveQuery>,
 ) -> impl IntoResponse {
+    let slow = state
+        .projects
+        .lock()
+        .get(&project_id)
+        .is_some_and(|p| p.slow_archive);
+    if slow {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
     let projects = state.projects.lock();
     match projects.get(&project_id) {
         Some(p) if p.empty_archive_body => (StatusCode::OK, Vec::<u8>::new()).into_response(),

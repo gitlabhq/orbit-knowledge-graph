@@ -1289,3 +1289,44 @@ async fn assert_branch_indexed(
     )
     .await;
 }
+
+#[tokio::test]
+async fn timed_out_job_writes_no_data() {
+    let project_id: i64 = 99;
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_slow_archive(project_id, "main");
+
+    // 1s budget vs a 3s fetch: the timeout fires mid-fetch, so the run is dropped before its flush.
+    let deps = CodeIndexingDeps::new_with_pipeline_config(
+        &mock,
+        &clickhouse,
+        gkg_server_config::CodeIndexingPipelineConfig {
+            job_timeout_secs: 1,
+            ..Default::default()
+        },
+    );
+    let handler = deps.code_indexing_task_handler();
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
+
+    let result = handler.handle(handler_context(&clickhouse), envelope).await;
+    assert!(result.is_err(), "slow fetch should trip the job timeout");
+
+    for table in ["gl_file", "gl_definition"] {
+        let rows = clickhouse
+            .query(&format!(
+                "SELECT project_id FROM {} WHERE project_id = {project_id}",
+                t(table)
+            ))
+            .await;
+        assert!(
+            rows.iter().all(|b| b.num_rows() == 0),
+            "a timed-out job must write no rows to {table}",
+        );
+    }
+}

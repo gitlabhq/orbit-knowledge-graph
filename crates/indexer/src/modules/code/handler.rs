@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use code_graph::v2::CancellationToken;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
@@ -278,21 +279,38 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
-        let result = self
-            .pipeline
-            .index_project(
-                context,
-                &IndexingRequest {
-                    project_id,
-                    branch: branch.to_string(),
-                    traversal_path: request.traversal_path.clone(),
-                    task_id: request.task_id,
-                    commit_sha: request.commit_sha.clone(),
-                    had_prior_checkpoint,
-                },
-                observer,
-            )
-            .await;
+        let indexing_request = IndexingRequest {
+            project_id,
+            branch: branch.to_string(),
+            traversal_path: request.traversal_path.clone(),
+            task_id: request.task_id,
+            commit_sha: request.commit_sha.clone(),
+            had_prior_checkpoint,
+        };
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is transient (retried, then DLQ'd).
+        let cancel = CancellationToken::new();
+        let work =
+            self.pipeline
+                .index_project(context, &indexing_request, observer, cancel.clone());
+        let result = match self.pipeline.job_timeout() {
+            Some(timeout) => match tokio::time::timeout(timeout, work).await {
+                Ok(result) => result,
+                Err(_) => {
+                    cancel.cancel();
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        timeout_secs = timeout.as_secs(),
+                        "code indexing job exceeded wall-clock timeout"
+                    );
+                    Err(HandlerError::Processing(format!(
+                        "code indexing job exceeded the {}s timeout",
+                        timeout.as_secs()
+                    )))
+                }
+            },
+            None => work.await,
+        };
 
         context
             .indexing_status
