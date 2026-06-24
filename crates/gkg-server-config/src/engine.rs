@@ -60,8 +60,9 @@ impl SubscriptionConfig {
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Truncate sub-second precision from a [`DateTime`], snapping to the current
-/// whole second. Falls back to the original value on the (unreachable) `None`
-/// from `with_nanosecond(0)`.
+/// whole second. Works around croner 3.0.1 preserving sub-second fractions in
+/// `find_next_occurrence`; becomes a harmless no-op if a future croner version
+/// fixes the upstream fraction handling. See #905.
 fn truncate_subsecond(dt: DateTime<Utc>) -> DateTime<Utc> {
     dt.with_nanosecond(0).unwrap_or(dt)
 }
@@ -698,6 +699,22 @@ modules: [sdlc, namespace_deletion]
             cfg.validate(),
             Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
+    }
+
+    #[test]
+    fn interval_hint_returns_exact_period() {
+        let sched = ScheduleConfiguration {
+            cron: Some("0 */1 * * * *".into()),
+        };
+
+        let hint = sched.interval_hint();
+
+        // interval_hint computes (second_occurrence - first_occurrence).
+        // Even without truncation the chained find_next_occurrence calls
+        // carry the same sub-second fraction, so the difference cancels to
+        // a clean 60s. The truncation is defensive; this test pins the
+        // contract regardless.
+        assert_eq!(hint, Duration::from_secs(60));
     }
 
     #[test]
