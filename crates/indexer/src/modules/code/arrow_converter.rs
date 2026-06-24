@@ -906,6 +906,13 @@ async fn emit(
     Ok(())
 }
 
+/// A table's buffered remainder batches and their running row count.
+#[derive(Default)]
+struct Pending {
+    batches: Vec<RecordBatch>,
+    rows: usize,
+}
+
 /// Combine small per-family batches and split large ones toward `slice_rows` rows per
 /// insert, written through a bounded set of concurrent futures.
 async fn write_loop(
@@ -919,7 +926,7 @@ async fn write_loop(
     let mut totals: HashMap<String, TableWriteTotals> = HashMap::new();
     let mut inflight: FuturesUnordered<BoxFuture<'static, WriteResult>> = FuturesUnordered::new();
     // Per-table remainders (each < slice_rows) waiting to accumulate a full insert.
-    let mut pending: HashMap<String, (Vec<RecordBatch>, usize)> = HashMap::new();
+    let mut pending: HashMap<String, Pending> = HashMap::new();
 
     while let Some((table, batch)) = rx.recv().await {
         let mut offset = 0;
@@ -939,34 +946,32 @@ async fn write_loop(
         if offset < batch.num_rows() {
             let remainder = batch.slice(offset, batch.num_rows() - offset);
             let rem_rows = remainder.num_rows();
-            let entry = pending
-                .entry(table.clone())
-                .or_insert_with(|| (Vec::new(), 0));
-            entry.0.push(remainder);
-            entry.1 += rem_rows;
-            if entry.1 >= slice_rows {
-                let (batches, _) = pending.remove(&table).expect("entry just inserted");
+            let entry = pending.entry(table.clone()).or_default();
+            entry.batches.push(remainder);
+            entry.rows += rem_rows;
+            if entry.rows >= slice_rows {
+                let buffered = pending.remove(&table).expect("entry just inserted");
                 emit(
                     &mut inflight,
                     &mut totals,
                     max_concurrent_writes,
                     destination.clone(),
                     table.clone(),
-                    batches,
+                    buffered.batches,
                 )
                 .await?;
             }
         }
     }
 
-    for (table, (batches, _)) in pending.drain().collect::<Vec<_>>() {
+    for (table, buffered) in pending.drain().collect::<Vec<_>>() {
         emit(
             &mut inflight,
             &mut totals,
             max_concurrent_writes,
             destination.clone(),
             table,
-            batches,
+            buffered.batches,
         )
         .await?;
     }
