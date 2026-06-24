@@ -16,7 +16,7 @@ fn compile_to_ast_works() {
     let Node::Query(ref q) = node else {
         unreachable!()
     };
-    assert_eq!(q.limit, Some(10));
+    assert_eq!(q.limit, Some(11));
     assert!(!q.select.is_empty());
 }
 
@@ -38,7 +38,7 @@ fn traversal_query() {
 
     assert!(rendered.contains("gl_edge"));
     assert!(rendered.contains("relationship_kind"));
-    assert!(rendered.contains("LIMIT 25"));
+    assert!(rendered.contains("LIMIT 26"));
     assert!(has_param_value(
         &result.base.params,
         &serde_json::json!("AUTHORED")
