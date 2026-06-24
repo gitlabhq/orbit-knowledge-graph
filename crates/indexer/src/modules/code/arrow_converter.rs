@@ -8,6 +8,7 @@
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
+use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
 use futures::future::{BoxFuture, FutureExt};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -717,9 +718,9 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     fn convert(
         &self,
         graph: code_graph::v2::linker::CodeGraph,
-    ) -> Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
+    ) -> Result<Vec<(String, RecordBatch)>, SinkError> {
         let data = convert_code_graph(&graph, &self.envelope, &self.specs)
-            .map_err(|e| code_graph::v2::SinkError(format!("ClickHouse graph conversion: {e}")))?;
+            .map_err(|e| SinkError(format!("ClickHouse graph conversion: {e}")))?;
         let mut result = vec![
             (self.table_names.branch.clone(), data.branch),
             (self.table_names.directory.clone(), data.directories),
@@ -739,15 +740,11 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             let rel_col = data
                 .edges
                 .column_by_name("relationship_kind")
-                .ok_or_else(|| {
-                    code_graph::v2::SinkError("edges batch missing relationship_kind column".into())
-                })?;
+                .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?;
             // The column may be dictionary-encoded (DictStr) or plain Utf8.
             // Cast to StringArray for uniform access.
             let rel_col_str = arrow::compute::cast(rel_col, &arrow::datatypes::DataType::Utf8)
-                .map_err(|e| {
-                    code_graph::v2::SinkError(format!("cast relationship_kind to string: {e}"))
-                })?;
+                .map_err(|e| SinkError(format!("cast relationship_kind to string: {e}")))?;
             let rel_array = rel_col_str.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
@@ -783,7 +780,7 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             for (table, indices) in table_rows {
                 let idx_array = arrow::array::UInt32Array::from(indices);
                 let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
-                    .map_err(|e| code_graph::v2::SinkError(format!("edge routing: {e}")))?;
+                    .map_err(|e| SinkError(format!("edge routing: {e}")))?;
                 if !table.contains("code_edge") {
                     batch = drop_columns(&batch, code_only_cols);
                 }
@@ -809,7 +806,7 @@ fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
 }
 
 /// Per-table totals the writer task yields, or the first write error.
-type WriteOutcome = Result<Vec<TableWriteTotals>, code_graph::v2::SinkError>;
+type WriteOutcome = Result<Vec<TableWriteTotals>, SinkError>;
 
 /// Streams each batch to an async writer task; the bounded channel back-pressures the parser instead of buffering the whole graph.
 pub struct StreamingClickHouseSink {
@@ -842,7 +839,7 @@ impl StreamingClickHouseSink {
         drop(self.tx.lock().take());
         let task = self.task.lock().take().expect("finish called exactly once");
         task.await
-            .map_err(|e| code_graph::v2::SinkError(format!("writer task join: {e}")))?
+            .map_err(|e| SinkError(format!("writer task join: {e}")))?
     }
 }
 
@@ -864,7 +861,7 @@ fn record_total(
 }
 
 /// Per-write result: the written table plus its row and byte counts.
-type WriteResult = Result<(String, u64, u64), code_graph::v2::SinkError>;
+type WriteResult = Result<(String, u64, u64), SinkError>;
 
 /// Drain a completed write if at the concurrency cap, then push one insert carrying a
 /// table's batches in a single ArrowStream request.
@@ -875,7 +872,7 @@ async fn emit(
     destination: Arc<dyn crate::destination::Destination>,
     table: String,
     batches: Vec<RecordBatch>,
-) -> Result<(), code_graph::v2::SinkError> {
+) -> Result<(), SinkError> {
     while inflight.len() >= max_concurrent_writes {
         if let Some(done) = inflight.next().await {
             let (table, rows, bytes) = done?;
@@ -897,11 +894,11 @@ async fn emit(
                     },
                 )
                 .await
-                .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
+                .map_err(|e| SinkError(format!("writer for {table}: {e}")))?;
             writer
                 .write_batch(&batches)
                 .await
-                .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
+                .map_err(|e| SinkError(format!("write to {table}: {e}")))?;
             Ok((table, rows, bytes))
         }
         .boxed(),
@@ -990,11 +987,7 @@ pub struct TableWriteTotals {
 
 impl code_graph::v2::BatchSink for StreamingClickHouseSink {
     /// Must run on a blocking thread (the code-graph writer threads), not an async task: it uses `blocking_send`.
-    fn write_batch(
-        &self,
-        table: &str,
-        batch: &RecordBatch,
-    ) -> Result<(), code_graph::v2::SinkError> {
+    fn write_batch(&self, table: &str, batch: &RecordBatch) -> Result<(), SinkError> {
         if batch.num_rows() == 0 {
             return Ok(());
         }
@@ -1002,10 +995,8 @@ impl code_graph::v2::BatchSink for StreamingClickHouseSink {
         match tx {
             Some(tx) => tx
                 .blocking_send((table.to_string(), batch.clone()))
-                .map_err(|_| code_graph::v2::SinkError("streaming sink writer stopped".into())),
-            None => Err(code_graph::v2::SinkError(
-                "streaming sink already finished".into(),
-            )),
+                .map_err(|_| SinkError("streaming sink writer stopped".into())),
+            None => Err(SinkError("streaming sink already finished".into())),
         }
     }
 }
