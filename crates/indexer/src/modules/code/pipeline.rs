@@ -362,6 +362,9 @@ impl CodeIndexingPipeline {
             ));
         let streaming_sink = Arc::new(arrow_converter::StreamingClickHouseSink::new(
             context.destination.clone(),
+            self.pipeline_config.write_channel_capacity,
+            self.pipeline_config.write_slice_rows,
+            self.pipeline_config.write_max_concurrent_writes,
         ));
         let sink: Arc<dyn code_graph::v2::BatchSink> = streaming_sink.clone();
 

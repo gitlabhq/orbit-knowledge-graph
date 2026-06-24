@@ -807,15 +807,6 @@ fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
     batch.project(&indices).expect("column projection")
 }
 
-/// Bounded so a slow ClickHouse back-pressures the parser instead of buffering the whole graph.
-const WRITE_CHANNEL_CAPACITY: usize = 8;
-
-/// Rows per insert; matches SDLC's datalake page size so a large table isn't one giant insert.
-const WRITE_SLICE_ROWS: usize = 500_000;
-
-/// Concurrent in-flight inserts; bounds write memory while overlapping writes with parsing.
-const MAX_CONCURRENT_WRITES: usize = 8;
-
 /// Per-table totals the writer task yields, or the first write error.
 type WriteOutcome = Result<Vec<TableWriteTotals>, code_graph::v2::SinkError>;
 
@@ -826,9 +817,19 @@ pub struct StreamingClickHouseSink {
 }
 
 impl StreamingClickHouseSink {
-    pub fn new(destination: Arc<dyn crate::destination::Destination>) -> Self {
-        let (tx, rx) = mpsc::channel(WRITE_CHANNEL_CAPACITY);
-        let task = tokio::runtime::Handle::current().spawn(write_loop(destination, rx));
+    pub fn new(
+        destination: Arc<dyn crate::destination::Destination>,
+        channel_capacity: usize,
+        slice_rows: usize,
+        max_concurrent_writes: usize,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel(channel_capacity.max(1));
+        let task = tokio::runtime::Handle::current().spawn(write_loop(
+            destination,
+            rx,
+            slice_rows,
+            max_concurrent_writes,
+        ));
         Self {
             tx: Mutex::new(Some(tx)),
             task: Mutex::new(Some(task)),
@@ -865,18 +866,22 @@ fn record_total(
 async fn write_loop(
     destination: Arc<dyn crate::destination::Destination>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
+    slice_rows: usize,
+    max_concurrent_writes: usize,
 ) -> WriteOutcome {
+    let slice_rows = slice_rows.max(1);
+    let max_concurrent_writes = max_concurrent_writes.max(1);
     let mut totals: HashMap<String, TableWriteTotals> = HashMap::new();
     let mut inflight = FuturesUnordered::new();
 
     while let Some((table, batch)) = rx.recv().await {
         let mut offset = 0;
         while offset < batch.num_rows() {
-            let len = WRITE_SLICE_ROWS.min(batch.num_rows() - offset);
+            let len = slice_rows.min(batch.num_rows() - offset);
             let slice = batch.slice(offset, len);
             offset += len;
 
-            while inflight.len() >= MAX_CONCURRENT_WRITES {
+            while inflight.len() >= max_concurrent_writes {
                 if let Some(done) = inflight.next().await {
                     let (table, rows, bytes) = done?;
                     record_total(&mut totals, table, rows, bytes);
@@ -954,9 +959,13 @@ mod tests {
         use code_graph::v2::BatchSink;
         use std::collections::HashMap;
 
-        let sink = Arc::new(StreamingClickHouseSink::new(Arc::new(
-            MockDestination::new(),
-        )));
+        // slice_rows = 2 forces the 3-row batch to slice, exercising aggregation across slices.
+        let sink = Arc::new(StreamingClickHouseSink::new(
+            Arc::new(MockDestination::new()),
+            8,
+            2,
+            4,
+        ));
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let batch =
             RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();

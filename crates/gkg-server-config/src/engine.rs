@@ -249,6 +249,18 @@ fn default_code_indexing_job_timeout_secs() -> u64 {
     250
 }
 
+fn default_code_indexing_write_channel_capacity() -> usize {
+    8
+}
+
+fn default_code_indexing_write_slice_rows() -> usize {
+    500_000
+}
+
+fn default_code_indexing_write_max_concurrent_writes() -> usize {
+    8
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -288,6 +300,15 @@ pub struct CodeIndexingPipelineConfig {
     /// code indexer. 0 = no limit. Defaults to 6.
     #[serde(default = "default_fetch_concurrency")]
     pub fetch_concurrency: usize,
+    /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.
+    #[serde(default = "default_code_indexing_write_channel_capacity")]
+    pub write_channel_capacity: usize,
+    /// Rows per ClickHouse insert from the streaming sink; large tables are sliced to this. Defaults to 500000.
+    #[serde(default = "default_code_indexing_write_slice_rows")]
+    pub write_slice_rows: usize,
+    /// Concurrent in-flight inserts from the streaming sink. Defaults to 8.
+    #[serde(default = "default_code_indexing_write_max_concurrent_writes")]
+    pub write_max_concurrent_writes: usize,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -305,6 +326,9 @@ impl Default for CodeIndexingPipelineConfig {
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
             job_timeout_secs: default_code_indexing_job_timeout_secs(),
             fetch_concurrency: default_fetch_concurrency(),
+            write_channel_capacity: default_code_indexing_write_channel_capacity(),
+            write_slice_rows: default_code_indexing_write_slice_rows(),
+            write_max_concurrent_writes: default_code_indexing_write_max_concurrent_writes(),
         }
     }
 }

@@ -77,7 +77,10 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "worker_threads": 0
+              "worker_threads": 0,
+              "write_channel_capacity": 8,
+              "write_max_concurrent_writes": 8,
+              "write_slice_rows": 500000
             }
           },
           "entity-handler": {
@@ -473,6 +476,27 @@
           "format": "uint",
           "default": 0,
           "minimum": 0
+        },
+        "write_channel_capacity": {
+          "description": "In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.",
+          "type": "integer",
+          "format": "uint",
+          "default": 8,
+          "minimum": 0
+        },
+        "write_max_concurrent_writes": {
+          "description": "Concurrent in-flight inserts from the streaming sink. Defaults to 8.",
+          "type": "integer",
+          "format": "uint",
+          "default": 8,
+          "minimum": 0
+        },
+        "write_slice_rows": {
+          "description": "Rows per ClickHouse insert from the streaming sink; large tables are sliced to this. Defaults to 500000.",
+          "type": "integer",
+          "format": "uint",
+          "default": 500000,
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -494,7 +518,10 @@
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
             "per_file_walk_timeout_ms": 100,
-            "worker_threads": 0
+            "worker_threads": 0,
+            "write_channel_capacity": 8,
+            "write_max_concurrent_writes": 8,
+            "write_slice_rows": 500000
           }
         }
       },
@@ -590,7 +617,10 @@
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
                 "per_file_walk_timeout_ms": 100,
-                "worker_threads": 0
+                "worker_threads": 0,
+                "write_channel_capacity": 8,
+                "write_max_concurrent_writes": 8,
+                "write_slice_rows": 500000
               }
             },
             "entity-handler": {
@@ -836,7 +866,10 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "worker_threads": 0
+              "worker_threads": 0,
+              "write_channel_capacity": 8,
+              "write_max_concurrent_writes": 8,
+              "write_slice_rows": 500000
             }
           }
         },
