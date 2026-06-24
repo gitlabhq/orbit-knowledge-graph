@@ -930,6 +930,9 @@ pub struct TableWriteTotals {
 }
 
 impl code_graph::v2::BatchSink for StreamingClickHouseSink {
+    /// # Panics
+    /// Uses `blocking_send`, so it must run on a blocking thread (the code-graph
+    /// writer threads), never directly inside an async task.
     fn write_batch(
         &self,
         table: &str,
