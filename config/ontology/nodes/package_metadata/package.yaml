@@ -1,0 +1,102 @@
+# config/ontology/nodes/package_metadata/package.yaml
+
+node_type: PmPackage
+domain: package_metadata
+description: A package known to the GitLab Package Metadata database, identified by purl type and name. Global reference data, not scoped to a project, and distinct from a registry Package.
+label: name
+destination_table: gl_pm_package
+default_columns: [id, purl_type, name]
+sort_key: [id]
+
+style:
+  size: 26
+  color: "#A78BFA"
+
+# resource_type pm_package must be registered in EE::Authz::RedactionService
+# for this node to return data; coordinate the monolith registration.
+redaction:
+  resource_type: pm_package
+  id_column: id
+  ability: read_security_resource
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Unique ID."
+
+  purl_type:
+    type: enum
+    source: purl_type
+    nullable: false
+    description: "Package URL (purl) type / ecosystem."
+    values:
+      0: not_provided
+      1: composer
+      2: conan
+      3: gem
+      4: golang
+      5: maven
+      6: npm
+      7: nuget
+      8: pypi
+      9: apk
+      10: rpm
+      11: deb
+      12: "cbl-mariner"
+      13: wolfi
+      14: cargo
+      15: swift
+      16: conda
+      17: pub
+      999: unknown
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Package name."
+
+  licenses:
+    type: string
+    source: licenses
+    nullable: true
+    description: "JSON-serialized license metadata for the package, if known."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    description: "Creation timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Last update timestamp."
+
+etl:
+  type: table
+  scope: global
+  source: siphon_pm_packages
+  order_by: [id]
+
+storage:
+  primary_key: [id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: purl_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: licenses, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_purl_type, column: purl_type, type: "set(32)", granularity: 2}
+    - {name: idx_name, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
+    - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}

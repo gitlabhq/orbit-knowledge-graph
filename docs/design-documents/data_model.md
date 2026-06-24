@@ -59,6 +59,12 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `ContainerRepository` | Represents a container image repository in a project's container registry. | `id`, `name`, `status`, `project_id` |
 | `VulnerabilityScanner` | Represents the scanner that produced vulnerability data.                                               | `id`, `external_id`, `name`, `vendor`                                         |
 | `VulnerabilityIdentifier` | Represents a vulnerability identifier such as CVE or GHSA.                                         | `id`, `external_type`, `external_id`, `name`                                  |
+| `PmAdvisory`          | A security advisory from the GitLab Package Metadata database (CVE/CVSS/identifiers). Global node, no `traversal_path`. | `id`, `advisory_xid`, `cve`, `title`, `source_xid`, `published_date`        |
+| `PmAffectedPackage`   | A package (by purl type, name and version range) affected by a Package Metadata advisory. Global node.   | `id`, `pm_advisory_id`, `purl_type`, `package_name`, `affected_range`         |
+| `PmCveEnrichment`     | CVE enrichment (EPSS score, known-exploit flag) from the Package Metadata database. Global node.          | `id`, `cve`, `epss_score`, `is_known_exploit`                                 |
+| `PmPackage`           | A package known to the Package Metadata database (by purl type and name). Global node, distinct from `Package`. | `id`, `purl_type`, `name`, `licenses`                                    |
+| `PmPackageVersion`    | A specific version of a Package Metadata package. Global node.                                          | `id`, `pm_package_id`, `version`                                              |
+| `PmLicense`           | A software license (by SPDX identifier) referenced by the Package Metadata database. Global node.        | `id`, `spdx_identifier`                                                       |
 
 ### Relationship Visualization
 
@@ -95,6 +101,10 @@ graph TD
     Package -- IN_PROJECT --> Project
     Package -- BUILT_BY --> Pipeline
     ContainerRepository -- IN_PROJECT --> Project
+
+    PmAffectedPackage -- AFFECTED_BY --> PmAdvisory
+    PmPackageVersion -- VERSION_OF --> PmPackage
+    PmPackageVersion -- HAS_LICENSE --> PmLicense
 ```
 
 ### Implemented Relationship Types
@@ -153,6 +163,9 @@ graph TD
 | `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
 | `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
 | `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
+| `AFFECTED_BY`                       | `PmAffectedPackage` | `PmAdvisory` | An affected-package entry belongs to a Package Metadata security advisory (FK `pm_advisory_id`). Global edge. |
+| `VERSION_OF`                        | `PmPackageVersion` | `PmPackage` | A package-metadata version belongs to its package (FK `pm_package_id`). Global edge.                       |
+| `HAS_LICENSE`                       | `PmPackageVersion` | `PmLicense` | A package-metadata version is published under a license (sourced from the `pm_package_version_licenses` join table). Global edge. |
 
 ---
 

@@ -1,0 +1,9 @@
+# config/ontology/edges/version_of.yaml
+
+description: A package version is a version of a package
+
+variants:
+  - from_node: { type: PmPackageVersion, id: id }
+    to_node: { type: PmPackage, id: id }
+    fk_column: pm_package_id
+    description: "Package version belongs to package."

@@ -1,0 +1,31 @@
+description: Package-metadata packages, versions and licenses index globally with VERSION_OF and HAS_LICENSE edges
+
+seed:
+  siphon_pm_packages:
+    - { id: 3001, purl_type: 6, name: "lodash", licenses: "[\"MIT\"]", created_at: "2024-01-01 10:00:00", updated_at: "2024-01-01 10:00:00" }
+  siphon_pm_package_versions:
+    - { id: 4001, pm_package_id: 3001, version: "4.17.21", created_at: "2024-01-01 10:00:00", updated_at: "2024-01-01 10:00:00" }
+    - { id: 4002, pm_package_id: 3001, version: "4.17.20", created_at: "2024-01-02 10:00:00", updated_at: "2024-01-02 10:00:00" }
+  siphon_pm_licenses:
+    - { id: 5001, spdx_identifier: "MIT", created_at: "2024-01-01 10:00:00", updated_at: "2024-01-01 10:00:00" }
+  siphon_pm_package_version_licenses:
+    - { id: 6001, pm_package_version_id: 4001, pm_license_id: 5001, created_at: "2024-01-01 10:00:00", updated_at: "2024-01-01 10:00:00" }
+    - { id: 6002, pm_package_version_id: 4002, pm_license_id: 5001, created_at: "2024-01-02 10:00:00", updated_at: "2024-01-02 10:00:00" }
+
+run: global
+
+expect:
+  nodes:
+    gl_pm_package:
+      rows:
+        - { id: 3001, purl_type: npm, name: "lodash" }
+    gl_pm_package_version:
+      rows:
+        - { id: 4001, pm_package_id: 3001, version: "4.17.21" }
+        - { id: 4002, pm_package_id: 3001, version: "4.17.20" }
+    gl_pm_license:
+      rows:
+        - { id: 5001, spdx_identifier: "MIT" }
+  edges:
+    - { kind: VERSION_OF, from: PmPackageVersion, to: PmPackage, count: 2 }
+    - { kind: HAS_LICENSE, from: PmPackageVersion, to: PmLicense, count: 2 }

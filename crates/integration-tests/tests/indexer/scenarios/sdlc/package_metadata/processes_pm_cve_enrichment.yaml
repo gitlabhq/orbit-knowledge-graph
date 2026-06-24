@@ -1,0 +1,15 @@
+description: CVE enrichment rows index globally with float EPSS score and known-exploit flag
+
+seed:
+  siphon_pm_cve_enrichment:
+    - { id: 9001, cve: "CVE-2024-0001", epss_score: 0.95, is_known_exploit: true, created_at: "2024-01-10 10:00:00", updated_at: "2024-01-11 10:00:00" }
+    - { id: 9002, cve: "CVE-2024-0002", epss_score: 0.01, is_known_exploit: false, created_at: "2024-02-10 10:00:00", updated_at: "2024-02-11 10:00:00" }
+
+run: global
+
+expect:
+  nodes:
+    gl_pm_cve_enrichment:
+      rows:
+        - { id: 9001, cve: "CVE-2024-0001", epss_score: "0.95", is_known_exploit: "true" }
+        - { id: 9002, cve: "CVE-2024-0002", epss_score: "0.01", is_known_exploit: "false" }

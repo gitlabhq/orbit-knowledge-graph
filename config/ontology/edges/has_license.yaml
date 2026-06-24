@@ -1,0 +1,19 @@
+# config/ontology/edges/has_license.yaml
+
+description: A package version has a license
+
+variants:
+  - from_node: { type: PmPackageVersion, id: id }
+    to_node: { type: PmLicense, id: id }
+    description: "Package version is published under license."
+
+etl:
+  - scope: global
+    source: siphon_pm_package_version_licenses
+    order_by: [id]
+    from:
+      id: pm_package_version_id
+      type: PmPackageVersion
+    to:
+      id: pm_license_id
+      type: PmLicense

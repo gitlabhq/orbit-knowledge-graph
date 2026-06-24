@@ -1,0 +1,24 @@
+description: Advisories index globally with transformed source_xid enum, plus affected packages and AFFECTED_BY edges
+
+seed:
+  siphon_pm_advisories:
+    - { id: 7001, advisory_xid: "GHSA-aaaa-bbbb-cccc", source_xid: 1, cve: "CVE-2024-0001", title: "Prototype pollution", description: "A prototype pollution issue.", cvss_v3: "CVSS:3.1/AV:N/AC:L", identifiers: "[]", published_date: "2024-01-10", created_at: "2024-01-10 10:00:00", updated_at: "2024-01-11 10:00:00" }
+    - { id: 7002, advisory_xid: "TRIVY-2024-0002", source_xid: 2, cve: "CVE-2024-0002", title: "Path traversal", description: "A path traversal issue.", identifiers: "[]", published_date: "2024-02-10", created_at: "2024-02-10 10:00:00", updated_at: "2024-02-11 10:00:00" }
+  siphon_pm_affected_packages:
+    - { id: 8101, pm_advisory_id: 7001, purl_type: 6, package_name: "left-pad", distro_version: "", affected_range: "<1.3.0", solution: "Upgrade to 1.3.0", overridden_advisory_fields: "{}", versions: "[]", created_at: "2024-01-10 10:00:00", updated_at: "2024-01-10 10:00:00" }
+    - { id: 8102, pm_advisory_id: 7002, purl_type: 8, package_name: "requests", distro_version: "", affected_range: "<2.31.0", overridden_advisory_fields: "{}", versions: "[]", created_at: "2024-02-10 10:00:00", updated_at: "2024-02-10 10:00:00" }
+
+run: global
+
+expect:
+  nodes:
+    gl_pm_advisory:
+      rows:
+        - { id: 7001, advisory_xid: "GHSA-aaaa-bbbb-cccc", source_xid: glad, cve: "CVE-2024-0001" }
+        - { id: 7002, advisory_xid: "TRIVY-2024-0002", source_xid: trivy-db, cve: "CVE-2024-0002" }
+    gl_pm_affected_package:
+      rows:
+        - { id: 8101, pm_advisory_id: 7001, purl_type: npm, package_name: "left-pad" }
+        - { id: 8102, pm_advisory_id: 7002, purl_type: pypi, package_name: "requests" }
+  edges:
+    - { kind: AFFECTED_BY, from: PmAffectedPackage, to: PmAdvisory, count: 2 }

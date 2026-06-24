@@ -1470,3 +1470,130 @@ CREATE TABLE IF NOT EXISTS siphon_container_repositories
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS siphon_pm_advisories
+(
+    `id` Int64,
+    `advisory_xid` String,
+    `source_xid` Int16,
+    `cve` Nullable(String),
+    `title` Nullable(String),
+    `description` Nullable(String),
+    `cvss_v2` Nullable(String),
+    `cvss_v3` Nullable(String),
+    `cvss_v4` Nullable(String),
+    `identifiers` String,
+    `published_date` Date32,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY id
+ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS siphon_pm_affected_packages
+(
+    `id` Int64,
+    `pm_advisory_id` Int64,
+    `purl_type` Int16,
+    `package_name` String,
+    `distro_version` String DEFAULT '',
+    `affected_range` String,
+    `solution` Nullable(String),
+    `overridden_advisory_fields` String DEFAULT '{}',
+    `versions` String DEFAULT '[]',
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY id
+ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS siphon_pm_cve_enrichment
+(
+    `id` Int64,
+    `epss_score` Float64,
+    `cve` String,
+    `is_known_exploit` Bool DEFAULT false,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY id
+ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS siphon_pm_packages
+(
+    `id` Int64,
+    `purl_type` Int16,
+    `name` String,
+    `licenses` Nullable(String),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY id
+ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS siphon_pm_package_versions
+(
+    `id` Int64,
+    `pm_package_id` Int64,
+    `version` String,
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY id
+ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS siphon_pm_licenses
+(
+    `id` Int64,
+    `spdx_identifier` String,
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY id
+ORDER BY id;
+
+CREATE TABLE IF NOT EXISTS siphon_pm_package_version_licenses
+(
+    `id` Int64,
+    `pm_package_version_id` Int64,
+    `pm_license_id` Int64,
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY id
+ORDER BY id;

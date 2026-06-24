@@ -339,6 +339,15 @@ domains:
     description: "Entities related to container image repositories in the container registry."
     nodes:
       ContainerRepository: nodes/container_registry/container_repository.yaml
+  package_metadata:
+    description: "Entities from the GitLab Package Metadata database: security advisories, affected packages, CVE enrichment, and license reference data. Global, not scoped to a project."
+    nodes:
+      PmAdvisory: nodes/package_metadata/advisory.yaml
+      PmAffectedPackage: nodes/package_metadata/affected_package.yaml
+      PmCveEnrichment: nodes/package_metadata/cve_enrichment.yaml
+      PmPackage: nodes/package_metadata/package.yaml
+      PmPackageVersion: nodes/package_metadata/package_version.yaml
+      PmLicense: nodes/package_metadata/license.yaml
 edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
@@ -397,3 +406,6 @@ edges:
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
   BUILT_BY: edges/built_by.yaml
   MENTIONS: edges/mentions.yaml
+  AFFECTED_BY: edges/affected_by.yaml
+  VERSION_OF: edges/version_of.yaml
+  HAS_LICENSE: edges/has_license.yaml

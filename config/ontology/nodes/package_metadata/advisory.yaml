@@ -1,0 +1,138 @@
+# config/ontology/nodes/package_metadata/advisory.yaml
+
+node_type: PmAdvisory
+domain: package_metadata
+description: A security advisory from the GitLab Package Metadata database (CVE descriptions, CVSS scores, and identifiers). Global, source-agnostic security intelligence, not scoped to a project.
+label: advisory_xid
+destination_table: gl_pm_advisory
+default_columns: [id, advisory_xid, cve, title, source_xid]
+sort_key: [id]
+
+style:
+  size: 30
+  color: "#F87171"
+
+# resource_type matches EE::Authz::RedactionService EE_RESOURCE_CLASSES
+# (pm_advisory: ::PackageMetadata::Advisory). Advisories are global security
+# intelligence; PackageMetadata::AdvisoryPolicy grants read_security_resource
+# to any authenticated user.
+redaction:
+  resource_type: pm_advisory
+  id_column: id
+  ability: read_security_resource
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Unique ID."
+
+  advisory_xid:
+    type: string
+    source: advisory_xid
+    nullable: false
+    description: "External advisory identifier from the source database (e.g. the GitLab Advisory Database XID)."
+
+  source_xid:
+    type: enum
+    source: source_xid
+    nullable: false
+    description: "Data source the advisory was ingested from."
+    values:
+      1: glad
+      2: trivy-db
+
+  cve:
+    type: string
+    source: cve
+    nullable: true
+    description: "CVE identifier, if the advisory maps to one (e.g. CVE-2024-1234)."
+
+  title:
+    type: string
+    source: title
+    nullable: true
+    description: "Short advisory title."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Full advisory description."
+
+  cvss_v2:
+    type: string
+    source: cvss_v2
+    nullable: true
+    description: "CVSS v2 vector string, if scored."
+
+  cvss_v3:
+    type: string
+    source: cvss_v3
+    nullable: true
+    description: "CVSS v3 vector string, if scored."
+
+  cvss_v4:
+    type: string
+    source: cvss_v4
+    nullable: true
+    description: "CVSS v4 vector string, if scored."
+
+  identifiers:
+    type: string
+    source: identifiers
+    nullable: false
+    description: "JSON-serialized list of external identifiers (CVE, GHSA, etc.) associated with the advisory."
+
+  published_date:
+    type: date
+    source: published_date
+    nullable: false
+    description: "Date the advisory was published by its source."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    description: "Creation timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Last update timestamp."
+
+etl:
+  type: table
+  scope: global
+  source: siphon_pm_advisories
+  order_by: [id]
+
+storage:
+  primary_key: [id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: advisory_xid, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: source_xid, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: cve, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: title, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: cvss_v2, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: cvss_v3, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: cvss_v4, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: identifiers, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: published_date, type: "Date32", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_advisory_xid, column: advisory_xid, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_source_xid, column: source_xid, type: "set(8)", granularity: 2}
+    - {name: idx_cve, column: cve, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_published_date, column: published_date, type: "minmax", granularity: 1}
+    - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
+    - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}

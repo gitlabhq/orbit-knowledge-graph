@@ -14,13 +14,13 @@
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "packages", "container_registry"],
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "packages", "container_registry", "package_metadata"],
       "description": "Domain classification for organizing entities."
     },
 
     "propertyType": {
       "type": "string",
-      "enum": ["string", "int64", "boolean", "timestamp", "date", "enum", "uuid"],
+      "enum": ["string", "int64", "float", "boolean", "timestamp", "date", "enum", "uuid"],
       "description": "Data type for a property field."
     },
 
@@ -1196,7 +1196,7 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "pattern": "^(Int64|UInt64|Float64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
           "description": "Exact ClickHouse type. Must start with a known type name."
         },
         "default": {
