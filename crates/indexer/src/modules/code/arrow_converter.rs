@@ -9,6 +9,7 @@ use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
+use futures::stream::{FuturesUnordered, StreamExt};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
@@ -810,6 +811,14 @@ fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
 /// on purpose: this bound is what keeps indexer memory flat on huge repos.
 const WRITE_CHANNEL_CAPACITY: usize = 8;
 
+/// Rows per ClickHouse insert. Matches SDLC's datalake page size so a large
+/// table is sliced into the same insert granularity instead of one giant insert.
+const WRITE_SLICE_ROWS: usize = 500_000;
+
+/// Concurrent in-flight inserts. Bounds write memory while overlapping writes
+/// with parsing; SDLC gets a similar bound from its per-page per-table fan-out.
+const MAX_CONCURRENT_WRITES: usize = 8;
+
 /// Per-table totals the writer task yields, or the first write error.
 type WriteOutcome = Result<Vec<TableWriteTotals>, code_graph::v2::SinkError>;
 
@@ -842,36 +851,73 @@ impl StreamingClickHouseSink {
     }
 }
 
+fn record_total(
+    totals: &mut HashMap<String, TableWriteTotals>,
+    table: String,
+    rows: u64,
+    bytes: u64,
+) {
+    let entry = totals
+        .entry(table.clone())
+        .or_insert_with(|| TableWriteTotals {
+            table,
+            rows: 0,
+            bytes: 0,
+        });
+    entry.rows += rows;
+    entry.bytes += bytes;
+}
+
+/// Slice each incoming batch into fixed-size inserts and write them through a
+/// bounded set of concurrent futures, mirroring SDLC's page/fan-out model.
+/// async_insert (Durable) coalesces the slices into fewer parts server-side.
 async fn write_loop(
     destination: Arc<dyn crate::destination::Destination>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
 ) -> WriteOutcome {
     let mut totals: HashMap<String, TableWriteTotals> = HashMap::new();
+    let mut inflight = FuturesUnordered::new();
+
     while let Some((table, batch)) = rx.recv().await {
-        // async_insert coalesces these many small per-table inserts into fewer
-        // parts; wait_for_async_insert stays on so a run is durable before it checkpoints.
-        let writer = destination
-            .new_batch_writer(
-                &table,
-                BatchWriterOptions {
-                    durability: Some(WriteDurability::Durable),
-                },
-            )
-            .await
-            .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
-        writer
-            .write_batch(std::slice::from_ref(&batch))
-            .await
-            .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
-        let entry = totals
-            .entry(table.clone())
-            .or_insert_with(|| TableWriteTotals {
-                table,
-                rows: 0,
-                bytes: 0,
+        let mut offset = 0;
+        while offset < batch.num_rows() {
+            let len = WRITE_SLICE_ROWS.min(batch.num_rows() - offset);
+            let slice = batch.slice(offset, len);
+            offset += len;
+
+            while inflight.len() >= MAX_CONCURRENT_WRITES {
+                if let Some(done) = inflight.next().await {
+                    let (table, rows, bytes) = done?;
+                    record_total(&mut totals, table, rows, bytes);
+                }
+            }
+
+            let destination = destination.clone();
+            let table = table.clone();
+            inflight.push(async move {
+                let rows = slice.num_rows() as u64;
+                let bytes = slice.get_array_memory_size() as u64;
+                let writer = destination
+                    .new_batch_writer(
+                        &table,
+                        BatchWriterOptions {
+                            durability: Some(WriteDurability::Durable),
+                        },
+                    )
+                    .await
+                    .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
+                writer
+                    .write_batch(std::slice::from_ref(&slice))
+                    .await
+                    .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
+                Ok::<_, code_graph::v2::SinkError>((table, rows, bytes))
             });
-        entry.rows += batch.num_rows() as u64;
-        entry.bytes += batch.get_array_memory_size() as u64;
+        }
+    }
+
+    while let Some(done) = inflight.next().await {
+        let (table, rows, bytes) = done?;
+        record_total(&mut totals, table, rows, bytes);
     }
     Ok(totals.into_values().collect())
 }
