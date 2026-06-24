@@ -1646,7 +1646,8 @@
           "default": 30,
           "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "TableCleanupConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",

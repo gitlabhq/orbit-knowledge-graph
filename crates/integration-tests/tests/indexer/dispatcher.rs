@@ -45,6 +45,8 @@ struct TestContext {
     clickhouse: ClickHouseContext,
     _nats: testcontainers::ContainerAsync<Nats>,
     nats_url: String,
+    /// Monotonically increasing counter to generate unique consumer names.
+    consumer_seq: std::sync::atomic::AtomicU64,
 }
 
 impl TestContext {
@@ -57,6 +59,7 @@ impl TestContext {
             clickhouse,
             _nats: nats,
             nats_url,
+            consumer_seq: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -91,19 +94,28 @@ impl TestContext {
             .await
     }
 
+    /// Drains all messages matching `subject` from the JetStream stream.
+    /// Uses a unique durable consumer name per invocation and deletes it
+    /// after draining, avoiding WorkQueue "filtered consumer not unique" errors.
     async fn consume_messages<T: for<'de> Deserialize<'de>>(&self, subject: &str) -> Vec<T> {
+        let seq = self
+            .consumer_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let consumer_name = format!("test-drain-{seq}");
         let client = async_nats::connect(format!("nats://{}", self.nats_url))
             .await
             .unwrap();
         let jetstream = async_nats::jetstream::new(client);
+        let stream_name = NATS_VERSIONER.stream(INDEXER_STREAM);
 
         let consumer = jetstream
             .create_consumer_on_stream(
                 async_nats::jetstream::consumer::pull::Config {
+                    durable_name: Some(consumer_name.clone()),
                     filter_subject: NATS_VERSIONER.subject(subject),
                     ..Default::default()
                 },
-                &NATS_VERSIONER.stream(INDEXER_STREAM),
+                &stream_name,
             )
             .await
             .unwrap();
@@ -115,6 +127,10 @@ impl TestContext {
             results.push(serde_json::from_slice(&msg.payload).unwrap());
             msg.ack().await.unwrap();
         }
+
+        // Clean up to avoid collision on subsequent calls.
+        let stream = jetstream.get_stream(&stream_name).await.unwrap();
+        let _ = stream.delete_consumer(&consumer_name).await;
 
         results
     }
@@ -219,12 +235,10 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         .unwrap();
     let after = Utc::now();
 
-    // Global indexing request
     let global = context.consume_global_requests().await;
     assert_eq!(global.len(), 1);
     assert!(global[0].watermark >= before && global[0].watermark <= after);
 
-    // Namespace indexing requests
     let namespaces = context.consume_namespace_requests().await;
     assert_eq!(namespaces.len(), 3);
 
@@ -252,7 +266,7 @@ fn dirty_detection_config() -> NamespaceDispatcherConfig {
             cron: Some("*/1 * * * * *".to_string()),
         },
         sweep: SweepConfig {
-            cron: "0 0 1 1 1 *".to_string(), // yearly — won't fire during test
+            cron: "0 0 1 1 1 *".to_string(),
             slack_secs: 0,
         },
     }
@@ -293,12 +307,12 @@ async fn dirty_detection_dispatches_only_changed_namespaces() {
         campaign.clone(),
     );
 
-    // First run is always a sweep (last_sweep = None) — dispatches all 3
+    // First run is always a sweep (last_sweep = None) — dispatches all 3.
     dispatcher.run().await.unwrap();
     let first_batch = context.consume_namespace_requests().await;
     assert_eq!(first_batch.len(), 3, "sweep should dispatch all namespaces");
 
-    // (a) Seed a row with a recent watermark in namespace 1/100/
+    // Seed a row with a recent watermark in namespace 1/100/.
     context
         .clickhouse
         .execute(
@@ -307,10 +321,9 @@ async fn dirty_detection_dispatches_only_changed_namespaces() {
         )
         .await;
 
-    // Second run: dirty-detection mode (sweep not due). Only namespace 1/100/ changed.
-    // Recreate the stream to allow re-publishing to the same subjects.
     TestContext::purge_stream(&context.nats_url).await;
 
+    // Second run: dirty-detection mode. Only namespace 1/100/ changed.
     dispatcher.run().await.unwrap();
     let second_batch = context.consume_namespace_requests().await;
     let dispatched_paths: HashSet<_> = second_batch
@@ -329,6 +342,54 @@ async fn dirty_detection_dispatches_only_changed_namespaces() {
         !dispatched_paths.contains("3/300/"),
         "unchanged namespace should not be dispatched"
     );
+}
+
+#[tokio::test]
+async fn dirty_detection_catches_descendant_path() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([Namespace {
+            id: 100,
+            traversal_path: "1/100/".to_string(),
+        }])
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let datalake = context.clickhouse.config.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
+    let dispatcher = NamespaceDispatcher::new(
+        services.nats.clone(),
+        datalake.clone(),
+        metrics.clone(),
+        dirty_detection_config(),
+        campaign.clone(),
+    );
+
+    dispatcher.run().await.unwrap();
+    context.consume_namespace_requests().await;
+
+    // Seed a row under a deeper sub-group path within the enabled namespace.
+    context
+        .clickhouse
+        .execute(
+            "INSERT INTO work_items (id, iid, title, work_item_type_id, namespace_id, traversal_path, _siphon_watermark) \
+             VALUES (10, 10, 'subgroup', 1, 200, '1/100/200/', now64(6))",
+        )
+        .await;
+
+    TestContext::purge_stream(&context.nats_url).await;
+    dispatcher.run().await.unwrap();
+    let batch = context.consume_namespace_requests().await;
+    assert_eq!(
+        batch.len(),
+        1,
+        "descendant path should trigger parent namespace dispatch"
+    );
+    assert_eq!(batch[0].traversal_path, "1/100/");
 }
 
 #[tokio::test]
@@ -356,11 +417,9 @@ async fn dirty_detection_catches_watermark_update() {
         campaign.clone(),
     );
 
-    // First run: sweep
     dispatcher.run().await.unwrap();
     context.consume_namespace_requests().await;
 
-    // (b) Update the row's watermark to a recent time
     context
         .clickhouse
         .execute(
@@ -401,11 +460,10 @@ async fn dirty_detection_catches_deleted_tombstone() {
         campaign.clone(),
     );
 
-    // First run: sweep
     dispatcher.run().await.unwrap();
     context.consume_namespace_requests().await;
 
-    // (c) Insert a _siphon_deleted=true tombstone with an advanced watermark
+    // _siphon_deleted=true tombstone with an advanced watermark.
     context
         .clickhouse
         .execute(

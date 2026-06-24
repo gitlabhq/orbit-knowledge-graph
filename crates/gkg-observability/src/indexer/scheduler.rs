@@ -86,7 +86,7 @@ pub const DIRTY_DETECTION_QUERY_DURATION: MetricSpec = MetricSpec::histogram_f64
 
 pub const DIRTY_DETECTION_READ_ROWS: MetricSpec = MetricSpec::histogram_f64(
     "gkg.scheduler.dirty_detection.query.read_rows",
-    "Rows read by the per-table change-detection query.",
+    "Rows scanned by the per-table change-detection query (from ClickHouse summary).",
     None,
     &[labels::TABLE],
     ROW_COUNT,

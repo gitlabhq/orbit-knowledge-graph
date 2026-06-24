@@ -359,6 +359,7 @@ fn default_dirty_detection_slack_secs() -> u64 {
 ///
 /// Modeled on [`CodeBackfillSweepConfig`].
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct SweepConfig {
     /// Cron expression for the full sweep (6-field: `sec min hour dom mon dow`).
     /// Defaults to every 15 minutes.

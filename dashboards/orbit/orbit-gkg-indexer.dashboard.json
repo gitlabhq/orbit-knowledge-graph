@@ -6566,6 +6566,417 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
+               "description": "Number of distinct dirty namespaces found per dispatch cycle.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 328
+               },
+               "id": 129,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_scheduler_dirty_detection_namespaces_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p50 overall",
+                     "refId": "A"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_scheduler_dirty_detection_namespaces_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p95 overall",
+                     "refId": "B"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_scheduler_dirty_detection_namespaces_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p99 overall",
+                     "refId": "C"
+                  }
+               ],
+               "title": "gkg_scheduler_dirty_detection_namespaces — p50/p95/p99",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Number of distinct dirty namespaces found per dispatch cycle.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 328
+               },
+               "id": 130,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum(rate(gkg_scheduler_dirty_detection_namespaces_count{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "count",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_scheduler_dirty_detection_namespaces — observation rate",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Per-table change-detection query duration.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "s"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 328
+               },
+               "id": 131,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.5, sum by (le, table) (rate(gkg_scheduler_dirty_detection_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p50 {{table}}",
+                     "refId": "A"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_scheduler_dirty_detection_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p95 {{table}}",
+                     "refId": "B"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.99, sum by (le, table) (rate(gkg_scheduler_dirty_detection_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p99 {{table}}",
+                     "refId": "C"
+                  }
+               ],
+               "title": "gkg_scheduler_dirty_detection_query_duration_seconds — p50/p95/p99",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Per-table change-detection query duration.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 336
+               },
+               "id": 132,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (table) (rate(gkg_scheduler_dirty_detection_query_duration_seconds_count{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{table}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_scheduler_dirty_detection_query_duration_seconds — observation rate",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Rows scanned by the per-table change-detection query (from ClickHouse summary).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 336
+               },
+               "id": 133,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.5, sum by (le, table) (rate(gkg_scheduler_dirty_detection_query_read_rows_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p50 {{table}}",
+                     "refId": "A"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_scheduler_dirty_detection_query_read_rows_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p95 {{table}}",
+                     "refId": "B"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.99, sum by (le, table) (rate(gkg_scheduler_dirty_detection_query_read_rows_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p99 {{table}}",
+                     "refId": "C"
+                  }
+               ],
+               "title": "gkg_scheduler_dirty_detection_query_read_rows — p50/p95/p99",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Rows scanned by the per-table change-detection query (from ClickHouse summary).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 336
+               },
+               "id": 134,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (table) (rate(gkg_scheduler_dirty_detection_query_read_rows_count{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{table}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_scheduler_dirty_detection_query_read_rows — observation rate",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Namespaces dispatched only because of the full sweep, not seen by dirty-detection. A sustained non-zero value signals dirty-detection is under-reporting.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 344
+               },
+               "id": 135,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum(rate(gkg_scheduler_dirty_detection_sweep_only_dispatched_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_scheduler_dirty_detection_sweep_only_dispatched_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
                "description": "End-to-end duration of a scheduled task run.",
                "fieldConfig": {
                   "defaults": {
@@ -6581,10 +6992,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
-                  "y": 328
+                  "x": 8,
+                  "y": 344
                },
-               "id": 129,
+               "id": 136,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6650,10 +7061,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 328
+                  "x": 16,
+                  "y": 344
                },
-               "id": 130,
+               "id": 137,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6701,10 +7112,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 328
+                  "x": 0,
+                  "y": 352
                },
-               "id": 131,
+               "id": 138,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6752,10 +7163,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
-                  "y": 336
+                  "x": 8,
+                  "y": 352
                },
-               "id": 132,
+               "id": 139,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6821,10 +7232,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 336
+                  "x": 16,
+                  "y": 352
                },
-               "id": 133,
+               "id": 140,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6872,10 +7283,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 336
+                  "x": 0,
+                  "y": 360
                },
-               "id": 134,
+               "id": 141,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6923,10 +7334,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
-                  "y": 344
+                  "x": 8,
+                  "y": 360
                },
-               "id": 135,
+               "id": 142,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6974,10 +7385,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 344
+                  "x": 16,
+                  "y": 360
                },
-               "id": 136,
+               "id": 143,
                "options": {
                   "legend": {
                      "calcs": [

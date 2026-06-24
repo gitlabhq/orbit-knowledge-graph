@@ -70,7 +70,7 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query) | Scheduled task errors by stage |
 | `gkg.scheduler.dirty_detection.namespaces` | Histogram | count | | Distinct dirty namespaces found per dispatch cycle |
 | `gkg.scheduler.dirty_detection.query.duration` | Histogram | s | `table` | Per-table change-detection query duration |
-| `gkg.scheduler.dirty_detection.query.read_rows` | Histogram | count | `table` | Rows read by the per-table change-detection query |
+| `gkg.scheduler.dirty_detection.query.read_rows` | Histogram | count | `table` | Rows scanned by the per-table change-detection query (from ClickHouse summary) |
 | `gkg.scheduler.dirty_detection.sweep_only_dispatched` | Counter | count | | Namespaces dispatched only by the full sweep (silent-drop canary) |
 
 *SDLC module metrics:*
