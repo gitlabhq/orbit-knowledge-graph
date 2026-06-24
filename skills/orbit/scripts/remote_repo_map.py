@@ -150,6 +150,43 @@ def _resolve_name(name: str) -> tuple[str, str]:
     return ("fqn", name)
 
 
+def _resolve_callable_name(raw: str) -> tuple[str, str | None]:
+    if "#" in raw:
+        return raw.rsplit("#", 1)[1], raw.replace("#", "::")
+    if raw.count("::") >= 2:
+        return raw.rsplit("::", 1)[1], raw
+    if "." in raw:
+        return raw.rsplit(".", 1)[1], raw
+    return raw, None
+
+
+def _import_path_candidates(fqn: str | None) -> list[str]:
+    if not fqn or "." not in fqn:
+        return []
+
+    module_path = fqn.rsplit(".", 1)[0]
+    parts = module_path.split(".")
+    candidates = [module_path, parts[-1]]
+
+    if len(parts) > 1 and parts[0] in {"src", "lib", "app"}:
+        candidates.append(".".join(parts[1:]))
+
+    seen = set()
+    return [c for c in candidates if c and not (c in seen or seen.add(c))]
+
+
+def _unique_by_id(rows: list[dict]) -> list[dict]:
+    deduped = []
+    seen = set()
+    for row in rows:
+        row_id = row.get("id")
+        if row_id in seen:
+            continue
+        seen.add(row_id)
+        deduped.append(row)
+    return deduped
+
+
 def cmd_extends(args: argparse.Namespace) -> None:
     """Find all descendants of a class/module via EXTENDS — single server-side multi-hop traversal.
 
@@ -524,20 +561,8 @@ def cmd_callers(args: argparse.Namespace) -> None:
     pid    = args.project_id
     branch = args.branch
 
-    # Parse optional class qualifier: "MergeRequests::RefreshService#execute"
-    # Orbit FQN uses '::' for all separators — normalize '#' to '::'.
     raw = args.name
-    orbit_fqn: str | None = None
-    if "#" in raw:
-        # "ClassName#method" → Orbit stores as "ClassName::method"
-        method_name = raw.rsplit("#", 1)[1]
-        orbit_fqn = raw.replace("#", "::")
-    elif raw.count("::") >= 2:
-        # "Ns::ClassName::method" — last component is the method name
-        method_name = raw.rsplit("::", 1)[1]
-        orbit_fqn = raw
-    else:
-        method_name = raw
+    method_name, orbit_fqn = _resolve_callable_name(raw)
 
     if orbit_fqn:
         # Exact FQN match: most precise — returns only the intended target
@@ -578,6 +603,32 @@ def cmd_callers(args: argparse.Namespace) -> None:
         target_ids = {t.get("id") for t in targets}
         callers = [n for n in all_defs if n.get("id") not in target_ids]
 
+    imported_callers: list[dict] = []
+    import_paths = _import_path_candidates(orbit_fqn)
+    if import_paths:
+        import_body = {"query": {
+            "query_type": "traversal",
+            "nodes": [
+                {
+                    "id": "target_import", "entity": "ImportedSymbol",
+                    "filters": {
+                        **_base_filters(pid, branch),
+                        "identifier_name": {"op": "eq", "value": method_name},
+                        "import_path": {"op": "in", "value": import_paths},
+                    },
+                    "columns": ["id", "import_path", "identifier_name", "file_path", "start_line"],
+                },
+                {
+                    "id": "caller", "entity": "Definition",
+                    "filters": _base_filters(pid, branch),
+                    "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
+                },
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "target_import"}],
+            "limit": 100,
+        }}
+        imported_callers = _unique_by_id(_nodes(_query(import_body), "Definition"))
+
     print(f"CALLERS — of {raw!r}")
     print("=" * 78)
     if not targets:
@@ -589,9 +640,12 @@ def cmd_callers(args: argparse.Namespace) -> None:
     for t in targets:
         print(f"  target: {t.get('fqn','?')}  @ {t.get('file_path','')}:{t.get('start_line','')}")
     print()
+    callers = _unique_by_id(callers + imported_callers)
     if not callers:
         print("(no callers found via CALLS edge — CALLS indexing may be incomplete)")
         return
+    if imported_callers:
+        print(f"(included calls that target imported symbols for: {', '.join(import_paths)})")
     print(f"{'type':12}  {'fqn':<60}  location")
     print("-" * 100)
     for c in sorted(callers, key=lambda x: x.get("file_path", "")):
@@ -641,7 +695,7 @@ def main() -> None:
 
     p_cal = sub.add_parser("callers", help="who calls a method via CALLS")
     p_cal.add_argument("name",
-                       help="Method/function name, or 'ClassName#method' to narrow by class")
+                       help="Method/function name, 'ClassName#method', or dotted FQN")
 
     args = parser.parse_args()
     dispatch = {
@@ -657,4 +711,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

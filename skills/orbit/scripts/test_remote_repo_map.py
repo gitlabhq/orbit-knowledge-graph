@@ -121,5 +121,46 @@ class MapDescendantConcernsTest(unittest.TestCase):
         self.assertEqual(d2c, {"issue": set(), "mr": set()})
 
 
+class ResolveCallableNameTest(unittest.TestCase):
+    def test_bare_name(self):
+        self.assertEqual(rrm._resolve_callable_name("execute"), ("execute", None))
+
+    def test_ruby_hash_separator(self):
+        self.assertEqual(
+            rrm._resolve_callable_name("MergeRequests::RefreshService#execute"),
+            ("execute", "MergeRequests::RefreshService::execute"),
+        )
+
+    def test_ruby_fqn(self):
+        self.assertEqual(
+            rrm._resolve_callable_name("MergeRequests::RefreshService::execute"),
+            ("execute", "MergeRequests::RefreshService::execute"),
+        )
+
+    def test_dotted_fqn(self):
+        self.assertEqual(
+            rrm._resolve_callable_name("src.scoring.score_review"),
+            ("score_review", "src.scoring.score_review"),
+        )
+
+
+class ImportPathCandidatesTest(unittest.TestCase):
+    def test_dotted_fqn_candidates_include_source_root_stripped_path(self):
+        self.assertEqual(
+            rrm._import_path_candidates("src.scoring.score_review"),
+            ["src.scoring", "scoring"],
+        )
+
+    def test_nested_src_candidate(self):
+        self.assertEqual(
+            rrm._import_path_candidates("src.agent.scoring.score_review"),
+            ["src.agent.scoring", "scoring", "agent.scoring"],
+        )
+
+    def test_non_dotted_fqn_has_no_candidates(self):
+        self.assertEqual(rrm._import_path_candidates("execute"), [])
+        self.assertEqual(rrm._import_path_candidates(None), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -60,6 +60,7 @@ python3 ./scripts/remote_repo_map.py class MergeRequestPolicy
 python3 ./scripts/remote_repo_map.py api app/services/merge_requests
 python3 ./scripts/remote_repo_map.py callers execute
 python3 ./scripts/remote_repo_map.py callers "MergeRequests::RefreshService#execute"
+python3 ./scripts/remote_repo_map.py callers src.scoring.score_review
 ```
 
 Override the project or branch with global flags before the subcommand:
@@ -122,7 +123,14 @@ broad roots like `app/`.
 
 Finds definitions that call a method or function through `CALLS` edges. The
 argument can be a bare name such as `execute` or a qualified target such as
-`MergeRequests::RefreshService#execute` to narrow common method names.
+`MergeRequests::RefreshService#execute` or `src.scoring.score_review` to narrow
+common method names.
+
+For dotted FQNs, the helper also checks calls that target matching
+`ImportedSymbol` rows. This covers Python patterns such as
+`from scoring import score_review`, where the index may store the call as
+`Definition --CALLS--> ImportedSymbol` rather than
+`Definition --CALLS--> Definition`.
 
 ## Output format and caveats
 
@@ -134,6 +142,9 @@ Known limitations of Orbit Remote's Code Graph coverage:
 - `EXTENDS` depth is capped at 3 server-side, and large inheritance trees can be
   incomplete.
 - `CALLS` edges are not fully indexed for every language/project combination.
+  For imported Python functions, `callers` may report import-targeted calls via
+  matching `ImportedSymbol` rows when direct definition-targeted `CALLS` edges
+  are absent.
 - `extends` and `ancestors` issue a single server-side multi-hop traversal;
   `includes` issues two. None of them fan out into per-hop round trips. Each
   query requests the maximum result cap (`limit` 1000). A traversal whose result
