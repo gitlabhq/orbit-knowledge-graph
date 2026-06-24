@@ -482,3 +482,63 @@ async fn dirty_detection_catches_deleted_tombstone() {
     );
     assert_eq!(batch[0].traversal_path, "1/100/");
 }
+
+#[tokio::test]
+async fn dirty_detection_covers_merge_request_table() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([
+            Namespace {
+                id: 100,
+                traversal_path: "1/100/".to_string(),
+            },
+            Namespace {
+                id: 200,
+                traversal_path: "2/200/".to_string(),
+            },
+        ])
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let datalake = context.clickhouse.config.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
+    let dispatcher = NamespaceDispatcher::new(
+        services.nats.clone(),
+        datalake.clone(),
+        metrics.clone(),
+        dirty_detection_config(),
+        campaign.clone(),
+    );
+
+    dispatcher.run().await.unwrap();
+    context.consume_namespace_requests().await;
+
+    // MR is a high-churn entity that must be covered by dirty-detection.
+    context
+        .clickhouse
+        .execute(
+            "INSERT INTO merge_requests \
+             (id, iid, title, state_id, target_project_id, target_branch, source_branch, \
+              traversal_path, _siphon_watermark) \
+             VALUES (1, 1, 'test MR', 1, 1, 'main', 'feat', '1/100/', now64(6))",
+        )
+        .await;
+
+    TestContext::purge_stream(&context.nats_url).await;
+    dispatcher.run().await.unwrap();
+    let batch = context.consume_namespace_requests().await;
+
+    let dispatched: HashSet<_> = batch.iter().map(|r| r.traversal_path.as_str()).collect();
+    assert!(
+        dispatched.contains("1/100/"),
+        "MR change should trigger dirty-detection for its namespace"
+    );
+    assert!(
+        !dispatched.contains("2/200/"),
+        "unchanged namespace should not be dispatched"
+    );
+}

@@ -30,18 +30,15 @@ static ENABLED_NAMESPACE_QUERY: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Source tables and their per-entity watermark columns, derived from the
-/// ontology. Only namespaced entities with an ETL config contribute — these are
-/// the tables whose changes imply a namespace needs re-indexing.
-///
-/// Source tables and their per-entity watermark columns, derived from the
-/// ontology. Only namespaced entities whose source table carries both the
-/// watermark column AND `traversal_path` are included — i.e. tables where a
+/// Siphon source tables and their per-entity watermark columns, derived from
+/// the ontology. Only namespaced entities whose `source` table carries both the
+/// watermark column AND `traversal_path` are included — tables where a
 /// `SELECT DISTINCT traversal_path WHERE <watermark> > <cutoff>` is valid.
 ///
-/// Entities whose watermark lives on a different table than their source (e.g.
-/// Group via `siphon_namespaces` which lacks `traversal_path`, or Project via
-/// `siphon_projects`) are excluded; they ride on the periodic full sweep.
+/// Entities whose watermark lives on a *different* JOINed table than `source`
+/// (e.g. Group via `siphon_namespaces`, Project via `siphon_projects` — both
+/// lack `traversal_path`) are excluded and ride on the periodic full sweep.
+/// See #908 for a future JOIN-based dirty query for those entities.
 static DIRTY_DETECTION_TABLES: LazyLock<Vec<DirtyDetectionTable>> = LazyLock::new(|| {
     let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must be valid");
     let mut seen = HashSet::new();
@@ -75,36 +72,48 @@ static DIRTY_DETECTION_TABLES: LazyLock<Vec<DirtyDetectionTable>> = LazyLock::ne
 
 /// Resolves which table to query and which column to filter on for dirty
 /// detection. Returns `None` when the entity cannot be dirty-detected with a
-/// simple single-table query (e.g. the watermark lives on a JOINed table that
-/// lacks `traversal_path`).
+/// simple single-table query (the watermark lives on a JOINed table whose
+/// `traversal_path` and watermark don't coexist on `source`).
 ///
-/// For `Table`-type ETLs, this is always `Some((source, watermark))` — simple
-/// siphon tables carry both columns.
+/// For `Table`-type ETLs, this is always `Some((source, watermark))`.
 ///
-/// For `Query`-type ETLs whose watermark is NOT alias-qualified, `source`
-/// carries the watermark column directly (e.g. Note from `siphon_notes`).
-///
-/// For `Query`-type ETLs whose watermark IS alias-qualified (e.g. Group's
-/// `namespace._siphon_watermark`), the watermark lives on a JOINed table
-/// (`siphon_namespaces`) that does not have `traversal_path`, so we return
-/// `None` — these entities are covered by the periodic full sweep.
+/// For `Query`-type ETLs, we compare the first table in `from` against
+/// `source`. When they match (e.g. MergeRequest: `source=merge_requests`,
+/// `from: merge_requests AS m`), the alias just disambiguates within the JOIN
+/// and `source` carries both columns → include with unqualified watermark.
+/// When they differ (e.g. Group: `source=namespace_traversal_paths`,
+/// `from: siphon_namespaces namespace INNER JOIN …`), the watermark lives on
+/// a different table that lacks `traversal_path` → exclude (covered by sweep).
 fn dirty_detection_table_and_column(etl: &ontology::EtlConfig) -> Option<(String, String)> {
     match etl {
         ontology::EtlConfig::Table {
             source, watermark, ..
         } => Some((source.clone(), watermark.clone())),
         ontology::EtlConfig::Query {
-            source, watermark, ..
+            source,
+            from,
+            watermark,
+            ..
         } => {
-            if watermark.contains('.') {
-                // Alias-qualified watermark — the watermark-bearing table
-                // differs from `source` and typically lacks `traversal_path`.
-                None
-            } else {
+            let from_table = first_table_in_from(from);
+            if from_table == *source {
+                // Alias resolves to the source table itself — it carries both
+                // `traversal_path` and the watermark column.
                 Some((source.clone(), unqualified_column(watermark)))
+            } else {
+                // The watermark-bearing table (first in `from`) differs from
+                // `source` and typically lacks `traversal_path` (e.g.
+                // siphon_namespaces, siphon_projects). Covered by sweep.
+                None
             }
         }
     }
+}
+
+/// Extracts the first table name from a `from` clause.
+/// E.g. `"siphon_namespaces namespace INNER JOIN ..."` → `"siphon_namespaces"`.
+fn first_table_in_from(from: &str) -> String {
+    from.split_whitespace().next().unwrap_or(from).to_owned()
 }
 
 /// Strips a potential table-alias qualifier (e.g. `sn._siphon_watermark` →
@@ -451,14 +460,15 @@ mod tests {
             if etl.scope() != ontology::EtlScope::Namespaced {
                 return;
             }
-            if let Some((expected_table, expected_col)) = dirty_detection_table_and_column(etl) {
-                if let Some(&actual_col) = detection_map.get(expected_table.as_str()) {
-                    assert_eq!(
-                        actual_col, expected_col,
-                        "dirty-detection column mismatch for table '{}' (entity '{}')",
-                        expected_table, entity_name,
-                    );
-                }
+            let Some((expected_table, expected_col)) = dirty_detection_table_and_column(etl) else {
+                return;
+            };
+            if let Some(&actual_col) = detection_map.get(expected_table.as_str()) {
+                assert_eq!(
+                    actual_col, expected_col,
+                    "dirty-detection column mismatch for table '{}' (entity '{}')",
+                    expected_table, entity_name,
+                );
             }
         };
 
@@ -472,30 +482,63 @@ mod tests {
         }
     }
 
-    /// Group and Project use Query-type ETLs with alias-qualified watermarks
-    /// pointing to tables that lack `traversal_path`. They must be excluded
-    /// from dirty-detection (covered by the periodic sweep instead).
+    /// Group and Project: `from` first table differs from `source` (the
+    /// watermark-bearing table lacks `traversal_path`) → excluded from
+    /// dirty-detection, covered by the periodic full sweep.
     #[test]
-    fn alias_qualified_watermark_entities_excluded_from_dirty_detection() {
+    fn group_and_project_excluded_from_dirty_detection() {
         let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
 
         let group_etl = ontology
             .get_node("Group")
             .and_then(|n| n.etl.as_ref())
             .expect("Group must have ETL");
-        assert!(
-            dirty_detection_table_and_column(group_etl).is_none(),
-            "Group should be excluded — siphon_namespaces lacks traversal_path"
-        );
+        assert!(dirty_detection_table_and_column(group_etl).is_none());
 
         let project_etl = ontology
             .get_node("Project")
             .and_then(|n| n.etl.as_ref())
             .expect("Project must have ETL");
-        assert!(
-            dirty_detection_table_and_column(project_etl).is_none(),
-            "Project should be excluded — siphon_projects lacks traversal_path"
+        assert!(dirty_detection_table_and_column(project_etl).is_none());
+    }
+
+    /// MergeRequest and MergeRequestDiffFile: `from` first table == `source`
+    /// (the alias just disambiguates within the JOIN) → included with
+    /// unqualified watermark column.
+    #[test]
+    fn merge_request_entities_included_in_dirty_detection() {
+        let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must load");
+
+        let mr_etl = ontology
+            .get_node("MergeRequest")
+            .and_then(|n| n.etl.as_ref())
+            .expect("MergeRequest must have ETL");
+        let (table, col) = dirty_detection_table_and_column(mr_etl)
+            .expect("MergeRequest should be included in dirty-detection");
+        assert_eq!(table, "merge_requests");
+        assert_eq!(col, "_siphon_watermark");
+
+        let mrd_etl = ontology
+            .get_node("MergeRequestDiffFile")
+            .and_then(|n| n.etl.as_ref())
+            .expect("MergeRequestDiffFile must have ETL");
+        let (table, col) = dirty_detection_table_and_column(mrd_etl)
+            .expect("MergeRequestDiffFile should be included in dirty-detection");
+        assert_eq!(table, "siphon_merge_request_diff_files");
+        assert_eq!(col, "_siphon_watermark");
+    }
+
+    #[test]
+    fn first_table_extraction_handles_alias_and_join() {
+        assert_eq!(
+            first_table_in_from("siphon_namespaces namespace INNER JOIN (...)"),
+            "siphon_namespaces"
         );
+        assert_eq!(
+            first_table_in_from("merge_requests AS m LEFT JOIN (...)"),
+            "merge_requests"
+        );
+        assert_eq!(first_table_in_from("siphon_notes"), "siphon_notes");
     }
 
     #[test]
