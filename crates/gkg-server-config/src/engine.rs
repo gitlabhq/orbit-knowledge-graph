@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,13 @@ impl SubscriptionConfig {
 
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Truncate sub-second precision from a [`DateTime`], snapping to the current
+/// whole second. Falls back to the original value on the (unreachable) `None`
+/// from `with_nanosecond(0)`.
+fn truncate_subsecond(dt: DateTime<Utc>) -> DateTime<Utc> {
+    dt.with_nanosecond(0).unwrap_or(dt)
+}
+
 /// Per-task schedule configuration.
 ///
 /// Each scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.
@@ -82,7 +89,13 @@ impl ScheduleConfiguration {
         let Ok(cron) = Cron::from_str(expr) else {
             return DEFAULT_INTERVAL;
         };
-        cron.find_next_occurrence(&now, false)
+        // croner 3.0.1 preserves the sub-second fraction of `now` in the
+        // returned occurrence, causing drift and periodic double-fires.
+        // Truncating to whole seconds for the lookup pins every fire to
+        // :00.000; the delta is still measured from the real `now` so the
+        // caller sleeps exactly until that clean boundary.
+        let truncated = truncate_subsecond(now);
+        cron.find_next_occurrence(&truncated, false)
             .ok()
             .map(|next| {
                 let delta = next - now;
@@ -100,7 +113,7 @@ impl ScheduleConfiguration {
         let Ok(cron) = Cron::from_str(expr) else {
             return DEFAULT_INTERVAL;
         };
-        let now = Utc::now();
+        let now = truncate_subsecond(Utc::now());
         let first = cron.find_next_occurrence(&now, false).ok();
         let second = first.and_then(|t| cron.find_next_occurrence(&t, false).ok());
         match (first, second) {
@@ -685,5 +698,32 @@ modules: [sdlc, namespace_deletion]
             cfg.validate(),
             Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
+    }
+
+    #[test]
+    fn next_delay_snaps_to_whole_second_boundary() {
+        use chrono::NaiveDate;
+
+        let sched = ScheduleConfiguration {
+            cron: Some("0 */1 * * * *".into()),
+        };
+
+        // 2026-01-15 10:05:00.700 UTC — 700ms into a matching second.
+        // Without truncation croner returns :06:00.700, yielding ~60.0s delay.
+        // With truncation the next occurrence is :06:00.000, yielding exactly 59.3s.
+        let now = NaiveDate::from_ymd_opt(2026, 1, 15)
+            .unwrap()
+            .and_hms_milli_opt(10, 5, 0, 700)
+            .unwrap()
+            .and_utc();
+
+        let delay = sched.next_delay(now);
+        let secs = delay.as_secs_f64();
+
+        // Must be < 60s (snapped to :06:00.000 → 59.3s), not ~60.0s or ~60.7s.
+        assert!(
+            (59.0..60.0).contains(&secs),
+            "expected delay ~59.3s, got {secs:.3}s"
+        );
     }
 }
