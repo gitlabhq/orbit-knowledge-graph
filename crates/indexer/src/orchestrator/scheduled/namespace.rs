@@ -30,14 +30,14 @@ static ENABLED_NAMESPACE_QUERY: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Siphon source tables and their per-entity watermark columns, derived from
-/// the ontology. Only namespaced entities whose `source` table carries both the
-/// watermark column AND `traversal_path` are included — tables where a
+/// Siphon source tables eligible for dirty-detection, derived from the
+/// ontology. Only namespaced entities whose `source` table carries both the
+/// watermark column and `traversal_path` are included — tables where
 /// `SELECT DISTINCT traversal_path WHERE <watermark> > <cutoff>` is valid.
 ///
-/// Entities whose watermark lives on a *different* JOINed table than `source`
-/// (e.g. Group via `siphon_namespaces`, Project via `siphon_projects` — both
-/// lack `traversal_path`) are excluded and ride on the periodic full sweep.
+/// Entities whose watermark lives on a different JOINed table than `source`
+/// (Group via `siphon_namespaces`, Project via `siphon_projects` — both lack
+/// `traversal_path`) are excluded and ride on the periodic full sweep.
 /// See #908 for a future JOIN-based dirty query for those entities.
 static DIRTY_DETECTION_TABLES: LazyLock<Vec<DirtyDetectionTable>> = LazyLock::new(|| {
     let ontology = ontology::Ontology::load_embedded().expect("embedded ontology must be valid");
