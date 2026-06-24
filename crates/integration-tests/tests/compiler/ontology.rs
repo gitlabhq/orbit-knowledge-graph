@@ -7,6 +7,7 @@ use compiler::{
     ColumnSelection, HydrationPlan, Input, InputNode, QueryType, TraversalPath, compile,
     compile_input,
 };
+use serde_json::json;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation (error path — no SQL produced)
@@ -502,7 +503,7 @@ fn cursor_pagination_validation() {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 20}
+        "cursor": {"page_size": 20}
     }"#,
         &ontology,
         &ctx,
@@ -524,13 +525,29 @@ fn cursor_pagination_validation() {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
         "limit": 10,
-        "cursor": {"offset": 5, "page_size": 10}
+        "cursor": {"page_size": 10}
     }"#,
         &ontology,
         &ctx,
     )
     .unwrap();
-    assert!(result.base.render().contains("LIMIT 16"));
+    assert!(result.base.render().contains("LIMIT 11"));
+
+    let after = compiler::input::encode_cursor_values(vec![json!(1)]).unwrap();
+    let result = compile(
+        &format!(
+            r#"{{
+        "query_type": "traversal",
+        "node": {{"id": "u", "entity": "User", "node_ids": [1]}},
+        "limit": 10,
+        "cursor": {{"after": "{after}", "page_size": 10}}
+    }}"#
+        ),
+        &ontology,
+        &ctx,
+    )
+    .unwrap();
+    assert!(result.base.render().contains("(u.id > 1)"));
 
     let result = compile(
         r#"{
@@ -541,7 +558,7 @@ fn cursor_pagination_validation() {
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
         "limit": 50,
-        "cursor": {"offset": 10, "page_size": 20}
+        "cursor": {"page_size": 20}
     }"#,
         &ontology,
         &ctx,
@@ -556,14 +573,14 @@ fn cursor_pagination_validation() {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
         "limit": 10,
-        "cursor": {"offset": 5, "page_size": 5}
+        "cursor": {"page_size": 5}
     }"#,
         &ontology,
         &ctx,
     );
     assert!(
         result.is_ok(),
-        "offset + page_size == limit should be valid"
+        "cursor page_size should compile independently of limit"
     );
 
     let result = compile(
@@ -571,7 +588,7 @@ fn cursor_pagination_validation() {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
         "limit": 30,
-        "cursor": {"offset": 0, "page_size": 30}
+        "cursor": {"page_size": 30}
     }"#,
         &ontology,
         &ctx,
@@ -579,31 +596,18 @@ fn cursor_pagination_validation() {
     let result = result.unwrap();
     assert!(result.base.render().contains("LIMIT 31"));
 
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 1000,
-        "cursor": {"offset": 999, "page_size": 100}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap();
-    assert!(result.base.render().contains("LIMIT 1100"));
-
     let err = compile(
         r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "cursor": {"offset": 0}
+        "cursor": {"after": "not-base64", "page_size": 10}
     }"#,
         &ontology,
         &ctx,
     );
-    assert!(err.is_err(), "cursor missing page_size should fail");
+    assert!(err.is_err(), "malformed cursor token should fail");
 
-    let err = compile(
+    let result = compile(
         r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
@@ -612,7 +616,7 @@ fn cursor_pagination_validation() {
         &ontology,
         &ctx,
     );
-    assert!(err.is_err(), "cursor missing offset should fail");
+    assert!(result.is_ok(), "cursor page_size alone starts pagination");
 
     let err = compile(
         r#"{
@@ -631,12 +635,24 @@ fn cursor_pagination_validation() {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
         "limit": 10,
-        "cursor": {"offset": 0, "page_size": 0}
+        "cursor": {"page_size": 0}
     }"#,
         &ontology,
         &ctx,
     );
     assert!(err.is_err(), "page_size = 0 should fail");
+
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "limit": 10,
+        "cursor": {"page_size": 1001}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(err.is_err(), "page_size above 1000 should fail");
 
     // No cursor: default limit still works, no SETTINGS emitted
     let result = compile(

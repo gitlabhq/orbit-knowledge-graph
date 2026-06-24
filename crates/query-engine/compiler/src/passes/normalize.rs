@@ -298,6 +298,17 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
     resolve_fk_metadata(&mut input, ontology);
+    let order_by_type = input.order_by.as_ref().and_then(|order_by| {
+        input
+            .nodes
+            .iter()
+            .find(|node| node.id == order_by.node)
+            .and_then(|node| node.entity.as_deref())
+            .and_then(|entity| ontology.get_field_type(entity, &order_by.property))
+    });
+    if let Some(order_by) = &mut input.order_by {
+        order_by.data_type = order_by_type;
+    }
     Ok(input)
 }
 

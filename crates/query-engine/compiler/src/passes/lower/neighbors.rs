@@ -18,6 +18,11 @@ use crate::passes::shared::{
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 
+use super::pagination::{CursorKey, apply_keyset};
+
+const NEIGHBORS_PAGE_ALIAS: &str = "_gkg_neighbors_page";
+const NEIGHBORS_SORT_COLUMN: &str = "_gkg_neighbors_sort_0";
+
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
 pub fn emit_neighbors(
@@ -74,44 +79,6 @@ pub fn emit_neighbors(
         }
         dedup_subquery(alias, table, select, scan_where)
     }
-
-    let edge_tiebreakers = || -> Vec<OrderExpr> {
-        vec![
-            OrderExpr::asc(Expr::col(edge_alias, SOURCE_ID_COLUMN)),
-            OrderExpr::asc(Expr::col(edge_alias, TARGET_ID_COLUMN)),
-            OrderExpr::asc(Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN)),
-        ]
-    };
-    let projected_tiebreakers = || -> Vec<OrderExpr> {
-        vec![
-            OrderExpr::asc(Expr::ident(redaction_id_column(&center_id))),
-            OrderExpr::asc(Expr::ident(neighbor_id_column())),
-            OrderExpr::asc(Expr::ident(relationship_type_column())),
-            OrderExpr::asc(Expr::ident(neighbor_is_outgoing_column())),
-        ]
-    };
-    let tie_breakers = || {
-        if direction == Direction::Both {
-            projected_tiebreakers()
-        } else {
-            edge_tiebreakers()
-        }
-    };
-    let order_by = match &plan.order_by {
-        Some(ob) => {
-            let mut exprs = vec![if ob.direction == OrderDirection::Desc {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-            } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-            }];
-            if plan.cursor.is_some() {
-                exprs.extend(tie_breakers());
-            }
-            exprs
-        }
-        None if plan.cursor.is_some() => tie_breakers(),
-        None => vec![],
-    };
 
     let build_arm = |dir: Direction| -> Query {
         let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
@@ -289,7 +256,7 @@ pub fn emit_neighbors(
         && edge_table.len() == 1;
 
     if fused_both_eligible {
-        let mut q = build_fused_both_arm(
+        let q = build_fused_both_arm(
             &center_id,
             &center_entity,
             center_has_tp,
@@ -300,21 +267,91 @@ pub fn emit_neighbors(
             &edge_table[0],
             edge_alias,
         );
-        q.order_by = order_by;
-        q.limit = Some(plan.limit);
+        let q = page_neighbors(q, plan, &center_id)?;
         Ok(Node::Query(Box::new(q)))
     } else if direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
-        outgoing.order_by = order_by;
-        outgoing.limit = Some(plan.limit);
+        let outgoing = page_neighbors(outgoing, plan, &center_id)?;
         Ok(Node::Query(Box::new(outgoing)))
     } else {
-        let mut arm = build_arm(direction);
-        arm.order_by = order_by;
-        arm.limit = Some(plan.limit);
+        let arm = page_neighbors(build_arm(direction), plan, &center_id)?;
         Ok(Node::Query(Box::new(arm)))
     }
+}
+
+fn page_neighbors(mut inner: Query, plan: &Plan, center_id: &str) -> Result<Query> {
+    if let Some(ob) = &plan.order_by {
+        let sort_select = SelectExpr::new(
+            Expr::col(&ob.node, &ob.property),
+            NEIGHBORS_SORT_COLUMN.to_string(),
+        );
+        inner.select.push(sort_select.clone());
+        for arm in &mut inner.union_all {
+            arm.select.push(sort_select.clone());
+        }
+    }
+
+    let select = inner
+        .select
+        .iter()
+        .filter_map(|item| {
+            item.alias
+                .as_ref()
+                .map(|alias| SelectExpr::new(Expr::col(NEIGHBORS_PAGE_ALIAS, alias), alias.clone()))
+        })
+        .collect();
+    let keys = neighbor_keys(plan, center_id);
+    let mut outer = Query {
+        select,
+        from: TableRef::Subquery {
+            query: Box::new(inner),
+            alias: NEIGHBORS_PAGE_ALIAS.to_string(),
+        },
+        limit: Some(plan.limit),
+        ..Default::default()
+    };
+    apply_keyset(&mut outer, &keys, plan.cursor.as_ref(), false)?;
+    Ok(outer)
+}
+
+fn neighbor_keys(plan: &Plan, center_id: &str) -> Vec<CursorKey> {
+    let mut keys = Vec::new();
+    if let Some(ob) = &plan.order_by {
+        keys.push(CursorKey::new(
+            Expr::col(NEIGHBORS_PAGE_ALIAS, NEIGHBORS_SORT_COLUMN),
+            crate::passes::shared::data_type_to_ch(ob.data_type.as_ref()),
+            ob.direction == OrderDirection::Desc,
+            keys.len(),
+        ));
+    }
+    keys.extend([
+        CursorKey::new(
+            Expr::col(NEIGHBORS_PAGE_ALIAS, redaction_id_column(center_id)),
+            ChType::Int64,
+            false,
+            keys.len(),
+        ),
+        CursorKey::new(
+            Expr::col(NEIGHBORS_PAGE_ALIAS, neighbor_id_column()),
+            ChType::Int64,
+            false,
+            keys.len() + 1,
+        ),
+        CursorKey::new(
+            Expr::col(NEIGHBORS_PAGE_ALIAS, relationship_type_column()),
+            ChType::String,
+            false,
+            keys.len() + 2,
+        ),
+        CursorKey::new(
+            Expr::col(NEIGHBORS_PAGE_ALIAS, neighbor_is_outgoing_column()),
+            ChType::Int64,
+            false,
+            keys.len() + 3,
+        ),
+    ]);
+    keys
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).

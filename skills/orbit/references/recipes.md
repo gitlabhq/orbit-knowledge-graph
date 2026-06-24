@@ -415,7 +415,7 @@ structured `PropertyFilter`:
 
 ## Pagination
 
-Add a `cursor`. The server autofits the internal fetch window when `offset + page_size` exceeds `limit`. `page_size` max 100.
+Add a `cursor` with `page_size` for the first page. For later pages, pass the previous response's `pagination.next_cursor` as `cursor.after`. `page_size` max 1000.
 
 ```json orbit-query
 {
@@ -427,12 +427,26 @@ Add a `cursor`. The server autofits the internal fetch window when `offset + pag
       "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
     },
     "limit": 200,
-    "cursor": {"offset": 0, "page_size": 50}
+    "cursor": {"page_size": 50}
   }
 }
 ```
 
-Increment `offset` by `page_size` for subsequent pages.
+Use the response's `pagination.next_cursor` for the next page:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
+    },
+    "cursor": {"after": "<next_cursor>", "page_size": 50}
+  }
+}
+```
 
 ## More examples
 

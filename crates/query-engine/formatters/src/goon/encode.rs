@@ -121,6 +121,9 @@ fn write_header(
         if p.truncated {
             out.push_str("truncated:true\n");
         }
+        if let Some(next_cursor) = &p.next_cursor {
+            let _ = writeln!(out, "next_cursor:{}", quote_escaped(next_cursor));
+        }
         let _ = writeln!(out, "total_rows:{}", p.total_rows);
     }
     if response.query_type == "aggregation" {

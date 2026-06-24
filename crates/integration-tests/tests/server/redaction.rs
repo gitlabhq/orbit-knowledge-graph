@@ -3966,7 +3966,7 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "cursor": {"page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -4033,7 +4033,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "cursor": {"page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -4072,19 +4072,23 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
 async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
+    let after =
+        query_engine::compiler::input::encode_cursor_values(vec![serde_json::json!(100)]).unwrap();
 
-    let json = r#"{
+    let json = format!(
+        r#"{{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}}},
         "limit": 1000,
-        "cursor": {"offset": 100, "page_size": 10}
-    }"#;
+        "cursor": {{"after": "{after}", "page_size": 10}}
+    }}"#
+    );
 
-    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let query = compile(&json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    let has_more = result.apply_cursor(100, 10);
+    let has_more = result.apply_cursor(0, 10);
     assert!(!has_more);
     assert_eq!(
         result.authorized_count(),
@@ -4103,7 +4107,7 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
         "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "cursor": {"page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();

@@ -7,6 +7,8 @@ use crate::input::*;
 use crate::passes::plan::{HydrationStrategy, Plan};
 use crate::passes::shared::requested_columns;
 
+use super::pagination::{aggregation_keys, apply_keyset};
+
 pub fn emit_aggregation(
     plan: &Plan,
     aggregations: &[InputAggregationMetric],
@@ -15,14 +17,28 @@ pub fn emit_aggregation(
 ) -> Result<Node> {
     let output = plan.emit_edge_chain()?;
     let if_cond = output.edge_if_predicates.clone();
-    let (agg_select, group_by, order_by) = build_aggregation(
+    let (agg_select, group_by, _order_by) = build_aggregation(
         plan,
         aggregations,
         group_by_keys,
         agg_sort,
         if_cond.as_ref(),
     );
-    let q = output.into_query(agg_select, group_by, order_by, plan.limit);
+    let group_by_names = group_by_output_names(group_by_keys);
+    let mut q = output.into_query(agg_select, group_by, vec![], plan.limit);
+    let keys = aggregation_keys(
+        aggregations,
+        group_by_keys,
+        &group_by_names,
+        &q.select,
+        agg_sort,
+    );
+    for key in &keys {
+        if matches!(key.expr, Expr::Column { .. }) && !q.group_by.contains(&key.expr) {
+            q.group_by.push(key.expr.clone());
+        }
+    }
+    apply_keyset(&mut q, &keys, plan.cursor.as_ref(), true)?;
     Ok(Node::Query(Box::new(q)))
 }
 

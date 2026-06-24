@@ -2,12 +2,13 @@
 
 use crate::ast::*;
 use crate::error::Result;
-use crate::input::*;
 
 use crate::constants::*;
 use crate::passes::plan::{Plan, Strategy};
 use crate::passes::shared::edge_select_columns;
 use crate::passes::shared::edge_select_columns_with_prefix;
+
+use super::pagination::{apply_keyset, traversal_keys};
 
 pub fn emit_traversal(plan: &Plan) -> Result<Node> {
     if matches!(plan.strategy, Strategy::SingleNode) {
@@ -38,37 +39,17 @@ pub fn emit_traversal(plan: &Plan) -> Result<Node> {
         }
     }
 
-    let order_by = plan
-        .order_by
-        .as_ref()
-        .map(|ob| {
-            vec![if matches!(ob.direction, OrderDirection::Desc) {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-            } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-            }]
-        })
-        .unwrap_or_default();
-
-    let q = output.into_query(select, vec![], order_by, plan.limit);
+    let mut q = output.into_query(select, vec![], vec![], plan.limit);
+    let keys = traversal_keys(plan);
+    apply_keyset(&mut q, &keys, plan.cursor.as_ref(), false)?;
     Ok(Node::Query(Box::new(q)))
 }
 
 fn emit_single_node(plan: &Plan) -> Result<Node> {
     let output = plan.emit_edge_chain()?;
 
-    let order_by = plan
-        .order_by
-        .as_ref()
-        .map(|ob| {
-            vec![if matches!(ob.direction, OrderDirection::Desc) {
-                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-            } else {
-                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-            }]
-        })
-        .unwrap_or_default();
-
-    let q = output.into_query(vec![], vec![], order_by, plan.limit);
+    let mut q = output.into_query(vec![], vec![], vec![], plan.limit);
+    let keys = traversal_keys(plan);
+    apply_keyset(&mut q, &keys, plan.cursor.as_ref(), false)?;
     Ok(Node::Query(Box::new(q)))
 }

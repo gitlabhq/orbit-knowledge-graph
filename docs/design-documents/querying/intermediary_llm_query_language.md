@@ -61,10 +61,10 @@ The JSON query schema supports four query types through a single unified structu
 | `group_by` | `array` | Group keys for aggregation rows |
 | `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
 | `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
-| `limit` | `integer` | Max rows to return when `cursor` is omitted (1-1000, default: 30). With `cursor`, `page_size` controls returned rows and the server fetches through `offset + page_size + 1` to detect truncation. |
+| `limit` | `integer` | Max rows to return when `cursor` is omitted (1-1000, default: 30). With `cursor`, `page_size` controls returned rows. |
 | `order_by` | `object` | Result ordering specification |
 | `aggregation_sort` | `object` | Ordering for aggregation outputs |
-| `cursor` | `object` | Offset pagination cursor `{ offset, page_size }`. Slices the authorized (post-redaction) result set. |
+| `cursor` | `object` | Keyset pagination cursor. Use `{ "page_size": N }` for the first page, then `{ "after": "...", "page_size": N }` with the previous response's `pagination.next_cursor`. |
 | `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
 
 ## Node Selectors
@@ -478,8 +478,8 @@ Each relationship step has a hard-coded `max_hops` cap, and the schema enforces 
 - Path `max_depth` limited to 3
 - `node_ids` capped at 500 per node selector
 - `IN` filter values capped at 100 per filter
-- `cursor.offset` capped at 999, `cursor.page_size` capped at 100
-- `cursor.offset + cursor.page_size` must not exceed `limit`
+- `cursor.page_size` capped at 1000
+- `cursor.after` is an opaque server-issued cursor
 
 > **Note:** These limits will be tuned as we collect usage data.
 

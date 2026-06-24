@@ -2,8 +2,9 @@
 //!
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -118,17 +119,19 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn response_window(&self) -> (u32, u32) {
+    pub fn response_page_size(&self) -> u32 {
         self.cursor
-            .map(|cursor| (cursor.offset, cursor.page_size))
-            .unwrap_or((0, self.limit))
+            .as_ref()
+            .map(|cursor| cursor.page_size)
+            .unwrap_or(self.limit)
+    }
+
+    pub fn response_window(&self) -> (u32, u32) {
+        (0, self.response_page_size())
     }
 
     pub fn fetch_limit(&self) -> u32 {
-        let (offset, page_size) = self.response_window();
-        self.limit
-            .max(offset.saturating_add(page_size))
-            .saturating_add(1)
+        self.limit.max(self.response_page_size()).saturating_add(1)
     }
 }
 
@@ -309,16 +312,40 @@ fn default_limit() -> u32 {
     30
 }
 
-/// Agent-driven pagination cursor. Slices the authorized (post-redaction)
-/// result set by `offset` and `page_size`. The server fetches one extra row
-/// beyond the requested window so response metadata can signal truncation.
-///
-/// This model avoids SQL-level keyset pagination, which only generalizes to
-/// Search queries and breaks when redaction removes rows from the LIMIT window.
-// TODO: Server-side query caching with TTL to avoid re-running the same query on page 2+
-#[derive(Debug, Clone, Copy, Deserialize)]
+pub const CURSOR_COLUMN_PREFIX: &str = "_gkg_cursor_";
+
+pub fn cursor_column(index: usize) -> String {
+    format!("{CURSOR_COLUMN_PREFIX}{index}")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CursorToken {
+    v: u8,
+    values: Vec<Value>,
+}
+
+pub fn encode_cursor_values(values: Vec<Value>) -> Result<String, String> {
+    let token = CursorToken { v: 1, values };
+    serde_json::to_vec(&token)
+        .map(|bytes| URL_SAFE_NO_PAD.encode(bytes))
+        .map_err(|e| e.to_string())
+}
+
+pub fn decode_cursor_values(cursor: &str) -> Result<Vec<Value>, String> {
+    let bytes = URL_SAFE_NO_PAD.decode(cursor).map_err(|e| e.to_string())?;
+    let token: CursorToken = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    if token.v != 1 {
+        return Err(format!("unsupported cursor version {}", token.v));
+    }
+    Ok(token.values)
+}
+
+/// Opaque keyset pagination cursor. `page_size` controls the returned rows.
+/// `after` is the `next_cursor` returned by the previous response.
+#[derive(Debug, Clone, Deserialize)]
 pub struct InputCursor {
-    pub offset: u32,
+    #[serde(default)]
+    pub after: Option<String>,
     pub page_size: u32,
 }
 
@@ -938,6 +965,8 @@ pub struct InputOrderBy {
     pub property: String,
     #[serde(default)]
     pub direction: OrderDirection,
+    #[serde(skip)]
+    pub data_type: Option<ontology::DataType>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

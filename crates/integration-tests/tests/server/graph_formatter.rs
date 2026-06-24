@@ -241,6 +241,7 @@ async fn run_pipeline_with_security(
     let has_more = query_result.apply_cursor(offset, page_size);
     let pagination = Some(query_engine::shared::PaginationMeta {
         has_more,
+        next_cursor: None,
         total_rows,
         truncated: has_more,
     });
@@ -2321,7 +2322,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 2,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
     )
@@ -2364,14 +2365,18 @@ async fn pagination_present_without_cursor(ctx: &TestContext) {
 }
 
 async fn pagination_last_page_has_more_false(ctx: &TestContext) {
+    let after =
+        query_engine::compiler::input::encode_cursor_values(vec![serde_json::json!(4)]).unwrap();
     let value = run_pipeline(
         ctx,
-        r#"{
+        &format!(
+            r#"{{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
             "limit": 100,
-            "cursor": {"offset": 4, "page_size": 10}
-        }"#,
+            "cursor": {{"after": "{after}", "page_size": 10}}
+        }}"#
+        ),
         &allow_all(),
     )
     .await;
@@ -2379,7 +2384,7 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
     let pagination = &value["pagination"];
     assert_eq!(
         pagination["has_more"], false,
-        "offset=4, 5 users → last page"
+        "after id 4, 5 users -> last page"
     );
     assert_eq!(pagination["total_rows"], 5);
 
@@ -2398,7 +2403,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &svc,
     )

@@ -103,8 +103,8 @@ query type.
 | `group_by` | `array` | Group keys for aggregation rows. Maximum 4. |
 | `path` | `object` | Path finding configuration. Required for `path_finding`. |
 | `neighbors` | `object` | Neighbor lookup configuration. Required for `neighbors`. |
-| `limit` | `integer` | Maximum rows to return when `cursor` is omitted. Default 30. Maximum 1000. With `cursor`, `page_size` controls returned rows and the server fetches through `offset + page_size + 1` to detect truncation. |
-| `cursor` | `object` | Offset pagination over authorized results. |
+| `limit` | `integer` | Maximum rows to return when `cursor` is omitted. Default 30. Maximum 1000. With `cursor`, `page_size` controls returned rows. |
+| `cursor` | `object` | Keyset pagination cursor. Use `{"page_size": N}` for the first page, then pass the previous response's `pagination.next_cursor` as `after`. |
 | `order_by` | `object` | Sort rows by a node property. |
 | `aggregation_sort` | `object` | Sort aggregation rows by output column. |
 | `options` | `object` | Presentation and debug options. |

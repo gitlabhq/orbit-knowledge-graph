@@ -104,7 +104,7 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         strategy: Strategy::SingleNode,
         limit: input.fetch_limit(),
         order_by: input.order_by.clone(),
-        cursor: input.cursor,
+        cursor: input.cursor.clone(),
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
         denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),

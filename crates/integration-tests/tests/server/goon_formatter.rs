@@ -117,6 +117,7 @@ async fn run_pipeline(
     let has_more = query_result.apply_cursor(offset, page_size);
     let pagination = Some(query_engine::shared::PaginationMeta {
         has_more,
+        next_cursor: None,
         total_rows,
         truncated: has_more,
     });

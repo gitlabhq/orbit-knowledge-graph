@@ -32,8 +32,8 @@ pub(super) use query_engine::formatters::{GraphFormatter, ResultFormatter};
 pub(super) use query_engine::pipeline::{
     NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap,
 };
-pub(super) use query_engine::shared::RedactionOutput;
 pub(super) use query_engine::shared::content::ColumnResolverRegistry;
+pub(super) use query_engine::shared::{OutputStage, RedactionOutput};
 pub(super) use serde_json::Value;
 
 pub(super) struct MockColumnResolver;
@@ -121,27 +121,11 @@ pub(super) async fn run_query_with_security(
         .await
         .expect("pipeline should succeed");
 
-    let mut query_result = hydration_output.query_result;
-    let (offset, page_size) = compiled.input.response_window();
-    let total_rows = query_result.authorized_count();
-    let has_more = query_result.apply_cursor(offset, page_size);
-    let pagination = Some(query_engine::shared::PaginationMeta {
-        has_more,
-        total_rows,
-        truncated: has_more,
-    });
-
-    let pipeline_output = query_engine::shared::PipelineOutput {
-        row_count: query_result.authorized_count(),
-        redacted_count: hydration_output.redacted_count,
-        query_type: compiled.query_type.to_string(),
-        raw_query_strings: vec![compiled.base.sql.clone()],
-        compiled: Arc::clone(&compiled),
-        query_result,
-        result_context: hydration_output.result_context,
-        execution_log: vec![],
-        pagination,
-    };
+    pipeline_ctx.phases.insert(hydration_output);
+    let pipeline_output = OutputStage
+        .execute(&mut pipeline_ctx, &mut obs)
+        .await
+        .expect("output stage should succeed");
 
     let value = GraphFormatter.format(&pipeline_output);
     assert_valid(&value);

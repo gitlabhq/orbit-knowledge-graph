@@ -6,6 +6,7 @@ mod flat_chain;
 mod helpers;
 pub mod hydration;
 pub mod neighbors;
+mod pagination;
 pub mod pathfinding;
 mod single_node;
 pub mod traversal;

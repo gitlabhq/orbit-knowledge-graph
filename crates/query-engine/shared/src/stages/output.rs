@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use compiler::input::{cursor_column, encode_cursor_values};
+use gkg_utils::arrow::ColumnValue;
 use serde_json::json;
 
 use crate::types::{HydrationOutput, PaginationMeta, PipelineOutput, QueryExecutionLog};
@@ -45,11 +47,17 @@ impl PipelineStage for OutputStage {
 
         let mut query_result = input.query_result.clone();
 
-        let (offset, page_size) = compiled.input.response_window();
+        let (_, page_size) = compiled.input.response_window();
         let total_rows = query_result.authorized_count();
-        let has_more = query_result.apply_cursor(offset, page_size);
+        let has_more = query_result.apply_cursor(0, page_size);
+        let next_cursor = if has_more {
+            next_cursor(&query_result).map_err(PipelineError::Execution)?
+        } else {
+            None
+        };
         let pagination = Some(PaginationMeta {
             has_more,
+            next_cursor,
             total_rows,
             truncated: has_more,
         });
@@ -65,6 +73,35 @@ impl PipelineStage for OutputStage {
             execution_log,
             pagination,
         })
+    }
+}
+
+fn next_cursor(query_result: &types::QueryResult) -> Result<Option<String>, String> {
+    let Some(row) = query_result.authorized_rows().last() else {
+        return Ok(None);
+    };
+
+    let mut values = Vec::new();
+    for index in 0.. {
+        let column = cursor_column(index);
+        let Some(value) = row.get(&column) else {
+            break;
+        };
+        values.push(column_value_to_json(value));
+    }
+
+    if values.is_empty() {
+        return Ok(None);
+    }
+    encode_cursor_values(values).map(Some)
+}
+
+fn column_value_to_json(value: &ColumnValue) -> serde_json::Value {
+    match value {
+        ColumnValue::Int64(v) => json!(v),
+        ColumnValue::Float64(v) => json!(v),
+        ColumnValue::String(v) => json!(v),
+        ColumnValue::Null => serde_json::Value::Null,
     }
 }
 

@@ -84,6 +84,8 @@ pub struct PipelineOutput {
 pub struct PaginationMeta {
     /// Whether more materialized authorized rows exist beyond the current page.
     pub has_more: bool,
+    /// Opaque cursor to request the next page when `has_more` is true.
+    pub next_cursor: Option<String>,
     /// Authorized rows materialized before slicing. Exact only when `truncated`
     /// is false.
     pub total_rows: usize,

@@ -696,6 +696,7 @@ mod tests {
                 node: "_u".into(),
                 property: property.into(),
                 direction: OrderDirection::Desc,
+                data_type: None,
             }),
             ..Input::default()
         }
@@ -1061,6 +1062,7 @@ mod tests {
                 node: "_u".into(),
                 property: field.into(),
                 direction: OrderDirection::Desc,
+                data_type: None,
             }),
             ..Input::default()
         }

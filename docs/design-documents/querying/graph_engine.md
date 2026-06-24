@@ -179,12 +179,12 @@ not a new correctness or security boundary.
 
 ### Unified Response Format
 
-After ClickHouse returns rows and redaction completes, the server slices the
-authorized result set with offset pagination (`{ offset, page_size }`) when a
-cursor is present, or the request `limit` otherwise. Query lowering fetches one
-extra row beyond the returned window so the response can set `has_more` and
-`truncated` when more materialized rows exist. The formatting stage then
-transforms the sliced `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md)
+Query lowering adds deterministic keyset ordering for the materialized result
+rows and fetches one extra row beyond the requested page size. After ClickHouse
+returns rows and redaction completes, the output stage returns the requested
+page and emits `pagination.next_cursor` from the last returned authorized row
+when more rows exist. The formatting stage then transforms the sliced
+`QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md)
 defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`
 shape for all four query types (traversal, aggregation, path_finding,
 neighbors) with deduplicated nodes and instance-level edges. `format_version`

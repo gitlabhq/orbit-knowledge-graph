@@ -311,7 +311,7 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.
 7. Ontology is cached. Display metadata (labels, styles, descriptions) comes from the schema, not the response.
 8. `id` and `type` are always included on nodes, even if the user didn't select them.
-9. Pagination uses offset windows (`{ offset, page_size }`) over the authorized (post-redaction) result set when a cursor is present, or the request `limit` otherwise. The JSON body returns `{ has_more, total_rows, truncated? }`; `total_rows` is exact only when `truncated` is absent.
+9. Pagination uses keyset anchors. A first page may request `{ page_size }`; later pages pass the previous response's `next_cursor` as `cursor.after`. The JSON body returns `{ has_more, next_cursor?, total_rows, truncated? }`; `total_rows` is exact only when `truncated` is absent.
 
 ### Display hint
 

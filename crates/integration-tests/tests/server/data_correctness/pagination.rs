@@ -7,6 +7,14 @@
 
 use super::helpers::*;
 
+fn next_cursor(resp: &ResponseView) -> String {
+    resp.response
+        .pagination
+        .as_ref()
+        .and_then(|pagination| pagination.next_cursor.clone())
+        .expect("response should include next_cursor")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Search pagination
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +27,7 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 2,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
     )
@@ -38,15 +46,34 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
 }
 
 pub(super) async fn cursor_second_page(ctx: &TestContext) {
-    let resp = run_query(
+    let first = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 2, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
+        &allow_all(),
+    )
+    .await;
+    let after = next_cursor(&first);
+    first.skip_requirement(Requirement::Cursor);
+    first.skip_requirement(Requirement::NodeCount);
+    first.skip_requirement(Requirement::OrderBy);
+
+    let resp = run_query(
+        ctx,
+        &format!(
+            r#"{{
+            "query_type": "traversal",
+            "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+            "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
+            "limit": 100,
+            "cursor": {{"after": "{after}", "page_size": 2}}
+        }}"#
+        ),
         &allow_all(),
     )
     .await;
@@ -56,33 +83,71 @@ pub(super) async fn cursor_second_page(ctx: &TestContext) {
 }
 
 pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
-    let resp = run_query(
+    let page1 = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 4, "page_size": 10}
+            "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
     )
     .await;
+    let after = next_cursor(&page1);
+    page1.skip_requirement(Requirement::Cursor);
+    page1.skip_requirement(Requirement::NodeCount);
+    page1.skip_requirement(Requirement::OrderBy);
+    let page2 = run_query(
+        ctx,
+        &format!(
+            r#"{{
+            "query_type": "traversal",
+            "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+            "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
+            "limit": 100,
+            "cursor": {{"after": "{after}", "page_size": 2}}
+        }}"#
+        ),
+        &allow_all(),
+    )
+    .await;
+    let after = next_cursor(&page2);
+    page2.skip_requirement(Requirement::Cursor);
+    page2.skip_requirement(Requirement::NodeCount);
+    page2.skip_requirement(Requirement::OrderBy);
+    let resp = run_query(
+        ctx,
+        &format!(
+            r#"{{
+            "query_type": "traversal",
+            "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+            "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
+            "limit": 100,
+            "cursor": {{"after": "{after}", "page_size": 10}}
+        }}"#
+        ),
+        &allow_all(),
+    )
+    .await;
 
-    // 7 users total, offset=4 → users 5, 6, 7
     resp.assert_node_count(3);
     resp.assert_node_order("User", &[5, 6, 7]);
 }
 
 pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
+    let after = compiler::input::encode_cursor_values(vec![serde_json::json!(50)]).unwrap();
     let resp = run_query(
         ctx,
-        r#"{
+        &format!(
+            r#"{{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}}},
             "limit": 100,
-            "cursor": {"offset": 50, "page_size": 10}
-        }"#,
+            "cursor": {{"after": "{after}", "page_size": 10}}
+        }}"#
+        ),
         &allow_all(),
     )
     .await;
@@ -104,7 +169,7 @@ pub(super) async fn cursor_with_filter(ctx: &TestContext) {
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
     )
@@ -116,7 +181,7 @@ pub(super) async fn cursor_with_filter(ctx: &TestContext) {
 }
 
 pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
-    let resp = run_query(
+    let first = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
@@ -124,13 +189,35 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 2, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
     )
     .await;
+    let after = next_cursor(&first);
+    first.skip_requirement(Requirement::Cursor);
+    first.skip_requirement(Requirement::Filter {
+        field: "state".to_string(),
+    });
+    first.skip_requirement(Requirement::NodeCount);
+    first.skip_requirement(Requirement::OrderBy);
 
-    // 5 active users total, offset=2 → users 3, 4
+    let resp = run_query(
+        ctx,
+        &format!(
+            r#"{{
+            "query_type": "traversal",
+            "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username", "state"],
+                     "filters": {{"state": "active"}}}},
+            "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
+            "limit": 100,
+            "cursor": {{"after": "{after}", "page_size": 2}}
+        }}"#
+        ),
+        &allow_all(),
+    )
+    .await;
+
     resp.assert_node_count(2);
     resp.assert_node_order("User", &[3, 4]);
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
@@ -153,7 +240,7 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &svc,
     )
@@ -169,20 +256,38 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
     svc.allow("user", &[1, 3, 5]);
     svc.deny("user", &[2, 4, 6]);
 
-    let resp = run_query(
+    let first = run_query(
         ctx,
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
-            "cursor": {"offset": 2, "page_size": 10}
+            "cursor": {"page_size": 2}
         }"#,
         &svc,
     )
     .await;
+    let after = next_cursor(&first);
+    first.skip_requirement(Requirement::Cursor);
+    first.skip_requirement(Requirement::NodeCount);
+    first.skip_requirement(Requirement::OrderBy);
 
-    // 3 authorized (1, 3, 5), offset=2 → only user 5
+    let resp = run_query(
+        ctx,
+        &format!(
+            r#"{{
+            "query_type": "traversal",
+            "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+            "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
+            "limit": 100,
+            "cursor": {{"after": "{after}", "page_size": 10}}
+        }}"#
+        ),
+        &svc,
+    )
+    .await;
+
     resp.assert_node_count(1);
     resp.assert_node_order("User", &[5]);
 }
@@ -195,29 +300,25 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
     // Page through all 7 users in pages of 2, collecting IDs from each page.
     let mut all_ids: Vec<i64> = Vec::new();
 
-    for offset in (0u32..).step_by(2) {
+    let mut after: Option<String> = None;
+    loop {
+        let cursor = after
+            .as_ref()
+            .map(|after| format!(r#""cursor": {{"after": "{after}", "page_size": 2}}"#))
+            .unwrap_or_else(|| r#""cursor": {"page_size": 2}"#.to_string());
         let json = format!(
             r#"{{
                 "query_type": "traversal",
 "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
                  "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
                  "limit": 100,
-                 "cursor": {{"offset": {offset}, "page_size": 2}}
+                 {cursor}
             }}"#
         );
 
         let resp = run_query(ctx, &json, &allow_all()).await;
-        let count = resp.node_count();
-
-        if count == 0 {
-            resp.assert_node_count(0);
-            resp.skip_requirement(Requirement::OrderBy);
-            break;
-        }
-
         let page_ids = resp.node_ids_ordered("User");
 
-        // No overlap with previously seen IDs
         for id in &page_ids {
             assert!(!all_ids.contains(id), "ID {id} appeared in multiple pages");
         }
@@ -225,6 +326,11 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
         resp.skip_requirement(Requirement::Cursor);
         resp.skip_requirement(Requirement::NodeCount);
         resp.skip_requirement(Requirement::OrderBy);
+        let pagination = resp.response.pagination.as_ref().unwrap();
+        if !pagination.has_more {
+            break;
+        }
+        after = pagination.next_cursor.clone();
     }
 
     assert_eq!(
@@ -261,7 +367,6 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
     full.assert_node_count(9);
     full.assert_edge_count("MEMBER_OF", 9);
 
-    // First page: offset=0, page_size=4
     let page1 = run_query(
         ctx,
         r#"{
@@ -272,7 +377,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 4}
+            "cursor": {"page_size": 4}
         }"#,
         &allow_all(),
     )
@@ -288,19 +393,21 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         edge_type: "MEMBER_OF".into(),
     });
 
-    // Second page: offset=4, page_size=4
+    let after = next_cursor(&page1);
     let page2 = run_query(
         ctx,
-        r#"{
+        &format!(
+            r#"{{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-                {"id": "g", "entity": "Group"}
+                {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}}},
+                {{"id": "g", "entity": "Group"}}
             ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "relationships": [{{"type": "MEMBER_OF", "from": "u", "to": "g"}}],
             "limit": 100,
-            "cursor": {"offset": 4, "page_size": 4}
-        }"#,
+            "cursor": {{"after": "{after}", "page_size": 4}}
+        }}"#
+        ),
         &allow_all(),
     )
     .await;
@@ -312,19 +419,21 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         edge_type: "MEMBER_OF".into(),
     });
 
-    // Last page: offset=8, page_size=4 → 1 row left
+    let after = next_cursor(&page2);
     let page3 = run_query(
         ctx,
-        r#"{
+        &format!(
+            r#"{{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-                {"id": "g", "entity": "Group"}
+                {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}}},
+                {{"id": "g", "entity": "Group"}}
             ],
-            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "relationships": [{{"type": "MEMBER_OF", "from": "u", "to": "g"}}],
             "limit": 100,
-            "cursor": {"offset": 8, "page_size": 4}
-        }"#,
+            "cursor": {{"after": "{after}", "page_size": 4}}
+        }}"#
+        ),
         &allow_all(),
     )
     .await;
@@ -348,7 +457,7 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 3}
+        "cursor": {"page_size": 3}
     }"#;
 
     let resp1 = run_query(ctx, query, &allow_all()).await;
@@ -370,24 +479,22 @@ pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestConte
     // The default ORDER BY id ASC should give stable, non-overlapping pages.
     let mut all_ids: Vec<i64> = Vec::new();
 
-    for offset in (0u32..).step_by(2) {
+    let mut after: Option<String> = None;
+    loop {
+        let cursor = after
+            .as_ref()
+            .map(|after| format!(r#""cursor": {{"after": "{after}", "page_size": 2}}"#))
+            .unwrap_or_else(|| r#""cursor": {"page_size": 2}"#.to_string());
         let json = format!(
             r#"{{
                 "query_type": "traversal",
 "node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
                  "limit": 100,
-                 "cursor": {{"offset": {offset}, "page_size": 2}}
+                 {cursor}
             }}"#
         );
 
         let resp = run_query(ctx, &json, &allow_all()).await;
-        let count = resp.node_count();
-
-        if count == 0 {
-            resp.assert_node_count(0);
-            break;
-        }
-
         let page_ids = resp.node_ids_ordered("User");
 
         for id in &page_ids {
@@ -396,6 +503,11 @@ pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestConte
         all_ids.extend(page_ids);
         resp.skip_requirement(Requirement::Cursor);
         resp.skip_requirement(Requirement::NodeCount);
+        let pagination = resp.response.pagination.as_ref().unwrap();
+        if !pagination.has_more {
+            break;
+        }
+        after = pagination.next_cursor.clone();
     }
 
     assert_eq!(
@@ -414,7 +526,7 @@ pub(super) async fn cursor_traversal_without_order_by_is_deterministic(ctx: &Tes
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 4}
+        "cursor": {"page_size": 4}
     }"#;
 
     let resp1 = run_query(ctx, query, &allow_all()).await;
@@ -448,7 +560,7 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
         "group_by": [{"kind": "node", "node": "u"}],
         "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "cursor": {"page_size": 2}
     }"#;
 
     let resp1 = run_query(ctx, query, &allow_all()).await;
@@ -509,7 +621,6 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
         dests
     };
 
-    // Page 1: offset=0, page_size=2
     let page1 = run_query(
         ctx,
         r#"{
@@ -521,7 +632,7 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]},
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
     )
@@ -531,20 +642,22 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
     assert_eq!(p1_pids.len(), 2, "first page should have 2 paths");
     page1.assert_node_count(page1.node_count());
 
-    // Page 2: offset=2, page_size=2
+    let after = next_cursor(&page1);
     let page2 = run_query(
         ctx,
-        r#"{
+        &format!(
+            r#"{{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+                {{"id": "start", "entity": "User", "node_ids": [1]}},
+                {{"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "path": {{"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}},
             "limit": 100,
-            "cursor": {"offset": 2, "page_size": 2}
-        }"#,
+            "cursor": {{"after": "{after}", "page_size": 2}}
+        }}"#
+        ),
         &allow_all(),
     )
     .await;
@@ -585,7 +698,7 @@ pub(super) async fn cursor_path_finding_is_deterministic(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                  "rel_types": ["MEMBER_OF", "CONTAINS"]},
         "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "cursor": {"page_size": 2}
     }"#;
 
     let resp1 = run_query(ctx, query, &allow_all()).await;

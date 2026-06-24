@@ -726,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_without_cursor_orders_only_by_depth() {
+    fn path_finding_without_cursor_keeps_path_tie_break_order() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -741,9 +741,9 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("toString(paths._gkg_path)")
-                && !sql.contains("toString(paths._gkg_edge_kinds)"),
-            "path array tie-break sorting should only be emitted for cursor pagination, got:\n{sql}"
+            sql.contains("toString(paths._gkg_path)")
+                && sql.contains("toString(paths._gkg_edge_kinds)"),
+            "path finding should keep deterministic path tie-break sorting, got:\n{sql}"
         );
     }
 
@@ -757,7 +757,7 @@ mod tests {
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "cursor": {"offset": 0, "page_size": 10},
+            "cursor": {"page_size": 10},
             "limit": 10
         }"#;
 
@@ -850,20 +850,22 @@ mod tests {
     }
 
     #[test]
-    fn cursor_neighbors_both_orders_by_projected_columns() {
+    fn cursor_neighbors_both_keyset_uses_projected_columns() {
         let query = r#"{
             "query_type": "neighbors",
             "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]},
             "neighbors": {"node": "mr", "direction": "both"},
             "limit": 100,
-            "cursor": {"offset": 0, "page_size": 20}
+            "cursor": {"page_size": 20}
         }"#;
 
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("ORDER BY _gkg_mr_id ASC, _gkg_neighbor_id ASC"),
-            "cursor neighbors over UNION should order by projected aliases, got:\n{sql}"
+            sql.contains("_gkg_neighbors_page._gkg_mr_id AS _gkg_cursor_0")
+                && sql.contains("_gkg_neighbors_page._gkg_neighbor_id AS _gkg_cursor_1")
+                && sql.contains("ORDER BY _gkg_cursor_0 ASC, _gkg_cursor_1 ASC"),
+            "cursor neighbors over UNION should keyset over projected aliases, got:\n{sql}"
         );
         assert!(
             !sql.contains("ORDER BY e.source_id"),

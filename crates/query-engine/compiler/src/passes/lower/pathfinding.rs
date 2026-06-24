@@ -22,6 +22,8 @@ use crate::passes::shared::{
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 
+use super::pagination::{CursorKey, apply_keyset};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Emit
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,21 +225,31 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
     };
 
-    let mut order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
-    if plan.cursor.is_some() {
-        order_by.extend([
-            OrderExpr::asc(Expr::func(
-                "toString",
-                vec![Expr::col(PATHS_ALIAS, path_column())],
-            )),
-            OrderExpr::asc(Expr::func(
+    let keys = vec![
+        CursorKey::new(
+            Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
+            ChType::Int64,
+            false,
+            0,
+        ),
+        CursorKey::new(
+            Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
+            ChType::String,
+            false,
+            1,
+        ),
+        CursorKey::new(
+            Expr::func(
                 "toString",
                 vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
-            )),
-        ]);
-    }
+            ),
+            ChType::String,
+            false,
+            2,
+        ),
+    ];
 
-    Ok(Node::Query(Box::new(Query {
+    let mut query = Query {
         ctes: {
             let mut ctes = anchor_ctes;
             if let Some(scope) = path_scope_cte {
@@ -255,10 +267,12 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
             SelectExpr::col(PATHS_ALIAS, DEPTH_COLUMN),
         ],
         from: paths_union,
-        order_by,
         limit: Some(plan.limit),
         ..Default::default()
-    })))
+    };
+    apply_keyset(&mut query, &keys, plan.cursor.as_ref(), false)?;
+
+    Ok(Node::Query(Box::new(query)))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -261,6 +261,7 @@ fn snapshot_pagination() {
     }];
     r.pagination = Some(PaginationResponse {
         has_more: true,
+        next_cursor: Some("cursor-1".into()),
         total_rows: 100,
         truncated: true,
     });

@@ -9,6 +9,7 @@ nodes:1
 edges:0
 has_more:true
 truncated:true
+next_cursor:"cursor-1"
 total_rows:100
 @nodes
 MR(1):
