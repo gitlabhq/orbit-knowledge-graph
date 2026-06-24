@@ -68,6 +68,7 @@
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
+              "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
@@ -410,6 +411,13 @@
           "default": 6,
           "minimum": 0
         },
+        "job_timeout_secs": {
+          "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. Keep below `nats.ack_wait_secs`. 0 = no timeout. Defaults to 250.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 250,
+          "minimum": 0
+        },
         "max_concurrent_languages": {
           "type": "integer",
           "format": "uint",
@@ -477,6 +485,7 @@
           "default": {
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 6,
+            "job_timeout_secs": 250,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
@@ -572,6 +581,7 @@
               "pipeline": {
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 6,
+                "job_timeout_secs": 250,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
@@ -817,6 +827,7 @@
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
+              "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,

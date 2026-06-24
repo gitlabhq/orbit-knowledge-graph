@@ -245,6 +245,10 @@ fn default_code_indexing_cross_file_resolve_timeout_ms() -> u64 {
     180_000
 }
 
+fn default_code_indexing_job_timeout_secs() -> u64 {
+    250
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -276,6 +280,9 @@ pub struct CodeIndexingPipelineConfig {
     /// (import edges, call edges). 0 = no timeout.
     #[serde(default = "default_code_indexing_cross_file_resolve_timeout_ms")]
     pub cross_file_resolve_timeout_ms: u64,
+    /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. Keep below `nats.ack_wait_secs`. 0 = no timeout. Defaults to 250.
+    #[serde(default = "default_code_indexing_job_timeout_secs")]
+    pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
     /// many repositories can be downloaded simultaneously in the pipelined
     /// code indexer. 0 = no limit. Defaults to 6.
@@ -296,8 +303,16 @@ impl Default for CodeIndexingPipelineConfig {
             per_file_walk_timeout_ms: default_code_indexing_per_file_walk_timeout_ms(),
             per_file_ssa_timeout_ms: default_code_indexing_per_file_ssa_timeout_ms(),
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
+            job_timeout_secs: default_code_indexing_job_timeout_secs(),
             fetch_concurrency: default_fetch_concurrency(),
         }
+    }
+}
+
+impl CodeIndexingPipelineConfig {
+    /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
+    pub fn job_timeout(&self) -> Option<Duration> {
+        (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
     }
 }
 
@@ -596,6 +611,17 @@ pub struct ScheduleConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn job_timeout_is_some_by_default_and_disabled_at_zero() {
+        let cfg = CodeIndexingPipelineConfig::default();
+        assert_eq!(cfg.job_timeout(), Some(Duration::from_secs(250)));
+        let disabled = CodeIndexingPipelineConfig {
+            job_timeout_secs: 0,
+            ..Default::default()
+        };
+        assert_eq!(disabled.job_timeout(), None);
+    }
 
     #[test]
     fn default_modules_are_universal() {
