@@ -807,25 +807,19 @@ fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
     batch.project(&indices).expect("column projection")
 }
 
-/// In-flight batches the sink holds before back-pressuring the parser. Small
-/// on purpose: this bound is what keeps indexer memory flat on huge repos.
+/// Bounded so a slow ClickHouse back-pressures the parser instead of buffering the whole graph.
 const WRITE_CHANNEL_CAPACITY: usize = 8;
 
-/// Rows per ClickHouse insert. Matches SDLC's datalake page size so a large
-/// table is sliced into the same insert granularity instead of one giant insert.
+/// Rows per insert; matches SDLC's datalake page size so a large table isn't one giant insert.
 const WRITE_SLICE_ROWS: usize = 500_000;
 
-/// Concurrent in-flight inserts. Bounds write memory while overlapping writes
-/// with parsing; SDLC gets a similar bound from its per-page per-table fan-out.
+/// Concurrent in-flight inserts; bounds write memory while overlapping writes with parsing.
 const MAX_CONCURRENT_WRITES: usize = 8;
 
 /// Per-table totals the writer task yields, or the first write error.
 type WriteOutcome = Result<Vec<TableWriteTotals>, code_graph::v2::SinkError>;
 
-/// `BatchSink` for ClickHouse that streams each batch to a dedicated async
-/// writer task as the pipeline produces it. The bounded channel back-pressures
-/// the parser when ClickHouse falls behind, so the indexer holds at most a
-/// handful of batches instead of buffering the whole graph until the end.
+/// Streams each batch to an async writer task; the bounded channel back-pressures the parser instead of buffering the whole graph.
 pub struct StreamingClickHouseSink {
     tx: Mutex<Option<mpsc::Sender<(String, RecordBatch)>>>,
     task: Mutex<Option<tokio::task::JoinHandle<WriteOutcome>>>,
@@ -841,8 +835,7 @@ impl StreamingClickHouseSink {
         }
     }
 
-    /// Close the channel, drain the writer task, and return per-table totals.
-    /// Call exactly once, after the pipeline has returned.
+    /// Close the channel, drain the writer task, and return per-table totals; call once after the pipeline returns.
     pub async fn finish(&self) -> WriteOutcome {
         drop(self.tx.lock().take());
         let task = self.task.lock().take().expect("finish called exactly once");
@@ -868,9 +861,7 @@ fn record_total(
     entry.bytes += bytes;
 }
 
-/// Slice each incoming batch into fixed-size inserts and write them through a
-/// bounded set of concurrent futures, mirroring SDLC's page/fan-out model.
-/// async_insert (Durable) coalesces the slices into fewer parts server-side.
+/// Slice each batch into fixed-size inserts written through bounded concurrent futures, mirroring SDLC.
 async fn write_loop(
     destination: Arc<dyn crate::destination::Destination>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
@@ -930,9 +921,7 @@ pub struct TableWriteTotals {
 }
 
 impl code_graph::v2::BatchSink for StreamingClickHouseSink {
-    /// # Panics
-    /// Uses `blocking_send`, so it must run on a blocking thread (the code-graph
-    /// writer threads), never directly inside an async task.
+    /// Must run on a blocking thread (the code-graph writer threads), not an async task: it uses `blocking_send`.
     fn write_batch(
         &self,
         table: &str,

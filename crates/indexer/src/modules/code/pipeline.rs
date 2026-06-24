@@ -508,8 +508,7 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         result: &code_graph::v2::PipelineResult,
     ) {
-        // Always run, even with no prior checkpoint: streamed writes mean a killed
-        // first-time run can leave committed partial rows that only this sweep removes.
+        // Always run: with streamed writes a killed first-time run can leave partial rows only this sweep removes.
 
         // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
         info!(
