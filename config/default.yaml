@@ -104,6 +104,9 @@ schedule:
       cron: "0 */1 * * * *"           # every minute
     namespace:
       cron: "0 */1 * * * *"           # every minute
+      sweep:
+        cron: "0 */15 * * * *"        # full sweep every 15 minutes
+        slack_secs: 30
     code-backfill:
       cron: "0 */1 * * * *"           # every minute
     table-cleanup:

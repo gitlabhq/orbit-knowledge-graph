@@ -11,6 +11,10 @@ pub struct ScheduledTaskMetrics {
     requests_skipped: Counter<u64>,
     query_duration: Histogram<f64>,
     errors: Counter<u64>,
+    dirty_namespaces: Histogram<f64>,
+    dirty_detection_query_duration: Histogram<f64>,
+    dirty_detection_read_rows: Histogram<f64>,
+    sweep_only_dispatched: Counter<u64>,
 }
 
 impl ScheduledTaskMetrics {
@@ -27,6 +31,12 @@ impl ScheduledTaskMetrics {
             requests_skipped: scheduler::REQUESTS_SKIPPED.build_counter_u64(meter),
             query_duration: scheduler::QUERY_DURATION.build_histogram_f64(meter),
             errors: scheduler::ERRORS.build_counter_u64(meter),
+            dirty_namespaces: scheduler::DIRTY_NAMESPACES.build_histogram_f64(meter),
+            dirty_detection_query_duration: scheduler::DIRTY_DETECTION_QUERY_DURATION
+                .build_histogram_f64(meter),
+            dirty_detection_read_rows: scheduler::DIRTY_DETECTION_READ_ROWS
+                .build_histogram_f64(meter),
+            sweep_only_dispatched: scheduler::SWEEP_ONLY_DISPATCHED.build_counter_u64(meter),
         }
     }
 
@@ -71,6 +81,20 @@ impl ScheduledTaskMetrics {
                 KeyValue::new(scheduler::labels::STAGE, stage.to_owned()),
             ],
         );
+    }
+
+    pub fn record_dirty_namespaces(&self, count: f64) {
+        self.dirty_namespaces.record(count, &[]);
+    }
+
+    pub fn record_dirty_detection_query(&self, table: &str, duration: f64, read_rows: f64) {
+        let label = [KeyValue::new(scheduler::labels::TABLE, table.to_owned())];
+        self.dirty_detection_query_duration.record(duration, &label);
+        self.dirty_detection_read_rows.record(read_rows, &label);
+    }
+
+    pub fn record_sweep_only_dispatched(&self, count: u64) {
+        self.sweep_only_dispatched.add(count, &[]);
     }
 }
 

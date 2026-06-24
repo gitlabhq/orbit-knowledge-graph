@@ -108,6 +108,13 @@ impl ScheduleConfiguration {
             _ => DEFAULT_INTERVAL,
         }
     }
+
+    /// Like [`interval_hint`](Self::interval_hint) but returns a `chrono::Duration`
+    /// for use in timestamp arithmetic.
+    pub fn interval_hint_chrono(&self) -> chrono::Duration {
+        chrono::Duration::from_std(self.interval_hint())
+            .unwrap_or_else(|_| chrono::Duration::seconds(DEFAULT_INTERVAL.as_secs() as i64))
+    }
 }
 
 // ── Handler config types ─────────────────────────────────────────────
@@ -333,6 +340,46 @@ pub struct GlobalDispatcherConfig {
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+
+    /// Full-sweep cadence: periodically dispatch all enabled namespaces
+    /// regardless of dirty-detection, as a safety net against signal gaps.
+    #[serde(default)]
+    pub sweep: SweepConfig,
+}
+
+fn default_sweep_cron() -> String {
+    "0 */15 * * * *".to_string()
+}
+
+fn default_dirty_detection_slack_secs() -> u64 {
+    30
+}
+
+/// Controls the periodic full-sweep safety net and dirty-detection slack.
+///
+/// Modeled on [`CodeBackfillSweepConfig`].
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SweepConfig {
+    /// Cron expression for the full sweep (6-field: `sec min hour dom mon dow`).
+    /// Defaults to every 15 minutes.
+    #[serde(default = "default_sweep_cron")]
+    pub cron: String,
+
+    /// Extra seconds subtracted from the dirty-detection watermark to create an
+    /// overlap window, compensating for clock skew and replication lag. A wider
+    /// slack over-reports dirty namespaces (cheap — deduped by `PublishDuplicate`)
+    /// but never under-reports.
+    #[serde(default = "default_dirty_detection_slack_secs")]
+    pub slack_secs: u64,
+}
+
+impl Default for SweepConfig {
+    fn default() -> Self {
+        Self {
+            cron: default_sweep_cron(),
+            slack_secs: default_dirty_detection_slack_secs(),
+        }
+    }
 }
 
 fn default_events_stream_name() -> String {

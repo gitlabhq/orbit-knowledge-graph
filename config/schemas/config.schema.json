@@ -245,7 +245,11 @@
             "cron": "0 */5 * * * *"
           },
           "namespace": {
-            "cron": null
+            "cron": null,
+            "sweep": {
+              "cron": "0 */15 * * * *",
+              "slack_secs": 30
+            }
           },
           "namespace-deletion": {
             "cron": "0 0 3 * * *"
@@ -966,6 +970,14 @@
             "null"
           ],
           "default": null
+        },
+        "sweep": {
+          "description": "Full-sweep cadence: periodically dispatch all enabled namespaces\nregardless of dirty-detection, as a safety net against signal gaps.",
+          "$ref": "#/$defs/SweepConfig",
+          "default": {
+            "cron": "0 */15 * * * *",
+            "slack_secs": 30
+          }
         }
       }
     },
@@ -1425,7 +1437,11 @@
               "cron": "0 */5 * * * *"
             },
             "namespace": {
-              "cron": null
+              "cron": null,
+              "sweep": {
+                "cron": "0 */15 * * * *",
+                "slack_secs": 30
+              }
             },
             "namespace-deletion": {
               "cron": "0 0 3 * * *"
@@ -1470,7 +1486,11 @@
         "namespace": {
           "$ref": "#/$defs/NamespaceDispatcherConfig",
           "default": {
-            "cron": null
+            "cron": null,
+            "sweep": {
+              "cron": "0 */15 * * * *",
+              "slack_secs": 30
+            }
           }
         },
         "namespace-deletion": {
@@ -1609,6 +1629,24 @@
         }
       },
       "additionalProperties": false
+    },
+    "SweepConfig": {
+      "description": "Controls the periodic full-sweep safety net and dirty-detection slack.\n\nModeled on [`CodeBackfillSweepConfig`].",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression for the full sweep (6-field: `sec min hour dom mon dow`).\nDefaults to every 15 minutes.",
+          "type": "string",
+          "default": "0 */15 * * * *"
+        },
+        "slack_secs": {
+          "description": "Extra seconds subtracted from the dirty-detection watermark to create an\noverlap window, compensating for clock skew and replication lag. A wider\nslack over-reports dirty namespaces (cheap — deduped by `PublishDuplicate`)\nbut never under-reports.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        }
+      }
     },
     "TableCleanupConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",

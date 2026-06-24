@@ -193,6 +193,12 @@ The scheduler publishes indexing requests to parameterized subjects (e.g. `sdlc.
 
 This replaces the previous KV-lock-based deduplication with a simpler, infrastructure-level guarantee.
 
+**Dirty-namespace pre-filter**
+
+The namespace dispatcher includes a dirty-namespace change-detection pre-filter that avoids dispatching quiescent namespaces every cycle. Once per dispatch cycle, it runs one change-detection query per namespaced Siphon source table (`SELECT DISTINCT traversal_path WHERE <watermark> > <cutoff>`), unions the dirty `traversal_path`s, and dispatches only those namespaces. The watermark column is resolved per entity from `EtlConfig::watermark()` (not the global default), which is load-bearing for tables where the two columns differ in pruning efficiency. A configurable full sweep runs periodically as a safety net against signal gaps. A silent-drop canary metric (`gkg.scheduler.dirty_detection.sweep_only_dispatched`) tracks namespaces dispatched only by the sweep, signaling under-reporting if it sustains a non-zero value.
+
+Dropping a dispatch cannot drop data: the indexer's per-entity checkpoint floor (`pull_window`) is owned by the indexer and only advances on a successful run. A skipped namespace's next dispatch re-reads the full intervening interval. Dirty-detection is an optimization on a self-healing base.
+
 **Completing an indexing job**
 
 When the handler acks the message, WorkQueue retention automatically removes it from the stream. The handler then updates the database to reflect the date of the last indexing alongside relevant metadata.

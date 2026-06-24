@@ -8,7 +8,10 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
-use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
+use gkg_server_config::{
+    GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration, ScheduleConfiguration,
+    SweepConfig,
+};
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::scheduled::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
@@ -152,6 +155,17 @@ impl TestContext {
             .await
             .unwrap();
     }
+
+    /// Purge all messages from the stream so subjects can accept new publishes.
+    async fn purge_stream(url: &str) {
+        let client = async_nats::connect(format!("nats://{url}")).await.unwrap();
+        let jetstream = async_nats::jetstream::new(client);
+        let stream = jetstream
+            .get_stream(&NATS_VERSIONER.stream(INDEXER_STREAM))
+            .await
+            .unwrap();
+        stream.purge().await.unwrap();
+    }
 }
 
 // --- Tests ---
@@ -226,4 +240,187 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             .iter()
             .all(|r| r.watermark >= before && r.watermark <= after)
     );
+}
+
+// --- Dirty-namespace detection tests ---
+
+/// Config that makes the first run a sweep (default), then subsequent runs
+/// use dirty-detection because the sweep cron is far in the future.
+fn dirty_detection_config() -> NamespaceDispatcherConfig {
+    NamespaceDispatcherConfig {
+        schedule: ScheduleConfiguration {
+            cron: Some("*/1 * * * * *".to_string()),
+        },
+        sweep: SweepConfig {
+            cron: "0 0 1 1 1 *".to_string(), // yearly — won't fire during test
+            slack_secs: 0,
+        },
+    }
+}
+
+#[tokio::test]
+async fn dirty_detection_dispatches_only_changed_namespaces() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([
+            Namespace {
+                id: 100,
+                traversal_path: "1/100/".to_string(),
+            },
+            Namespace {
+                id: 200,
+                traversal_path: "2/200/".to_string(),
+            },
+            Namespace {
+                id: 300,
+                traversal_path: "3/300/".to_string(),
+            },
+        ])
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let datalake = context.clickhouse.config.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
+    let dispatcher = NamespaceDispatcher::new(
+        services.nats.clone(),
+        datalake.clone(),
+        metrics.clone(),
+        dirty_detection_config(),
+        campaign.clone(),
+    );
+
+    // First run is always a sweep (last_sweep = None) — dispatches all 3
+    dispatcher.run().await.unwrap();
+    let first_batch = context.consume_namespace_requests().await;
+    assert_eq!(first_batch.len(), 3, "sweep should dispatch all namespaces");
+
+    // (a) Seed a row with a recent watermark in namespace 1/100/
+    context
+        .clickhouse
+        .execute(
+            "INSERT INTO work_items (id, iid, title, work_item_type_id, namespace_id, traversal_path, _siphon_watermark) \
+             VALUES (1, 1, 'test', 1, 100, '1/100/', now64(6))",
+        )
+        .await;
+
+    // Second run: dirty-detection mode (sweep not due). Only namespace 1/100/ changed.
+    // Recreate the stream to allow re-publishing to the same subjects.
+    TestContext::purge_stream(&context.nats_url).await;
+
+    dispatcher.run().await.unwrap();
+    let second_batch = context.consume_namespace_requests().await;
+    let dispatched_paths: HashSet<_> = second_batch
+        .iter()
+        .map(|r| r.traversal_path.as_str())
+        .collect();
+    assert!(
+        dispatched_paths.contains("1/100/"),
+        "namespace with changed row should be dispatched"
+    );
+    assert!(
+        !dispatched_paths.contains("2/200/"),
+        "unchanged namespace should not be dispatched"
+    );
+    assert!(
+        !dispatched_paths.contains("3/300/"),
+        "unchanged namespace should not be dispatched"
+    );
+}
+
+#[tokio::test]
+async fn dirty_detection_catches_watermark_update() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([Namespace {
+            id: 100,
+            traversal_path: "1/100/".to_string(),
+        }])
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let datalake = context.clickhouse.config.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
+    let dispatcher = NamespaceDispatcher::new(
+        services.nats.clone(),
+        datalake.clone(),
+        metrics.clone(),
+        dirty_detection_config(),
+        campaign.clone(),
+    );
+
+    // First run: sweep
+    dispatcher.run().await.unwrap();
+    context.consume_namespace_requests().await;
+
+    // (b) Update the row's watermark to a recent time
+    context
+        .clickhouse
+        .execute(
+            "INSERT INTO work_items (id, iid, title, work_item_type_id, namespace_id, traversal_path, _siphon_watermark) \
+             VALUES (2, 2, 'updated', 1, 100, '1/100/', now64(6))",
+        )
+        .await;
+
+    TestContext::purge_stream(&context.nats_url).await;
+    dispatcher.run().await.unwrap();
+    let batch = context.consume_namespace_requests().await;
+    assert_eq!(batch.len(), 1, "updated watermark should trigger dispatch");
+    assert_eq!(batch[0].traversal_path, "1/100/");
+}
+
+#[tokio::test]
+async fn dirty_detection_catches_deleted_tombstone() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([Namespace {
+            id: 100,
+            traversal_path: "1/100/".to_string(),
+        }])
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let datalake = context.clickhouse.config.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
+    let dispatcher = NamespaceDispatcher::new(
+        services.nats.clone(),
+        datalake.clone(),
+        metrics.clone(),
+        dirty_detection_config(),
+        campaign.clone(),
+    );
+
+    // First run: sweep
+    dispatcher.run().await.unwrap();
+    context.consume_namespace_requests().await;
+
+    // (c) Insert a _siphon_deleted=true tombstone with an advanced watermark
+    context
+        .clickhouse
+        .execute(
+            "INSERT INTO work_items (id, iid, title, work_item_type_id, namespace_id, traversal_path, _siphon_watermark, _siphon_deleted) \
+             VALUES (3, 3, 'deleted', 1, 100, '1/100/', now64(6), true)",
+        )
+        .await;
+
+    TestContext::purge_stream(&context.nats_url).await;
+    dispatcher.run().await.unwrap();
+    let batch = context.consume_namespace_requests().await;
+    assert_eq!(
+        batch.len(),
+        1,
+        "deleted tombstone with advanced watermark should trigger dispatch"
+    );
+    assert_eq!(batch[0].traversal_path, "1/100/");
 }

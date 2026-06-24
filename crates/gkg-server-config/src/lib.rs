@@ -32,7 +32,7 @@ pub use engine::{
     GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
     ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
-    StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
+    StaleEdgeReconciliationConfig, SubscriptionConfig, SweepConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};

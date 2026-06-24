@@ -1167,6 +1167,75 @@
       "domain": "query.pipeline"
     },
     {
+      "otel_name": "gkg.scheduler.dirty_detection.namespaces",
+      "prom_name": "gkg_scheduler_dirty_detection_namespaces",
+      "description": "Number of distinct dirty namespaces found per dispatch cycle.",
+      "kind": "histogram_f64",
+      "labels": [],
+      "buckets": [
+        1.0,
+        10.0,
+        100.0,
+        1000.0,
+        10000.0,
+        100000.0,
+        1000000.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.dirty_detection.query.duration",
+      "prom_name": "gkg_scheduler_dirty_detection_query_duration_seconds",
+      "description": "Per-table change-detection query duration.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "table"
+      ],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.dirty_detection.query.read_rows",
+      "prom_name": "gkg_scheduler_dirty_detection_query_read_rows",
+      "description": "Rows read by the per-table change-detection query.",
+      "kind": "histogram_f64",
+      "labels": [
+        "table"
+      ],
+      "buckets": [
+        1.0,
+        10.0,
+        100.0,
+        1000.0,
+        10000.0,
+        100000.0,
+        1000000.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
+      "otel_name": "gkg.scheduler.dirty_detection.sweep_only_dispatched",
+      "prom_name": "gkg_scheduler_dirty_detection_sweep_only_dispatched_total",
+      "description": "Namespaces dispatched only because of the full sweep, not seen by dirty-detection. A sustained non-zero value signals dirty-detection is under-reporting.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
       "otel_name": "gkg.scheduler.task.duration",
       "prom_name": "gkg_scheduler_task_duration_seconds",
       "description": "End-to-end duration of a scheduled task run.",

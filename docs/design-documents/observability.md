@@ -68,6 +68,10 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.scheduler.task.requests.skipped` | Counter | count | `task` | Requests skipped (already in-flight) |
 | `gkg.scheduler.task.query.duration` | Histogram | s | `query` | Duration of a scheduled task ClickHouse query |
 | `gkg.scheduler.task.errors` | Counter | count | `task`, `stage` (publish/query) | Scheduled task errors by stage |
+| `gkg.scheduler.dirty_detection.namespaces` | Histogram | count | | Distinct dirty namespaces found per dispatch cycle |
+| `gkg.scheduler.dirty_detection.query.duration` | Histogram | s | `table` | Per-table change-detection query duration |
+| `gkg.scheduler.dirty_detection.query.read_rows` | Histogram | count | `table` | Rows read by the per-table change-detection query |
+| `gkg.scheduler.dirty_detection.sweep_only_dispatched` | Counter | count | | Namespaces dispatched only by the full sweep (silent-drop canary) |
 
 *SDLC module metrics:*
 
