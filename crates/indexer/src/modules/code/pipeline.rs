@@ -508,15 +508,8 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         result: &code_graph::v2::PipelineResult,
     ) {
-        if !request.had_prior_checkpoint {
-            debug!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                traversal_path = request.traversal_path.as_str(),
-                "first-time indexing detected, skipping stale data cleanup"
-            );
-            return;
-        }
+        // Always run, even with no prior checkpoint: streamed writes mean a killed
+        // first-time run can leave committed partial rows that only this sweep removes.
 
         // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
         info!(
