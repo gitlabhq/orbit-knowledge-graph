@@ -492,7 +492,7 @@
           "minimum": 0
         },
         "write_slice_rows": {
-          "description": "Rows per ClickHouse insert from the streaming sink; large tables are sliced to this. Defaults to 500000.",
+          "description": "Target rows per ClickHouse insert; the sink combines small per-language batches and splits large ones toward this. Defaults to 500000.",
           "type": "integer",
           "format": "uint",
           "default": 500000,

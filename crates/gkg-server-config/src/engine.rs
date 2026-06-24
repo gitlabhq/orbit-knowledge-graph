@@ -303,7 +303,7 @@ pub struct CodeIndexingPipelineConfig {
     /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.
     #[serde(default = "default_code_indexing_write_channel_capacity")]
     pub write_channel_capacity: usize,
-    /// Rows per ClickHouse insert from the streaming sink; large tables are sliced to this. Defaults to 500000.
+    /// Target rows per ClickHouse insert; the sink combines small per-language batches and splits large ones toward this. Defaults to 500000.
     #[serde(default = "default_code_indexing_write_slice_rows")]
     pub write_slice_rows: usize,
     /// Concurrent in-flight inserts from the streaming sink. Defaults to 8.
