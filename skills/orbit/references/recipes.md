@@ -443,7 +443,7 @@ Use the response's `pagination.next_cursor` for the next page:
       "entity": "Project",
       "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
     },
-    "cursor": {"after": "<next_cursor>", "page_size": 50}
+    "cursor": {"after": "eyJ2IjoxLCJ2YWx1ZXMiOlsxXX0", "page_size": 50}
   }
 }
 ```

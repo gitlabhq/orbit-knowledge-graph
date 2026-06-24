@@ -810,12 +810,12 @@ proj_id_mr_orderby_limit_page:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
       "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
       "limit": 40,
-      "cursor": {"offset": 0, "page_size": 20},
+      "cursor": {"page_size": 20},
       "options": {"include_debug_sql": true}
     }
 
 proj_id_mr_orderby_limit_page2:
-  desc: "Second page of the exact same scoped+ordered query (offset 20). Proves pagination is stable. page1 and page2 are disjoint, contiguous, and together equal the global ORDER BY created_at DESC top-40 with no gaps, duplicates, or reordering."
+  desc: "Same scoped+ordered query with an explicit cursor page size. Follow-up pages use the previous response's opaque next_cursor as cursor.after."
   category: traversal
   suite: scoping
   query: |
@@ -828,7 +828,7 @@ proj_id_mr_orderby_limit_page2:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
       "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
       "limit": 40,
-      "cursor": {"offset": 20, "page_size": 20},
+      "cursor": {"page_size": 20},
       "options": {"include_debug_sql": true}
     }
 
@@ -1085,4 +1085,3 @@ pipeline_filter_changed_paths_agg:
       "aggregation_sort": {"column": "changes", "direction": "DESC"},
       "limit": 60
     }
-

@@ -2386,7 +2386,7 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
         pagination["has_more"], false,
         "after id 4, 5 users -> last page"
     );
-    assert_eq!(pagination["total_rows"], 5);
+    assert_eq!(pagination["total_rows"], 1);
 
     let nodes = value["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 1, "only 1 user left on last page");

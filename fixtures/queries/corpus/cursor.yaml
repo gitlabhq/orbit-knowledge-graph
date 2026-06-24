@@ -43,7 +43,6 @@
       ],
       "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -96,7 +95,6 @@
       ],
       "limit": 30,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -119,7 +117,6 @@
       },
       "limit": 100,
       "cursor": {
-        "offset": 0,
         "page_size": 20
       }
     }
@@ -145,7 +142,6 @@
       },
       "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -199,7 +195,6 @@
       },
       "limit": 20,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -254,7 +249,6 @@
       },
       "limit": 15,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -286,7 +280,6 @@
       ],
       "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -333,7 +326,6 @@
       ],
       "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -374,7 +366,6 @@
       ],
       "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -400,7 +391,6 @@
       },
       "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -433,7 +423,6 @@
       },
       "limit": 100,
       "cursor": {
-        "offset": 0,
         "page_size": 20
       }
     }
@@ -476,7 +465,6 @@
       ],
       "limit": 100,
       "cursor": {
-        "offset": 0,
         "page_size": 20
       }
     }
@@ -518,7 +506,6 @@
       ],
       "limit": 500,
       "cursor": {
-        "offset": 0,
         "page_size": 50
       }
     }
@@ -575,7 +562,6 @@
       ],
       "limit": 20,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -682,7 +668,6 @@
       },
       "limit": 20,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -738,7 +723,6 @@
       },
       "limit": 30,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -806,7 +790,6 @@
       },
       "limit": 30,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
