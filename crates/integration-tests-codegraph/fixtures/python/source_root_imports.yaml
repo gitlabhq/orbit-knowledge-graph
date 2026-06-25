@@ -1,0 +1,193 @@
+name: "Python: source-root imports"
+fixtures:
+  - path: src/scoring.py
+    content: |
+      def score_review(review):
+          return review
+
+  - path: src/pipeline.py
+    content: |
+      from scoring import score_review
+
+      def run_tier_reviews(review):
+          return score_review(review)
+
+  - path: src/poetry/factory.py
+    content: |
+      class Factory:
+          def build(self):
+              pass
+
+  - path: src/poetry/__init__.py
+    content: |
+      pass
+
+  - path: src/poetry/console/application.py
+    content: |
+      from poetry.factory import Factory
+
+      def build_application():
+          return Factory()
+
+  - path: src/prefect/__init__.py
+    content: |
+      pass
+
+  - path: src/prefect/events/schemas/events.py
+    content: |
+      class Event:
+          def emit(self):
+              pass
+
+  - path: src/prefect/task_runners.py
+    content: |
+      from prefect.events.schemas.events import Event
+
+      def emit_task_event():
+          return Event()
+
+  - path: src/requests/api.py
+    content: |
+      def request(method, url):
+          return method, url
+
+  - path: src/requests/__init__.py
+    content: |
+      pass
+
+  - path: src/requests/sessions.py
+    content: |
+      from requests.api import request as send_request
+
+      def replay():
+          return send_request("GET", "https://example.com")
+
+  - path: apps/orion/src/orion/worker.py
+    content: |
+      class Worker:
+          pass
+
+  - path: apps/orion/src/orion/service.py
+    content: |
+      from orion.worker import Worker
+
+      def boot_worker():
+          return Worker()
+
+  - path: vendor/sdk/client.py
+    content: |
+      class Client:
+          pass
+
+  - path: src/external_client.py
+    content: |
+      from sdk.client import Client
+
+      def build_external_client():
+          return Client()
+
+  - path: src/alpha/common/scoring.py
+    content: |
+      def score_review(review):
+          return review
+
+  - path: src/alpha/other/common/scoring.py
+    content: |
+      def score_review(review):
+          return review
+
+  - path: src/alpha/other/reporting.py
+    content: |
+      from common.scoring import score_review
+
+      def run_ambiguous(review):
+          return score_review(review)
+
+tests:
+  - name: "top-level source-root module import resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.pipeline.run_tier_reviews'
+        AND callee.fqn = 'src.scoring.score_review'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Poetry-style package import resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.poetry.console.application.build_application'
+        AND callee.fqn = 'src.poetry.factory.Factory'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Prefect-style nested package import resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.prefect.task_runners.emit_task_event'
+        AND callee.fqn = 'src.prefect.events.schemas.events.Event'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Requests-style aliased package import resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.requests.sessions.replay'
+        AND callee.fqn = 'src.requests.api.request'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "nested src source root import resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'apps.orion.src.orion.service.boot_worker'
+        AND callee.fqn = 'apps.orion.src.orion.worker.Worker'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "unmarked ancestor definitions do not capture external imports"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'src.external_client.build_external_client'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'src.external_client.build_external_client'
+            AND sym.path = 'sdk.client'
+            AND sym.name = 'Client'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
+        assert:
+          - { row_count: 1 }
+
+  - name: "unmarked ancestor candidates do not bind arbitrary definitions"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'src.alpha.other.reporting.run_ambiguous'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'src.alpha.other.reporting.run_ambiguous'
+            AND sym.path = 'common.scoring'
+            AND sym.name = 'score_review'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
+        assert:
+          - { row_count: 1 }

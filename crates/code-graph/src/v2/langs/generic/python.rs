@@ -11,11 +11,11 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::BindingKind;
 
-use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
     ResolverHooks,
 };
+use crate::v2::linker::{HasRules, ResolveSettings};
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
@@ -364,6 +364,10 @@ impl HasRules for PythonRules {
                 "type",
                 "zip",
             ],
+            ..Default::default()
+        })
+        .with_settings(ResolveSettings {
+            source_root_import_markers: &["src"],
             ..Default::default()
         })
     }

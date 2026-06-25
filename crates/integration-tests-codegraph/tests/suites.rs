@@ -183,6 +183,10 @@ yaml_test!(
     "python/v1_interfile_resolution.yaml"
 );
 yaml_test!(
+    python_source_root_imports,
+    "python/source_root_imports.yaml"
+);
+yaml_test!(
     python_imported_symbol_fallback_matrix,
     "python/imported_symbol_fallback_matrix.yaml"
 );
