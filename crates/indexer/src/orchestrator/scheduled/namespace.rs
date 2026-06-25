@@ -121,6 +121,7 @@ impl NamespaceDispatcher {
                 watermark,
                 dispatch_id: Uuid::new_v4(),
                 campaign_id: campaign_id.clone(),
+                targets: Vec::new(),
             };
 
             let subscription = request.publish_subscription();

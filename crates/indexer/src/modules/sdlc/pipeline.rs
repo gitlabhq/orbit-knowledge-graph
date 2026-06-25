@@ -470,6 +470,7 @@ mod tests {
     fn simple_plan_with_batch_size(name: &str, batch_size: u64) -> Plan {
         Plan {
             name: name.to_string(),
+            target: name.to_string(),
             extract_template: "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \

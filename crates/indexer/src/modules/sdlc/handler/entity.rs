@@ -51,6 +51,13 @@ struct IndexingRequest {
     namespace_id: Option<i64>,
     dispatch_id: Uuid,
     campaign_id: Option<String>,
+    targets: Vec<String>,
+}
+
+impl IndexingRequest {
+    fn indexing_requested(&self, target: &str) -> bool {
+        self.targets.is_empty() || self.targets.iter().any(|requested| requested == target)
+    }
 }
 
 impl EntityHandler {
@@ -111,6 +118,7 @@ impl EntityHandler {
                     namespace_id: None,
                     dispatch_id: payload.dispatch_id,
                     campaign_id: payload.campaign_id,
+                    targets: payload.targets,
                 })
             }
             EtlScope::Namespaced => {
@@ -123,6 +131,7 @@ impl EntityHandler {
                     namespace_id: Some(payload.namespace),
                     dispatch_id: payload.dispatch_id,
                     campaign_id: payload.campaign_id,
+                    targets: payload.targets,
                 })
             }
         }
@@ -413,6 +422,16 @@ impl Handler for EntityHandler {
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let request = self.deserialize(message)?;
 
+        if !request.indexing_requested(&self.plan.target) {
+            debug!(
+                entity = %self.plan.name,
+                target = %self.plan.target,
+                targets = ?request.targets,
+                "skipping request: target not selected"
+            );
+            return Ok(());
+        }
+
         if !self.enabled_for_namespace(request.namespace_id) {
             debug!(
                 entity = %self.plan.name,
@@ -571,6 +590,25 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn indexing_requested_matches_empty_or_matching_target() {
+        assert!(indexing_request_with_targets([]).indexing_requested("MergeRequest"));
+        assert!(indexing_request_with_targets(["MergeRequest"]).indexing_requested("MergeRequest"));
+        assert!(!indexing_request_with_targets(["Job"]).indexing_requested("MergeRequest"));
+    }
+
+    fn indexing_request_with_targets<const N: usize>(targets: [&str; N]) -> IndexingRequest {
+        IndexingRequest {
+            watermark: ts("2024-01-21T00:00:00Z"),
+            scope_key: "global".to_string(),
+            traversal_path: None,
+            namespace_id: None,
+            dispatch_id: Uuid::nil(),
+            campaign_id: None,
+            targets: targets.iter().map(|target| target.to_string()).collect(),
+        }
     }
 
     fn ts(s: &str) -> DateTime<Utc> {

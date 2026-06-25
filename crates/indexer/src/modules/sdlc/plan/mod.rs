@@ -237,6 +237,7 @@ impl Filter for CursorFilter<'_> {
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
+    pub target: String,
     pub extract_template: String,
     pub watermark_column: String,
     pub deleted_column: String,
@@ -375,6 +376,7 @@ mod tests {
         let sort_key_sql = sort_key.join(", ");
         Plan {
             name: "Test".to_string(),
+            target: "Test".to_string(),
             extract_template: format!(
                 "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \

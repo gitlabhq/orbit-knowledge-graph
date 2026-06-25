@@ -97,18 +97,21 @@ fn assert_unique_plan_names(global: &[Plan], namespaced: &[Plan]) {
 }
 
 fn lower_derived_entity_plan(input: DerivedEntityPlan, batch_size: u64) -> Plan {
+    let name = input.name;
     let mut plan = lower_extract_plan(input.extract, batch_size);
-    plan.name = input.name;
+    plan.name = name.clone();
+    plan.target = name;
     plan.transform = TransformSpec::Rust(input.transform);
     plan
 }
 
 fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Plan {
+    let name = input.name;
     let node_destination = input.extract.destination_table.clone();
     let mut plan = lower_extract_plan(input.extract, batch_size);
 
     let dict_columns = ontology
-        .get_node(&input.name)
+        .get_node(&name)
         .map(|node| {
             node.storage
                 .columns
@@ -129,7 +132,8 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pla
         transforms.push(lower_fk_edge_transform(fk_edge, ontology));
     }
 
-    plan.name = input.name;
+    plan.name = name.clone();
+    plan.target = name;
     plan.transform = TransformSpec::DataFusion(transforms);
     plan
 }
@@ -226,6 +230,7 @@ fn lower_standalone_edge_plan(
     ontology: &Ontology,
 ) -> Plan {
     let destination_table = input.extract.destination_table.clone();
+    let target = input.relationship_kind.clone();
     let name = plan_name(
         &input.relationship_kind,
         &input.extract.source,
@@ -245,6 +250,7 @@ fn lower_standalone_edge_plan(
         &meta.sort_key,
     );
     plan.name = name;
+    plan.target = target;
     plan.transform = TransformSpec::DataFusion(vec![Transformation {
         sql,
         destination_table,
@@ -472,6 +478,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
 
     Plan {
         name: String::new(),
+        target: String::new(),
         extract_template,
         watermark_column: input.watermark,
         deleted_column: input.deleted,
@@ -583,6 +590,7 @@ mod tests {
     fn named_plan(name: &str) -> Plan {
         Plan {
             name: name.to_string(),
+            target: name.to_string(),
             extract_template: String::new(),
             watermark_column: String::new(),
             deleted_column: String::new(),
@@ -613,6 +621,58 @@ mod tests {
         // target (empty plan-name suffix) trips here instead of silently
         // clobbering a handler and sharing a checkpoint cursor.
         let _ = build_plans(&test_ontology(), 1000);
+    }
+
+    #[test]
+    fn embedded_ontology_yields_expected_indexing_targets() {
+        let plans = build_plans(&test_ontology(), 1000);
+        let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+        for plan in plans.global.iter().chain(plans.namespaced.iter()) {
+            assert!(
+                !plan.target.is_empty(),
+                "plan '{}' has empty target",
+                plan.name
+            );
+            *counts.entry(plan.target.as_str()).or_default() += 1;
+        }
+
+        assert_eq!(counts.get("User"), Some(&1));
+        assert_eq!(counts.get("Job"), Some(&1));
+        assert_eq!(counts.get("SystemNote"), Some(&1));
+        assert_eq!(counts.get("HAS_LABEL"), Some(&1));
+        assert_eq!(counts.get("REOPENED"), Some(&2));
+    }
+
+    #[test]
+    fn embedded_ontology_yields_unambiguous_indexing_targets() {
+        let inputs = input::from_ontology(&test_ontology());
+        let mut owners =
+            std::collections::BTreeMap::<String, std::collections::BTreeSet<&str>>::new();
+
+        for node in &inputs.node_plans {
+            owners.entry(node.name.clone()).or_default().insert("node");
+        }
+        for edge in &inputs.standalone_edge_plans {
+            owners
+                .entry(edge.relationship_kind.clone())
+                .or_default()
+                .insert("standalone edge");
+        }
+        for derived in &inputs.derived_entity_plans {
+            owners
+                .entry(derived.name.clone())
+                .or_default()
+                .insert("derived entity");
+        }
+
+        let ambiguous_targets = owners
+            .iter()
+            .filter(|(_, owners)| owners.len() > 1)
+            .collect::<Vec<_>>();
+        assert!(
+            ambiguous_targets.is_empty(),
+            "ambiguous indexing targets: {ambiguous_targets:?}"
+        );
     }
 
     fn build_plans(ontology: &ontology::Ontology, batch_size: u64) -> Plans {

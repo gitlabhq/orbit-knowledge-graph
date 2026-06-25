@@ -31,6 +31,8 @@ pub struct GlobalIndexingRequest {
     pub dispatch_id: Uuid,
     #[serde(default)]
     pub campaign_id: Option<String>,
+    #[serde(default)]
+    pub targets: Vec<String>,
 }
 
 impl Event for GlobalIndexingRequest {
@@ -48,6 +50,8 @@ pub struct NamespaceIndexingRequest {
     pub dispatch_id: Uuid,
     #[serde(default)]
     pub campaign_id: Option<String>,
+    #[serde(default)]
+    pub targets: Vec<String>,
 }
 
 impl NamespaceIndexingRequest {
