@@ -354,13 +354,13 @@ impl CodeIndexingPipeline {
             &self.ontology,
             self.table_names.clone(),
         ));
-        let streaming_sink = Arc::new(StreamWriter::new(
+        let (writer, stream_handle) = StreamWriter::new(
             context.destination.clone(),
             self.pipeline_config.write_channel_capacity,
             self.pipeline_config.write_max_concurrent_writes,
             self.pipeline_config.write_slice_rows,
-        ));
-        let sink: Arc<dyn code_graph::v2::BatchSink> = streaming_sink.clone();
+        );
+        let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(writer);
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
@@ -386,7 +386,7 @@ impl CodeIndexingPipeline {
         );
 
         let flush_start = Instant::now();
-        let per_table_writes = match streaming_sink.finish().await {
+        let per_table_writes = match stream_handle.finish().await {
             Ok(totals) => totals,
             Err(e) => {
                 return Err(HandlerError::Permanent {

@@ -4,11 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
-use parking_lot::Mutex;
+use code_graph::v2::SinkError;
 use thiserror::Error;
 use tokio::sync::mpsc;
-
-use code_graph::v2::SinkError;
 
 use crate::destination::{BatchWriterOptions, Destination};
 use crate::durability::WriteDurability;
@@ -18,14 +16,14 @@ use crate::durability::WriteDurability;
 pub struct StreamWriteError(pub String);
 
 type Outcome = Result<Vec<WriteTotals>, StreamWriteError>;
-type State = (
-    mpsc::Sender<(String, RecordBatch)>,
-    tokio::task::JoinHandle<Outcome>,
-);
 
 pub struct StreamWriter {
-    state: Mutex<Option<State>>,
+    tx: mpsc::Sender<(String, RecordBatch)>,
     max_rows_per_send: usize,
+}
+
+pub struct StreamHandle {
+    task: tokio::task::JoinHandle<Outcome>,
 }
 
 impl StreamWriter {
@@ -34,7 +32,7 @@ impl StreamWriter {
         channel_capacity: usize,
         max_concurrent: usize,
         max_rows_per_insert: usize,
-    ) -> Self {
+    ) -> (Self, StreamHandle) {
         let max_rows = max_rows_per_insert.max(1);
         let (tx, rx) = mpsc::channel(channel_capacity.max(1));
         let task = tokio::runtime::Handle::current().spawn(drain_loop(
@@ -43,41 +41,36 @@ impl StreamWriter {
             max_concurrent.max(1),
             max_rows,
         ));
-        Self {
-            state: Mutex::new(Some((tx, task))),
-            max_rows_per_send: max_rows,
-        }
+        (
+            Self {
+                tx,
+                max_rows_per_send: max_rows,
+            },
+            StreamHandle { task },
+        )
     }
 
     pub fn send(&self, table: &str, batch: &RecordBatch) -> Result<(), StreamWriteError> {
         if batch.num_rows() == 0 {
             return Ok(());
         }
-        let tx = self
-            .state
-            .lock()
-            .as_ref()
-            .map(|(tx, _)| tx.clone())
-            .ok_or_else(|| StreamWriteError("stream writer already finished".into()))?;
         let table = table.to_string();
         let mut offset = 0;
         while offset < batch.num_rows() {
             let len = (batch.num_rows() - offset).min(self.max_rows_per_send);
-            tx.blocking_send((table.clone(), batch.slice(offset, len)))
+            self.tx
+                .blocking_send((table.clone(), batch.slice(offset, len)))
                 .map_err(|_| StreamWriteError("stream writer stopped".into()))?;
             offset += len;
         }
         Ok(())
     }
+}
 
-    pub async fn finish(&self) -> Outcome {
-        let (tx, task) = self
-            .state
-            .lock()
-            .take()
-            .ok_or_else(|| StreamWriteError("finish already called".into()))?;
-        drop(tx);
-        task.await
+impl StreamHandle {
+    pub async fn finish(self) -> Outcome {
+        self.task
+            .await
             .map_err(|e| StreamWriteError(format!("join: {e}")))?
     }
 }
@@ -182,28 +175,26 @@ mod tests {
     use crate::testkit::MockDestination;
     use arrow::array::Int64Array;
     use arrow::datatypes::{DataType, Field, Schema};
+    use code_graph::v2::BatchSink;
 
     #[tokio::test]
     async fn finish_returns_per_table_totals() {
-        let sw = Arc::new(StreamWriter::new(
-            Arc::new(MockDestination::new()),
-            8,
-            4,
-            500_000,
-        ));
+        let (writer, handle) = StreamWriter::new(Arc::new(MockDestination::new()), 8, 4, 500_000);
+        let writer = Arc::new(writer);
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let batch =
             RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
 
-        let w = Arc::clone(&sw);
+        let w = Arc::clone(&writer);
         tokio::task::spawn_blocking(move || {
-            w.send("gl_file", &batch).unwrap();
-            w.send("gl_definition", &batch).unwrap();
+            w.write_batch("gl_file", &batch).unwrap();
+            w.write_batch("gl_definition", &batch).unwrap();
         })
         .await
         .unwrap();
 
-        let per_table = sw.finish().await.expect("finish should succeed");
+        drop(writer);
+        let per_table = handle.finish().await.expect("finish should succeed");
         let by_table: HashMap<&str, &WriteTotals> =
             per_table.iter().map(|t| (t.table.as_str(), t)).collect();
         assert_eq!(by_table.len(), 2);
