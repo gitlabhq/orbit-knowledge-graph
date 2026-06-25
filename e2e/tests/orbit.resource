@@ -16,7 +16,7 @@ ${INDEXING_BUDGET_MULTIPLIER}       %{INDEXING_BUDGET_MULTIPLIER=1}
 Orbit Status Is Healthy
     ${headers}=    GitLab Auth Headers
     ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
-    Should Be Equal    ${resp.json()["status"]}    healthy
+    Should Be Equal    ${resp.json()["system"]["status"]}    healthy
 
 Orbit Query Node
     [Documentation]    Search for a single node by entity type and primary id.

@@ -3,10 +3,10 @@
 # CI can override GKG image via E2E_GKG_IMAGE / E2E_GKG_TAG env vars.
 
 siphon:
-  chart: "1.10.0"
+  chart: "1.14.0"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.100-beta"
+    tag: "0.0.106-beta"
 gitlab:
   # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
   # gitlab-org/gitlab ref, and CNG image digests below are all bumped
@@ -14,12 +14,12 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "10.0.2-2603915101"
+  chart: "10.1.1-2628465458"
   # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "35e1865c3988d8bdb82d848a40f234bb6c88130c"
+  ref: "15857a4b652e3ac47d3ab4adc2748bb565fd0e3f"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
@@ -28,13 +28,13 @@ gitlab:
   # an empty Authorization header and silently 502.
   images:
     webservice:
-      digest: "sha256:ecb1feebef71bcdb25db00c97b11a47324a80d237bf189c24fa96dc1d325f56e"
+      digest: "sha256:7a7d9989c64cb64b693879000b40f8f05f2a48e462302b404f8b6501cc26e01b"
     workhorse:
-      digest: "sha256:274a096ee9fa46f234e8f2adb0ac22d3f8375af9c3b19aa098bfe9cb799bd966"
+      digest: "sha256:5c4d656e1216e2095d7c54ae5e41e618641723c7a14057c263a85506361d10c8"
     sidekiq:
-      digest: "sha256:ffb96bd81b0ac643fa9819c27c5eb141d143b70fdf9d8e0e9e537bb33acdf791"
+      digest: "sha256:f1aad3b485b5c030c5732713fb5dd7c0e8932ca28f1c049229dc3c691532cf23"
     toolbox:
-      digest: "sha256:5958727b4cfd33fc84c0c245dfb687b91f7704b0404e8d75423dd8ba141b2d31"
+      digest: "sha256:dd89243a09991063287fc7e2e162d81d47f80b84658af46645581094729bf4eb"
 gkg:
   chart: "0.24.0"
   image:
