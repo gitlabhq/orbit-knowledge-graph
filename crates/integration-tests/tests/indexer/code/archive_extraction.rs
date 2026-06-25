@@ -11,9 +11,7 @@ use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
 use code_graph::v2::linker::CodeGraph;
 use code_graph::v2::linker::graph::GraphNode;
 use code_graph::v2::types::EdgeKind;
-use code_graph::v2::{
-    BatchSink, FileInventoryEntry, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
-};
+use code_graph::v2::{FileInventoryEntry, GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use gkg_utils::archive::extract_tar_gz;
@@ -131,14 +129,15 @@ async fn run_pipeline(
     let capturer_for_pipeline = capturer.clone();
     let root = root.to_path_buf();
     let result = tokio::task::spawn_blocking(move || {
-        let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
+        let on_batch: Arc<code_graph::v2::OnBatch> =
+            Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
         Pipeline::run(
             &root,
             Arc::from(file_inventory),
             PipelineConfig::default(),
             &stream_reasons,
             capturer_for_pipeline as Arc<dyn GraphConverter>,
-            sink,
+            on_batch,
         )
     })
     .await

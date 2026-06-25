@@ -234,11 +234,16 @@ mod tests {
         })
     }
 
+    fn noop_on_batch()
+    -> impl Fn(&str, arrow::record_batch::RecordBatch) -> Result<(), crate::v2::SinkError> {
+        |_: &str, _: arrow::record_batch::RecordBatch| Ok(())
+    }
+
     #[test]
     fn javascript_pipeline_is_registered() {
         let ctx = test_ctx();
         let conv = NoopConverter;
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let on_batch = noop_on_batch();
         let (dirs, files, d, i, e) = (
             AtomicUsize::new(0),
             AtomicUsize::new(0),
@@ -248,7 +253,7 @@ mod tests {
         );
         let errors = std::sync::Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            &on_batch,
             &conv,
             &errors,
             GraphStatsCounters::new(&dirs, &files, &d, &i, &e),
@@ -260,7 +265,7 @@ mod tests {
     fn typescript_pipeline_is_registered() {
         let ctx = test_ctx();
         let conv = NoopConverter;
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let on_batch = noop_on_batch();
         let (dirs, files, d, i, e) = (
             AtomicUsize::new(0),
             AtomicUsize::new(0),
@@ -270,7 +275,7 @@ mod tests {
         );
         let errors = std::sync::Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            &on_batch,
             &conv,
             &errors,
             GraphStatsCounters::new(&dirs, &files, &d, &i, &e),
@@ -282,7 +287,7 @@ mod tests {
     fn js_pipeline_tag_is_registered() {
         let ctx = test_ctx();
         let conv = NoopConverter;
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let on_batch = noop_on_batch();
         let (dirs, files, d, i, e) = (
             AtomicUsize::new(0),
             AtomicUsize::new(0),
@@ -292,7 +297,7 @@ mod tests {
         );
         let errors = std::sync::Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            &on_batch,
             &conv,
             &errors,
             GraphStatsCounters::new(&dirs, &files, &d, &i, &e),

@@ -516,8 +516,19 @@ fn index_repo(
             commit_sha: git.commit_sha.clone(),
             ontology: std::sync::Arc::new(ontology.clone()),
         });
-    let sink: std::sync::Arc<dyn code_graph::v2::BatchSink> =
-        std::sync::Arc::new(duckdb_client::DuckDbSink::new(client));
+    let client = std::sync::Mutex::new(client);
+    let on_batch: std::sync::Arc<code_graph::v2::OnBatch> = std::sync::Arc::new(
+        move |table: &str, batch: arrow::record_batch::RecordBatch| {
+            if batch.num_rows() == 0 {
+                return Ok(());
+            }
+            client
+                .lock()
+                .unwrap()
+                .insert_batch(table, &batch)
+                .map_err(|e| code_graph::v2::SinkError(format!("DuckDB write to {table}: {e}")))
+        },
+    );
 
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
         std::path::Path::new(&root_path),
@@ -526,7 +537,7 @@ fn index_repo(
         filter.file_reasons(),
         tracer,
         converter,
-        sink,
+        on_batch,
     );
 
     if !v2_result.errors.is_empty() {
@@ -534,7 +545,6 @@ fn index_repo(
             tracing::warn!("pipeline error: {} ({})", err.error, err.file_path);
         }
     }
-    // Re-open for workspace status (client was moved into sink)
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
     workspace::set_status(
