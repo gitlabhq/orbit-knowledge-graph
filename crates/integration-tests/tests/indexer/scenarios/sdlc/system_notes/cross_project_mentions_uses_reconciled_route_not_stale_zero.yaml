@@ -4,6 +4,9 @@
 # dedup by PG primary key + argMax(_siphon_replicated_at) and pick the
 # reconciled row. The stale row is listed second so insertion order is
 # adversarial: only argMax (not row order, not FINAL) resolves it.
+# The MENTIONS edge lands in the noteable's (target's) namespace partition,
+# so the traversal_path assertion is on the noteable's namespace, not the
+# resolved ref's route.
 description: Cross-project MENTIONS uses the reconciled route, not the stale 0/ row
 scope: { namespace: 100 }
 
@@ -26,4 +29,4 @@ expect:
     - kind: MENTIONS
       count: 1
       rows:
-        - { target_id: 30, traversal_path: "1/100/94/" }
+        - { source_id: 30, target_id: 1000, traversal_path: "1/100/200/" }

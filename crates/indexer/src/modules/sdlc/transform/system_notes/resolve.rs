@@ -156,11 +156,13 @@ pub struct EntityRow {
     pub iid: i64,
 }
 
-/// Output of the resolver: the target entity id plus the `traversal_path`
-/// the edge row should land in. The traversal_path comes from the
-/// *target's* route, not the source note's; this matters for cross-project
-/// MENTIONS because `gl_edge`'s primary key includes traversal_path and
-/// querying for inbound MENTIONS reaches them via the target's namespace.
+/// Output of the resolver: the resolved entity id plus its
+/// `traversal_path`. The traversal_path here is the *resolved ref's* route
+/// namespace, which the emitter does **not** use as the edge partition for
+/// MENTIONS — the MENTIONS edge lands in the noteable's (target's)
+/// namespace via `NoteRow.traversal_path` so that inbound-degree queries
+/// hit the right `gl_edge` partition. This field is still carried for
+/// potential future use by other edge kinds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
     pub id: i64,
@@ -240,9 +242,11 @@ impl ResolutionPlan {
 /// parsed [`Reference`] — substituting the note's default project path for
 /// same-project shorthand — without re-querying ClickHouse per reference.
 ///
-/// The target's `traversal_path` comes from the route row, so cross-project
-/// MENTIONS land in the *target's* namespace partition (matching the
-/// `gl_edge` primary key), which is what an inbound-edge query expects.
+/// Each resolved entry carries the ref's own `traversal_path` from its
+/// route row. For MENTIONS edges, the emitter uses the *noteable's*
+/// traversal_path (from `NoteRow`) as the edge partition — not this one —
+/// so inbound-degree queries on the mentioned entity hit the right
+/// `gl_edge` partition.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ResolvedIndex {
     by_key: HashMap<(RefKind, i64), HashMap<String, ResolvedTarget>>,

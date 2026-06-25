@@ -20,4 +20,4 @@ expect:
     - kind: MENTIONS
       count: 1
       rows:
-        - { target_id: 20, target_kind: WorkItem }
+        - { source_id: 20, source_kind: WorkItem, target_id: 1000, target_kind: MergeRequest }

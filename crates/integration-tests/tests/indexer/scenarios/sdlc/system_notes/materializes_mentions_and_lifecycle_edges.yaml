@@ -1,8 +1,10 @@
-# ADR 013 happy path. The cross-project target (1/100/400/) is a sibling
-# under the SAME top-level namespace as the source (1/100/200/); v1 bounds
-# resolution to the source top-level namespace, so it still resolves and
-# the edge lands in the target's namespace partition. Note rows carry
-# _siphon_replicated_at == created_at so the watermark window selects them.
+# ADR 013 happy path. The cross-project mentioner (1/100/400/) is a sibling
+# under the SAME top-level namespace as the mentioned noteable (1/100/200/);
+# v1 bounds resolution to the source top-level namespace, so it still
+# resolves. The MENTIONS edge points from mentioner → mentioned and lands
+# in the mentioned entity's (noteable's) namespace partition. Note rows
+# carry _siphon_replicated_at == created_at so the watermark window selects
+# them.
 description: System notes materialize MENTIONS edges, and nothing else
 scope: { namespace: 100 }
 
@@ -31,8 +33,8 @@ expect:
     - kind: MENTIONS
       count: 3
       rows:
-        - { source_id: 1000, source_kind: MergeRequest, target_id: 10, target_kind: MergeRequest }
-        - { source_id: 1000, source_kind: MergeRequest, target_id: 20, target_kind: WorkItem }
-        - { source_id: 1000, source_kind: MergeRequest, target_id: 30, target_kind: MergeRequest, traversal_path: "1/100/400/" }
+        - { source_id: 10, source_kind: MergeRequest, target_id: 1000, target_kind: MergeRequest, traversal_path: "1/100/200/" }
+        - { source_id: 20, source_kind: WorkItem, target_id: 1000, target_kind: MergeRequest, traversal_path: "1/100/200/" }
+        - { source_id: 30, source_kind: MergeRequest, target_id: 1000, target_kind: MergeRequest, traversal_path: "1/100/200/" }
   totals:
     gl_edge: 3
