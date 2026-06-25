@@ -1156,19 +1156,28 @@ impl FamilyPipeline {
             })
             .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
+        let import_path_resolver_files = files
+            .iter()
+            .map(|file| crate::v2::dsl::types::ImportPathResolverFile {
+                language: file.language,
+                path: file.path.as_str(),
+            })
+            .collect::<Vec<_>>();
         let import_path_resolvers: FxHashMap<
             Language,
             Box<dyn crate::v2::dsl::types::ImportPathResolver>,
         > = member_ctxs
             .iter()
             .filter_map(|(&language, lctx)| {
-                let build = lctx.spec.hooks.build_import_path_resolver?;
-                let paths = files
-                    .iter()
-                    .filter(|file| file.language == language)
-                    .map(|file| file.path.as_str())
-                    .collect::<Vec<_>>();
-                Some((language, build(&paths, expected_sep)))
+                let build = lctx.spec.hooks.import_path_resolver?;
+                Some((
+                    language,
+                    build(crate::v2::dsl::types::ImportPathResolverConfig {
+                        language,
+                        files: &import_path_resolver_files,
+                        sep: expected_sep,
+                    }),
+                ))
             })
             .collect();
 

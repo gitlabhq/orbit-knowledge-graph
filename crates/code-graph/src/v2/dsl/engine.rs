@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use super::types::{ImportPathResolver, LanguageSpec, Rule};
+use super::types::{
+    ImportPathContext, ImportPathResolution, ImportPathResolver, LanguageSpec, Rule,
+};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -39,10 +41,12 @@ fn import_scope_name(
     hooks: &super::types::LanguageHooks,
     imp: &CanonicalImport,
     sep: &str,
+    scope_name_override: Option<&str>,
 ) -> Option<String> {
-    hooks
-        .import_scope_name
-        .and_then(|f| f(imp, sep))
+    imp.alias
+        .clone()
+        .or_else(|| scope_name_override.map(ToString::to_string))
+        .or_else(|| hooks.import_scope_name.and_then(|f| f(imp, sep)))
         .or_else(|| default_import_scope_name(imp, sep))
 }
 
@@ -451,13 +455,15 @@ impl LanguageSpec {
 
         let range = canonical_range(&node_to_range(node));
         let label = rule.resolve_label(node);
-        let module_scope = state.scope_stack.first().map(|s| s.as_ref());
+        let module_scope = state.scope_stack.first().map(ToString::to_string);
+        let module_scope = module_scope.as_deref();
         let import_path_resolver = state.import_path_resolver;
 
         if let Some(child_kinds) = rule.multi_child_kinds {
             let raw_path = rule.extract().apply(node).unwrap_or_default();
-            let base_path =
+            let base_resolution =
                 self.resolve_import_path(raw_path.clone(), module_scope, sep, import_path_resolver);
+            let base_path = base_resolution.path;
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -467,28 +473,37 @@ impl LanguageSpec {
                     if let Some(name_node) = child.field("name") {
                         let alias = child.field("alias").map(|a| a.text().to_string());
                         let name = name_node.text().to_string();
-                        let (path, name) = if base_path.is_empty() {
-                            (name, None)
+                        let (path, name, scope_name) = if base_path.is_empty() {
+                            let resolution = self.resolve_import_path(
+                                name.clone(),
+                                module_scope,
+                                sep,
+                                import_path_resolver,
+                            );
+                            (resolution.path, None, resolution.scope_name)
                         } else {
-                            (base_path.clone(), Some(name))
+                            (base_path.clone(), Some(name), None)
                         };
                         let binding_kind = if !path.is_empty() {
                             ImportBindingKind::Named
                         } else {
                             infer_import_binding_kind(name.as_deref(), alias.as_deref(), false)
                         };
-                        state.imports.push(CanonicalImport {
-                            import_type: label,
-                            path,
-                            binding_kind,
-                            mode: ImportMode::Declarative,
-                            name,
-                            alias,
-                            scope_fqn: None,
-                            range,
-                            is_type_only: false,
-                            wildcard: false,
-                        });
+                        state.push_import(
+                            CanonicalImport {
+                                import_type: label,
+                                path,
+                                binding_kind,
+                                mode: ImportMode::Declarative,
+                                name,
+                                alias,
+                                scope_fqn: None,
+                                range,
+                                is_type_only: false,
+                                wildcard: false,
+                            },
+                            scope_name,
+                        );
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
                     let child_text = child.text().to_string();
@@ -496,46 +511,59 @@ impl LanguageSpec {
                     {
                         continue;
                     }
-                    let (path, name) = if base_path.is_empty() {
-                        (child_text, None)
+                    let (path, name, scope_name) = if base_path.is_empty() {
+                        let resolution = self.resolve_import_path(
+                            child_text,
+                            module_scope,
+                            sep,
+                            import_path_resolver,
+                        );
+                        (resolution.path, None, resolution.scope_name)
                     } else {
-                        (base_path.clone(), Some(child_text))
+                        (base_path.clone(), Some(child_text), None)
                     };
                     let binding_kind = if !path.is_empty() {
                         ImportBindingKind::Named
                     } else {
                         infer_import_binding_kind(name.as_deref(), None, false)
                     };
-                    state.imports.push(CanonicalImport {
-                        import_type: label,
-                        binding_kind,
-                        mode: ImportMode::Declarative,
-                        path,
-                        name,
-                        alias: None,
-                        scope_fqn: None,
-                        range,
-                        is_type_only: false,
-                        wildcard: false,
-                    });
+                    state.push_import(
+                        CanonicalImport {
+                            import_type: label,
+                            binding_kind,
+                            mode: ImportMode::Declarative,
+                            path,
+                            name,
+                            alias: None,
+                            scope_fqn: None,
+                            range,
+                            is_type_only: false,
+                            wildcard: false,
+                        },
+                        scope_name,
+                    );
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
-                    state.imports.push(CanonicalImport {
-                        import_type: label,
-                        binding_kind: ImportBindingKind::Named,
-                        mode: ImportMode::Declarative,
-                        path: base_path.clone(),
-                        name: Some(rule.wildcard_symbol.to_string()),
-                        alias: None,
-                        scope_fqn: None,
-                        range,
-                        is_type_only: false,
-                        wildcard: true,
-                    });
+                    state.push_import(
+                        CanonicalImport {
+                            import_type: label,
+                            binding_kind: ImportBindingKind::Named,
+                            mode: ImportMode::Declarative,
+                            path: base_path.clone(),
+                            name: Some(rule.wildcard_symbol.to_string()),
+                            alias: None,
+                            scope_fqn: None,
+                            range,
+                            is_type_only: false,
+                            wildcard: true,
+                        },
+                        None,
+                    );
                 }
             }
         } else if let Some(raw_path) = rule.extract().apply(node) {
-            let full_path =
+            let resolution =
                 self.resolve_import_path(raw_path, module_scope, sep, import_path_resolver);
+            let full_path = resolution.path;
             let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
             // in `import com.example.*`) or the always_wildcard flag (e.g. C#
@@ -550,18 +578,21 @@ impl LanguageSpec {
 
             if is_wildcard_import {
                 // Wildcard import: path is the full extracted name, no split needed.
-                state.imports.push(CanonicalImport {
-                    import_type: label,
-                    binding_kind: ImportBindingKind::Named,
-                    mode: ImportMode::Declarative,
-                    path: full_path,
-                    name: None,
-                    alias: None,
-                    scope_fqn: None,
-                    range,
-                    is_type_only: false,
-                    wildcard: true,
-                });
+                state.push_import(
+                    CanonicalImport {
+                        import_type: label,
+                        binding_kind: ImportBindingKind::Named,
+                        mode: ImportMode::Declarative,
+                        path: full_path,
+                        name: None,
+                        alias: None,
+                        scope_fqn: None,
+                        range,
+                        is_type_only: false,
+                        wildcard: true,
+                    },
+                    None,
+                );
             } else {
                 let (path, name) = if rule.should_split() {
                     rule.split_path_name(&full_path)
@@ -571,18 +602,21 @@ impl LanguageSpec {
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
                 let binding_kind =
                     infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
-                state.imports.push(CanonicalImport {
-                    import_type: label,
-                    binding_kind,
-                    mode: ImportMode::Declarative,
-                    path,
-                    name,
-                    alias,
-                    scope_fqn: None,
-                    range,
-                    is_type_only: false,
-                    wildcard: is_wildcard,
-                });
+                state.push_import(
+                    CanonicalImport {
+                        import_type: label,
+                        binding_kind,
+                        mode: ImportMode::Declarative,
+                        path,
+                        name,
+                        alias,
+                        scope_fqn: None,
+                        range,
+                        is_type_only: false,
+                        wildcard: is_wildcard,
+                    },
+                    resolution.scope_name,
+                );
             }
         }
     }
@@ -593,21 +627,20 @@ impl LanguageSpec {
         module_scope: Option<&str>,
         sep: &str,
         import_path_resolver: Option<ImportPathResolverOverride<'_>>,
-    ) -> String {
+    ) -> ImportPathResolution {
         let Some(module_scope) = module_scope else {
-            return raw_path;
+            return ImportPathResolution::path(raw_path);
         };
         if let Some(resolver) = import_path_resolver
-            && let Some(resolved) = resolver.resolve(&raw_path, module_scope, sep)
+            && let Some(resolved) = resolver.resolve(ImportPathContext {
+                raw_path: &raw_path,
+                module_scope,
+                sep,
+            })
         {
             return resolved;
         }
-        if let Some(resolve) = self.hooks.resolve_import_path
-            && let Some(resolved) = resolve(&raw_path, module_scope, sep)
-        {
-            return resolved;
-        }
-        raw_path
+        ImportPathResolution::path(raw_path)
     }
 
     // ── parse_full_and_resolve: single walk with SSA + inline callback ──
@@ -1106,7 +1139,12 @@ impl LanguageSpec {
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
-                let effective_name = import_scope_name(&self.hooks, imp, sep);
+                let effective_name = import_scope_name(
+                    &self.hooks,
+                    imp,
+                    sep,
+                    state.import_scope_overrides.get(&idx).map(String::as_str),
+                );
                 trace!(
                     state.tracer,
                     ImportRecorded {
@@ -1541,6 +1579,7 @@ struct WalkFullState<'a> {
     enclosing_def_stack: Vec<u32>,
     defs: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
+    import_scope_overrides: rustc_hash::FxHashMap<usize, String>,
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
@@ -1573,6 +1612,7 @@ impl<'a> WalkFullState<'a> {
             enclosing_def_stack: Vec::new(),
             defs: Vec::new(),
             imports: Vec::new(),
+            import_scope_overrides: rustc_hash::FxHashMap::default(),
             pending_refs: Vec::new(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
@@ -1583,6 +1623,14 @@ impl<'a> WalkFullState<'a> {
             file_path,
             budget: budget.map(treesitter_visit::CpuBudget::start),
             timed_out: false,
+        }
+    }
+
+    fn push_import(&mut self, import: CanonicalImport, scope_name: Option<String>) {
+        let idx = self.imports.len();
+        self.imports.push(import);
+        if let Some(scope_name) = scope_name {
+            self.import_scope_overrides.insert(idx, scope_name);
         }
     }
 

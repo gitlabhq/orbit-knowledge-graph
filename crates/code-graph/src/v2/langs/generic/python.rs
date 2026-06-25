@@ -101,8 +101,7 @@ impl DslLanguage for PythonDsl {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["decorator"],
-            resolve_import_path: Some(resolve_python_relative_import),
-            build_import_path_resolver: Some(build_python_import_path_resolver),
+            import_path_resolver: Some(build_python_import_path_resolver),
             import_scope_name: Some(python_import_scope_name),
             ..LanguageHooks::default()
         }
@@ -388,7 +387,12 @@ impl PythonImportPathResolver {
         Self { importable_paths }
     }
 
-    pub(crate) fn resolve(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+    pub(crate) fn resolve_source_root(
+        &self,
+        raw_path: &str,
+        module_scope: &str,
+        sep: &str,
+    ) -> Option<String> {
         if raw_path.is_empty() || raw_path.starts_with('.') {
             return None;
         }
@@ -412,15 +416,36 @@ impl PythonImportPathResolver {
 }
 
 impl ImportPathResolver for PythonImportPathResolver {
-    fn resolve(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
-        PythonImportPathResolver::resolve(self, raw_path, module_scope, sep)
+    fn resolve(&self, cx: ImportPathContext<'_>) -> Option<ImportPathResolution> {
+        if let Some(path) = resolve_python_relative_import(cx.raw_path, cx.module_scope, cx.sep) {
+            return Some(ImportPathResolution::path(path));
+        }
+
+        self.resolve_source_root(cx.raw_path, cx.module_scope, cx.sep)
+            .map(|path| {
+                let mut resolution = ImportPathResolution::path(path);
+                if let Some(scope_name) = cx
+                    .raw_path
+                    .split(cx.sep)
+                    .next()
+                    .filter(|segment| !segment.is_empty())
+                {
+                    resolution = resolution.with_scope_name(scope_name);
+                }
+                resolution
+            })
     }
 }
 
-fn build_python_import_path_resolver(paths: &[&str], sep: &str) -> Box<dyn ImportPathResolver> {
+fn build_python_import_path_resolver(
+    cx: ImportPathResolverConfig<'_>,
+) -> Box<dyn ImportPathResolver> {
     Box::new(PythonImportPathResolver::from_paths(
-        paths.iter().copied(),
-        sep,
+        cx.files
+            .iter()
+            .filter(|file| file.language == cx.language)
+            .map(|file| file.path),
+        cx.sep,
     ))
 }
 
@@ -525,6 +550,18 @@ fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> 
 mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
+
+    fn resolve_import_path(
+        resolver: &PythonImportPathResolver,
+        raw_path: &str,
+        module_scope: &str,
+    ) -> Option<ImportPathResolution> {
+        resolver.resolve(ImportPathContext {
+            raw_path,
+            module_scope,
+            sep: ".",
+        })
+    }
 
     fn parse(
         code: &str,
@@ -674,14 +711,18 @@ mod tests {
         );
 
         assert_eq!(
-            resolver.resolve("myapp.worker", "lib.myapp.service", "."),
+            resolve_import_path(&resolver, "myapp.worker", "lib.myapp.service")
+                .map(|resolution| resolution.path),
             Some("lib.myapp.worker".to_string())
         );
         assert_eq!(
-            resolver.resolve("scoring", "src.pipeline", "."),
-            Some("src.scoring".to_string())
+            resolve_import_path(&resolver, "scoring", "src.pipeline"),
+            Some(ImportPathResolution::path("src.scoring").with_scope_name("scoring"))
         );
-        assert_eq!(resolver.resolve("requests", "src.pipeline", "."), None);
+        assert_eq!(
+            resolve_import_path(&resolver, "requests", "src.pipeline"),
+            None
+        );
     }
 
     #[test]
@@ -692,7 +733,8 @@ mod tests {
         );
 
         assert_eq!(
-            resolver.resolve("package", "src.test_package_import", "."),
+            resolve_import_path(&resolver, "package", "src.test_package_import")
+                .map(|resolution| resolution.path),
             Some("src.package".to_string())
         );
     }
@@ -709,8 +751,18 @@ mod tests {
         );
 
         assert_eq!(
-            resolver.resolve("common.scoring", "src.alpha.other.reporting", "."),
+            resolve_import_path(&resolver, "common.scoring", "src.alpha.other.reporting"),
             None
+        );
+    }
+
+    #[test]
+    fn import_path_resolver_handles_relative_imports() {
+        let resolver = PythonImportPathResolver::from_paths(std::iter::empty(), ".");
+
+        assert_eq!(
+            resolve_import_path(&resolver, ".models", "src.package.views"),
+            Some(ImportPathResolution::path("src.package.models"))
         );
     }
 }

@@ -12,6 +12,13 @@ fixtures:
       def run_tier_reviews(review):
           return score_review(review)
 
+  - path: src/module_import_pipeline.py
+    content: |
+      import scoring
+
+      def run_module_reviews(review):
+          return scoring.score_review(review)
+
   - path: src/poetry/factory.py
     content: |
       class Factory:
@@ -111,6 +118,16 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.pipeline.run_tier_reviews'
+        AND callee.fqn = 'src.scoring.score_review'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "whole-module source-root import keeps local binding"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.module_import_pipeline.run_module_reviews'
         AND callee.fqn = 'src.scoring.score_review'
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee

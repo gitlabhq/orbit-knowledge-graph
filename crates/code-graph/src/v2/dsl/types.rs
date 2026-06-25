@@ -4,17 +4,55 @@ use treesitter_visit::predicate::Pred;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
+use crate::v2::config::Language;
 use crate::v2::types::{DefKind, DefinitionMetadata};
 
 use super::extractors::MetadataRule;
 
-/// Signature for stateless import path resolution hooks.
-/// Called with (raw_path, module_scope, separator). Returns resolved path or None.
-pub type ImportPathResolverFn = fn(&str, &str, &str) -> Option<String>;
-pub trait ImportPathResolver: Send + Sync {
-    fn resolve(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String>;
+pub struct ImportPathContext<'a> {
+    pub raw_path: &'a str,
+    pub module_scope: &'a str,
+    pub sep: &'a str,
 }
-pub type ImportPathResolverFactory = fn(&[&str], &str) -> Box<dyn ImportPathResolver>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportPathResolution {
+    pub path: String,
+    pub scope_name: Option<String>,
+}
+
+impl ImportPathResolution {
+    pub fn path(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            scope_name: None,
+        }
+    }
+
+    pub fn with_scope_name(mut self, scope_name: impl Into<String>) -> Self {
+        self.scope_name = Some(scope_name.into());
+        self
+    }
+}
+
+pub trait ImportPathResolver: Send + Sync {
+    fn resolve(&self, cx: ImportPathContext<'_>) -> Option<ImportPathResolution>;
+}
+
+#[derive(Clone, Copy)]
+pub struct ImportPathResolverFile<'a> {
+    pub language: Language,
+    pub path: &'a str,
+}
+
+pub struct ImportPathResolverConfig<'a> {
+    pub language: Language,
+    pub files: &'a [ImportPathResolverFile<'a>],
+    pub sep: &'a str,
+}
+
+pub type ImportPathResolverFactory =
+    fn(ImportPathResolverConfig<'_>) -> Box<dyn ImportPathResolver>;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
@@ -798,14 +836,9 @@ pub struct LanguageHooks {
     /// to the new def. Handles decorators/annotations that are CST siblings
     /// of the decorated function/class definition.
     pub adopt_sibling_refs: &'static [&'static str],
-    /// Resolve an import path relative to the current module scope.
-    /// Called with (raw_path, module_scope, separator). Returns the
-    /// resolved absolute path, or None to keep the raw path.
-    /// Handles Python's `from .models import User` → `package.models`.
-    pub resolve_import_path: Option<ImportPathResolverFn>,
-    /// Build a stateful import path resolver from the current language's files.
+    /// Build an import path resolver from the current parse family.
     /// Used by languages whose import paths depend on repository layout.
-    pub build_import_path_resolver: Option<ImportPathResolverFactory>,
+    pub import_path_resolver: Option<ImportPathResolverFactory>,
     /// Node kinds that represent expression-bodied function bodies
     /// (e.g. Kotlin's `function_body` when it contains `=`).
     /// When the engine encounters one of these nodes with a `=` child,
