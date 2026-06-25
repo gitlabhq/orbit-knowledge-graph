@@ -808,10 +808,16 @@ fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
 /// Per-table totals the writer task yields, or the first write error.
 type WriteOutcome = Result<Vec<TableWriteTotals>, SinkError>;
 
+/// The writer task's channel and join handle; `finish()` takes both to close the channel and await the result.
+type WriterState = (
+    mpsc::Sender<(String, RecordBatch)>,
+    tokio::task::JoinHandle<WriteOutcome>,
+);
+
 /// Streams each batch to an async writer task; the bounded channel back-pressures the parser instead of buffering the whole graph.
 pub struct StreamingClickHouseSink {
-    tx: Mutex<Option<mpsc::Sender<(String, RecordBatch)>>>,
-    task: Mutex<Option<tokio::task::JoinHandle<WriteOutcome>>>,
+    // Mutex<Option> only so `finish()` can move the sender/handle out of the shared `&self` sink; the send itself is lock-free.
+    state: Mutex<Option<WriterState>>,
 }
 
 impl StreamingClickHouseSink {
@@ -829,15 +835,18 @@ impl StreamingClickHouseSink {
             max_concurrent_writes,
         ));
         Self {
-            tx: Mutex::new(Some(tx)),
-            task: Mutex::new(Some(task)),
+            state: Mutex::new(Some((tx, task))),
         }
     }
 
     /// Close the channel, drain the writer task, and return per-table totals; call once after the pipeline returns.
     pub async fn finish(&self) -> WriteOutcome {
-        drop(self.tx.lock().take());
-        let task = self.task.lock().take().expect("finish called exactly once");
+        let (tx, task) = self
+            .state
+            .lock()
+            .take()
+            .expect("finish called exactly once");
+        drop(tx); // close the channel so the writer task drains and exits
         task.await
             .map_err(|e| SinkError(format!("writer task join: {e}")))?
     }
@@ -998,13 +1007,12 @@ impl code_graph::v2::BatchSink for StreamingClickHouseSink {
         if batch.num_rows() == 0 {
             return Ok(());
         }
-        let tx = self.tx.lock().clone();
-        match tx {
-            Some(tx) => tx
-                .blocking_send((table.to_string(), batch.clone()))
-                .map_err(|_| SinkError("streaming sink writer stopped".into())),
-            None => Err(SinkError("streaming sink already finished".into())),
-        }
+        let tx = match self.state.lock().as_ref() {
+            Some((tx, _)) => tx.clone(),
+            None => return Err(SinkError("streaming sink already finished".into())),
+        };
+        tx.blocking_send((table.to_string(), batch.clone()))
+            .map_err(|_| SinkError("streaming sink writer stopped".into()))
     }
 }
 
