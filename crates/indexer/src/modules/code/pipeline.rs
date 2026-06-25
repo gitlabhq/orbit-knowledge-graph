@@ -15,7 +15,7 @@ use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use super::writer::{ChannelSink, drain_writes};
-use crate::destination::DestinationReport;
+use crate::clickhouse::WriteReport;
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -342,7 +342,7 @@ impl CodeIndexingPipeline {
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         config: PipelineConfig,
-    ) -> Result<(code_graph::v2::PipelineResult, Vec<DestinationReport>), HandlerError> {
+    ) -> Result<(code_graph::v2::PipelineResult, Vec<WriteReport>), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -413,7 +413,7 @@ impl CodeIndexingPipeline {
     fn record_indexing_results(
         &self,
         result: &code_graph::v2::PipelineResult,
-        per_table_writes: &[DestinationReport],
+        per_table_writes: &[WriteReport],
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,

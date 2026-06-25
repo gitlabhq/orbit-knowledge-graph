@@ -1,12 +1,32 @@
+use std::error::Error as StdError;
 use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
+use thiserror::Error;
 
-use crate::destination::{DestinationError, DestinationReport};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
+
+#[derive(Debug, Error)]
+pub enum WriteError {
+    #[error("failed to write: {0}")]
+    Write(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
+
+    #[error("connection error: {0}")]
+    Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
+
+    #[error("invalid configuration: {0}")]
+    InvalidConfiguration(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct WriteReport {
+    pub table: String,
+    pub rows: u64,
+    pub bytes: u64,
+}
 
 #[derive(Clone)]
 pub struct ClickHouseWriter {
@@ -18,10 +38,10 @@ impl ClickHouseWriter {
     pub fn new(
         configuration: ClickHouseConfiguration,
         metrics: Arc<EngineMetrics>,
-    ) -> Result<Self, DestinationError> {
+    ) -> Result<Self, WriteError> {
         configuration
             .validate()
-            .map_err(|e| DestinationError::InvalidConfiguration(e.to_string()))?;
+            .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
         let client = configuration.build_client();
         Ok(Self { client, metrics })
     }
@@ -40,9 +60,9 @@ impl ClickHouseWriter {
         table: &str,
         batches: Vec<RecordBatch>,
         durability: Option<WriteDurability>,
-    ) -> Result<DestinationReport, DestinationError> {
+    ) -> Result<WriteReport, WriteError> {
         if batches.is_empty() {
-            return Ok(DestinationReport {
+            return Ok(WriteReport {
                 table: table.to_string(),
                 rows: 0,
                 bytes: 0,
@@ -75,7 +95,7 @@ impl ClickHouseWriter {
         self.metrics
             .record_write_success(table, start.elapsed().as_secs_f64(), rows, bytes);
 
-        Ok(DestinationReport {
+        Ok(WriteReport {
             table: table.to_string(),
             rows,
             bytes,

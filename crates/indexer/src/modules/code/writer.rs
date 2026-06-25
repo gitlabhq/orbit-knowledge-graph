@@ -8,7 +8,7 @@ use code_graph::v2::SinkError;
 use tokio::sync::mpsc;
 
 use crate::clickhouse::ClickHouseWriter;
-use crate::destination::{DestinationError, DestinationReport};
+use crate::clickhouse::{WriteError, WriteReport};
 use crate::durability::WriteDurability;
 
 /// `BatchSink` that forwards to an mpsc channel for async draining.
@@ -31,7 +31,7 @@ pub async fn drain_writes(
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
     max_rows_per_insert: usize,
     max_concurrent: usize,
-) -> Result<Vec<DestinationReport>, DestinationError> {
+) -> Result<Vec<WriteReport>, WriteError> {
     let max_rows = max_rows_per_insert.max(1);
     let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
     let mut set = tokio::task::JoinSet::new();
@@ -63,7 +63,7 @@ pub async fn drain_writes(
 
     let mut reports = Vec::new();
     while let Some(r) = set.join_next().await {
-        reports.push(r.map_err(|e| DestinationError::Write(format!("join: {e}"), None))??);
+        reports.push(r.map_err(|e| WriteError::Write(format!("join: {e}"), None))??);
     }
     Ok(reports)
 }

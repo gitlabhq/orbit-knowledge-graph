@@ -9,7 +9,7 @@
 //!
 //! You provide:
 //! - A [`NatsBroker`](nats::NatsBroker) for message streaming
-//! - A [`Destination`](engine::destination::Destination) for writing record batches
+//! - A [`ClickHouseWriter`](clickhouse::ClickHouseWriter) for writing record batches
 //! - One or more [`Handler`](engine::handler::Handler)s registered in a [`HandlerRegistry`](engine::handler::HandlerRegistry)
 //!
 //! ```text
@@ -44,7 +44,7 @@ pub mod testkit;
 
 // Re-export engine submodules at crate root for external API stability.
 pub use config::*;
-pub use engine::{dead_letter, destination, durability, handler, types, worker_pool};
+pub use engine::{dead_letter, durability, handler, types, worker_pool};
 
 /// Re-export metrics from their canonical locations for external API stability.
 pub mod metrics {
