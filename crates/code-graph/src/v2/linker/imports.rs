@@ -20,7 +20,6 @@ pub struct ResolveSettings {
     pub chain_fallback: bool,
     pub compound_key_recovery: bool,
     pub implicit_scope_on_base: bool,
-    pub source_root_import_markers: &'static [&'static str],
     /// Maximum number of results from `global_name` before discarding
     /// as too ambiguous. Prevents fan-out on common names.
     pub global_name_max_results: usize,
@@ -40,7 +39,6 @@ impl Default for ResolveSettings {
             chain_fallback: true,
             compound_key_recovery: true,
             implicit_scope_on_base: true,
-            source_root_import_markers: &[],
             global_name_max_results: 5,
             same_directory_scope: false,
         }
@@ -133,12 +131,13 @@ impl<'a> ImportResolver<'a> {
             return by_path.to_vec();
         }
 
-        let key_buffer;
         let key = if imp_path.is_empty() {
-            symbol_name
+            self.scratch.clear();
+            self.scratch.push_str(symbol_name);
+            self.scratch.as_str()
         } else {
-            key_buffer = format!("{imp_path}{sep}{symbol_name}");
-            key_buffer.as_str()
+            self.scratch
+                .set_fmt(format_args!("{imp_path}{sep}{symbol_name}"))
         };
         let by_fqn = self
             .graph
@@ -147,13 +146,6 @@ impl<'a> ImportResolver<'a> {
             .lookup(key, |idx| self.graph.def_fqn(idx) == key);
         if !by_fqn.is_empty() {
             return by_fqn.to_vec();
-        }
-
-        if !imp_path.is_empty() {
-            let source_root_matches = self.source_root_import(key);
-            if !source_root_matches.is_empty() {
-                return source_root_matches;
-            }
         }
 
         if !imp_path.is_empty() {
@@ -404,56 +396,11 @@ impl<'a> ImportResolver<'a> {
             .filter(|&idx| self.graph.def_in_file(idx, file_path))
             .collect()
     }
-
-    fn source_root_import(&self, key: &str) -> Vec<NodeIndex> {
-        let mut matches = Vec::new();
-        for source_root in source_root_fqn_prefixes_for_file_path(
-            self.graph.graph[self.file_node].path(),
-            self.settings.source_root_import_markers,
-            self.sep(),
-        ) {
-            let candidate_key = format!("{source_root}{}{key}", self.sep());
-            for idx in self.graph.indexes.by_fqn.lookup(&candidate_key, |idx| {
-                self.graph.def_fqn(idx) == candidate_key
-            }) {
-                if !matches.contains(&idx) {
-                    matches.push(idx);
-                }
-            }
-        }
-
-        if matches.len() == 1 {
-            matches
-        } else {
-            Vec::new()
-        }
-    }
-}
-
-fn source_root_fqn_prefixes_for_file_path(
-    file_path: &str,
-    markers: &[&str],
-    sep: &str,
-) -> Vec<String> {
-    let Some((dir, _file_name)) = file_path.rsplit_once('/') else {
-        return Vec::new();
-    };
-    let segments = dir
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-
-    segments
-        .iter()
-        .enumerate()
-        .filter(|(_, segment)| markers.contains(segment))
-        .map(|(idx, _)| segments[..=idx].join(sep))
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{dir_of, source_root_fqn_prefixes_for_file_path};
+    use super::dir_of;
 
     #[test]
     fn dir_of_nested_path() {
@@ -473,29 +420,5 @@ mod tests {
     #[test]
     fn dir_of_trailing_slash() {
         assert_eq!(dir_of("a/b/"), "a/b");
-    }
-
-    #[test]
-    fn source_root_prefixes_use_marked_path_segments() {
-        assert_eq!(
-            source_root_fqn_prefixes_for_file_path(
-                "src/poetry/console/application.py",
-                &["src"],
-                "."
-            ),
-            vec!["src"]
-        );
-        assert_eq!(
-            source_root_fqn_prefixes_for_file_path(
-                "apps/orion/src/orion/service.py",
-                &["src"],
-                "."
-            ),
-            vec!["apps.orion.src"]
-        );
-        assert!(
-            source_root_fqn_prefixes_for_file_path("src_alpha/scoring.py", &["src"], ".")
-                .is_empty()
-        );
     }
 }

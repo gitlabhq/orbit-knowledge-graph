@@ -62,6 +62,18 @@ fixtures:
       def replay():
           return send_request("GET", "https://example.com")
 
+  - path: src/package_imports/module.py
+    content: |
+      def build_module():
+          pass
+
+  - path: src/package_imports/caller.py
+    content: |
+      from package_imports import module
+
+      def build_package_import():
+          return module.build_module()
+
   - path: apps/orion/src/orion/worker.py
     content: |
       class Worker:
@@ -139,6 +151,16 @@ tests:
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.requests.sessions.replay'
         AND callee.fqn = 'src.requests.api.request'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "source-root package module import resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.package_imports.caller.build_package_import'
+        AND callee.fqn = 'src.package_imports.module.build_module'
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:

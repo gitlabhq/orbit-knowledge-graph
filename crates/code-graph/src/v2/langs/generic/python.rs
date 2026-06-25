@@ -11,11 +11,11 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::BindingKind;
 
+use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
     ResolverHooks,
 };
-use crate::v2::linker::{HasRules, ResolveSettings};
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
@@ -366,11 +366,67 @@ impl HasRules for PythonRules {
             ],
             ..Default::default()
         })
-        .with_settings(ResolveSettings {
-            source_root_import_markers: &["src"],
-            ..Default::default()
-        })
     }
+}
+
+pub(crate) struct PythonImportPathResolver {
+    importable_paths: rustc_hash::FxHashSet<String>,
+}
+
+impl PythonImportPathResolver {
+    pub(crate) fn from_paths<'a>(paths: impl IntoIterator<Item = &'a str>, sep: &str) -> Self {
+        let mut importable_paths = rustc_hash::FxHashSet::default();
+        for module in paths
+            .into_iter()
+            .filter_map(|path| python_module_from_path(path, sep))
+        {
+            insert_importable_path_prefixes(&module, sep, &mut importable_paths);
+        }
+
+        Self { importable_paths }
+    }
+
+    pub(crate) fn resolve(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+        if raw_path.is_empty() || raw_path.starts_with('.') {
+            return None;
+        }
+
+        let mut candidates = source_root_candidates(module_scope, sep)
+            .into_iter()
+            .map(|source_root| format!("{source_root}{sep}{raw_path}"))
+            .filter(|candidate| self.importable_paths.contains(candidate))
+            .collect::<Vec<_>>();
+        candidates.sort();
+        candidates.dedup();
+
+        if candidates.len() == 1 {
+            candidates.pop()
+        } else {
+            None
+        }
+    }
+}
+
+fn insert_importable_path_prefixes(
+    module: &str,
+    sep: &str,
+    importable_paths: &mut rustc_hash::FxHashSet<String>,
+) {
+    let parts = module
+        .split(sep)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    for end in 1..=parts.len() {
+        importable_paths.insert(parts[..end].join(sep));
+    }
+}
+
+fn source_root_candidates(module_scope: &str, sep: &str) -> Vec<String> {
+    let parts = module_scope
+        .split(sep)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    (1..parts.len()).map(|end| parts[..end].join(sep)).collect()
 }
 
 /// Resolve Python relative import paths against the current module scope.
@@ -592,6 +648,59 @@ mod tests {
                 .imports
                 .iter()
                 .any(|i| i.name.as_deref() == Some("Path"))
+        );
+    }
+
+    #[test]
+    fn import_path_resolver_uses_actual_module_files() {
+        let resolver = PythonImportPathResolver::from_paths(
+            [
+                "lib/myapp/service.py",
+                "lib/myapp/worker.py",
+                "src/pipeline.py",
+                "src/scoring.py",
+            ],
+            ".",
+        );
+
+        assert_eq!(
+            resolver.resolve("myapp.worker", "lib.myapp.service", "."),
+            Some("lib.myapp.worker".to_string())
+        );
+        assert_eq!(
+            resolver.resolve("scoring", "src.pipeline", "."),
+            Some("src.scoring".to_string())
+        );
+        assert_eq!(resolver.resolve("requests", "src.pipeline", "."), None);
+    }
+
+    #[test]
+    fn import_path_resolver_uses_module_parent_packages() {
+        let resolver = PythonImportPathResolver::from_paths(
+            ["src/package/module.py", "src/test_package_import.py"],
+            ".",
+        );
+
+        assert_eq!(
+            resolver.resolve("package", "src.test_package_import", "."),
+            Some("src.package".to_string())
+        );
+    }
+
+    #[test]
+    fn import_path_resolver_rejects_ambiguous_ancestor_matches() {
+        let resolver = PythonImportPathResolver::from_paths(
+            [
+                "src/alpha/common/scoring.py",
+                "src/alpha/other/common/scoring.py",
+                "src/alpha/other/reporting.py",
+            ],
+            ".",
+        );
+
+        assert_eq!(
+            resolver.resolve("common.scoring", "src.alpha.other.reporting", "."),
+            None
         );
     }
 }

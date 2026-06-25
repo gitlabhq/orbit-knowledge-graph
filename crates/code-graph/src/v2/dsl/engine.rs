@@ -16,6 +16,8 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Axis, Match};
 use treesitter_visit::{Node, SupportLang};
 
+type ImportPathResolverOverride<'a> = &'a (dyn Fn(&str, &str, &str) -> Option<String> + Sync);
+
 /// Result of a defs-only parse. Just definitions and imports.
 pub struct ParsedDefs {
     pub definitions: Vec<CanonicalDefinition>,
@@ -436,6 +438,7 @@ impl LanguageSpec {
         imports: &mut Vec<CanonicalImport>,
         module_scope: Option<&str>,
         sep: &str,
+        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -453,13 +456,8 @@ impl LanguageSpec {
 
         if let Some(child_kinds) = rule.multi_child_kinds {
             let raw_path = rule.extract().apply(node).unwrap_or_default();
-            let base_path = if let Some(resolve) = self.hooks.resolve_import_path
-                && let Some(ms) = module_scope
-            {
-                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
-            } else {
-                raw_path
-            };
+            let base_path =
+                self.resolve_import_path(raw_path.clone(), module_scope, sep, import_path_resolver);
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -494,7 +492,8 @@ impl LanguageSpec {
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
                     let child_text = child.text().to_string();
-                    if !base_path.is_empty() && child_text == base_path {
+                    if !base_path.is_empty() && (child_text == base_path || child_text == raw_path)
+                    {
                         continue;
                     }
                     let (path, name) = if base_path.is_empty() {
@@ -535,13 +534,8 @@ impl LanguageSpec {
                 }
             }
         } else if let Some(raw_path) = rule.extract().apply(node) {
-            let full_path = if let Some(resolve) = self.hooks.resolve_import_path
-                && let Some(ms) = module_scope
-            {
-                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
-            } else {
-                raw_path
-            };
+            let full_path =
+                self.resolve_import_path(raw_path, module_scope, sep, import_path_resolver);
             let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
             // in `import com.example.*`) or the always_wildcard flag (e.g. C#
@@ -593,6 +587,29 @@ impl LanguageSpec {
         }
     }
 
+    fn resolve_import_path(
+        &self,
+        raw_path: String,
+        module_scope: Option<&str>,
+        sep: &str,
+        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
+    ) -> String {
+        let Some(module_scope) = module_scope else {
+            return raw_path;
+        };
+        if let Some(resolve) = import_path_resolver
+            && let Some(resolved) = resolve(&raw_path, module_scope, sep)
+        {
+            return resolved;
+        }
+        if let Some(resolve) = self.hooks.resolve_import_path
+            && let Some(resolved) = resolve(&raw_path, module_scope, sep)
+        {
+            return resolved;
+        }
+        raw_path
+    }
+
     // ── parse_full_and_resolve: single walk with SSA + inline callback ──
 
     /// Parse source with SSA, then call `on_ref` for each resolved reference.
@@ -613,6 +630,20 @@ impl LanguageSpec {
         language: Language,
         tracer: &Tracer,
         timeouts: PhaseTimeouts,
+    ) -> Result<ParseFullResult, ParseFullError> {
+        self.parse_full_collect_with_import_resolver(
+            source, file_path, language, tracer, timeouts, None,
+        )
+    }
+
+    pub(crate) fn parse_full_collect_with_import_resolver(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+        tracer: &Tracer,
+        timeouts: PhaseTimeouts,
+        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
@@ -661,7 +692,13 @@ impl LanguageSpec {
         });
 
         let walk_start = cpu_time::ThreadTime::now();
-        self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
+        self.walk_full(
+            &root,
+            &mut state,
+            sep,
+            module_prefix.as_deref(),
+            import_path_resolver,
+        );
         if state.timed_out {
             return Err(ParseFullError::Aborted {
                 phase: crate::v2::error::AbortPhase::Walk,
@@ -828,6 +865,7 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
         module_prefix: Option<&str>,
+        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         // CPU budget tripped: bail so the walk unwinds; parse_full_collect then skips the file.
         if state.timed_out {
@@ -1033,7 +1071,14 @@ impl LanguageSpec {
         if !custom_handled {
             // Branch matching → SSA fork/join (handles own children)
             if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
-                self.walk_full_branch(node, rule_idx, state, sep, module_prefix);
+                self.walk_full_branch(
+                    node,
+                    rule_idx,
+                    state,
+                    sep,
+                    module_prefix,
+                    import_path_resolver,
+                );
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
@@ -1046,7 +1091,14 @@ impl LanguageSpec {
 
             // Loop matching → SSA header/body/exit (handles own children)
             if let Some(&rule_idx) = self.loop_dispatch.get(nk).and_then(|v| v.first()) {
-                self.walk_full_loop(node, rule_idx, state, sep, module_prefix);
+                self.walk_full_loop(
+                    node,
+                    rule_idx,
+                    state,
+                    sep,
+                    module_prefix,
+                    import_path_resolver,
+                );
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
@@ -1065,7 +1117,7 @@ impl LanguageSpec {
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
                 let ms = state.scope_stack.first().map(|s| s.as_ref());
-                self.evaluate_imports(node, nk, &mut state.imports, ms, sep);
+                self.evaluate_imports(node, nk, &mut state.imports, ms, sep, import_path_resolver);
             }
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
@@ -1308,7 +1360,7 @@ impl LanguageSpec {
 
         // Recurse children
         for child in node.children() {
-            self.walk_full(&child, state, sep, module_prefix);
+            self.walk_full(&child, state, sep, module_prefix, import_path_resolver);
         }
 
         // Clear return context after children
@@ -1342,6 +1394,7 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
         module_prefix: Option<&str>,
+        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         let rule = &self.branches[rule_idx];
         let pre_block = state.current_block;
@@ -1357,7 +1410,7 @@ impl LanguageSpec {
         if let Some(cond_field) = rule.condition_field
             && let Some(cond_node) = node.field(cond_field)
         {
-            self.walk_full(&cond_node, state, sep, module_prefix);
+            self.walk_full(&cond_node, state, sep, module_prefix, import_path_resolver);
         }
 
         let has_catch_all = rule
@@ -1388,7 +1441,7 @@ impl LanguageSpec {
 
                 // Walk arm contents
                 for arm_child in child.children() {
-                    self.walk_full(&arm_child, state, sep, module_prefix);
+                    self.walk_full(&arm_child, state, sep, module_prefix, import_path_resolver);
                 }
 
                 end_blocks.push(state.current_block);
@@ -1399,7 +1452,7 @@ impl LanguageSpec {
                 let is_condition = cond_range.is_some_and(|(s, e)| cs >= s && ce <= e);
                 if !is_condition {
                     state.current_block = pre_block;
-                    self.walk_full(&child, state, sep, module_prefix);
+                    self.walk_full(&child, state, sep, module_prefix, import_path_resolver);
                 }
             }
         }
@@ -1430,6 +1483,7 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
         module_prefix: Option<&str>,
+        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         let rule = &self.loops[rule_idx];
         let pre_block = state.current_block;
@@ -1438,7 +1492,7 @@ impl LanguageSpec {
         if let Some(iter_field) = rule.iter_field
             && let Some(iter_node) = node.field(iter_field)
         {
-            self.walk_full(&iter_node, state, sep, module_prefix);
+            self.walk_full(&iter_node, state, sep, module_prefix, import_path_resolver);
         }
 
         // Header block (NOT sealed yet — back edge comes after body)
@@ -1462,11 +1516,11 @@ impl LanguageSpec {
 
         // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
-            self.walk_full(&body_node, state, sep, module_prefix);
+            self.walk_full(&body_node, state, sep, module_prefix, import_path_resolver);
         } else {
             // No explicit body field — walk all children
             for child in node.children() {
-                self.walk_full(&child, state, sep, module_prefix);
+                self.walk_full(&child, state, sep, module_prefix, import_path_resolver);
             }
         }
 

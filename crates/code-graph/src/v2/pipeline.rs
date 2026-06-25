@@ -1156,6 +1156,15 @@ impl FamilyPipeline {
             })
             .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
+        let python_import_path_resolver = member_ctxs.contains_key(&Language::Python).then(|| {
+            crate::v2::langs::generic::python::PythonImportPathResolver::from_paths(
+                files
+                    .iter()
+                    .filter(|file| file.language == Language::Python)
+                    .map(|file| file.path.as_str()),
+                expected_sep,
+            )
+        });
 
         // ── Phase 1a: parallel parse with per-file spec ─────────
         let pb = progress_bar(file_count as u64, "parse + graph");
@@ -1231,10 +1240,26 @@ impl FamilyPipeline {
                     walk: ctx.config.per_file_walk_timeout,
                     ssa: ctx.config.per_file_ssa_timeout,
                 };
-                let result = match lctx
-                    .spec
-                    .parse_full_collect(&source, &f.path, f.language, tracer, timeouts)
+                let result = if let Some(resolver) = python_import_path_resolver
+                    .as_ref()
+                    .filter(|_| f.language == Language::Python)
                 {
+                    let resolve = |raw_path: &str, module_scope: &str, sep: &str| {
+                        resolver.resolve(raw_path, module_scope, sep)
+                    };
+                    lctx.spec.parse_full_collect_with_import_resolver(
+                        &source,
+                        &f.path,
+                        f.language,
+                        tracer,
+                        timeouts,
+                        Some(&resolve),
+                    )
+                } else {
+                    lctx.spec
+                        .parse_full_collect(&source, &f.path, f.language, tracer, timeouts)
+                };
+                let result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
                         tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
