@@ -15,7 +15,6 @@ pub mod repository;
 mod stale_data_cleaner;
 #[cfg(test)]
 pub(crate) mod test_helpers;
-mod writer;
 
 use std::sync::Arc;
 

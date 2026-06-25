@@ -14,8 +14,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use super::writer::{ChannelSink, drain_writes};
-use crate::clickhouse::WriteReport;
+use crate::clickhouse::{ClickHouseWriter, WriteReport};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -361,12 +360,11 @@ impl CodeIndexingPipeline {
             tokio::sync::mpsc::channel(self.pipeline_config.write_channel_capacity.max(1));
         let sink: Arc<dyn code_graph::v2::BatchSink> =
             Arc::new(ChannelSink::new(tx, self.pipeline_config.write_slice_rows));
-        let drain = tokio::spawn(drain_writes(
-            Arc::clone(&self.writer),
-            rx,
-            self.pipeline_config.write_slice_rows,
-            self.pipeline_config.write_max_concurrent_writes,
-        ));
+        let w = Arc::clone(&self.writer);
+        let max_rows = self.pipeline_config.write_slice_rows;
+        let max_concurrent = self.pipeline_config.write_max_concurrent_writes;
+        let drain =
+            tokio::spawn(async move { w.write_batches_stream(rx, max_rows, max_concurrent).await });
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
@@ -565,5 +563,45 @@ async fn acquire(
             .map(Some)
             .map_err(|e| HandlerError::Processing(format!("{name} slot closed: {e}"))),
         None => Ok(None),
+    }
+}
+
+/// `BatchSink` adapter: slices oversized batches and sends to an mpsc channel.
+struct ChannelSink {
+    tx: tokio::sync::mpsc::Sender<(String, arrow::record_batch::RecordBatch)>,
+    max_rows_per_send: usize,
+}
+
+impl ChannelSink {
+    fn new(
+        tx: tokio::sync::mpsc::Sender<(String, arrow::record_batch::RecordBatch)>,
+        max_rows_per_send: usize,
+    ) -> Self {
+        Self {
+            tx,
+            max_rows_per_send: max_rows_per_send.max(1),
+        }
+    }
+}
+
+impl code_graph::v2::BatchSink for ChannelSink {
+    fn write_batch(
+        &self,
+        table: &str,
+        batch: &arrow::record_batch::RecordBatch,
+    ) -> Result<(), code_graph::v2::SinkError> {
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+        let table = table.to_string();
+        let mut offset = 0;
+        while offset < batch.num_rows() {
+            let len = (batch.num_rows() - offset).min(self.max_rows_per_send);
+            self.tx
+                .blocking_send((table.clone(), batch.slice(offset, len)))
+                .map_err(|_| code_graph::v2::SinkError("channel closed".into()))?;
+            offset += len;
+        }
+        Ok(())
     }
 }

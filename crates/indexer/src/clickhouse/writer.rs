@@ -121,6 +121,51 @@ impl ClickHouseWriter {
             bytes,
         })
     }
+
+    /// Drain `(table, batch)` pairs from a channel, coalesce per table until
+    /// `max_rows`, and write concurrently up to `max_concurrent` in-flight inserts.
+    pub async fn write_batches_stream(
+        self: &Arc<Self>,
+        mut rx: tokio::sync::mpsc::Receiver<(String, RecordBatch)>,
+        max_rows: usize,
+        max_concurrent: usize,
+    ) -> Result<Vec<WriteReport>, WriteError> {
+        let max_rows = max_rows.max(1);
+        let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
+        let mut set = tokio::task::JoinSet::new();
+        let mut pending: std::collections::HashMap<String, (Vec<RecordBatch>, usize)> =
+            std::collections::HashMap::new();
+
+        while let Some((table, batch)) = rx.recv().await {
+            let entry = pending.entry(table.clone()).or_default();
+            entry.1 += batch.num_rows();
+            entry.0.push(batch);
+            if entry.1 >= max_rows {
+                let (batches, _) = pending.remove(&table).unwrap();
+                let (w, p) = (self.clone(), sem.clone());
+                set.spawn(async move {
+                    let _permit = p.acquire_owned().await.expect("write semaphore closed");
+                    w.write(&table, batches, Some(WriteDurability::Durable))
+                        .await
+                });
+            }
+        }
+
+        for (table, (batches, _)) in pending {
+            let (w, p) = (self.clone(), sem.clone());
+            set.spawn(async move {
+                let _permit = p.acquire_owned().await.expect("write semaphore closed");
+                w.write(&table, batches, Some(WriteDurability::Durable))
+                    .await
+            });
+        }
+
+        let mut reports = Vec::new();
+        while let Some(r) = set.join_next().await {
+            reports.push(r.map_err(|e| WriteError::Write(format!("join: {e}"), None))??);
+        }
+        Ok(reports)
+    }
 }
 
 #[cfg(test)]
