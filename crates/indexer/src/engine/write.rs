@@ -7,15 +7,13 @@ use thiserror::Error;
 
 use crate::durability::WriteDurability;
 
-pub type UnderlyingError = Box<dyn StdError + Send + Sync>;
-
 #[derive(Debug, Error)]
 pub enum WriteError {
     #[error("failed to write: {0}")]
-    Write(String, #[source] Option<UnderlyingError>),
+    Write(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
 
     #[error("connection error: {0}")]
-    Connection(String, #[source] Option<UnderlyingError>),
+    Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
 
     #[error("invalid configuration: {0}")]
     InvalidConfiguration(String),
@@ -35,11 +33,4 @@ pub trait TableWriter: Send + Sync {
         batches: Vec<RecordBatch>,
         durability: Option<WriteDurability>,
     ) -> impl std::future::Future<Output = Result<WriteReport, WriteError>> + Send;
-}
-
-#[derive(Debug, Clone)]
-pub struct WriteStrategy {
-    pub channel_capacity: usize,
-    pub max_rows_per_insert: usize,
-    pub max_concurrent: usize,
 }

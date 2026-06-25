@@ -9,7 +9,6 @@ use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
-use crate::destination::TableWriter;
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
@@ -24,6 +23,7 @@ use crate::modules::sdlc::transform::system_notes;
 use crate::observer::{self, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
+use crate::write::TableWriter;
 
 const NAMESPACE_GATED_TRANSFORMS: &[(&str, gkg_server_config::Feature)] = &[(
     system_notes::TRANSFORM_NAME,

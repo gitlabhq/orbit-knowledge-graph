@@ -13,12 +13,12 @@ use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
-use crate::destination::TableWriter;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
+use crate::write::TableWriter;
 
 /// Sentinel branch value written to the checkpoint when the project is
 /// resolved as deleted from Rails (404) and we cannot determine its default

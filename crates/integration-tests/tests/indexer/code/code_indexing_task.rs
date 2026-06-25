@@ -6,13 +6,13 @@ use arrow::record_batch::RecordBatch;
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::destination::{TableWriter, WriteError, WriteReport};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
+use indexer::write::{TableWriter, WriteError, WriteReport};
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
 
 use super::helpers::*;

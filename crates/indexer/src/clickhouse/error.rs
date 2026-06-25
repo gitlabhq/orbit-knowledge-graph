@@ -1,6 +1,6 @@
 use clickhouse_client::ClickHouseError;
 
-use crate::destination::WriteError;
+use crate::write::WriteError;
 
 impl From<ClickHouseError> for WriteError {
     fn from(error: ClickHouseError) -> Self {

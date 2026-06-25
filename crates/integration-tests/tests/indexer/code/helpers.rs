@@ -105,9 +105,7 @@ impl CodeIndexingDeps {
         self.cache_dir.path()
     }
 
-    pub fn code_indexing_task_handler_with_writer<
-        W: indexer::destination::TableWriter + 'static,
-    >(
+    pub fn code_indexing_task_handler_with_writer<W: indexer::write::TableWriter + 'static>(
         &self,
         writer: Arc<W>,
     ) -> CodeIndexingTaskHandler<W> {

@@ -2,14 +2,14 @@
 //!
 //! Message processing framework and domain modules for the GitLab Knowledge Graph.
 //!
-//! This crate contains both the engine (message routing, concurrency, destinations)
+//! This crate contains both the engine (message routing, concurrency)
 //! and the domain modules (SDLC, Code) that implement indexing logic.
 //!
 //! ## Engine
 //!
 //! You provide:
 //! - A [`NatsBroker`](nats::NatsBroker) for message streaming
-//! - A [`TableWriter`](engine::destination::TableWriter) for writing record batches
+//! - A [`TableWriter`](engine::write::TableWriter) for writing record batches
 //! - One or more [`Handler`](engine::handler::Handler)s registered in a [`HandlerRegistry`](engine::handler::HandlerRegistry)
 //!
 //! ```text
@@ -44,7 +44,7 @@ pub mod testkit;
 
 // Re-export engine submodules at crate root for external API stability.
 pub use config::*;
-pub use engine::{dead_letter, destination, durability, handler, types, worker_pool};
+pub use engine::{dead_letter, durability, handler, types, worker_pool, write};
 
 /// Re-export metrics from their canonical locations for external API stability.
 pub mod metrics {

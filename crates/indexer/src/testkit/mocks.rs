@@ -13,13 +13,13 @@ use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::destination::{TableWriter, WriteError, WriteReport};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
 use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
 use crate::types::{Envelope, MessageId, Subscription};
+use crate::write::{TableWriter, WriteError, WriteReport};
 
 #[derive(Clone, Default)]
 pub struct MockNatsServices {

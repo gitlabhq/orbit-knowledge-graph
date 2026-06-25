@@ -4,9 +4,9 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 
-use crate::destination::{TableWriter, WriteError, WriteReport};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
+use crate::write::{TableWriter, WriteError, WriteReport};
 
 #[derive(Clone)]
 pub struct ClickHouseWriter {

@@ -16,7 +16,7 @@
 //! let registry = Arc::new(HandlerRegistry::default());
 //! registry.register_handler(Box::new(my_handler));
 //!
-//! let engine = EngineBuilder::new(broker, registry, Arc::new(my_destination))
+//! let engine = EngineBuilder::new(broker, registry)
 //!     .nats_services(nats_services)
 //!     .build();
 //!
@@ -27,12 +27,12 @@
 //! ```
 
 pub mod dead_letter;
-pub mod destination;
 pub mod durability;
 pub mod handler;
 pub mod metrics;
 pub mod types;
 pub mod worker_pool;
+pub mod write;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -80,7 +80,7 @@ pub enum EngineError {
 /// use etl_engine::engine::EngineBuilder;
 /// use std::sync::Arc;
 ///
-/// let engine = EngineBuilder::new(broker, registry, destination).build();
+/// let engine = EngineBuilder::new(broker, registry).build();
 /// ```
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
@@ -150,7 +150,7 @@ impl EngineBuilder {
 /// Use [`EngineBuilder`]:
 ///
 /// ```ignore
-/// let engine = EngineBuilder::new(broker, registry, destination).build();
+/// let engine = EngineBuilder::new(broker, registry).build();
 /// ```
 ///
 /// # Lifecycle

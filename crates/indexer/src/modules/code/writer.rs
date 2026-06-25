@@ -7,8 +7,8 @@ use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
 use tokio::sync::mpsc;
 
-use crate::destination::{TableWriter, WriteError, WriteReport, WriteStrategy};
 use crate::durability::WriteDurability;
+use crate::write::{TableWriter, WriteError, WriteReport};
 
 /// `BatchSink` that forwards to an mpsc channel for async draining.
 pub struct ChannelSink(pub mpsc::Sender<(String, RecordBatch)>);
@@ -28,10 +28,11 @@ impl code_graph::v2::BatchSink for ChannelSink {
 pub async fn drain_writes<W: TableWriter + 'static>(
     writer: Arc<W>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
-    strategy: WriteStrategy,
+    max_rows_per_insert: usize,
+    max_concurrent: usize,
 ) -> Result<Vec<WriteReport>, WriteError> {
-    let max_rows = strategy.max_rows_per_insert.max(1);
-    let sem = Arc::new(tokio::sync::Semaphore::new(strategy.max_concurrent.max(1)));
+    let max_rows = max_rows_per_insert.max(1);
+    let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
     let mut set = tokio::task::JoinSet::new();
     let mut pending: HashMap<String, (Vec<RecordBatch>, usize)> = HashMap::new();
 
@@ -76,14 +77,14 @@ mod tests {
 
     #[tokio::test]
     async fn drain_writes_returns_per_table_reports() {
-        let strategy = WriteStrategy {
-            channel_capacity: 8,
-            max_rows_per_insert: 500_000,
-            max_concurrent: 4,
-        };
-        let (tx, rx) = mpsc::channel(strategy.channel_capacity);
+        let (tx, rx) = mpsc::channel(8);
         let sink = Arc::new(ChannelSink(tx));
-        let drain = tokio::spawn(drain_writes(Arc::new(MockTableWriter::new()), rx, strategy));
+        let drain = tokio::spawn(drain_writes(
+            Arc::new(MockTableWriter::new()),
+            rx,
+            500_000,
+            4,
+        ));
 
         let s = Arc::clone(&sink);
         tokio::task::spawn_blocking(move || {

@@ -15,9 +15,9 @@ use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use super::writer::{ChannelSink, drain_writes};
-use crate::destination::{TableWriter, WriteReport, WriteStrategy};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
+use crate::write::{TableWriter, WriteReport};
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -357,14 +357,15 @@ impl<W: TableWriter + 'static> CodeIndexingPipeline<W> {
             &self.ontology,
             self.table_names.clone(),
         ));
-        let strategy = WriteStrategy {
-            channel_capacity: self.pipeline_config.write_channel_capacity,
-            max_rows_per_insert: self.pipeline_config.write_slice_rows,
-            max_concurrent: self.pipeline_config.write_max_concurrent_writes,
-        };
-        let (tx, rx) = tokio::sync::mpsc::channel(strategy.channel_capacity.max(1));
+        let (tx, rx) =
+            tokio::sync::mpsc::channel(self.pipeline_config.write_channel_capacity.max(1));
         let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(ChannelSink(tx));
-        let drain = tokio::spawn(drain_writes(Arc::clone(&self.writer), rx, strategy));
+        let drain = tokio::spawn(drain_writes(
+            Arc::clone(&self.writer),
+            rx,
+            self.pipeline_config.write_slice_rows,
+            self.pipeline_config.write_max_concurrent_writes,
+        ));
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
