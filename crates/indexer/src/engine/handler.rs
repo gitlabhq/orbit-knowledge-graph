@@ -27,10 +27,7 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 use thiserror::Error;
 
-use super::{
-    destination::Destination,
-    types::{Envelope, Subscription},
-};
+use super::types::{Envelope, Subscription};
 use crate::{
     indexing_status::IndexingStatusStore,
     locking::LockService,
@@ -94,33 +91,20 @@ impl HandlerInitError {
 /// and write results.
 #[derive(Clone)]
 pub struct HandlerContext {
-    /// The destination where processed data should be written.
-    pub destination: Arc<dyn Destination>,
-
-    /// NATS services for publishing messages and other NATS operations.
     pub nats: Arc<dyn NatsServices>,
-
-    /// Distributed lock service for coordinating concurrent processing.
     pub lock_service: Arc<dyn LockService>,
-
-    /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
-
-    /// Records indexing run progress to NATS KV for `GetGraphStatus`.
     pub indexing_status: Arc<IndexingStatusStore>,
 }
 
 impl HandlerContext {
-    /// Creates a new handler context with the given resources.
     pub fn new(
-        destination: Arc<dyn Destination>,
         nats: Arc<dyn NatsServices>,
         lock_service: Arc<dyn LockService>,
         progress: ProgressNotifier,
         indexing_status: Arc<IndexingStatusStore>,
     ) -> Self {
         HandlerContext {
-            destination,
             nats,
             lock_service,
             progress,

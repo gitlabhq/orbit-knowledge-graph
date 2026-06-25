@@ -46,7 +46,7 @@ use tracing::{Instrument, error, info, warn};
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
-use destination::Destination;
+
 use gkg_server_config::EngineConfiguration;
 use handler::{Handler, HandlerContext, HandlerError, HandlerRegistry, PermanentAction};
 use metrics::EngineMetrics;
@@ -85,7 +85,6 @@ pub enum EngineError {
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
-    destination: Arc<dyn Destination>,
     indexing_status: Arc<IndexingStatusStore>,
     metrics: Option<Arc<EngineMetrics>>,
     nats_services: Option<Arc<dyn NatsServices>>,
@@ -95,13 +94,11 @@ impl EngineBuilder {
     pub fn new(
         broker: Arc<NatsBroker>,
         registry: Arc<HandlerRegistry>,
-        destination: Arc<dyn Destination>,
         indexing_status: Arc<IndexingStatusStore>,
     ) -> Self {
         Self {
             broker,
             registry,
-            destination,
             indexing_status,
             metrics: None,
             nats_services: None,
@@ -133,7 +130,6 @@ impl EngineBuilder {
         Engine {
             broker: self.broker,
             registry: self.registry,
-            destination: self.destination,
             metrics,
             nats_services,
             lock_service,
@@ -165,7 +161,6 @@ impl EngineBuilder {
 pub struct Engine {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
-    destination: Arc<dyn Destination>,
     metrics: Arc<EngineMetrics>,
     nats_services: Arc<dyn NatsServices>,
     lock_service: Arc<dyn LockService>,
@@ -236,7 +231,7 @@ impl Engine {
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
-                        HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress, self.indexing_status.clone()),
+                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress, self.indexing_status.clone()),
                         self.broker.clone(),
                         runtime.clone(),
                         subscription.clone(),

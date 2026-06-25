@@ -1,4 +1,4 @@
-//! Sync-to-async streaming write bridge over [`Destination`]/[`BatchWriter`].
+//! Sync-to-async streaming write bridge over [`TableWriter`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,14 +8,14 @@ use code_graph::v2::SinkError;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::destination::{BatchWriterOptions, Destination};
+use crate::destination::{TableWriter, Writable, WriteReport};
 use crate::durability::WriteDurability;
 
 #[derive(Debug, Error)]
 #[error("{0}")]
 pub struct StreamWriteError(pub String);
 
-type Outcome = Result<Vec<WriteTotals>, StreamWriteError>;
+type Outcome = Result<Vec<WriteReport>, StreamWriteError>;
 
 pub struct StreamWriter {
     tx: mpsc::Sender<(String, RecordBatch)>,
@@ -27,8 +27,8 @@ pub struct StreamHandle {
 }
 
 impl StreamWriter {
-    pub fn new(
-        destination: Arc<dyn Destination>,
+    pub fn new<W: TableWriter + 'static>(
+        writer: Arc<W>,
         channel_capacity: usize,
         max_concurrent: usize,
         max_rows_per_insert: usize,
@@ -36,7 +36,7 @@ impl StreamWriter {
         let max_rows = max_rows_per_insert.max(1);
         let (tx, rx) = mpsc::channel(channel_capacity.max(1));
         let task = tokio::runtime::Handle::current().spawn(drain_loop(
-            destination,
+            writer,
             rx,
             max_concurrent.max(1),
             max_rows,
@@ -88,15 +88,15 @@ struct Pending {
     rows: usize,
 }
 
-async fn drain_loop(
-    destination: Arc<dyn Destination>,
+async fn drain_loop<W: TableWriter>(
+    writer: Arc<W>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
     max_concurrent: usize,
     max_rows: usize,
 ) -> Outcome {
     let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
     let mut set = tokio::task::JoinSet::new();
-    let mut totals: HashMap<String, WriteTotals> = HashMap::new();
+    let mut reports: Vec<WriteReport> = Vec::new();
     let mut pending: HashMap<String, Pending> = HashMap::new();
 
     while let Some((table, batch)) = rx.recv().await {
@@ -105,81 +105,55 @@ async fn drain_loop(
         p.batches.push(batch);
         if p.rows >= max_rows {
             let flushed = pending.remove(&table).unwrap();
-            spawn_write(&sem, &mut set, &destination, table, flushed.batches);
+            spawn_write(&sem, &mut set, &writer, table, flushed.batches);
         }
     }
 
     for (table, p) in pending.drain() {
         if !p.batches.is_empty() {
-            spawn_write(&sem, &mut set, &destination, table, p.batches);
+            spawn_write(&sem, &mut set, &writer, table, p.batches);
         }
     }
 
     while let Some(res) = set.join_next().await {
-        let (t, r, b) = res.map_err(|e| StreamWriteError(format!("join: {e}")))??;
-        let e = totals.entry(t.clone()).or_insert(WriteTotals {
-            table: t,
-            rows: 0,
-            bytes: 0,
-        });
-        e.rows += r;
-        e.bytes += b;
+        reports.push(res.map_err(|e| StreamWriteError(format!("join: {e}")))?
+            .map_err(|e| StreamWriteError(format!("write: {e}")))?);
     }
-    Ok(totals.into_values().collect())
+    Ok(reports)
 }
 
-fn spawn_write(
+fn spawn_write<W: TableWriter + 'static>(
     sem: &Arc<tokio::sync::Semaphore>,
-    set: &mut tokio::task::JoinSet<Result<(String, u64, u64), StreamWriteError>>,
-    destination: &Arc<dyn Destination>,
+    set: &mut tokio::task::JoinSet<Result<WriteReport, crate::destination::DestinationError>>,
+    writer: &Arc<W>,
     table: String,
     batches: Vec<RecordBatch>,
 ) {
     let permit = Arc::clone(sem);
-    let dest = destination.clone();
+    let w = Arc::clone(writer);
     set.spawn(async move {
         let permit = permit
             .acquire_owned()
             .await
-            .map_err(|e| StreamWriteError(format!("semaphore: {e}")))?;
-        let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-        let bytes: u64 = batches
-            .iter()
-            .map(|b| b.get_array_memory_size() as u64)
-            .sum();
-        let opts = BatchWriterOptions {
-            durability: Some(WriteDurability::Durable),
-        };
-        let w = dest
-            .new_batch_writer(&table, opts)
-            .await
-            .map_err(|e| StreamWriteError(format!("writer for {table}: {e}")))?;
-        w.write_batch(&batches)
-            .await
-            .map_err(|e| StreamWriteError(format!("write to {table}: {e}")))?;
+            .map_err(|e| crate::destination::DestinationError::Write(format!("semaphore: {e}"), None))?;
+        let report = w.write(Writable::new(table, batches).durable()).await?;
         drop(permit);
-        Ok((table, rows, bytes))
+        Ok(report)
     });
-}
-
-#[derive(Debug, Clone)]
-pub struct WriteTotals {
-    pub table: String,
-    pub rows: u64,
-    pub bytes: u64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testkit::MockDestination;
+    use crate::testkit::MockTableWriter;
     use arrow::array::Int64Array;
     use arrow::datatypes::{DataType, Field, Schema};
     use code_graph::v2::BatchSink;
 
     #[tokio::test]
-    async fn finish_returns_per_table_totals() {
-        let (writer, handle) = StreamWriter::new(Arc::new(MockDestination::new()), 8, 4, 500_000);
+    async fn finish_returns_per_table_reports() {
+        let (writer, handle) =
+            StreamWriter::new(Arc::new(MockTableWriter::new()), 8, 4, 500_000);
         let writer = Arc::new(writer);
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let batch =
@@ -194,12 +168,9 @@ mod tests {
         .unwrap();
 
         drop(writer);
-        let per_table = handle.finish().await.expect("finish should succeed");
-        let by_table: HashMap<&str, &WriteTotals> =
-            per_table.iter().map(|t| (t.table.as_str(), t)).collect();
-        assert_eq!(by_table.len(), 2);
-        assert_eq!(by_table["gl_file"].rows, 3);
-        assert_eq!(by_table["gl_definition"].rows, 3);
-        assert!(by_table.values().all(|t| t.bytes > 0));
+        let reports = handle.finish().await.expect("finish should succeed");
+        assert_eq!(reports.len(), 2);
+        assert!(reports.iter().all(|r| r.rows == 3));
+        assert!(reports.iter().all(|r| r.bytes > 0));
     }
 }

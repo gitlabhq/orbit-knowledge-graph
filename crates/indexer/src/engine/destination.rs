@@ -1,17 +1,15 @@
-//! Where processed data goes. Implement [`Destination`] to write to your storage.
+//! Write abstraction for the indexer ETL pipeline.
 
 use std::error::Error as StdError;
+use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
-use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::durability::WriteDurability;
 
-/// Underlying error from implementations.
 pub type UnderlyingError = Box<dyn StdError + Send + Sync>;
 
-/// Errors that can occur during destination operations.
 #[derive(Debug, Error)]
 pub enum DestinationError {
     #[error("failed to write batch: {0}")]
@@ -24,24 +22,71 @@ pub enum DestinationError {
     InvalidConfiguration(String),
 }
 
-/// Writes record batches to a destination.
-#[async_trait]
-pub trait BatchWriter: Send + Sync {
-    async fn write_batch(&self, batch: &[RecordBatch]) -> Result<(), DestinationError>;
+// ---------------------------------------------------------------------------
+// Writable: data + table + durability
+// ---------------------------------------------------------------------------
+
+pub trait IntoRecordBatches: Send {
+    fn into_batches(self) -> Vec<RecordBatch>;
 }
 
-/// `durability: None` inherits the backend's configured settings.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct BatchWriterOptions {
+impl IntoRecordBatches for RecordBatch {
+    fn into_batches(self) -> Vec<RecordBatch> {
+        vec![self]
+    }
+}
+
+impl IntoRecordBatches for Vec<RecordBatch> {
+    fn into_batches(self) -> Vec<RecordBatch> {
+        self
+    }
+}
+
+pub struct Writable {
+    pub table: String,
+    pub batches: Vec<RecordBatch>,
     pub durability: Option<WriteDurability>,
 }
 
-/// Creates writers for a storage backend.
-#[async_trait]
-pub trait Destination: Send + Sync {
-    async fn new_batch_writer(
+impl Writable {
+    pub fn new(table: impl Into<String>, data: impl IntoRecordBatches) -> Self {
+        Self {
+            table: table.into(),
+            batches: data.into_batches(),
+            durability: None,
+        }
+    }
+
+    pub fn durable(mut self) -> Self {
+        self.durability = Some(WriteDurability::Durable);
+        self
+    }
+
+    pub fn fire_and_forget(mut self) -> Self {
+        self.durability = Some(WriteDurability::FireAndForget);
+        self
+    }
+
+    pub fn with_durability(mut self, durability: Option<WriteDurability>) -> Self {
+        self.durability = durability;
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TableWriter: the single write trait
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct WriteReport {
+    pub table: String,
+    pub rows: u64,
+    pub bytes: u64,
+}
+
+pub trait TableWriter: Send + Sync {
+    fn write(
         &self,
-        table: &str,
-        options: BatchWriterOptions,
-    ) -> Result<Box<dyn BatchWriter>, DestinationError>;
+        writable: Writable,
+    ) -> impl std::future::Future<Output = Result<WriteReport, DestinationError>> + Send;
 }

@@ -13,7 +13,7 @@ use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::destination::{BatchWriter, Destination, DestinationError};
+use crate::destination::{DestinationError, TableWriter, Writable, WriteReport};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
 use crate::nats::{
@@ -124,47 +124,25 @@ impl nats_client::KvServices for MockNatsServices {
     }
 }
 
-/// Mock destination for testing.
-pub struct MockDestination {
-    batch_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
-}
+pub struct MockTableWriter;
 
-impl MockDestination {
+impl MockTableWriter {
     pub fn new() -> Self {
-        Self {
-            batch_writes: Arc::new(Mutex::new(Vec::new())),
-        }
+        Self
     }
 }
 
-impl Default for MockDestination {
+impl Default for MockTableWriter {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[async_trait]
-impl Destination for MockDestination {
-    async fn new_batch_writer(
-        &self,
-        _table: &str,
-        _options: crate::destination::BatchWriterOptions,
-    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        Ok(Box::new(MockBatchWriter {
-            writes: self.batch_writes.clone(),
-        }))
-    }
-}
-
-pub struct MockBatchWriter {
-    writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
-}
-
-#[async_trait]
-impl BatchWriter for MockBatchWriter {
-    async fn write_batch(&self, batch: &[RecordBatch]) -> Result<(), DestinationError> {
-        self.writes.lock().push(batch.to_vec());
-        Ok(())
+impl TableWriter for MockTableWriter {
+    async fn write(&self, w: Writable) -> Result<WriteReport, DestinationError> {
+        let rows: u64 = w.batches.iter().map(|b| b.num_rows() as u64).sum();
+        let bytes: u64 = w.batches.iter().map(|b| b.get_array_memory_size() as u64).sum();
+        Ok(WriteReport { table: w.table, rows, bytes })
     }
 }
 
