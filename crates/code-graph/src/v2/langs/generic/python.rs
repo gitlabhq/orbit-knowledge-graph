@@ -11,6 +11,7 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::BindingKind;
 
+use crate::v2::dsl::types::{ImportPathResolver, LanguageHooks};
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
@@ -95,14 +96,15 @@ impl DslLanguage for PythonDsl {
         Language::Python
     }
 
-    fn hooks() -> crate::v2::dsl::types::LanguageHooks {
-        crate::v2::dsl::types::LanguageHooks {
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["decorator"],
             resolve_import_path: Some(resolve_python_relative_import),
+            build_import_path_resolver: Some(build_python_import_path_resolver),
             import_scope_name: Some(python_import_scope_name),
-            ..crate::v2::dsl::types::LanguageHooks::default()
+            ..LanguageHooks::default()
         }
     }
 
@@ -407,6 +409,19 @@ impl PythonImportPathResolver {
         }
         resolved
     }
+}
+
+impl ImportPathResolver for PythonImportPathResolver {
+    fn resolve(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+        PythonImportPathResolver::resolve(self, raw_path, module_scope, sep)
+    }
+}
+
+fn build_python_import_path_resolver(paths: &[&str], sep: &str) -> Box<dyn ImportPathResolver> {
+    Box::new(PythonImportPathResolver::from_paths(
+        paths.iter().copied(),
+        sep,
+    ))
 }
 
 fn insert_importable_path_prefixes(

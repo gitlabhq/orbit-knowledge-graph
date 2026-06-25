@@ -8,9 +8,13 @@ use crate::v2::types::{DefKind, DefinitionMetadata};
 
 use super::extractors::MetadataRule;
 
-/// Signature for import path resolution hooks.
+/// Signature for stateless import path resolution hooks.
 /// Called with (raw_path, module_scope, separator). Returns resolved path or None.
-pub type ImportPathResolver = fn(&str, &str, &str) -> Option<String>;
+pub type ImportPathResolverFn = fn(&str, &str, &str) -> Option<String>;
+pub trait ImportPathResolver: Send + Sync {
+    fn resolve(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String>;
+}
+pub type ImportPathResolverFactory = fn(&[&str], &str) -> Box<dyn ImportPathResolver>;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
@@ -798,7 +802,10 @@ pub struct LanguageHooks {
     /// Called with (raw_path, module_scope, separator). Returns the
     /// resolved absolute path, or None to keep the raw path.
     /// Handles Python's `from .models import User` → `package.models`.
-    pub resolve_import_path: Option<ImportPathResolver>,
+    pub resolve_import_path: Option<ImportPathResolverFn>,
+    /// Build a stateful import path resolver from the current language's files.
+    /// Used by languages whose import paths depend on repository layout.
+    pub build_import_path_resolver: Option<ImportPathResolverFactory>,
     /// Node kinds that represent expression-bodied function bodies
     /// (e.g. Kotlin's `function_body` when it contains `=`).
     /// When the engine encounters one of these nodes with a `=` child,

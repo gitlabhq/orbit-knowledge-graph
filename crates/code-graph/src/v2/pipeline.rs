@@ -1156,15 +1156,21 @@ impl FamilyPipeline {
             })
             .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
-        let python_import_path_resolver = member_ctxs.contains_key(&Language::Python).then(|| {
-            crate::v2::langs::generic::python::PythonImportPathResolver::from_paths(
-                files
+        let import_path_resolvers: FxHashMap<
+            Language,
+            Box<dyn crate::v2::dsl::types::ImportPathResolver>,
+        > = member_ctxs
+            .iter()
+            .filter_map(|(&language, lctx)| {
+                let build = lctx.spec.hooks.build_import_path_resolver?;
+                let paths = files
                     .iter()
-                    .filter(|file| file.language == Language::Python)
-                    .map(|file| file.path.as_str()),
-                expected_sep,
-            )
-        });
+                    .filter(|file| file.language == language)
+                    .map(|file| file.path.as_str())
+                    .collect::<Vec<_>>();
+                Some((language, build(&paths, expected_sep)))
+            })
+            .collect();
 
         // ── Phase 1a: parallel parse with per-file spec ─────────
         let pb = progress_bar(file_count as u64, "parse + graph");
@@ -1240,20 +1246,14 @@ impl FamilyPipeline {
                     walk: ctx.config.per_file_walk_timeout,
                     ssa: ctx.config.per_file_ssa_timeout,
                 };
-                let result = if let Some(resolver) = python_import_path_resolver
-                    .as_ref()
-                    .filter(|_| f.language == Language::Python)
-                {
-                    let resolve = |raw_path: &str, module_scope: &str, sep: &str| {
-                        resolver.resolve(raw_path, module_scope, sep)
-                    };
+                let result = if let Some(resolver) = import_path_resolvers.get(&f.language) {
                     lctx.spec.parse_full_collect_with_import_resolver(
                         &source,
                         &f.path,
                         f.language,
                         tracer,
                         timeouts,
-                        Some(&resolve),
+                        Some(resolver.as_ref()),
                     )
                 } else {
                     lctx.spec

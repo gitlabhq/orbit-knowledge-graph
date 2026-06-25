@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::types::{LanguageSpec, Rule};
+use super::types::{ImportPathResolver, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -16,7 +16,7 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Axis, Match};
 use treesitter_visit::{Node, SupportLang};
 
-type ImportPathResolverOverride<'a> = &'a (dyn Fn(&str, &str, &str) -> Option<String> + Sync);
+type ImportPathResolverOverride<'a> = &'a dyn ImportPathResolver;
 
 /// Result of a defs-only parse. Just definitions and imports.
 pub struct ParsedDefs {
@@ -597,8 +597,8 @@ impl LanguageSpec {
         let Some(module_scope) = module_scope else {
             return raw_path;
         };
-        if let Some(resolve) = import_path_resolver
-            && let Some(resolved) = resolve(&raw_path, module_scope, sep)
+        if let Some(resolver) = import_path_resolver
+            && let Some(resolved) = resolver.resolve(&raw_path, module_scope, sep)
         {
             return resolved;
         }
