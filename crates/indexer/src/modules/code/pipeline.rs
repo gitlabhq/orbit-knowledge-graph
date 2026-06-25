@@ -14,7 +14,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use super::writer::StreamBridge;
+use super::writer::{ChannelSink, drain_writes};
 use crate::destination::{TableWriter, WriteReport, WriteStrategy};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
@@ -362,8 +362,9 @@ impl<W: TableWriter + 'static> CodeIndexingPipeline<W> {
             max_rows_per_insert: self.pipeline_config.write_slice_rows,
             max_concurrent: self.pipeline_config.write_max_concurrent_writes,
         };
-        let (bridge, stream_handle) = StreamBridge::new(Arc::clone(&self.writer), strategy);
-        let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(bridge);
+        let (tx, rx) = tokio::sync::mpsc::channel(strategy.channel_capacity.max(1));
+        let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(ChannelSink(tx));
+        let drain = tokio::spawn(drain_writes(Arc::clone(&self.writer), rx, strategy));
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
@@ -389,18 +390,16 @@ impl<W: TableWriter + 'static> CodeIndexingPipeline<W> {
         );
 
         let flush_start = Instant::now();
-        let per_table_writes = match stream_handle.finish().await {
-            Ok(totals) => totals,
-            Err(e) => {
-                return Err(HandlerError::Permanent {
-                    message: format!(
-                        "fatal code indexing pipeline error during flush for project {}: {e}",
-                        request.project_id
-                    ),
-                    action: crate::handler::PermanentAction::DeadLetter,
-                });
-            }
-        };
+        let per_table_writes = drain
+            .await
+            .map_err(|e| HandlerError::Processing(format!("drain task panicked: {e}")))?
+            .map_err(|e| HandlerError::Permanent {
+                message: format!(
+                    "fatal code indexing pipeline error during flush for project {}: {e}",
+                    request.project_id
+                ),
+                action: crate::handler::PermanentAction::DeadLetter,
+            })?;
         let graph_write_duration = flush_start.elapsed();
         info!(
             duration_ms = graph_write_duration.as_millis() as u64,
