@@ -9,6 +9,9 @@ use gkg_utils::arrow::ArrowUtils;
 use indexer::destination::{Destination, DestinationError, DestinationReport};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
+use indexer::modules::code::{
+    ClickHouseStaleDataCleaner, StaleDataCleaner, config::CodeTableNames,
+};
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
@@ -43,7 +46,7 @@ async fn indexes_repository() {
 
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
-    let context = handler_context(&clickhouse);
+    let context = handler_context();
     let traversal_path = "1/1/";
     let envelope = code_indexing_task_envelope(project_id, commit_sha, 1, traversal_path);
 
@@ -619,7 +622,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         )],
     );
     let failing_handler = deps.code_indexing_task_handler_with_writer(Arc::new(FailingWriter));
-    let (context, _indexing_status) = handler_context();
+    let (context, indexing_status) = handler_context_with_status();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
     let error = failing_handler
         .handle(context, envelope)
@@ -670,7 +673,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
-    let context = handler_context(&clickhouse);
+    let context = handler_context();
     let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
 
     let result = handler.handle(context, envelope).await;
@@ -868,15 +871,15 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     .await;
 }
 
-async fn index_code(
-    handler: &indexer::modules::code::CodeIndexingTaskHandler,
-    clickhouse: &integration_testkit::TestContext,
+async fn index_code<W: indexer::destination::Destination + 'static>(
+    handler: &indexer::modules::code::CodeIndexingTaskHandler<W>,
+    _clickhouse: &integration_testkit::TestContext,
     project_id: i64,
     commit_sha: &str,
     task_id: i64,
     traversal_path: &str,
 ) {
-    let context = handler_context(clickhouse);
+    let context = handler_context();
     let envelope = code_indexing_task_envelope(project_id, commit_sha, task_id, traversal_path);
 
     handler
@@ -922,7 +925,7 @@ async fn insert_stale_canary_file(
     clickhouse.execute(&sql).await;
 }
 
-fn handler_context() -> (HandlerContext, Arc<IndexingStatusStore>) {
+fn handler_context_with_status() -> (HandlerContext, Arc<IndexingStatusStore>) {
     let mock_nats = Arc::new(MockNatsServices::new());
     let indexing_status = Arc::new(IndexingStatusStore::new(mock_nats.clone()));
     let context = HandlerContext::new(
@@ -1284,7 +1287,7 @@ async fn timed_out_job_writes_no_data() {
     let handler = deps.code_indexing_task_handler();
     let envelope = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
 
-    let result = handler.handle(handler_context(&clickhouse), envelope).await;
+    let result = handler.handle(handler_context(), envelope).await;
     assert!(result.is_err(), "slow fetch should trip the job timeout");
 
     for table in ["gl_file", "gl_definition"] {

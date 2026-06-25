@@ -14,7 +14,7 @@ pub async fn partitioned_initial_load_indexes_all_rows_and_consolidates(ctx: &Te
 
     entity_handler_with_partitions(ctx, "User", 4)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("partitioned handler should succeed");
 
@@ -98,7 +98,7 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
 
     entity_handler_with_partitions(ctx, "User", 4)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("deferred consolidation must surface as Ok, not a pipeline error");
 
@@ -158,7 +158,7 @@ pub async fn present_parent_takes_single_pull_path_and_honors_floor(ctx: &TestCo
 
     entity_handler_with_partitions(ctx, "User", 4)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("partitioned handler should succeed");
 
@@ -221,7 +221,7 @@ pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &
 
     entity_handler_with_partitions(ctx, "User", 4)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("partitioned handler should succeed");
 
@@ -316,7 +316,7 @@ pub async fn namespaced_entities_partition_by_id_within_scope(ctx: &TestContext)
 
     entity_handler_with_partitions(ctx, "Group", 4)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(), namespace_envelope(1, 100))
         .await
         .expect("Group partitioned handler should succeed");
     assert_indexed_ids(
@@ -330,7 +330,7 @@ pub async fn namespaced_entities_partition_by_id_within_scope(ctx: &TestContext)
 
     entity_handler_with_partitions(ctx, "Milestone", 4)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(), namespace_envelope(1, 100))
         .await
         .expect("namespaced partitioned handler should succeed");
     assert_indexed_ids(
@@ -349,7 +349,7 @@ pub async fn span_smaller_than_partition_count_falls_back_to_single_run(ctx: &Te
 
     entity_handler_with_partitions(ctx, "User", 4)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("handler should succeed even when span is too small");
 

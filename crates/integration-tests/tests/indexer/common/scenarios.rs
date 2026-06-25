@@ -18,7 +18,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
                 namespace_handler(ctx)
                     .await
                     .handle(
-                        handler_context(ctx),
+                        handler_context(),
                         namespace_envelope(scope.organization, scope.namespace),
                     )
                     .await
@@ -27,7 +27,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
             "global" => {
                 global_handler(ctx)
                     .await
-                    .handle(handler_context(ctx), global_envelope())
+                    .handle(handler_context(), global_envelope())
                     .await
                     .unwrap();
             }
@@ -36,7 +36,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
                 system_notes_handler(ctx)
                     .await
                     .handle(
-                        handler_context(ctx),
+                        handler_context(),
                         namespace_envelope(scope.organization, scope.namespace),
                     )
                     .await

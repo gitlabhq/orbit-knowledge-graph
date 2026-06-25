@@ -499,7 +499,10 @@ mod tests {
         )
     }
 
-    fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
+    fn build_handler(
+        entity_name: &str,
+        scope: EtlScope,
+    ) -> EntityHandler<crate::testkit::MockDestination> {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1000, 1000, &Default::default());
         let scope_plans = match scope {
@@ -524,10 +527,12 @@ mod tests {
             EtlScope::Namespaced => NamespaceIndexingRequest::subscription(),
         };
 
+        let writer = Arc::new(crate::testkit::MockDestination::new());
         EntityHandler::new(
             plan,
             scope,
             pipeline,
+            writer,
             datalake,
             checkpoint_store,
             test_metrics(),

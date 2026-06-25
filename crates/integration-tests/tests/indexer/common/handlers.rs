@@ -4,7 +4,7 @@ use std::sync::{Arc, Once};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use indexer::IndexerConfig;
-use indexer::clickhouse::ClickHouseDestination;
+use indexer::clickhouse::ClickHouseWriter;
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
 use indexer::nats::ProgressNotifier;
@@ -15,18 +15,9 @@ use indexer::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use indexer::types::{Envelope, Event, Subscription};
 use integration_testkit::TestContext;
 
-pub fn handler_context(ctx: &TestContext) -> HandlerContext {
-    // Match prod ClickHouse, which rejects an INSERT omitting a column; the testcontainer is lenient.
-    let mut config = ctx.config.clone();
-    config.insert_settings.insert(
-        "input_format_arrow_allow_missing_columns".to_string(),
-        "0".to_string(),
-    );
-    let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
-        .expect("failed to create destination");
+pub fn handler_context() -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
-        Arc::new(destination),
         mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
@@ -76,12 +67,17 @@ async fn build_fan_out(
     subscription: Subscription,
 ) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
+    let writer = Arc::new(
+        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
+            .expect("writer"),
+    );
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
         &ontology,
+        writer,
         indexer::analytics::IndexingAnalytics::disabled(),
     )
     .await
@@ -127,12 +123,17 @@ pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     });
 
     let config = create_test_indexer_config(&ctx.config);
+    let writer = Arc::new(
+        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
+            .expect("writer"),
+    );
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
         &ontology,
+        writer,
         indexer::analytics::IndexingAnalytics::disabled(),
     )
     .await
@@ -152,12 +153,17 @@ pub async fn entity_handler_with_partitions(
         HashMap::from([(entity_name.to_string(), partitions)]);
     config.engine.handlers.entity_handler.partition_min_rows = 0;
 
+    let writer = Arc::new(
+        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
+            .expect("writer"),
+    );
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
         &ontology,
+        writer,
         indexer::analytics::IndexingAnalytics::disabled(),
     )
     .await

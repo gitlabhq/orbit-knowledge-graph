@@ -452,6 +452,7 @@ mod tests {
     use super::super::plan::{TransformSpec, Transformation};
     use super::*;
     use crate::checkpoint::CheckpointError;
+    use crate::durability::WriteDurability;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::observer::NoOpObserver;

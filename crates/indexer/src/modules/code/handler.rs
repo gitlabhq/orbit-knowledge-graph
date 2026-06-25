@@ -367,7 +367,7 @@ mod tests {
     }
 
     struct TestContext {
-        handler: CodeIndexingTaskHandler,
+        handler: CodeIndexingTaskHandler<crate::testkit::MockDestination>,
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
@@ -403,8 +403,10 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
+            let writer = Arc::new(crate::testkit::MockDestination::new());
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
+                writer,
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),

@@ -37,6 +37,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
+    pub clickhouse_config: gkg_server_config::ClickHouseConfiguration,
     cache_dir: tempfile::TempDir,
 }
 
@@ -97,6 +98,7 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
+            clickhouse_config: clickhouse.config.clone(),
             cache_dir,
         }
     }
@@ -114,7 +116,7 @@ impl CodeIndexingDeps {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
-        let graph_client = Arc::new(self.checkpoint_store.client().clone());
+        let graph_client = Arc::new(self.clickhouse_config.build_client());
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
 
@@ -374,19 +376,9 @@ fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
 // Shared test helpers
 // ---------------------------------------------------------------------------
 
-pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
-    use indexer::clickhouse::ClickHouseDestination;
-    use indexer::metrics::EngineMetrics;
-
-    let destination = ClickHouseDestination::new(
-        clickhouse.config.clone(),
-        Arc::new(EngineMetrics::default()),
-    )
-    .expect("failed to create destination");
-
+pub fn handler_context() -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
-        Arc::new(destination),
         mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),

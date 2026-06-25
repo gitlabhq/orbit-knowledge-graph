@@ -54,7 +54,7 @@ pub async fn incremental_watermark_filters_old_rows(ctx: &TestContext) {
 
     global_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("handler should succeed");
 
@@ -86,7 +86,7 @@ pub async fn resume_honors_cursor_floor_and_watermark_boundary(ctx: &TestContext
 
     global_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("handler should succeed");
 
@@ -118,7 +118,7 @@ pub async fn composite_keyset_resume_skips_processed_groups(ctx: &TestContext) {
 
     namespace_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(), namespace_envelope(1, 100))
         .await
         .expect("handler should succeed");
 
