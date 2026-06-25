@@ -196,36 +196,6 @@ impl code_graph::v2::GraphConverter for DuckDbConverter {
     }
 }
 
-/// `BatchSink` implementation for DuckDB. Wraps a `DuckDbClient` behind
-/// a Mutex (DuckDB is single-writer).
-pub struct DuckDbSink {
-    client: std::sync::Mutex<crate::DuckDbClient>,
-}
-
-impl DuckDbSink {
-    pub fn new(client: crate::DuckDbClient) -> Self {
-        Self {
-            client: std::sync::Mutex::new(client),
-        }
-    }
-}
-
-impl code_graph::v2::BatchSink for DuckDbSink {
-    fn write_batch(
-        &self,
-        table: &str,
-        batch: &RecordBatch,
-    ) -> std::result::Result<(), code_graph::v2::SinkError> {
-        if batch.num_rows() == 0 {
-            return Ok(());
-        }
-        let client = self.client.lock().unwrap();
-        client
-            .insert_batch(table, batch)
-            .map_err(|e| code_graph::v2::SinkError(format!("DuckDB write to {table}: {e}")))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

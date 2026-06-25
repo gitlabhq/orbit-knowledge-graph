@@ -9,7 +9,7 @@ use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
-    BatchTx, Decision, FileInventoryEntry, GraphConverter, GraphStatsCounters, NullSink, Pipeline,
+    BatchTx, Decision, FileInventoryEntry, GraphConverter, GraphStatsCounters, OnBatch, Pipeline,
     PipelineConfig, PipelineContext,
 };
 
@@ -184,11 +184,12 @@ pub async fn run_yaml_suite(yaml: &str) {
         None | Some("generic") => {
             let config = PipelineConfig::default();
             let converter = Arc::new(LanceConverter::new());
-            let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(NullSink);
+            let on_batch: Arc<OnBatch> =
+                Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
             let inventory: Arc<[FileInventoryEntry]> = Arc::from(file_inventory.clone());
             let result = if let Some(pool) = &pool {
                 let c = converter.clone() as Arc<dyn GraphConverter>;
-                let s = sink.clone();
+                let ob = on_batch.clone();
                 let inventory = inventory.clone();
                 pool.install(move || {
                     Pipeline::run_with_tracer(
@@ -198,7 +199,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                         &Default::default(),
                         tracer,
                         c,
-                        s,
+                        ob,
                     )
                 })
             } else {
@@ -209,7 +210,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                     &Default::default(),
                     tracer,
                     converter.clone() as Arc<dyn GraphConverter>,
-                    sink,
+                    on_batch,
                 )
             };
             assert!(
@@ -237,6 +238,13 @@ pub async fn run_yaml_suite(yaml: &str) {
             });
             let converter = LanceConverter::new();
             let (tx, rx) = crossbeam_channel::unbounded();
+            let on_batch = {
+                let tx = tx.clone();
+                move |table: &str, batch: arrow::record_batch::RecordBatch| {
+                    tx.send((table.to_string(), batch))
+                        .map_err(|_| code_graph::v2::SinkError("channel closed".into()))
+                }
+            };
             let dirs = AtomicUsize::new(0);
             let files_count = AtomicUsize::new(0);
             let defs = AtomicUsize::new(0);
@@ -244,8 +252,9 @@ pub async fn run_yaml_suite(yaml: &str) {
             let edgs = AtomicUsize::new(0);
             {
                 let errors = std::sync::Mutex::new(Vec::new());
+                let on_batch_ref: &OnBatch = &on_batch;
                 let btx = BatchTx::new(
-                    &tx,
+                    on_batch_ref,
                     &converter,
                     &errors,
                     GraphStatsCounters::new(&dirs, &files_count, &defs, &imps, &edgs),
@@ -255,7 +264,6 @@ pub async fn run_yaml_suite(yaml: &str) {
                     .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
             }
             drop(tx);
-            // Collect any raw batches sent via send_raw (e.g. Ruby/Prism)
             let mut datasets = converter.take();
             for (table, batch) in rx.try_iter() {
                 extend_datasets(
