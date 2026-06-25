@@ -31,6 +31,7 @@ pub mod destination;
 pub mod durability;
 pub mod handler;
 pub mod metrics;
+pub mod stream_writer;
 pub mod types;
 pub mod worker_pool;
 
