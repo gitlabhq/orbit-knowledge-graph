@@ -536,7 +536,7 @@ mod tests {
     use super::*;
     use crate::nats::ProgressNotifier;
     use crate::testkit::mocks::{
-        MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
+        MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
     use gkg_server_config::SubscriptionConfig;
     use handler::{HandlerError, PermanentAction};
@@ -545,7 +545,6 @@ mod tests {
     fn test_context() -> HandlerContext {
         let mock = Arc::new(MockNatsServices::new());
         HandlerContext::new(
-            Arc::new(MockDestination::new()),
             mock.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),

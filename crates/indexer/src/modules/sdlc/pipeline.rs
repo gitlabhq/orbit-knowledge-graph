@@ -455,7 +455,7 @@ mod tests {
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::observer::NoOpObserver;
-    use crate::testkit::MockDestination;
+    use crate::testkit::MockTableWriter;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
@@ -547,9 +547,9 @@ mod tests {
     use crate::modules::sdlc::test_helpers::FailingDatalake;
     use crate::nats::ProgressNotifier;
 
-    fn noop_context() -> PipelineContext {
+    fn noop_context() -> PipelineContext<MockTableWriter> {
         PipelineContext {
-            destination: Arc::new(MockDestination::new()),
+            writer: Arc::new(MockTableWriter::new()),
             progress: ProgressNotifier::noop(),
             observer: Arc::new(Mutex::new(NoOpObserver)),
         }

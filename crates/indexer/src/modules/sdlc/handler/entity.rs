@@ -485,15 +485,13 @@ mod tests {
     use crate::modules::sdlc::plan::build_plans;
     use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
-    use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
+    use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
     use ontology::Ontology;
 
     fn handler_context() -> HandlerContext {
-        let destination = Arc::new(MockDestination::new());
         let mock_nats = Arc::new(MockNatsServices::new());
         HandlerContext::new(
-            destination,
             mock_nats.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),

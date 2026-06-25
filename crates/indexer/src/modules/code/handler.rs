@@ -358,7 +358,7 @@ mod tests {
     use crate::modules::code::repository::service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
-    use crate::testkit::{MockDestination, MockLockService, MockNatsServices};
+    use crate::testkit::{MockLockService, MockNatsServices};
     use crate::types::Event;
     use chrono::Utc;
 
@@ -436,7 +436,6 @@ mod tests {
 
         fn handler_context(&self) -> HandlerContext {
             HandlerContext::new(
-                Arc::new(MockDestination::new()),
                 self.mock_nats.clone(),
                 self.mock_locks.clone(),
                 ProgressNotifier::noop(),
