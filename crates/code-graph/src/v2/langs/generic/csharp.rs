@@ -4,7 +4,7 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{Extract, child_of_kind, field, text};
+use treesitter_visit::extract::{Extract, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -23,9 +23,18 @@ pub struct CSharpDsl;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 fn csharp_super_types(node: &N<'_>) -> Vec<String> {
-    child_of_kind("base_list")
-        .collect_shallow(AnyKind(&["identifier", "qualified_name", "generic_name"]))
-        .apply_all(node)
+    let mut result = Vec::new();
+    for child in node.children() {
+        if child.kind() == "base_list" {
+            for inner in child.children() {
+                let ik = inner.kind();
+                if ik == "identifier" || ik == "qualified_name" || ik == "generic_name" {
+                    result.push(inner.text().to_string());
+                }
+            }
+        }
+    }
+    result
 }
 
 impl DslLanguage for CSharpDsl {
@@ -116,19 +125,30 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        let base = || {
+        fn csharp_import_classify(node: &N<'_>) -> &'static str {
+            let text = node.text().to_string();
+            if text.contains("static") {
+                "StaticImport"
+            } else if text.contains('=') {
+                "AliasedImport"
+            } else {
+                // Regular using directives are namespace-level wildcards:
+                // `using MyApp.Models;` makes all types in MyApp.Models available.
+                "WildcardImport"
+            }
+        }
+
+        vec![
             import("using_directive")
                 .path_from(Extract::one(
                     Child,
                     AnyKind(&["qualified_name", "identifier"]),
                 ))
                 .alias_from(field("name"))
-                .always_wildcard()
-        };
-        vec![
-            base().label("StaticImport").when(text_contains("static")),
-            base().label("AliasedImport").when(text_contains("=")),
-            base().label("WildcardImport"),
+                .classify(csharp_import_classify)
+                // C# using directives import all types from a namespace.
+                // `using MyApp.Models;` ≈ Java's `import MyApp.Models.*;`
+                .always_wildcard(),
         ]
     }
 

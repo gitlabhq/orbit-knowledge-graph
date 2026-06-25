@@ -25,19 +25,26 @@ pub struct PythonDsl;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 fn python_super_types(node: &N<'_>) -> Vec<String> {
-    let Some(superclasses) = field("superclasses").navigate(node) else {
-        return vec![];
-    };
-    superclasses
-        .children_matching(AnyKind(&["identifier", "attribute", "call"]))
-        .filter_map(|child| {
-            if child.kind().as_ref() == "call" {
-                field("function").apply(&child)
-            } else {
-                Some(child.text().to_string())
+    let mut result = Vec::new();
+    if let Some(superclasses) = node.field("superclasses") {
+        for child in superclasses.children() {
+            let kind = child.kind();
+            if kind == "identifier" || kind == "attribute" || kind == "call" {
+                let text = if kind == "call" {
+                    child
+                        .field("function")
+                        .map(|f| f.text().to_string())
+                        .unwrap_or_else(|| child.text().to_string())
+                } else {
+                    child.text().to_string()
+                };
+                if !text.is_empty() {
+                    result.push(text);
+                }
             }
-        })
-        .collect()
+        }
+    }
+    result
 }
 
 fn python_decorators(node: &N<'_>) -> Vec<String> {
@@ -59,12 +66,24 @@ fn in_class_body() -> Pred {
     ))
 }
 
-fn is_async() -> Pred {
-    has_child(&["async"])
-}
+fn classify_python_function(node: &N<'_>) -> &'static str {
+    let is_async = node.has(Child, Kind("async"));
+    let has_decorator = node.has(Parent, Kind("decorated_definition"));
+    let is_method = node.parent().and_then(|p| p.parent()).is_some_and(|gp| {
+        gp.kind() == "class_definition"
+            || gp.kind() == "block" && gp.has(Parent, Kind("class_definition"))
+    });
 
-fn is_decorated() -> Pred {
-    parent_is("decorated_definition")
+    match (is_method, is_async, has_decorator) {
+        (true, true, true) => "DecoratedAsyncMethod",
+        (true, true, false) => "AsyncMethod",
+        (true, false, true) => "DecoratedMethod",
+        (true, false, false) => "Method",
+        (false, true, true) => "DecoratedAsyncFunction",
+        (false, true, false) => "AsyncFunction",
+        (false, false, true) => "DecoratedFunction",
+        (false, false, false) => "Function",
+    }
 }
 
 impl DslLanguage for PythonDsl {
@@ -94,7 +113,6 @@ impl DslLanguage for PythonDsl {
                 .return_type(field("return_type"))
                 .decorators(python_decorators)
         };
-        let func = |label| scope("function_definition", label).metadata(func_meta());
 
         let mut rules = vec![
             scope("class_definition", "Class")
@@ -102,19 +120,11 @@ impl DslLanguage for PythonDsl {
                 .metadata(class_meta()),
             scope("class_definition", "DecoratedClass")
                 .def_kind(DefKind::Class)
-                .when(is_decorated())
+                .when(parent_is("decorated_definition"))
                 .metadata(class_meta()),
-            // Fallback first (reverse iteration: tried last).
-            func("Function").def_kind(DefKind::Function),
-            func("DecoratedFunction")
-                .when(is_decorated())
-                .def_kind(DefKind::Function),
-            func("AsyncFunction")
-                .when(is_async())
-                .def_kind(DefKind::Function),
-            func("DecoratedAsyncFunction")
-                .when(is_decorated().and(is_async()))
-                .def_kind(DefKind::Function),
+            scope_fn("function_definition", classify_python_function)
+                .def_kind(DefKind::Function)
+                .metadata(func_meta()),
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(field_kind("right", &["lambda"]))
@@ -128,19 +138,13 @@ impl DslLanguage for PythonDsl {
                 .metadata(metadata().type_annotation(field("type"))),
         ];
 
+        // Inside a class: functions become methods
         rules.extend(within(
             grandparent_is("class_definition"),
             vec![
-                func("Method").def_kind(DefKind::Method),
-                func("DecoratedMethod")
-                    .when(is_decorated())
-                    .def_kind(DefKind::Method),
-                func("AsyncMethod")
-                    .when(is_async())
-                    .def_kind(DefKind::Method),
-                func("DecoratedAsyncMethod")
-                    .when(is_decorated().and(is_async()))
-                    .def_kind(DefKind::Method),
+                scope_fn("function_definition", |_| "Method")
+                    .def_kind(DefKind::Method)
+                    .metadata(func_meta()),
             ],
         ));
 
@@ -180,33 +184,36 @@ impl DslLanguage for PythonDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        let import_base = || {
+        fn python_import_classify(node: &N<'_>) -> &'static str {
+            if node.has(Child, Kind("wildcard_import")) {
+                return "WildcardImport";
+            }
+            if node.has(Child, Kind("aliased_import")) {
+                return "AliasedImport";
+            }
+            "Import"
+        }
+
+        fn python_from_classify(node: &N<'_>) -> &'static str {
+            if node.has(Child, Kind("wildcard_import")) {
+                return "WildcardImport";
+            }
+            "FromImport"
+        }
+
+        vec![
             import("import_statement")
+                .classify(python_import_classify)
                 .path_from(no_extract())
                 .multi(&["dotted_name"])
                 .alias_child("aliased_import")
-                .wildcard_child("wildcard_import")
-        };
-        let from_base = || {
+                .wildcard_child("wildcard_import"),
             import("import_from_statement")
+                .classify(python_from_classify)
                 .path_from(field("module_name"))
                 .multi(&["dotted_name", "identifier"])
                 .alias_child("aliased_import")
-                .wildcard_child("wildcard_import")
-        };
-
-        vec![
-            import_base()
-                .label("WildcardImport")
-                .when(has_child(&["wildcard_import"])),
-            import_base()
-                .label("AliasedImport")
-                .when(has_child(&["aliased_import"])),
-            import_base().label("Import"),
-            from_base()
-                .label("WildcardImport")
-                .when(has_child(&["wildcard_import"])),
-            from_base().label("FromImport"),
+                .wildcard_child("wildcard_import"),
             import("future_import_statement")
                 .label("FutureImport")
                 .path_from(child_of_kind("__future__"))

@@ -508,9 +508,13 @@ mod tests {
         }
     }
 
-    /// Regression for #801: self-joining the edge table without deduping each
-    /// scan multiplies un-merged ReplacingMergeTree versions and inflates
-    /// `count(mr)` (observed 7, 49, 245 for an MR that should return 1).
+    /// Regression for #801: when two or more hops self-join the edge table,
+    /// each edge scan must deduplicate ReplacingMergeTree row versions before
+    /// the join. Without it the self-join multiplies un-merged versions of
+    /// each hop, inflating `count(mr)` multiplicatively (the issue observed
+    /// 7, 49, 245 for an MR that should return 1). The dedup uses an argMax
+    /// GROUP BY subquery, which keeps the `source_id` projection (FINAL would
+    /// discard it and read ~170x more bytes).
     #[test]
     fn multi_edge_self_join_dedups_edge_versions() {
         let query = r#"{
@@ -531,8 +535,13 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("FROM gl_edge AS e0 FINAL") && sql.contains("FROM gl_edge AS e1 FINAL"),
-            "multi-edge self-join must dedup each edge scan via FINAL, got:\n{sql}"
+            sql.contains("argMax(e0._deleted, e0._version) = false")
+                && sql.contains("argMax(e1._deleted, e1._version) = false"),
+            "multi-edge self-join must dedup each edge scan via argMax, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("FROM gl_edge AS e0 FINAL"),
+            "dedup must keep the projection, not fall back to FINAL, got:\n{sql}"
         );
     }
 

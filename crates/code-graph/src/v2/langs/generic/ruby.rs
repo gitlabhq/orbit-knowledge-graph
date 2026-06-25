@@ -484,42 +484,62 @@ fn strip_leading_scope(name: &str) -> String {
     name.strip_prefix("::").unwrap_or(name).to_string()
 }
 
-const RUBY_CONST_KINDS: &[&str] = &["constant", "scope_resolution"];
-const INCLUDE_METHODS: &[&str] = &["include", "extend", "prepend"];
-
+/// Extract super types: superclass + include/extend calls in the class body.
 fn collect_include_args(call: &N<'_>, types: &mut Vec<String>) {
-    types.extend(
-        field("arguments")
-            .collect(AnyKind(RUBY_CONST_KINDS))
-            .strip_prefix("::")
-            .apply_all(call),
-    );
+    if let Some(args) = call.field("arguments") {
+        for arg in args.children() {
+            let kind = arg.kind();
+            if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
+                types.push(strip_leading_scope(&arg.text()));
+            }
+        }
+    }
 }
 
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
-    let mut types = field("superclass")
-        .collect_shallow(AnyKind(RUBY_CONST_KINDS))
-        .strip_prefix("::")
-        .apply_all(node);
+    let mut types = Vec::new();
 
-    if let Some(body) = field("body").navigate(node) {
-        for child in body.children_matching(Kind("call")) {
+    // Direct superclass: class Dog < Animal
+    // The "superclass" field wraps the type in a `superclass` node
+    // that includes the `<` token. Extract the inner constant or
+    // scope_resolution child directly.
+    if let Some(s) = node.field("superclass")
+        && let Some(type_node) = s.children().find(|c| {
+            let k = c.kind();
+            k.as_ref() == "constant" || k.as_ref() == "scope_resolution"
+        })
+    {
+        let name = strip_leading_scope(&type_node.text());
+        if !name.is_empty() {
+            types.push(name);
+        }
+    }
+
+    // include/extend in body: include Foo, extend Bar
+    if let Some(body) = node.field("body") {
+        for child in body.children() {
+            if child.kind().as_ref() != "call" {
+                continue;
+            }
             let method_name = child
                 .field("method")
                 .map(|m| m.text().to_string())
                 .unwrap_or_default();
             match method_name.as_str() {
-                _ if INCLUDE_METHODS.contains(&method_name.as_str()) => {
-                    collect_include_args(&child, &mut types);
-                }
+                "include" | "extend" | "prepend" => collect_include_args(&child, &mut types),
                 "included" | "prepended" => {
-                    if let Some(block_body) = field("block").field("body").navigate(&child) {
-                        for inner in block_body.children_matching(Kind("call")) {
+                    if let Some(block) = child.field("block")
+                        && let Some(block_body) = block.field("body")
+                    {
+                        for inner in block_body.children() {
+                            if inner.kind().as_ref() != "call" {
+                                continue;
+                            }
                             let m = inner
                                 .field("method")
                                 .map(|m| m.text().to_string())
                                 .unwrap_or_default();
-                            if INCLUDE_METHODS.contains(&m.as_str()) {
+                            if matches!(m.as_str(), "include" | "extend" | "prepend") {
                                 collect_include_args(&inner, &mut types);
                             }
                         }
@@ -529,6 +549,7 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
             }
         }
     }
+
     types
 }
 

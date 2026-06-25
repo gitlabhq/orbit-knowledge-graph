@@ -4,9 +4,8 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{
-    Extract, child_of_kind, constant, default_name, field, no_extract, text,
-};
+use treesitter_visit::extract::Extract;
+use treesitter_visit::extract::{child_of_kind, constant, default_name, field, no_extract, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -26,10 +25,73 @@ pub struct KotlinDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
+fn extract_user_type(node: &N<'_>) -> Option<String> {
+    // Look for user_type in direct children first, then in constructor_invocation
+    if let Some(ut) = node.children().find(|c| c.kind() == "user_type") {
+        return Some(ut.text().to_string());
+    }
+    if let Some(ci) = node
+        .children()
+        .find(|c| c.kind() == "constructor_invocation")
+        && let Some(ut) = ci.children().find(|c| c.kind() == "user_type")
+    {
+        return Some(ut.text().to_string());
+    }
+    None
+}
+
+fn extract_delegation_specifier(spec: &N<'_>, result: &mut Vec<String>) {
+    let sk = spec.kind();
+    if sk == "delegation_specifier" || sk == "constructor_invocation" {
+        let text = extract_user_type(spec).unwrap_or_else(|| spec.text().to_string());
+        if !text.is_empty() && text != "," {
+            result.push(text);
+        }
+    } else if sk == "user_type" {
+        result.push(spec.text().to_string());
+    }
+}
+
 fn kotlin_super_types(node: &N<'_>) -> Vec<String> {
-    child_of_kind("delegation_specifiers")
-        .collect_shallow(Kind("user_type"))
-        .apply_all(node)
+    let mut result = Vec::new();
+    for child in node.children() {
+        let ck = child.kind();
+        if ck == "delegation_specifiers" {
+            for spec in child.children() {
+                extract_delegation_specifier(&spec, &mut result);
+            }
+        } else if ck == "delegation_specifier"
+            || ck == "constructor_invocation"
+            || ck == "user_type"
+        {
+            extract_delegation_specifier(&child, &mut result);
+        }
+    }
+    result
+}
+
+fn classify_kotlin_class(node: &N<'_>) -> &'static str {
+    if node.has(Child, Kind("enum_class_body")) {
+        return "Enum";
+    }
+    if let Some(type_id) = node.find(Child, Kind("type_identifier")) {
+        let prefix_len = type_id.range().start.saturating_sub(node.range().start);
+        let prefix = &node.text()[..prefix_len];
+        if prefix.contains("interface") {
+            return "Interface";
+        }
+    }
+    if let Some(modifiers) = node.find(Child, Kind("modifiers"))
+        && let Some(class_mod) = modifiers.find(Child, Kind("class_modifier"))
+    {
+        match class_mod.text().as_ref() {
+            "data" => return "DataClass",
+            "value" => return "ValueClass",
+            "annotation" => return "AnnotationClass",
+            _ => {}
+        }
+    }
+    "Class"
 }
 
 impl DslLanguage for KotlinDsl {
@@ -42,25 +104,11 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_rule = |label: &'static str| {
-            scope("class_declaration", label)
+        vec![
+            scope_fn("class_declaration", classify_kotlin_class)
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(kotlin_super_types))
-        };
-
-        vec![
-            // Unconditional fallback first (reverse iteration: tried last).
-            class_rule("Class"),
-            class_rule("AnnotationClass").when(descendant_text("class_modifier", "annotation")),
-            class_rule("ValueClass").when(descendant_text("class_modifier", "value")),
-            class_rule("DataClass").when(descendant_text("class_modifier", "data")),
-            scope("class_declaration", "Interface")
-                .def_kind(DefKind::Interface)
-                .name_from(child_of_kind("type_identifier"))
-                .when(has_child_text("interface"))
                 .metadata(metadata().super_types(kotlin_super_types)),
-            class_rule("Enum").when(has_child(&["enum_class_body"])),
             scope("object_declaration", "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
@@ -165,20 +213,27 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        let base = || {
-            import("import_header").split_last(".").alias_from(
-                Extract::one(Child, Kind("import_alias")).child_of_kind("type_identifier"),
-            )
-        };
+        fn kotlin_import_classify(node: &N<'_>) -> &'static str {
+            if node.children().any(|c| {
+                let k = c.kind();
+                k == "MULT" || k == "wildcard_import" || c.text() == "*"
+            }) {
+                return "WildcardImport";
+            }
+            if node.has(Child, Kind("import_alias")) {
+                return "AliasedImport";
+            }
+            "Import"
+        }
+
         vec![
-            base()
-                .label("WildcardImport")
-                .when(has_child(&["wildcard_import", "MULT"]))
+            import("import_header")
+                .classify(kotlin_import_classify)
+                .split_last(".")
+                .alias_from(
+                    Extract::one(Child, Kind("import_alias")).child_of_kind("type_identifier"),
+                )
                 .wildcard_child("wildcard_import"),
-            base()
-                .label("AliasedImport")
-                .when(has_child(&["import_alias"])),
-            base().label("Import"),
         ]
     }
 

@@ -4,7 +4,7 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{Extract, child_of_kind, default_name, field, text};
+use treesitter_visit::extract::{Extract, default_name, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -22,17 +22,40 @@ pub struct JavaDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-const JAVA_TYPE_KINDS: &[&str] = &["type_identifier", "generic_type", "scoped_type_identifier"];
-
 fn java_super_types(node: &N<'_>) -> Vec<String> {
-    let tk = AnyKind(JAVA_TYPE_KINDS);
-    let mut result = field("superclass").collect_shallow(tk).apply_all(node);
-    result.extend(field("interfaces").collect_shallow(tk).apply_all(node));
-    result.extend(
-        child_of_kind("extends_interfaces")
-            .collect_shallow(tk)
-            .apply_all(node),
-    );
+    let mut result = Vec::new();
+    let type_kinds = ["type_identifier", "generic_type", "scoped_type_identifier"];
+
+    if let Some(superclass) = node.field("superclass") {
+        let text = superclass.text().to_string();
+        let name = text.strip_prefix("extends ").unwrap_or(&text).trim();
+        if !name.is_empty() {
+            result.push(name.to_string());
+        }
+    }
+    if let Some(interfaces) = node.field("interfaces") {
+        for child in interfaces.children() {
+            let ck = child.kind();
+            if type_kinds.iter().any(|&k| k == ck.as_ref()) {
+                result.push(child.text().to_string());
+            } else if ck.as_ref() == "type_list" {
+                for inner in child.children() {
+                    if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
+                        result.push(inner.text().to_string());
+                    }
+                }
+            }
+        }
+    }
+    for child in node.children() {
+        if child.kind() == "extends_interfaces" {
+            for inner in child.children() {
+                if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
+                    result.push(inner.text().to_string());
+                }
+            }
+        }
+    }
     result
 }
 
@@ -204,17 +227,22 @@ impl DslLanguage for JavaDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        let base = || {
-            import("import_declaration")
-                .split_last(".")
-                .wildcard_child("asterisk")
-        };
+        fn java_import_classify(node: &N<'_>) -> &'static str {
+            let text = node.text().to_string();
+            let is_static = text.trim_start().starts_with("import static");
+            let is_wildcard = node.has(Child, Kind("asterisk"));
+            match (is_static, is_wildcard) {
+                (true, _) => "StaticImport",
+                (false, true) => "WildcardImport",
+                (false, false) => "Import",
+            }
+        }
+
         vec![
-            base().label("StaticImport").when(has_child_text("static")),
-            base()
-                .label("WildcardImport")
-                .when(has_child(&["asterisk"])),
-            base().label("Import"),
+            import("import_declaration")
+                .classify(java_import_classify)
+                .split_last(".")
+                .wildcard_child("asterisk"),
         ]
     }
 

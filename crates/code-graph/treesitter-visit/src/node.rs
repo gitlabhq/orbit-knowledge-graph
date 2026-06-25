@@ -423,8 +423,6 @@ pub enum Match<'a> {
     KindStartsWith(&'a str),
     /// Match a node whose text content is exactly this string.
     Text(&'a str),
-    /// Match a node whose text content contains this substring.
-    TextContains(&'a str),
 }
 
 impl Match<'_> {
@@ -440,7 +438,6 @@ impl Match<'_> {
             Match::KindEndsWith(s) => node.kind().as_ref().ends_with(s),
             Match::KindStartsWith(s) => node.kind().as_ref().starts_with(s),
             Match::Text(t) => node.text() == *t,
-            Match::TextContains(t) => node.text().contains(t),
         }
     }
 }

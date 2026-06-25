@@ -48,22 +48,8 @@ pub enum Emit {
     Name(&'static [&'static str]),
     /// Collect text of all children matching this criterion.
     Children(Match<'static>),
-    /// Collect the outermost descendants matching this criterion.
-    /// DFS stops recursing into a subtree once a match is found,
-    /// so nested matches (e.g. type parameters inside a generic type)
-    /// are not emitted.
-    ShallowDescendants(Match<'static>),
     /// A fixed constant string, ignoring the node.
     Const(&'static str),
-}
-
-/// Post-processing applied to emitted text.
-#[derive(Clone)]
-pub enum TextTransform {
-    /// Remove a prefix if present: `"extends Foo"` → `"Foo"`.
-    StripPrefix(&'static str),
-    /// Trim leading occurrences of a character: `"\\Foo"` → `"Foo"`.
-    TrimStartChar(char),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -76,12 +62,11 @@ pub const IDENT_KINDS: &[&str] = &[
     "property_identifier",
 ];
 
-/// A pipeline: navigation steps + terminal extraction + text transforms.
+/// A pipeline: navigation steps + terminal extraction.
 #[derive(Clone)]
 pub struct Extract {
     steps: SmallVec<[Step; 4]>,
     emit: Emit,
-    transforms: SmallVec<[TextTransform; 1]>,
 }
 
 // ── Constructors ────────────────────────────────────────────────
@@ -138,7 +123,6 @@ impl Extract {
         Self {
             steps: SmallVec::from_elem(step, 1),
             emit: Emit::Text,
-            transforms: SmallVec::new(),
         }
     }
 
@@ -151,7 +135,6 @@ impl Extract {
         Self {
             steps: SmallVec::new(),
             emit,
-            transforms: SmallVec::new(),
         }
     }
 
@@ -233,28 +216,6 @@ impl Extract {
         self
     }
 
-    /// Collect the outermost descendants matching this criterion.
-    /// DFS stops recursing into a subtree once a match is found.
-    /// Use with `apply_all()`.
-    pub fn collect_shallow(mut self, m: Match<'static>) -> Self {
-        self.emit = Emit::ShallowDescendants(m);
-        self
-    }
-
-    // Text transforms (applied after emission)
-
-    /// Strip a prefix from the emitted text.
-    pub fn strip_prefix(mut self, prefix: &'static str) -> Self {
-        self.transforms.push(TextTransform::StripPrefix(prefix));
-        self
-    }
-
-    /// Trim leading occurrences of a character from the emitted text.
-    pub fn trim_start_char(mut self, ch: char) -> Self {
-        self.transforms.push(TextTransform::TrimStartChar(ch));
-        self
-    }
-
     // Composition
     pub fn inner(self, container: &'static str, target: &'static str) -> Self {
         self.try_child(container).try_descendant(target)
@@ -262,7 +223,6 @@ impl Extract {
     pub fn then(mut self, next: Extract) -> Self {
         self.steps.extend(next.steps);
         self.emit = next.emit;
-        self.transforms = next.transforms;
         self
     }
 }
@@ -270,27 +230,9 @@ impl Extract {
 // ── Execution ───────────────────────────────────────────────────
 
 impl Extract {
-    fn apply_transforms(&self, mut s: String) -> String {
-        for t in &self.transforms {
-            match t {
-                TextTransform::StripPrefix(prefix) => {
-                    if let Some(rest) = s.strip_prefix(prefix) {
-                        s = rest.trim().to_string();
-                    }
-                }
-                TextTransform::TrimStartChar(ch) => {
-                    s = s.trim_start_matches(*ch).to_string();
-                }
-            }
-        }
-        s
-    }
-
     pub fn apply<D: Doc>(&self, node: &Node<'_, D>) -> Option<String> {
         let target = self.navigate(node)?;
-        let raw = emit(&self.emit, &target)?;
-        let s = self.apply_transforms(raw);
-        if s.is_empty() { None } else { Some(s) }
+        emit(&self.emit, &target)
     }
 
     /// Navigate + extract, then transform the result with access to the
@@ -303,7 +245,7 @@ impl Extract {
     ) -> Option<String> {
         let target = self.navigate(node)?;
         let raw = emit(&self.emit, &target)?;
-        Some(transform(self.apply_transforms(raw), node))
+        Some(transform(raw, node))
     }
 
     /// Navigate, then collect all children matching the `Emit::Children`
@@ -313,10 +255,6 @@ impl Extract {
             return vec![];
         };
         emit_all(&self.emit, &target)
-            .into_iter()
-            .map(|s| self.apply_transforms(s))
-            .filter(|s| !s.is_empty())
-            .collect()
     }
 
     /// Like `apply_all`, but transform each collected string with tree context.
@@ -330,8 +268,6 @@ impl Extract {
         };
         emit_all(&self.emit, &target)
             .into_iter()
-            .map(|s| self.apply_transforms(s))
-            .filter(|s| !s.is_empty())
             .map(|s| transform(s, node))
             .collect()
     }
@@ -376,7 +312,10 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
             }
             None
         }
-        Emit::Children(_) | Emit::ShallowDescendants(_) => emit_all(mode, node).into_iter().next(),
+        Emit::Children(_) => {
+            // Single-value fallback: return first match
+            emit_all(mode, node).into_iter().next()
+        }
         Emit::Const(s) => Some(s.to_string()),
     }
 }
@@ -388,22 +327,8 @@ fn emit_all<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Vec<String> {
             .filter(|c| m.test(c))
             .map(|c| c.text().to_string())
             .collect(),
-        Emit::ShallowDescendants(m) => {
-            let mut results = Vec::new();
-            collect_shallow_rec(node, m, &mut results);
-            results
-        }
+        // For non-Children emit, produce 0 or 1 element
         other => emit(other, node).into_iter().collect(),
-    }
-}
-
-fn collect_shallow_rec<D: Doc>(node: &Node<'_, D>, m: &Match<'_>, results: &mut Vec<String>) {
-    for child in node.children() {
-        if m.test(&child) {
-            results.push(child.text().to_string());
-        } else {
-            collect_shallow_rec(&child, m, results);
-        }
     }
 }
 
