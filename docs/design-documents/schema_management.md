@@ -205,8 +205,9 @@ the version becoming ready (see "Indexer readiness gate" below).
 
 6. **Release lock** — Allow other pods to proceed.
 
-Because new-prefix checkpoints are empty, the dispatcher's normal namespace poll cycle
-re-dispatches backfill work automatically — no explicit trigger is needed.
+Because new-prefix checkpoints are empty, the namespace trigger checkpoint starts from the
+beginning of the Siphon window and re-dispatches backfill work automatically — no explicit trigger
+is needed.
 
 ### Indexer readiness gate
 
@@ -253,7 +254,7 @@ The metric `gkg_schema_migration_total` (counter) tracks migration phase outcome
 ## Migration completion detection
 
 After the dispatcher creates new-prefix tables and marks a version as `migrating`, its normal
-namespace poll cycle re-indexes all enabled namespaces into the new tables. A scheduled task
+namespace trigger cycle re-indexes enabled namespaces into the new tables. A scheduled task
 (`MigrationCompletionChecker`) running in `DispatchIndexing` mode periodically checks whether the
 migration is complete.
 

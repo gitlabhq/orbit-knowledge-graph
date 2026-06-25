@@ -8,7 +8,7 @@ use crate::entities::{
 use crate::etl::EtlScope;
 
 use super::EtlSettings;
-use super::node::render_etl_placeholders;
+use super::node::{TriggerYaml, convert_triggers, render_etl_placeholders};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct EdgeYaml {
@@ -52,6 +52,8 @@ struct EdgeEtlYaml {
     order_by: Vec<String>,
     #[serde(rename = "where", default)]
     filter: Option<String>,
+    #[serde(default)]
+    triggers: Vec<TriggerYaml>,
     from: EdgeEndpointYaml,
     to: EdgeEndpointYaml,
 }
@@ -117,6 +119,14 @@ impl EdgeYaml {
                     }
                     None => del.clone(),
                 };
+                let triggers = convert_triggers(
+                    relationship_kind,
+                    etl.triggers,
+                    (etl.scope == EtlScope::Namespaced).then_some(etl.source.as_str()),
+                    &watermark,
+                    wm,
+                    del,
+                )?;
 
                 Ok(EdgeSourceEtlConfig {
                     scope: etl.scope,
@@ -125,6 +135,7 @@ impl EdgeYaml {
                     deleted,
                     order_by: etl.order_by,
                     filter: etl.filter,
+                    triggers,
                     from,
                     to,
                 })

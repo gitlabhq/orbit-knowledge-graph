@@ -107,7 +107,7 @@ schedule:
     global:
       cron: "0 */1 * * * *"           # every minute
     namespace:
-      cron: "0 */1 * * * *"           # every minute
+      cron: "*/30 * * * * *"          # every 30 seconds
     code-backfill:
       cron: "0 */1 * * * *"           # every minute
     table-cleanup:

@@ -382,10 +382,20 @@ pub struct GlobalDispatcherConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+}
+
+impl Default for NamespaceDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("*/30 * * * * *".into()),
+            },
+        }
+    }
 }
 
 fn default_events_stream_name() -> String {

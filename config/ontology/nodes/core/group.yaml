@@ -118,6 +118,19 @@ etl:
   watermark: namespace.{{watermark_column}}
   table_alias: namespace
   deleted: "(namespace.{{deleted_column}} OR namespace.type != 'Group')"
+  triggers:
+    - table: siphon_namespaces
+      traversal_path:
+        dictionary: namespace_traversal_paths_dict
+        key_column: id
+    - table: siphon_namespace_details
+      traversal_path:
+        dictionary: namespace_traversal_paths_dict
+        key_column: namespace_id
+    - table: siphon_routes
+      traversal_path:
+        dictionary: namespace_traversal_paths_dict
+        key_column: source_id
   edges:
     owner_id:
       to: User

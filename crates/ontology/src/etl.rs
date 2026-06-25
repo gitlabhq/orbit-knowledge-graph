@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 /// use it implicitly; derived entities must name a different one.
 pub const DEFAULT_TRANSFORM: &str = "data_fusion";
 
+pub const DEFAULT_TRIGGER_TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EtlScope {
@@ -78,6 +80,22 @@ pub struct EdgeMapping {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trigger {
+    pub table: String,
+    pub watermark: String,
+    pub traversal_path: TriggerTraversalPath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TriggerTraversalPath {
+    Column(String),
+    Dictionary {
+        dictionary: String,
+        key_column: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EtlConfig {
     Table {
         scope: EtlScope,
@@ -85,6 +103,7 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
+        triggers: Vec<Trigger>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -98,6 +117,7 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
+        triggers: Vec<Trigger>,
         traversal_path_filter: Option<String>,
         /// Alias of the main table in the `from` JOIN expression.
         /// Used to qualify bare column references (e.g. `id`) that would
@@ -166,6 +186,13 @@ impl EtlConfig {
         }
     }
 
+    pub fn triggers(&self) -> &[Trigger] {
+        match self {
+            EtlConfig::Table { triggers, .. } => triggers,
+            EtlConfig::Query { triggers, .. } => triggers,
+        }
+    }
+
     pub fn edges(&self) -> &BTreeMap<String, Vec<EdgeMapping>> {
         match self {
             EtlConfig::Table { edges, .. } => edges,
@@ -222,6 +249,7 @@ mod tests {
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
+            triggers: Vec::new(),
             traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
             page_join: None,
@@ -276,6 +304,7 @@ mod tests {
             watermark: "w".to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
+            triggers: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert!(config.validate_query_parameters().is_empty());
@@ -289,6 +318,7 @@ mod tests {
             watermark: "w".to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
+            triggers: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert_eq!(table.deleted(), crate::constants::siphon_deleted_column());
@@ -305,6 +335,7 @@ mod tests {
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
+            triggers: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert_eq!(

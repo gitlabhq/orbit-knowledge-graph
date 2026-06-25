@@ -3,12 +3,14 @@
 use super::common;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
+use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::scheduled::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
@@ -18,8 +20,6 @@ use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
-
-// --- Test Infrastructure ---
 
 struct Namespace {
     id: i64,
@@ -77,6 +77,16 @@ impl TestContext {
                 ))
                 .await;
         }
+    }
+
+    async fn given_changed_work_item(&self, traversal_path: &str) {
+        self.clickhouse
+            .execute(&format!(
+                "INSERT INTO work_items \
+                 (id, title, created_at, updated_at, description, iid, work_item_type_id, namespace_id, traversal_path, assignees, label_ids, award_emojis) \
+                 VALUES (1, 'Changed work item', now64(6), now64(6), '', 1, 1, 1, '{traversal_path}', [], [], [])"
+            ))
+            .await;
     }
 
     async fn consume_global_requests(&self) -> Vec<GlobalRequest> {
@@ -154,8 +164,6 @@ impl TestContext {
     }
 }
 
-// --- Tests ---
-
 #[tokio::test]
 async fn dispatcher_publishes_global_and_namespace_requests() {
     let context = TestContext::new().await;
@@ -176,13 +184,18 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             },
         ])
         .await;
+    context.given_changed_work_item("2/200/").await;
 
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
         .unwrap();
     let datalake = context.clickhouse.config.build_client();
+    let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
+        context.clickhouse.config.build_client(),
+    )));
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
+    let ontology = ontology::Ontology::load_embedded().unwrap();
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
@@ -193,9 +206,11 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         Box::new(NamespaceDispatcher::new(
             services.nats,
             datalake,
+            checkpoint_store,
             metrics,
             NamespaceDispatcherConfig::default(),
-            std::sync::Arc::new(indexer::campaign::CampaignState::new()),
+            Arc::new(indexer::campaign::CampaignState::new()),
+            &ontology,
         )),
     ];
 
@@ -205,20 +220,18 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         .unwrap();
     let after = Utc::now();
 
-    // Global indexing request
     let global = context.consume_global_requests().await;
     assert_eq!(global.len(), 1);
     assert!(global[0].watermark >= before && global[0].watermark <= after);
 
-    // Namespace indexing requests
     let namespaces = context.consume_namespace_requests().await;
-    assert_eq!(namespaces.len(), 3);
+    assert_eq!(namespaces.len(), 1);
 
     let actual: HashSet<_> = namespaces
         .iter()
         .map(|r| (r.namespace, r.traversal_path.as_str()))
         .collect();
-    let expected: HashSet<_> = [(100, "1/100/"), (200, "2/200/"), (300, "3/300/")].into();
+    let expected: HashSet<_> = [(200, "2/200/")].into();
     assert_eq!(actual, expected);
 
     assert!(

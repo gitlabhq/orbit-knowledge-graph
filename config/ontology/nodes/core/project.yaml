@@ -135,6 +135,15 @@ etl:
   watermark: project.{{watermark_column}}
   table_alias: project
   deleted: project.{{deleted_column}}
+  triggers:
+    - table: siphon_projects
+      traversal_path:
+        dictionary: project_traversal_paths_dict
+        key_column: id
+    - table: siphon_routes
+      traversal_path:
+        dictionary: project_traversal_paths_dict
+        key_column: source_id
   edges:
     creator_id:
       to: User

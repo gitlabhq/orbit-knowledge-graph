@@ -865,6 +865,7 @@ mod tests {
             watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
+            triggers: Vec::new(),
             edges: edges_map,
         };
 
@@ -1043,6 +1044,7 @@ mod tests {
             watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
+            triggers: Vec::new(),
             edges: edges_map,
         };
 

@@ -38,7 +38,10 @@ pub use entities::{
     StatisticsExclude, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
     TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
-pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+pub use etl::{
+    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, Trigger,
+    TriggerTraversalPath,
+};
 
 use std::collections::BTreeMap;
 use std::fmt;
