@@ -20,106 +20,106 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 #[derive(Default)]
 pub struct JavaDsl;
 
-type N<'a> = Node<'a, SyntaxTree>;
+const JAVA_TYPE_KINDS: &[&str] = &["type_identifier", "generic_type", "scoped_type_identifier"];
 
-fn java_super_types(node: &N<'_>) -> Vec<String> {
-    let mut result = Vec::new();
-    let type_kinds = ["type_identifier", "generic_type", "scoped_type_identifier"];
-
-    if let Some(superclass) = node.field("superclass") {
-        let text = superclass.text().to_string();
-        let name = text.strip_prefix("extends ").unwrap_or(&text).trim();
-        if !name.is_empty() {
-            result.push(name.to_string());
+fn collect_type_children(
+    tree: &SyntaxTree,
+    parent: u32,
+    out: &mut Vec<(u32, String)>,
+    target: u32,
+) {
+    for &child in tree.children(parent) {
+        if JAVA_TYPE_KINDS.contains(&tree.kind(child)) {
+            out.push((target, tree.text(child).to_string()));
+        } else if tree.kind(child) == "type_list" {
+            for &inner in tree.children(child) {
+                if JAVA_TYPE_KINDS.contains(&tree.kind(inner)) {
+                    out.push((target, tree.text(inner).to_string()));
+                }
+            }
         }
     }
-    if let Some(interfaces) = node.field("interfaces") {
-        for child in interfaces.children() {
-            let ck = child.kind();
-            if type_kinds.iter().any(|&k| k == ck.as_ref()) {
-                result.push(child.text().to_string());
-            } else if ck.as_ref() == "type_list" {
-                for inner in child.children() {
-                    if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
-                        result.push(inner.text().to_string());
+}
+
+fn rewrite_java(tree: &mut SyntaxTree) {
+    let mut renames: Vec<(u32, &str)> = Vec::new();
+    let mut supertypes: Vec<(u32, String)> = Vec::new();
+    let mut accessors: Vec<(u32, String)> = Vec::new();
+
+    let class_kinds = [
+        "class_declaration",
+        "enum_declaration",
+        "record_declaration",
+        "interface_declaration",
+    ];
+    for kind in class_kinds {
+        for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
+            if let Some(sc) = tree.field(cls, "superclass") {
+                collect_type_children(tree, sc, &mut supertypes, cls);
+            }
+            if let Some(ifaces) = tree.field(cls, "interfaces") {
+                collect_type_children(tree, ifaces, &mut supertypes, cls);
+            }
+            for &child in tree.children(cls) {
+                if tree.kind(child) == "extends_interfaces" {
+                    collect_type_children(tree, child, &mut supertypes, cls);
+                }
+            }
+        }
+    }
+
+    // Record accessors: inject __accessor for each formal_parameter not
+    // overridden by an explicit no-arg method in the body
+    for record in tree.nodes_of_kind("record_declaration").collect::<Vec<_>>() {
+        let overrides: Vec<String> = tree
+            .field(record, "body")
+            .map(|body| {
+                tree.children_of_kind(body, "method_declaration")
+                    .filter(|&m| {
+                        tree.field(m, "parameters").is_none_or(|p| {
+                            !tree.children(p).iter().any(|&c| {
+                                let k = tree.kind(c);
+                                k == "formal_parameter" || k == "spread_parameter"
+                            })
+                        })
+                    })
+                    .filter_map(|m| tree.field_text(m, "name").map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if let Some(params) = tree.field(record, "parameters") {
+            for p in tree
+                .children_of_kind(params, "formal_parameter")
+                .collect::<Vec<_>>()
+            {
+                if let Some(name) = tree.field_text(p, "name") {
+                    if !overrides.contains(&name.to_string()) {
+                        accessors.push((record, name.to_string()));
                     }
                 }
             }
         }
     }
-    for child in node.children() {
-        if child.kind() == "extends_interfaces" {
-            for inner in child.children() {
-                if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
-                    result.push(inner.text().to_string());
-                }
-            }
-        }
-    }
-    result
-}
 
-/// Extract implicit accessor definitions for record components, only when
-/// the body does not explicitly define a no-arg method that shares a name
-/// with that component.
-fn java_record_accessors(
-    node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-    scope_stack: &[std::sync::Arc<str>],
-    sep: &'static str,
-) -> bool {
-    if node.kind() != "record_declaration" {
-        return false;
-    }
-    let Some(params) = node.field("parameters") else {
-        return false;
-    };
-    let no_arg_body_methods: Vec<String> = node
-        .field("body")
-        .map(|body| {
-            body.children()
-                .filter(|c| c.kind() == "method_declaration")
-                .filter(|m| {
-                    m.field("parameters").is_none_or(|p| {
-                        !p.children().any(|c| {
-                            matches!(c.kind().as_ref(), "formal_parameter" | "spread_parameter")
-                        })
-                    })
-                })
-                .filter_map(|m| m.field("name").map(|n| n.text().to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-    for param in params.children() {
-        if param.kind() != "formal_parameter" {
-            continue;
+    // Import classification
+    for imp in tree.nodes_of_kind("import_declaration").collect::<Vec<_>>() {
+        if tree.has_child_text(imp, "static") {
+            renames.push((imp, "__static_import"));
+        } else if tree.has_child_of_kind(imp, "asterisk") {
+            renames.push((imp, "__wildcard_import"));
         }
-        let Some(name) = param.field("name").map(|n| n.text().to_string()) else {
-            continue;
-        };
-        if no_arg_body_methods.contains(&name) {
-            continue;
-        }
-        let return_type = field("type")
-            .inner("type_arguments", "type_identifier")
-            .apply(&param);
-        let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-        defs.push(crate::v2::types::CanonicalDefinition {
-            definition_type: "Method",
-            kind: DefKind::Method,
-            name,
-            fqn,
-            range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&param)),
-            is_top_level: false,
-            metadata: return_type.map(|rt| {
-                Box::new(crate::v2::types::DefinitionMetadata {
-                    return_type: Some(rt),
-                    ..Default::default()
-                })
-            }),
-        });
     }
-    false
+
+    for (id, kind) in renames {
+        tree.set_kind(id, kind);
+    }
+    for (cls, text) in supertypes {
+        tree.insert_child(cls, "__supertype", &text);
+    }
+    for (record, name) in accessors {
+        tree.insert_child(record, "__accessor", &name);
+    }
 }
 
 impl DslLanguage for JavaDsl {
@@ -135,13 +135,22 @@ impl DslLanguage for JavaDsl {
         LanguageHooks {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["marker_annotation", "annotation"],
-            on_scope: Some(java_record_accessors),
             ..LanguageHooks::default()
         }
     }
 
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_java(tree);
+    }
+
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(java_super_types);
+        let collect_supertypes = |n: &Node<'_, SyntaxTree>| -> Vec<String> {
+            n.children()
+                .filter(|c| c.kind().as_ref() == "__supertype")
+                .map(|c| c.text().to_string())
+                .collect()
+        };
+        let class_meta = || metadata().super_types(collect_supertypes);
 
         vec![
             scope("class_declaration", "Class")
@@ -181,6 +190,9 @@ impl DslLanguage for JavaDsl {
                 .def_kind(DefKind::Lambda)
                 .no_scope()
                 .name_from(field("parameters")),
+            scope("__accessor", "Method")
+                .def_kind(DefKind::Method)
+                .no_scope(),
         ]
     }
 
@@ -227,20 +239,17 @@ impl DslLanguage for JavaDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        fn java_import_classify(node: &N<'_>) -> &'static str {
-            let text = node.text().to_string();
-            let is_static = text.trim_start().starts_with("import static");
-            let is_wildcard = node.has(Child, Kind("asterisk"));
-            match (is_static, is_wildcard) {
-                (true, _) => "StaticImport",
-                (false, true) => "WildcardImport",
-                (false, false) => "Import",
-            }
-        }
-
         vec![
+            import("__static_import")
+                .label("StaticImport")
+                .split_last(".")
+                .wildcard_child("asterisk"),
+            import("__wildcard_import")
+                .label("WildcardImport")
+                .split_last(".")
+                .wildcard_child("asterisk"),
             import("import_declaration")
-                .classify(java_import_classify)
+                .label("Import")
                 .split_last(".")
                 .wildcard_child("asterisk"),
         ]
