@@ -32,30 +32,6 @@ fn kotlin_super_types(node: &N<'_>) -> Vec<String> {
         .apply_all(node)
 }
 
-fn classify_kotlin_class(node: &N<'_>) -> &'static str {
-    if node.has(Child, Kind("enum_class_body")) {
-        return "Enum";
-    }
-    if let Some(type_id) = node.find(Child, Kind("type_identifier")) {
-        let prefix_len = type_id.range().start.saturating_sub(node.range().start);
-        let prefix = &node.text()[..prefix_len];
-        if prefix.contains("interface") {
-            return "Interface";
-        }
-    }
-    if let Some(modifiers) = node.find(Child, Kind("modifiers"))
-        && let Some(class_mod) = modifiers.find(Child, Kind("class_modifier"))
-    {
-        match class_mod.text().as_ref() {
-            "data" => return "DataClass",
-            "value" => return "ValueClass",
-            "annotation" => return "AnnotationClass",
-            _ => {}
-        }
-    }
-    "Class"
-}
-
 impl DslLanguage for KotlinDsl {
     fn name() -> &'static str {
         "kotlin"
@@ -66,11 +42,25 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        vec![
-            scope_fn("class_declaration", classify_kotlin_class)
+        let class_rule = |label: &'static str| {
+            scope("class_declaration", label)
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
+                .metadata(metadata().super_types(kotlin_super_types))
+        };
+
+        vec![
+            // Unconditional fallback first (reverse iteration: tried last).
+            class_rule("Class"),
+            class_rule("AnnotationClass").when(descendant_text("class_modifier", "annotation")),
+            class_rule("ValueClass").when(descendant_text("class_modifier", "value")),
+            class_rule("DataClass").when(descendant_text("class_modifier", "data")),
+            scope("class_declaration", "Interface")
+                .def_kind(DefKind::Interface)
+                .name_from(child_of_kind("type_identifier"))
+                .when(has_child_text("interface"))
                 .metadata(metadata().super_types(kotlin_super_types)),
+            class_rule("Enum").when(has_child(&["enum_class_body"])),
             scope("object_declaration", "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
@@ -175,27 +165,20 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        fn kotlin_import_classify(node: &N<'_>) -> &'static str {
-            if node.children().any(|c| {
-                let k = c.kind();
-                k == "MULT" || k == "wildcard_import" || c.text() == "*"
-            }) {
-                return "WildcardImport";
-            }
-            if node.has(Child, Kind("import_alias")) {
-                return "AliasedImport";
-            }
-            "Import"
-        }
-
+        let base = || {
+            import("import_header").split_last(".").alias_from(
+                Extract::one(Child, Kind("import_alias")).child_of_kind("type_identifier"),
+            )
+        };
         vec![
-            import("import_header")
-                .classify(kotlin_import_classify)
-                .split_last(".")
-                .alias_from(
-                    Extract::one(Child, Kind("import_alias")).child_of_kind("type_identifier"),
-                )
+            base()
+                .label("WildcardImport")
+                .when(has_child(&["wildcard_import", "MULT"]))
                 .wildcard_child("wildcard_import"),
+            base()
+                .label("AliasedImport")
+                .when(has_child(&["import_alias"])),
+            base().label("Import"),
         ]
     }
 

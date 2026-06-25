@@ -116,30 +116,19 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        fn csharp_import_classify(node: &N<'_>) -> &'static str {
-            let text = node.text().to_string();
-            if text.contains("static") {
-                "StaticImport"
-            } else if text.contains('=') {
-                "AliasedImport"
-            } else {
-                // Regular using directives are namespace-level wildcards:
-                // `using MyApp.Models;` makes all types in MyApp.Models available.
-                "WildcardImport"
-            }
-        }
-
-        vec![
+        let base = || {
             import("using_directive")
                 .path_from(Extract::one(
                     Child,
                     AnyKind(&["qualified_name", "identifier"]),
                 ))
                 .alias_from(field("name"))
-                .classify(csharp_import_classify)
-                // C# using directives import all types from a namespace.
-                // `using MyApp.Models;` ≈ Java's `import MyApp.Models.*;`
-                .always_wildcard(),
+                .always_wildcard()
+        };
+        vec![
+            base().label("StaticImport").when(text_contains("static")),
+            base().label("AliasedImport").when(text_contains("=")),
+            base().label("WildcardImport"),
         ]
     }
 

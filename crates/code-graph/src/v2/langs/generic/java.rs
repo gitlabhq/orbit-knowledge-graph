@@ -204,22 +204,17 @@ impl DslLanguage for JavaDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        fn java_import_classify(node: &N<'_>) -> &'static str {
-            let text = node.text().to_string();
-            let is_static = text.trim_start().starts_with("import static");
-            let is_wildcard = node.has(Child, Kind("asterisk"));
-            match (is_static, is_wildcard) {
-                (true, _) => "StaticImport",
-                (false, true) => "WildcardImport",
-                (false, false) => "Import",
-            }
-        }
-
-        vec![
+        let base = || {
             import("import_declaration")
-                .classify(java_import_classify)
                 .split_last(".")
-                .wildcard_child("asterisk"),
+                .wildcard_child("asterisk")
+        };
+        vec![
+            base().label("StaticImport").when(has_child_text("static")),
+            base()
+                .label("WildcardImport")
+                .when(has_child(&["asterisk"])),
+            base().label("Import"),
         ]
     }
 
