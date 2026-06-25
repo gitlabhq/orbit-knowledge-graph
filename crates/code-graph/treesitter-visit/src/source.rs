@@ -108,8 +108,14 @@ pub trait SgNode<'r>: Clone {
     }
 
     fn field(&self, name: &str) -> Option<Self>;
-    fn field_children(&self, field_id: Option<u16>) -> impl Iterator<Item = Self>;
-    fn child_by_field_id(&self, field_id: u16) -> Option<Self>;
+
+    fn field_children(&self, _field_id: Option<u16>) -> impl Iterator<Item = Self> {
+        std::iter::empty()
+    }
+
+    fn child_by_field_id(&self, _field_id: u16) -> Option<Self> {
+        None
+    }
 }
 
 /// Trait for documents that can be parsed by tree-sitter.

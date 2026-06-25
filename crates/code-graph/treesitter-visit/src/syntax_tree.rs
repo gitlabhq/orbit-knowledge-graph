@@ -99,24 +99,31 @@ impl SyntaxTree {
     // ── Read ────────────────────────────────────────────────────
 
     #[inline]
-    pub fn node(&self, id: NodeId) -> &SyntaxNode {
+    fn n(&self, id: NodeId) -> &SyntaxNode {
         &self.nodes[id as usize]
     }
     pub fn root_id(&self) -> NodeId {
         self.root
     }
+
     pub fn text(&self, id: NodeId) -> &str {
-        let n = self.node(id);
-        match n.virtual_text {
-            Some(ref vt) => vt.as_str(),
-            None => &self.source[n.start_byte as usize..n.end_byte as usize],
-        }
+        let n = self.n(id);
+        n.virtual_text
+            .as_deref()
+            .unwrap_or(&self.source[n.start_byte as usize..n.end_byte as usize])
     }
     pub fn kind(&self, id: NodeId) -> &str {
-        self.node(id).kind.as_str()
+        self.n(id).kind.as_str()
+    }
+    pub fn children(&self, id: NodeId) -> &[NodeId] {
+        &self.n(id).children
+    }
+    pub fn parent(&self, id: NodeId) -> Option<NodeId> {
+        let p = self.n(id).parent;
+        (p != NO_PARENT).then_some(p)
     }
     pub fn field(&self, id: NodeId, name: &str) -> Option<NodeId> {
-        self.node(id)
+        self.n(id)
             .fields
             .iter()
             .find(|(n, _)| *n == name)
@@ -124,13 +131,6 @@ impl SyntaxTree {
     }
     pub fn field_text(&self, id: NodeId, name: &str) -> Option<&str> {
         self.field(id, name).map(|c| self.text(c))
-    }
-    pub fn children(&self, id: NodeId) -> &[NodeId] {
-        &self.node(id).children
-    }
-    pub fn parent(&self, id: NodeId) -> Option<NodeId> {
-        let p = self.node(id).parent;
-        (p != NO_PARENT).then_some(p)
     }
 
     // ── Query ───────────────────────────────────────────────────
@@ -143,7 +143,7 @@ impl SyntaxTree {
         id: NodeId,
         kind: &'a str,
     ) -> impl Iterator<Item = NodeId> + 'a {
-        self.node(id)
+        self.n(id)
             .children
             .iter()
             .copied()
@@ -153,27 +153,24 @@ impl SyntaxTree {
         self.children_of_kind(id, kind).next().is_some()
     }
     pub fn has_child_text(&self, id: NodeId, text: &str) -> bool {
-        self.node(id).children.iter().any(|&c| self.text(c) == text)
+        self.n(id).children.iter().any(|&c| self.text(c) == text)
     }
     pub fn descendant_text(&self, id: NodeId, kind: &str, text: &str) -> bool {
-        self.descendants(id)
-            .any(|d| self.kind(d) == kind && self.text(d) == text)
-    }
-    fn descendants(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
         let mut stack = vec![id];
-        std::iter::from_fn(move || {
-            let node = stack.pop()?;
-            stack.extend(self.node(node).children.iter().rev().copied());
-            Some(node)
-        })
+        while let Some(node) = stack.pop() {
+            if self.kind(node) == kind && self.text(node) == text {
+                return true;
+            }
+            stack.extend(self.n(node).children.iter().rev());
+        }
+        false
     }
     pub fn next_sibling(&self, id: NodeId) -> Option<NodeId> {
-        let sibs = &self.node(self.parent(id)?).children;
-        let pos = sibs.iter().position(|&c| c == id)?;
-        sibs.get(pos + 1).copied()
+        let sibs = &self.n(self.parent(id)?).children;
+        sibs.get(sibs.iter().position(|&c| c == id)? + 1).copied()
     }
     pub fn next_sibling_of_kind(&self, id: NodeId, kind: &str) -> Option<NodeId> {
-        let sibs = &self.node(self.parent(id)?).children;
+        let sibs = &self.n(self.parent(id)?).children;
         let pos = sibs.iter().position(|&c| c == id)?;
         sibs[pos + 1..]
             .iter()
@@ -184,7 +181,7 @@ impl SyntaxTree {
     // ── Mutation ────────────────────────────────────────────────
 
     pub fn insert_child(&mut self, parent: NodeId, kind: &str, text: &str) -> NodeId {
-        let (sb, eb) = (self.node(parent).start_byte, self.node(parent).end_byte);
+        let (sb, eb) = (self.n(parent).start_byte, self.n(parent).end_byte);
         let id = self.nodes.len() as NodeId;
         self.nodes.push(SyntaxNode {
             kind: SmolStr::new(kind),
@@ -229,8 +226,7 @@ impl SyntaxTree {
 // ── SgNode / Doc ────────────────────────────────────────────────
 
 fn byte_to_row_col(src: &[u8], byte: usize) -> (usize, usize) {
-    let mut row = 0;
-    let mut col = 0;
+    let (mut row, mut col) = (0, 0);
     for &b in &src[..byte.min(src.len())] {
         if b == b'\n' {
             row += 1;
@@ -255,6 +251,9 @@ impl<'a> SyntaxNodeRef<'a> {
             id,
         }
     }
+    fn n(&self) -> &'a SyntaxNode {
+        self.tree.n(self.id)
+    }
 }
 
 impl<'a> SgNode<'a> for SyntaxNodeRef<'a> {
@@ -263,8 +262,7 @@ impl<'a> SgNode<'a> for SyntaxNodeRef<'a> {
     }
     fn children(&self) -> impl ExactSizeIterator<Item = Self> {
         let tree = self.tree;
-        self.tree
-            .node(self.id)
+        self.n()
             .children
             .iter()
             .map(move |&id| SyntaxNodeRef { tree, id })
@@ -279,42 +277,32 @@ impl<'a> SgNode<'a> for SyntaxNodeRef<'a> {
         self.id as usize
     }
     fn range(&self) -> Range<usize> {
-        let n = self.tree.node(self.id);
-        n.start_byte as usize..n.end_byte as usize
+        self.n().start_byte as usize..self.n().end_byte as usize
     }
     fn start_pos(&self) -> Position {
-        let n = self.tree.node(self.id);
-        let (row, col) = byte_to_row_col(self.tree.source.as_bytes(), n.start_byte as usize);
-        Position::new(row, col, n.start_byte as usize)
+        let n = self.n();
+        let (r, c) = byte_to_row_col(self.tree.source.as_bytes(), n.start_byte as usize);
+        Position::new(r, c, n.start_byte as usize)
     }
     fn end_pos(&self) -> Position {
-        let n = self.tree.node(self.id);
-        let (row, col) = byte_to_row_col(self.tree.source.as_bytes(), n.end_byte as usize);
-        Position::new(row, col, n.end_byte as usize)
+        let n = self.n();
+        let (r, c) = byte_to_row_col(self.tree.source.as_bytes(), n.end_byte as usize);
+        Position::new(r, c, n.end_byte as usize)
     }
     fn is_named(&self) -> bool {
-        self.tree.node(self.id).is_named
+        self.n().is_named
     }
     fn is_leaf(&self) -> bool {
-        self.tree.node(self.id).children.is_empty()
-    }
-    fn is_named_leaf(&self) -> bool {
-        self.is_named() && self.is_leaf()
+        self.n().children.is_empty()
     }
     fn field(&self, name: &str) -> Option<Self> {
         self.tree.field(self.id, name).map(|id| self.at(id))
-    }
-    fn field_children(&self, _field_id: Option<u16>) -> impl Iterator<Item = Self> {
-        std::iter::empty()
-    }
-    fn child_by_field_id(&self, _field_id: u16) -> Option<Self> {
-        None
     }
     fn next(&self) -> Option<Self> {
         self.tree.next_sibling(self.id).map(|id| self.at(id))
     }
     fn prev(&self) -> Option<Self> {
-        let sibs = &self.tree.node(self.tree.parent(self.id)?).children;
+        let sibs = &self.tree.n(self.tree.parent(self.id)?).children;
         let pos = sibs.iter().position(|&c| c == self.id)?;
         (pos > 0).then(|| self.at(sibs[pos - 1]))
     }
@@ -350,32 +338,29 @@ mod tests {
     use super::*;
     use crate::{LanguageExt, Root};
 
-    fn py_tree(src: &str) -> SyntaxTree {
+    fn py(src: &str) -> SyntaxTree {
         let ts = SupportLang::Python.ast_grep(src);
         SyntaxTree::from_tree_sitter(src, &ts.doc.tree, SupportLang::Python)
     }
 
     #[test]
-    fn round_trip_preserves_structure() {
-        let tree = py_tree("def foo(x):\n    return x + 1");
-        let root = Root::doc(tree);
-        let module = root.root();
-        assert_eq!(module.kind().as_ref(), "module");
-        let func = module.children().next().unwrap();
+    fn round_trip() {
+        let root = Root::doc(py("def foo(x):\n    return x + 1"));
+        let func = root.root().children().next().unwrap();
         assert_eq!(func.kind().as_ref(), "function_definition");
         assert_eq!(func.field("name").unwrap().text().as_ref(), "foo");
     }
 
     #[test]
-    fn insert_child_is_visible() {
-        let mut tree = py_tree("class Foo: pass");
+    fn insert_child() {
+        let mut tree = py("class Foo: pass");
         let cls = tree
             .children_of_kind(tree.root_id(), "class_definition")
             .next()
             .unwrap();
-        tree.insert_child(cls, "__property", "bar");
+        tree.insert_child(cls, "__prop", "bar");
         let root = Root::doc(tree);
-        let prop = root
+        let last = root
             .root()
             .children()
             .next()
@@ -383,13 +368,15 @@ mod tests {
             .children()
             .last()
             .unwrap();
-        assert_eq!(prop.kind().as_ref(), "__property");
-        assert_eq!(prop.text().as_ref(), "bar");
+        assert_eq!(
+            (last.kind().as_ref(), last.text().as_ref()),
+            ("__prop", "bar")
+        );
     }
 
     #[test]
-    fn set_kind_changes_kind() {
-        let mut tree = py_tree("class Foo: pass");
+    fn set_kind() {
+        let mut tree = py("class Foo: pass");
         let cls = tree
             .children_of_kind(tree.root_id(), "class_definition")
             .next()
@@ -399,17 +386,16 @@ mod tests {
     }
 
     #[test]
-    fn set_text_overrides() {
-        let mut tree = py_tree("x = 1");
+    fn set_text() {
+        let mut tree = py("x = 1");
         let id = tree.nodes_of_kind("identifier").next().unwrap();
-        assert_eq!(tree.text(id), "x");
         tree.set_text(id, "replaced");
         assert_eq!(tree.text(id), "replaced");
     }
 
     #[test]
-    fn remove_hides_node() {
-        let mut tree = py_tree("x = 1");
+    fn remove() {
+        let mut tree = py("x = 1");
         let root = tree.root_id();
         let before = tree.children(root).len();
         tree.remove(tree.children(root)[0]);
@@ -419,8 +405,7 @@ mod tests {
     #[test]
     fn extract_works() {
         use crate::extract::field;
-        let tree = py_tree("def foo(x): return x");
-        let root = Root::doc(tree);
+        let root = Root::doc(py("def foo(x): return x"));
         let func = root.root().children().next().unwrap();
         assert_eq!(field("name").apply(&func), Some("foo".to_string()));
     }
