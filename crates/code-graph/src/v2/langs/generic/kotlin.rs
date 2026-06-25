@@ -4,8 +4,9 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::Extract;
-use treesitter_visit::extract::{child_of_kind, constant, default_name, field, no_extract, text};
+use treesitter_visit::extract::{
+    Extract, child_of_kind, constant, default_name, field, no_extract, text,
+};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -25,49 +26,10 @@ pub struct KotlinDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-fn extract_user_type(node: &N<'_>) -> Option<String> {
-    // Look for user_type in direct children first, then in constructor_invocation
-    if let Some(ut) = node.children().find(|c| c.kind() == "user_type") {
-        return Some(ut.text().to_string());
-    }
-    if let Some(ci) = node
-        .children()
-        .find(|c| c.kind() == "constructor_invocation")
-        && let Some(ut) = ci.children().find(|c| c.kind() == "user_type")
-    {
-        return Some(ut.text().to_string());
-    }
-    None
-}
-
-fn extract_delegation_specifier(spec: &N<'_>, result: &mut Vec<String>) {
-    let sk = spec.kind();
-    if sk == "delegation_specifier" || sk == "constructor_invocation" {
-        let text = extract_user_type(spec).unwrap_or_else(|| spec.text().to_string());
-        if !text.is_empty() && text != "," {
-            result.push(text);
-        }
-    } else if sk == "user_type" {
-        result.push(spec.text().to_string());
-    }
-}
-
 fn kotlin_super_types(node: &N<'_>) -> Vec<String> {
-    let mut result = Vec::new();
-    for child in node.children() {
-        let ck = child.kind();
-        if ck == "delegation_specifiers" {
-            for spec in child.children() {
-                extract_delegation_specifier(&spec, &mut result);
-            }
-        } else if ck == "delegation_specifier"
-            || ck == "constructor_invocation"
-            || ck == "user_type"
-        {
-            extract_delegation_specifier(&child, &mut result);
-        }
-    }
-    result
+    child_of_kind("delegation_specifiers")
+        .collect_shallow(Kind("user_type"))
+        .apply_all(node)
 }
 
 fn classify_kotlin_class(node: &N<'_>) -> &'static str {

@@ -4,7 +4,9 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
+use treesitter_visit::extract::{
+    Emit, Extract, child_of_kind, default_name, field, no_extract, text,
+};
 use treesitter_visit::predicate::has_child_text;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -25,30 +27,18 @@ const PHP_PRIMITIVE_TYPES: &[&str] = &[
 #[derive(Default)]
 pub struct PhpDsl;
 
-/// Parents from extends, implements, and body-level `use TraitName;` (traits as supertypes).
+const PHP_TYPE_NAME_KINDS: &[&str] = &["name", "qualified_name"];
+
 fn php_super_types(node: &N<'_>) -> Vec<String> {
-    let is_type_name = |k: &str| k == "name" || k == "qualified_name";
+    let type_names = AnyKind(PHP_TYPE_NAME_KINDS);
+    let collect_types = |nav: Extract| nav.collect(type_names).trim_start_char('\\');
     let mut out = Vec::new();
-    for child in node.children() {
-        match child.kind().as_ref() {
-            "base_clause" | "class_interface_clause" => {
-                for t in child.children() {
-                    if is_type_name(t.kind().as_ref()) {
-                        // Graph FQNs omit the leading `\` of an absolute name.
-                        out.push(t.text().trim_start_matches('\\').to_string());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    if let Some(body) = node.field("body") {
-        for u in body.children().filter(|c| c.kind() == "use_declaration") {
-            for t in u.children() {
-                if is_type_name(t.kind().as_ref()) {
-                    out.push(t.text().trim_start_matches('\\').to_string());
-                }
-            }
+    out.extend(collect_types(child_of_kind("base_clause")).apply_all(node));
+    out.extend(collect_types(child_of_kind("class_interface_clause")).apply_all(node));
+    if let Some(body) = field("body").navigate(node) {
+        let types = no_extract().collect(type_names).trim_start_char('\\');
+        for u in body.children_matching(Kind("use_declaration")) {
+            out.extend(types.apply_all(&u));
         }
     }
     out

@@ -4,7 +4,7 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{Extract, default_name, field, text};
+use treesitter_visit::extract::{Extract, child_of_kind, default_name, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -22,40 +22,17 @@ pub struct JavaDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-fn java_super_types(node: &N<'_>) -> Vec<String> {
-    let mut result = Vec::new();
-    let type_kinds = ["type_identifier", "generic_type", "scoped_type_identifier"];
+const JAVA_TYPE_KINDS: &[&str] = &["type_identifier", "generic_type", "scoped_type_identifier"];
 
-    if let Some(superclass) = node.field("superclass") {
-        let text = superclass.text().to_string();
-        let name = text.strip_prefix("extends ").unwrap_or(&text).trim();
-        if !name.is_empty() {
-            result.push(name.to_string());
-        }
-    }
-    if let Some(interfaces) = node.field("interfaces") {
-        for child in interfaces.children() {
-            let ck = child.kind();
-            if type_kinds.iter().any(|&k| k == ck.as_ref()) {
-                result.push(child.text().to_string());
-            } else if ck.as_ref() == "type_list" {
-                for inner in child.children() {
-                    if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
-                        result.push(inner.text().to_string());
-                    }
-                }
-            }
-        }
-    }
-    for child in node.children() {
-        if child.kind() == "extends_interfaces" {
-            for inner in child.children() {
-                if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
-                    result.push(inner.text().to_string());
-                }
-            }
-        }
-    }
+fn java_super_types(node: &N<'_>) -> Vec<String> {
+    let tk = AnyKind(JAVA_TYPE_KINDS);
+    let mut result = field("superclass").collect_shallow(tk).apply_all(node);
+    result.extend(field("interfaces").collect_shallow(tk).apply_all(node));
+    result.extend(
+        child_of_kind("extends_interfaces")
+            .collect_shallow(tk)
+            .apply_all(node),
+    );
     result
 }
 

@@ -25,26 +25,19 @@ pub struct PythonDsl;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 fn python_super_types(node: &N<'_>) -> Vec<String> {
-    let mut result = Vec::new();
-    if let Some(superclasses) = node.field("superclasses") {
-        for child in superclasses.children() {
-            let kind = child.kind();
-            if kind == "identifier" || kind == "attribute" || kind == "call" {
-                let text = if kind == "call" {
-                    child
-                        .field("function")
-                        .map(|f| f.text().to_string())
-                        .unwrap_or_else(|| child.text().to_string())
-                } else {
-                    child.text().to_string()
-                };
-                if !text.is_empty() {
-                    result.push(text);
-                }
+    let Some(superclasses) = field("superclasses").navigate(node) else {
+        return vec![];
+    };
+    superclasses
+        .children_matching(AnyKind(&["identifier", "attribute", "call"]))
+        .filter_map(|child| {
+            if child.kind().as_ref() == "call" {
+                field("function").apply(&child)
+            } else {
+                Some(child.text().to_string())
             }
-        }
-    }
-    result
+        })
+        .collect()
 }
 
 fn python_decorators(node: &N<'_>) -> Vec<String> {
