@@ -255,7 +255,7 @@
             "cron": "0 0 3 * * *"
           },
           "namespace-sweep": {
-            "cron": "0 */5 * * * *"
+            "cron": "0 0 * * * *"
           },
           "siphon": {
             "batch_size": 100,
@@ -1492,7 +1492,7 @@
               "cron": "0 0 3 * * *"
             },
             "namespace-sweep": {
-              "cron": "0 */5 * * * *"
+              "cron": "0 0 * * * *"
             },
             "siphon": {
               "batch_size": 100,
@@ -1546,7 +1546,7 @@
         "namespace-sweep": {
           "$ref": "#/$defs/NamespaceSweepConfig",
           "default": {
-            "cron": "0 */5 * * * *"
+            "cron": "0 0 * * * *"
           }
         },
         "siphon": {
