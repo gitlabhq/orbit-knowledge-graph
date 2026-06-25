@@ -130,7 +130,9 @@ For dotted FQNs, the helper also checks calls that target matching
 `ImportedSymbol` rows. This covers Python patterns such as
 `from scoring import score_review`, where the index may store the call as
 `Definition --CALLS--> ImportedSymbol` rather than
-`Definition --CALLS--> Definition`.
+`Definition --CALLS--> Definition`. If neither `CALLS` path has coverage, it
+reports matching imported-symbol records so the indexed import coverage is still
+visible.
 
 ## Output format and caveats
 
@@ -144,7 +146,7 @@ Known limitations of Orbit Remote's Code Graph coverage:
 - `CALLS` edges are not fully indexed for every language/project combination.
   For imported Python functions, `callers` may report import-targeted calls via
   matching `ImportedSymbol` rows when direct definition-targeted `CALLS` edges
-  are absent.
+  are absent, or matching imported-symbol records when call edges are missing.
 - `extends` and `ancestors` issue a single server-side multi-hop traversal;
   `includes` issues two. None of them fan out into per-hop round trips. Each
   query requests the maximum result cap (`limit` 1000). A traversal whose result

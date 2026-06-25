@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import importlib.util
 import unittest
+from argparse import Namespace
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 _SPEC = importlib.util.spec_from_file_location(
     "remote_repo_map", Path(__file__).with_name("remote_repo_map.py")
@@ -39,6 +43,16 @@ def edge(from_id, to_id, depth=None):
     if depth is not None:
         e["depth"] = depth
     return e
+
+
+def graph(nodes):
+    return {"result": {"nodes": nodes, "edges": []}}
+
+
+def imported_symbol(nid, **extra):
+    n = {"id": nid, "type": "ImportedSymbol"}
+    n.update(extra)
+    return n
 
 
 class FilterByPrefixTest(unittest.TestCase):
@@ -160,6 +174,69 @@ class ImportPathCandidatesTest(unittest.TestCase):
     def test_non_dotted_fqn_has_no_candidates(self):
         self.assertEqual(rrm._import_path_candidates("execute"), [])
         self.assertEqual(rrm._import_path_candidates(None), [])
+
+
+class CallersCommandTest(unittest.TestCase):
+    def run_callers(self, responses):
+        args = Namespace(
+            project_id=80112683,
+            branch="main",
+            name="src.scoring.score_review",
+        )
+        out = StringIO()
+        with patch.object(rrm, "_query", side_effect=responses) as query, redirect_stdout(out):
+            rrm.cmd_callers(args)
+        return out.getvalue(), query.call_count
+
+    def test_empty_direct_traversal_looks_up_target_before_imported_callers(self):
+        output, call_count = self.run_callers([
+            graph([]),
+            graph([node(
+                "target",
+                name="score_review",
+                fqn="src.scoring.score_review",
+                file_path="src/scoring.py",
+                start_line=75,
+            )]),
+            graph([node(
+                "caller",
+                name="run_tier_reviews",
+                fqn="src.pipeline.run_tier_reviews",
+                file_path="src/pipeline.py",
+                start_line=102,
+                definition_type="Function",
+            )]),
+        ])
+
+        self.assertEqual(call_count, 3)
+        self.assertIn("target: src.scoring.score_review", output)
+        self.assertIn("src.pipeline.run_tier_reviews", output)
+        self.assertNotIn("method not found", output)
+
+    def test_imported_symbol_records_are_last_fallback(self):
+        output, call_count = self.run_callers([
+            graph([]),
+            graph([node(
+                "target",
+                name="score_review",
+                fqn="src.scoring.score_review",
+                file_path="src/scoring.py",
+                start_line=75,
+            )]),
+            graph([]),
+            graph([imported_symbol(
+                "import",
+                import_path="scoring",
+                identifier_name="score_review",
+                file_path="src/pipeline.py",
+                start_line=10,
+            )]),
+        ])
+
+        self.assertEqual(call_count, 4)
+        self.assertIn("matching imported symbols found", output)
+        self.assertIn("scoring.score_review", output)
+        self.assertIn("1 imported symbol record(s) found", output)
 
 
 if __name__ == "__main__":

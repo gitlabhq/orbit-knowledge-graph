@@ -603,19 +603,35 @@ def cmd_callers(args: argparse.Namespace) -> None:
         target_ids = {t.get("id") for t in targets}
         callers = [n for n in all_defs if n.get("id") not in target_ids]
 
+    if not targets:
+        lookup_body = {"query": {
+            "query_type": "traversal",
+            "nodes": [
+                {
+                    "id": "target", "entity": "Definition",
+                    "filters": target_filters,
+                    "columns": ["id", "name", "fqn", "file_path", "start_line"],
+                },
+            ],
+            "limit": 100,
+        }}
+        targets = _nodes(_query(lookup_body), "Definition")
+
     imported_callers: list[dict] = []
+    imported_symbols: list[dict] = []
     import_paths = _import_path_candidates(orbit_fqn)
-    if import_paths:
+    if targets and import_paths and not callers:
+        import_filters = {
+            **_base_filters(pid, branch),
+            "identifier_name": {"op": "eq", "value": method_name},
+            "import_path": {"op": "in", "value": import_paths},
+        }
         import_body = {"query": {
             "query_type": "traversal",
             "nodes": [
                 {
                     "id": "target_import", "entity": "ImportedSymbol",
-                    "filters": {
-                        **_base_filters(pid, branch),
-                        "identifier_name": {"op": "eq", "value": method_name},
-                        "import_path": {"op": "in", "value": import_paths},
-                    },
+                    "filters": import_filters,
                     "columns": ["id", "import_path", "identifier_name", "file_path", "start_line"],
                 },
                 {
@@ -628,6 +644,19 @@ def cmd_callers(args: argparse.Namespace) -> None:
             "limit": 100,
         }}
         imported_callers = _unique_by_id(_nodes(_query(import_body), "Definition"))
+        if not callers and not imported_callers:
+            symbol_body = {"query": {
+                "query_type": "traversal",
+                "nodes": [
+                    {
+                        "id": "target_import", "entity": "ImportedSymbol",
+                        "filters": import_filters,
+                        "columns": ["id", "import_path", "identifier_name", "file_path", "start_line"],
+                    },
+                ],
+                "limit": 100,
+            }}
+            imported_symbols = _unique_by_id(_nodes(_query(symbol_body), "ImportedSymbol"))
 
     print(f"CALLERS — of {raw!r}")
     print("=" * 78)
@@ -642,6 +671,16 @@ def cmd_callers(args: argparse.Namespace) -> None:
     print()
     callers = _unique_by_id(callers + imported_callers)
     if not callers:
+        if imported_symbols:
+            print("(no callers found via CALLS edge; matching imported symbols found)")
+            print(f"{'type':12}  {'symbol':<60}  location")
+            print("-" * 100)
+            for s in sorted(imported_symbols, key=lambda x: x.get("file_path", "")):
+                symbol = ".".join(p for p in [s.get("import_path"), s.get("identifier_name")] if p)
+                loc = f"{s.get('file_path','')}:{s.get('start_line','')}"
+                print(f"{'import':12}  {symbol[:60]:<60}  {loc}")
+            print(f"\n{len(imported_symbols)} imported symbol record(s) found")
+            return
         print("(no callers found via CALLS edge — CALLS indexing may be incomplete)")
         return
     if imported_callers:
