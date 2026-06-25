@@ -1,9 +1,4 @@
-//! Streaming writer that bridges sync callers to the async
-//! [`Destination`]/[`BatchWriter`] layer.
-//!
-//! Accepts `(table, RecordBatch)` pairs synchronously via a bounded mpsc
-//! channel, coalesces small batches per table, slices large ones, and
-//! writes through a concurrency-limited set of tasks.
+//! Sync-to-async streaming write bridge over [`Destination`]/[`BatchWriter`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,11 +20,6 @@ pub struct StreamWriteError(pub String);
 type Outcome = Result<Vec<WriteTotals>, StreamWriteError>;
 type State = (mpsc::Sender<(String, RecordBatch)>, tokio::task::JoinHandle<Outcome>);
 
-/// Reusable streaming writer over any [`Destination`].
-///
-/// Callers push `(table, batch)` pairs synchronously via [`send`](Self::send).
-/// Large batches are sliced; small ones are coalesced per table. An async
-/// drain task writes through the destination with bounded concurrency.
 pub struct StreamWriter {
     state: Mutex<Option<State>>,
     max_rows_per_send: usize,
@@ -50,8 +40,6 @@ impl StreamWriter {
         Self { state: Mutex::new(Some((tx, task))), max_rows_per_send: max_rows }
     }
 
-    /// Send one batch synchronously. Slices it if larger than `max_rows_per_insert`.
-    /// Blocks when the channel is full (back-pressure).
     pub fn send(&self, table: &str, batch: &RecordBatch) -> Result<(), StreamWriteError> {
         if batch.num_rows() == 0 { return Ok(()); }
         let tx = self.state.lock().as_ref()
@@ -68,12 +56,17 @@ impl StreamWriter {
         Ok(())
     }
 
-    /// Close the channel, drain remaining writes, and return per-table totals.
     pub async fn finish(&self) -> Outcome {
         let (tx, task) = self.state.lock().take()
             .ok_or_else(|| StreamWriteError("finish already called".into()))?;
         drop(tx);
         task.await.map_err(|e| StreamWriteError(format!("join: {e}")))?
+    }
+}
+
+impl code_graph::v2::BatchSink for StreamWriter {
+    fn write_batch(&self, table: &str, batch: &RecordBatch) -> Result<(), SinkError> {
+        self.send(table, batch).map_err(|e| SinkError(e.to_string()))
     }
 }
 
@@ -141,12 +134,6 @@ fn spawn_write(
         drop(permit);
         Ok((table, rows, bytes))
     });
-}
-
-impl code_graph::v2::BatchSink for StreamWriter {
-    fn write_batch(&self, table: &str, batch: &RecordBatch) -> Result<(), SinkError> {
-        self.send(table, batch).map_err(|e| SinkError(e.to_string()))
-    }
 }
 
 #[derive(Debug, Clone)]

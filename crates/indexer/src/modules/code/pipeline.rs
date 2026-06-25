@@ -512,9 +512,7 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         result: &code_graph::v2::PipelineResult,
     ) {
-        // Always run: with streamed writes a killed first-time run can leave partial rows only this sweep removes.
-
-        // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
+        // A killed first-time run can leave partial rows that only this sweep removes.
         info!(
             project_id = request.project_id,
             branch = %request.branch,
