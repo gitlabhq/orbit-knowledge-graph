@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
+use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 
-use crate::destination::{DestinationError, TableWriter, Writable, WriteReport};
+use crate::destination::{TableWriter, WriteError, WriteReport};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 
@@ -17,10 +18,10 @@ impl ClickHouseWriter {
     pub fn new(
         configuration: ClickHouseConfiguration,
         metrics: Arc<EngineMetrics>,
-    ) -> Result<Self, DestinationError> {
+    ) -> Result<Self, WriteError> {
         configuration
             .validate()
-            .map_err(|e| DestinationError::InvalidConfiguration(e.to_string()))?;
+            .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
         let client = configuration.build_client();
         Ok(Self { client, metrics })
     }
@@ -34,44 +35,48 @@ fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'s
 }
 
 impl TableWriter for ClickHouseWriter {
-    async fn write(&self, w: Writable) -> Result<WriteReport, DestinationError> {
-        if w.batches.is_empty() {
+    async fn write(
+        &self,
+        table: &str,
+        batches: Vec<RecordBatch>,
+        durability: Option<WriteDurability>,
+    ) -> Result<WriteReport, WriteError> {
+        if batches.is_empty() {
             return Ok(WriteReport {
-                table: w.table,
+                table: table.to_string(),
                 rows: 0,
                 bytes: 0,
             });
         }
 
-        let insert_sql = match w.durability {
-            Some(durability) => self
+        let insert_sql = match durability {
+            Some(d) => self
                 .client
-                .build_insert_sql_with_overrides(&w.table, insert_overrides(durability)),
-            None => self.client.build_insert_sql(&w.table),
+                .build_insert_sql_with_overrides(table, insert_overrides(d)),
+            None => self.client.build_insert_sql(table),
         };
 
         let start = std::time::Instant::now();
-        let rows: u64 = w.batches.iter().map(|b| b.num_rows() as u64).sum();
-        let bytes: u64 = w
-            .batches
+        let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+        let bytes: u64 = batches
             .iter()
             .map(|b| b.get_array_memory_size() as u64)
             .sum();
 
         if let Err(error) = self
             .client
-            .insert_arrow_streaming_with_sql(&w.table, &insert_sql, &w.batches)
+            .insert_arrow_streaming_with_sql(table, &insert_sql, &batches)
             .await
         {
-            self.metrics.record_write_error(&w.table);
+            self.metrics.record_write_error(table);
             return Err(error.into());
         }
 
         self.metrics
-            .record_write_success(&w.table, start.elapsed().as_secs_f64(), rows, bytes);
+            .record_write_success(table, start.elapsed().as_secs_f64(), rows, bytes);
 
         Ok(WriteReport {
-            table: w.table,
+            table: table.to_string(),
             rows,
             bytes,
         })

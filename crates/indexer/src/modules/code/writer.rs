@@ -8,7 +8,7 @@ use code_graph::v2::SinkError;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::destination::{DestinationError, TableWriter, Writable, WriteReport, WriteStrategy};
+use crate::destination::{TableWriter, WriteError, WriteReport, WriteStrategy};
 
 #[derive(Debug, Error)]
 #[error("{0}")]
@@ -123,7 +123,7 @@ async fn drain_loop<W: TableWriter + 'static>(
 
 fn spawn_write<W: TableWriter + 'static>(
     sem: &Arc<tokio::sync::Semaphore>,
-    set: &mut tokio::task::JoinSet<Result<WriteReport, DestinationError>>,
+    set: &mut tokio::task::JoinSet<Result<WriteReport, WriteError>>,
     writer: &Arc<W>,
     table: String,
     batches: Vec<RecordBatch>,
@@ -134,8 +134,14 @@ fn spawn_write<W: TableWriter + 'static>(
         let permit = permit
             .acquire_owned()
             .await
-            .map_err(|e| DestinationError::Write(format!("semaphore: {e}"), None))?;
-        let report = w.write(Writable::new(table, batches).durable()).await?;
+            .map_err(|e| WriteError::Write(format!("semaphore: {e}"), None))?;
+        let report = w
+            .write(
+                &table,
+                batches,
+                Some(crate::durability::WriteDurability::Durable),
+            )
+            .await?;
         drop(permit);
         Ok(report)
     });

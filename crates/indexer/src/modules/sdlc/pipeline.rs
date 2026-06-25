@@ -11,7 +11,7 @@ use futures::stream::FuturesUnordered;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::destination::{TableWriter, Writable};
+use crate::destination::TableWriter;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -189,7 +189,7 @@ impl Pipeline {
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
                 write_futures.push(async move {
-                    w.write(Writable::new(table, batches).with_durability(d))
+                    w.write(&table, batches, d)
                         .await
                         .map_err(|e| HandlerError::Processing(e.to_string()))
                 });
