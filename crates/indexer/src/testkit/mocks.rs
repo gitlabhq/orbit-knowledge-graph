@@ -122,18 +122,8 @@ impl nats_client::KvServices for MockNatsServices {
     }
 }
 
-/// Creates a `ClickHouseWriter` with a dummy config for tests that never actually write.
 pub fn test_writer() -> Arc<crate::clickhouse::ClickHouseWriter> {
-    Arc::new(
-        crate::clickhouse::ClickHouseWriter::new(
-            gkg_server_config::ClickHouseConfiguration {
-                url: "http://localhost:0".into(),
-                ..Default::default()
-            },
-            Arc::new(crate::metrics::EngineMetrics::new()),
-        )
-        .expect("test writer config is valid"),
-    )
+    Arc::new(crate::clickhouse::ClickHouseWriter::noop())
 }
 
 /// Mock handler for testing.

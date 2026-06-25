@@ -35,6 +35,7 @@ pub struct WriteReport {
 pub struct ClickHouseWriter {
     client: ArrowClickHouseClient,
     metrics: Arc<EngineMetrics>,
+    noop: bool,
 }
 
 impl ClickHouseWriter {
@@ -46,7 +47,21 @@ impl ClickHouseWriter {
             .validate()
             .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
         let client = configuration.build_client();
-        Ok(Self { client, metrics })
+        Ok(Self {
+            client,
+            metrics,
+            noop: false,
+        })
+    }
+
+    /// A writer that accepts all writes without connecting. For unit tests only.
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn noop() -> Self {
+        Self {
+            client: ClickHouseConfiguration::default().build_client(),
+            metrics: Arc::new(EngineMetrics::new()),
+            noop: true,
+        }
     }
 }
 
@@ -65,11 +80,17 @@ impl ClickHouseWriter {
         batches: Vec<RecordBatch>,
         durability: Option<WriteDurability>,
     ) -> Result<WriteReport, WriteError> {
-        if batches.is_empty() {
+        let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+        let bytes: u64 = batches
+            .iter()
+            .map(|b| b.get_array_memory_size() as u64)
+            .sum();
+
+        if batches.is_empty() || self.noop {
             return Ok(WriteReport {
                 table: table.to_string(),
-                rows: 0,
-                bytes: 0,
+                rows,
+                bytes,
             });
         }
 
@@ -81,11 +102,6 @@ impl ClickHouseWriter {
         };
 
         let start = std::time::Instant::now();
-        let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-        let bytes: u64 = batches
-            .iter()
-            .map(|b| b.get_array_memory_size() as u64)
-            .sum();
 
         if let Err(error) = self
             .client
