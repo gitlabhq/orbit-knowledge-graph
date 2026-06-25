@@ -39,8 +39,8 @@ pub use entities::{
     TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
-    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, Trigger,
-    TriggerTraversalPath,
+    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
+    SourceTable,
 };
 
 use std::collections::BTreeMap;

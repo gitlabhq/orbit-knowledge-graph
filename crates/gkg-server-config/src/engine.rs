@@ -398,6 +398,22 @@ impl Default for NamespaceDispatcherConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct NamespaceSweepConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
+impl Default for NamespaceSweepConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */5 * * * *".into()),
+            },
+        }
+    }
+}
+
 fn default_events_stream_name() -> String {
     "siphon_stream_main_db".to_string()
 }
@@ -511,6 +527,8 @@ pub struct ScheduledTasksConfiguration {
     pub global: GlobalDispatcherConfig,
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
+    #[serde(default)]
+    pub namespace_sweep: NamespaceSweepConfig,
     #[serde(default)]
     pub siphon: SiphonRouterConfig,
     #[serde(default)]

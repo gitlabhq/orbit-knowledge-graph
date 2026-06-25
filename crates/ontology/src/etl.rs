@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 /// use it implicitly; derived entities must name a different one.
 pub const DEFAULT_TRANSFORM: &str = "data_fusion";
 
-pub const DEFAULT_TRIGGER_TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
+pub const DEFAULT_TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -79,15 +79,17 @@ pub struct EdgeMapping {
     pub mutable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Trigger {
+/// A datalake table feeding an entity, and how to resolve one of its rows to a
+/// `traversal_path`. Consumed by the indexer's namespace dispatch, not by graph
+/// construction.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SourceTable {
     pub table: String,
-    pub watermark: String,
-    pub traversal_path: TriggerTraversalPath,
+    pub traversal_path: PathResolution,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TriggerTraversalPath {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PathResolution {
     Column(String),
     Dictionary {
         dictionary: String,
@@ -103,7 +105,7 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
-        triggers: Vec<Trigger>,
+        source_tables: Vec<SourceTable>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -117,7 +119,7 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
-        triggers: Vec<Trigger>,
+        source_tables: Vec<SourceTable>,
         traversal_path_filter: Option<String>,
         /// Alias of the main table in the `from` JOIN expression.
         /// Used to qualify bare column references (e.g. `id`) that would
@@ -186,10 +188,10 @@ impl EtlConfig {
         }
     }
 
-    pub fn triggers(&self) -> &[Trigger] {
+    pub fn source_tables(&self) -> &[SourceTable] {
         match self {
-            EtlConfig::Table { triggers, .. } => triggers,
-            EtlConfig::Query { triggers, .. } => triggers,
+            EtlConfig::Table { source_tables, .. } => source_tables,
+            EtlConfig::Query { source_tables, .. } => source_tables,
         }
     }
 
@@ -249,7 +251,7 @@ mod tests {
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
-            triggers: Vec::new(),
+            source_tables: Vec::new(),
             traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
             page_join: None,
@@ -304,7 +306,7 @@ mod tests {
             watermark: "w".to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
-            triggers: Vec::new(),
+            source_tables: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert!(config.validate_query_parameters().is_empty());
@@ -318,7 +320,7 @@ mod tests {
             watermark: "w".to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
-            triggers: Vec::new(),
+            source_tables: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert_eq!(table.deleted(), crate::constants::siphon_deleted_column());
@@ -335,7 +337,7 @@ mod tests {
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
-            triggers: Vec::new(),
+            source_tables: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert_eq!(

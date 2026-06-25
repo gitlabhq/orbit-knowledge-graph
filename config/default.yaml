@@ -108,6 +108,8 @@ schedule:
       cron: "0 */1 * * * *"           # every minute
     namespace:
       cron: "*/30 * * * * *"          # every 30 seconds
+    namespace-sweep:
+      cron: "0 */5 * * * *"           # every 5 minutes, full re-dispatch safety net
     code-backfill:
       cron: "0 */1 * * * *"           # every minute
     table-cleanup:

@@ -879,7 +879,7 @@ mod tests {
                 watermark: "w".to_string(),
                 deleted: "d".to_string(),
                 order_by: vec![],
-                triggers: Vec::new(),
+                source_tables: Vec::new(),
                 edges: BTreeMap::new(),
             },
         }

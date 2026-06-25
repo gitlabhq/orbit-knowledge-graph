@@ -12,7 +12,7 @@ pub use backfill_sweep::CodeBackfillSweep;
 pub use global::GlobalDispatcher;
 pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;
-pub use namespace::NamespaceDispatcher;
+pub use namespace::{NamespaceDispatcher, NamespaceSweepDispatcher};
 pub use namespace_deletion::NamespaceDeletionScheduler;
 pub use stale_edge_reconciliation::StaleEdgeReconciliation;
 pub use table_cleanup::TableCleanup;

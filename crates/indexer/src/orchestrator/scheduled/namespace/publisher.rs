@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use super::change_detection::ChangedNamespace;
+use super::DispatchNamespace;
 use crate::campaign::CampaignState;
 use crate::nats::NatsServices;
 use crate::orchestrator::scheduled::TaskError;
@@ -22,7 +22,7 @@ pub(super) struct PublishReport {
 pub(super) trait NamespacePublisher: Send + Sync {
     async fn publish(
         &self,
-        namespaces: &[ChangedNamespace],
+        namespaces: &[DispatchNamespace],
         watermark: DateTime<Utc>,
     ) -> Result<PublishReport, TaskError>;
 }
@@ -42,7 +42,7 @@ impl NamespaceRequestPublisher {
 impl NamespacePublisher for NamespaceRequestPublisher {
     async fn publish(
         &self,
-        namespaces: &[ChangedNamespace],
+        namespaces: &[DispatchNamespace],
         watermark: DateTime<Utc>,
     ) -> Result<PublishReport, TaskError> {
         let campaign_id = self.campaign.current();
@@ -76,7 +76,6 @@ impl NamespacePublisher for NamespaceRequestPublisher {
                     debug!(
                         namespace_id = namespace.namespace_id,
                         traversal_path = %namespace.traversal_path,
-                        target_keys = ?namespace.target_keys,
                         "dispatched namespace indexing request"
                     );
                 }
@@ -85,7 +84,6 @@ impl NamespacePublisher for NamespaceRequestPublisher {
                     debug!(
                         namespace_id = namespace.namespace_id,
                         traversal_path = %namespace.traversal_path,
-                        target_keys = ?namespace.target_keys,
                         "skipped namespace indexing request, already in-flight"
                     );
                 }

@@ -1,5 +1,6 @@
 mod change_detection;
 mod publisher;
+mod sweep;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,7 +9,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use tracing::{debug, info};
 
-use change_detection::{NamespaceChangeDetector, NamespaceTriggerDetector};
+use change_detection::{DatalakeChangeDetector, NamespaceChangeDetector};
 use publisher::{NamespacePublisher, NamespaceRequestPublisher};
 
 use crate::campaign::CampaignState;
@@ -20,7 +21,15 @@ use crate::orchestrator::scheduled::ScheduledTaskMetrics;
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
-const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.triggers";
+pub use sweep::NamespaceSweepDispatcher;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DispatchNamespace {
+    pub namespace_id: i64,
+    pub traversal_path: String,
+}
+
+const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
 
 pub struct NamespaceDispatcher {
     detector: Arc<dyn NamespaceChangeDetector>,
@@ -41,7 +50,7 @@ impl NamespaceDispatcher {
         ontology: &ontology::Ontology,
     ) -> Self {
         Self {
-            detector: Arc::new(NamespaceTriggerDetector::new(datalake, ontology)),
+            detector: Arc::new(DatalakeChangeDetector::new(datalake, ontology)),
             publisher: Arc::new(NamespaceRequestPublisher::new(nats, campaign)),
             checkpoint_store,
             metrics,
@@ -101,7 +110,7 @@ impl NamespaceDispatcher {
                 self.metrics.record_error(self.name(), "query");
             })?;
         self.metrics
-            .record_query_duration("namespace_triggers", query_start.elapsed().as_secs_f64());
+            .record_query_duration("namespace_changes", query_start.elapsed().as_secs_f64());
 
         debug!(
             changed_namespaces = namespaces.len(),
@@ -157,7 +166,6 @@ impl NamespaceDispatcher {
 mod tests {
     use super::*;
     use crate::checkpoint::{Checkpoint, CheckpointError};
-    use crate::orchestrator::scheduled::namespace::change_detection::ChangedNamespace;
     use crate::orchestrator::scheduled::namespace::publisher::PublishReport;
     use std::sync::Mutex;
 
@@ -214,7 +222,7 @@ mod tests {
     }
 
     struct StubDetector {
-        result: Result<Vec<ChangedNamespace>, &'static str>,
+        result: Result<Vec<DispatchNamespace>, &'static str>,
     }
 
     #[async_trait]
@@ -223,7 +231,7 @@ mod tests {
             &self,
             _lower: DateTime<Utc>,
             _upper: DateTime<Utc>,
-        ) -> Result<Vec<ChangedNamespace>, TaskError> {
+        ) -> Result<Vec<DispatchNamespace>, TaskError> {
             self.result.clone().map_err(TaskError::new)
         }
     }
@@ -236,7 +244,7 @@ mod tests {
     impl NamespacePublisher for StubPublisher {
         async fn publish(
             &self,
-            _namespaces: &[ChangedNamespace],
+            _namespaces: &[DispatchNamespace],
             _watermark: DateTime<Utc>,
         ) -> Result<PublishReport, TaskError> {
             self.result.map_err(TaskError::new)
@@ -262,10 +270,9 @@ mod tests {
         let checkpoint_store = Arc::new(StubCheckpointStore::default());
         let dispatcher = dispatcher_with(
             StubDetector {
-                result: Ok(vec![ChangedNamespace {
+                result: Ok(vec![DispatchNamespace {
                     namespace_id: 9,
                     traversal_path: "1/9/".to_string(),
-                    target_keys: vec!["WorkItem".to_string()],
                 }]),
             },
             StubPublisher {
@@ -306,10 +313,9 @@ mod tests {
         let checkpoint_store = Arc::new(StubCheckpointStore::default());
         let dispatcher = dispatcher_with(
             StubDetector {
-                result: Ok(vec![ChangedNamespace {
+                result: Ok(vec![DispatchNamespace {
                     namespace_id: 9,
                     traversal_path: "1/9/".to_string(),
-                    target_keys: vec!["WorkItem".to_string()],
                 }]),
             },
             StubPublisher {

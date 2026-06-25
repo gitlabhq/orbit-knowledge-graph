@@ -135,7 +135,7 @@ etl:
   watermark: project.{{watermark_column}}
   table_alias: project
   deleted: project.{{deleted_column}}
-  triggers:
+  source_tables:
     - table: siphon_projects
       traversal_path:
         dictionary: project_traversal_paths_dict

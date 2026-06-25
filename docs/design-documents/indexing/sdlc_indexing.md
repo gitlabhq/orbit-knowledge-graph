@@ -361,7 +361,7 @@ ALTER TABLE database_b.<table_name> DROP COLUMN <column_name>;
 
 For changes to a table that are not backward compatible or may cause downtime, the system uses a prefix-based multi-step migration process handled by the dispatcher.
 
-The dispatcher creates new-prefix tables (e.g. `v59_gl_issue`) with the updated schema. The previous-prefix tables remain available to serve queries. The normal namespace trigger cycle re-indexes enabled namespaces into the new-prefix tables. Once `MigrationCompletionChecker` confirms all namespaces are re-indexed, the new version is promoted to `active`, the old version is retired, and dead-version GC drops the obsolete tables.
+The dispatcher creates new-prefix tables (e.g. `v59_gl_issue`) with the updated schema. The previous-prefix tables remain available to serve queries. The namespace sweep task re-indexes every enabled namespace into the new-prefix tables. Once `MigrationCompletionChecker` confirms all namespaces are re-indexed, the new version is promoted to `active`, the old version is retired, and dead-version GC drops the obsolete tables.
 
 **Initial schema creation**
 

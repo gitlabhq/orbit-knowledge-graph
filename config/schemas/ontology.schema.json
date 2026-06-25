@@ -262,17 +262,13 @@
       "additionalProperties": false
     },
 
-    "triggerDefinition": {
+    "sourceTableDefinition": {
       "type": "object",
-      "description": "Source table whose Siphon changes trigger root namespace dispatch.",
+      "description": "A datalake table feeding this entity, used to detect which root namespaces changed and need re-dispatching.",
       "properties": {
         "table": {
           "type": "string",
           "description": "Datalake table to inspect for changed rows."
-        },
-        "watermark": {
-          "type": "string",
-          "description": "Watermark column for this trigger. Defaults to the ETL watermark."
         },
         "traversal_path": {
           "type": "object",
@@ -280,7 +276,7 @@
           "properties": {
             "column": {
               "type": "string",
-              "description": "Traversal path column on the trigger table."
+              "description": "Traversal path column on the source table."
             },
             "dictionary": {
               "type": "string",
@@ -288,7 +284,7 @@
             },
             "key_column": {
               "type": "string",
-              "description": "Column on the trigger table used as the dictionary key."
+              "description": "Column on the source table used as the dictionary key."
             }
           },
           "additionalProperties": false
@@ -329,10 +325,10 @@
               "pattern": "^[a-z][a-z0-9_]*$",
               "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
             },
-            "triggers": {
+            "source_tables": {
               "type": "array",
-              "description": "Source tables whose Siphon changes should trigger root namespace dispatch.",
-              "items": { "$ref": "#/definitions/triggerDefinition" },
+              "description": "Datalake tables whose Siphon changes mean this entity's root namespace needs re-dispatching. Defaults to the primary source table.",
+              "items": { "$ref": "#/definitions/sourceTableDefinition" },
               "minItems": 1
             },
             "edges": {
@@ -438,10 +434,10 @@
               "pattern": "^[a-z][a-z0-9_]*$",
               "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
             },
-            "triggers": {
+            "source_tables": {
               "type": "array",
-              "description": "Source tables whose Siphon changes should trigger root namespace dispatch.",
-              "items": { "$ref": "#/definitions/triggerDefinition" },
+              "description": "Datalake tables whose Siphon changes mean this entity's root namespace needs re-dispatching. Defaults to the primary source table.",
+              "items": { "$ref": "#/definitions/sourceTableDefinition" },
               "minItems": 1
             },
             "edges": {
@@ -1122,11 +1118,11 @@
           "type": "string",
           "description": "Optional extra WHERE predicate pushed into the extraction SQL, ANDed with the watermark/deleted/not-null filters. Lets a standalone edge select a row subset of a shared source table (e.g. one Rails enum value)."
         },
-        "triggers": {
-          "type": "array",
-          "description": "Source tables whose Siphon changes should trigger root namespace dispatch.",
-          "items": { "$ref": "#/definitions/triggerDefinition" },
-          "minItems": 1
+        "source_tables": {
+              "type": "array",
+              "description": "Datalake tables whose Siphon changes mean this entity's root namespace needs re-dispatching. Defaults to the primary source table.",
+              "items": { "$ref": "#/definitions/sourceTableDefinition" },
+              "minItems": 1
         },
         "from": { "$ref": "#/definitions/edgeEtlEndpoint" },
         "to": { "$ref": "#/definitions/edgeEtlEndpoint" }

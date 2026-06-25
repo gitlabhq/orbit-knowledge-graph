@@ -10,8 +10,8 @@ use crate::entities::{
     VirtualSource,
 };
 use crate::etl::{
-    DEFAULT_TRANSFORM, DEFAULT_TRIGGER_TRAVERSAL_PATH_COLUMN, EdgeDirection, EdgeMapping,
-    EdgeTarget, EtlConfig, EtlScope, Trigger, TriggerTraversalPath,
+    DEFAULT_TRANSFORM, DEFAULT_TRAVERSAL_PATH_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget,
+    EtlConfig, EtlScope, PathResolution, SourceTable,
 };
 
 use super::EtlSettings;
@@ -66,7 +66,7 @@ pub(crate) enum EtlYaml {
         #[serde(default)]
         transform: Option<String>,
         #[serde(default)]
-        triggers: Vec<TriggerYaml>,
+        source_tables: Vec<SourceTableYaml>,
         #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
@@ -92,23 +92,21 @@ pub(crate) enum EtlYaml {
         #[serde(default)]
         transform: Option<String>,
         #[serde(default)]
-        triggers: Vec<TriggerYaml>,
+        source_tables: Vec<SourceTableYaml>,
         #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TriggerYaml {
+pub(crate) struct SourceTableYaml {
     table: String,
     #[serde(default)]
-    watermark: Option<String>,
-    #[serde(default)]
-    traversal_path: Option<TriggerTraversalPathYaml>,
+    traversal_path: Option<PathResolutionYaml>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TriggerTraversalPathYaml {
+pub(crate) struct PathResolutionYaml {
     #[serde(default)]
     column: Option<String>,
     #[serde(default)]
@@ -588,20 +586,16 @@ fn convert_edge_mappings(
         .collect()
 }
 
-pub(crate) fn convert_triggers(
+pub(crate) fn convert_source_tables(
     entity_name: &str,
-    raw: Vec<TriggerYaml>,
+    raw: Vec<SourceTableYaml>,
     default_table: Option<&str>,
-    inherited_watermark: &str,
-    placeholder_watermark: &str,
-    default_deleted: &str,
-) -> Result<Vec<Trigger>, OntologyError> {
+) -> Result<Vec<SourceTable>, OntologyError> {
     let raw = if raw.is_empty() {
         default_table
             .map(|table| {
-                vec![TriggerYaml {
+                vec![SourceTableYaml {
                     table: table.to_string(),
-                    watermark: None,
                     traversal_path: None,
                 }]
             })
@@ -611,72 +605,45 @@ pub(crate) fn convert_triggers(
     };
 
     raw.into_iter()
-        .map(|trigger| {
-            let watermark = match trigger.watermark {
-                Some(w) => render_etl_placeholders(
-                    entity_name,
-                    "triggers.watermark",
-                    &w,
-                    placeholder_watermark,
-                    default_deleted,
-                )?,
-                None => default_trigger_watermark(inherited_watermark),
-            };
-            Ok(Trigger {
-                table: trigger.table,
-                watermark,
-                traversal_path: convert_trigger_traversal_path(
-                    entity_name,
-                    trigger.traversal_path,
-                )?,
+        .map(|source_table| {
+            Ok(SourceTable {
+                table: source_table.table,
+                traversal_path: convert_path_resolution(entity_name, source_table.traversal_path)?,
             })
         })
         .collect()
 }
 
-fn default_trigger_watermark(watermark: &str) -> String {
-    watermark
-        .rsplit_once('.')
-        .filter(|(qualifier, column)| is_identifier(qualifier) && is_identifier(column))
-        .map_or_else(|| watermark.to_string(), |(_, column)| column.to_string())
-}
-
-fn is_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    matches!(chars.next(), Some(ch) if ch == '_' || ch.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-fn convert_trigger_traversal_path(
+fn convert_path_resolution(
     entity_name: &str,
-    raw: Option<TriggerTraversalPathYaml>,
-) -> Result<TriggerTraversalPath, OntologyError> {
+    raw: Option<PathResolutionYaml>,
+) -> Result<PathResolution, OntologyError> {
     let Some(raw) = raw else {
-        return Ok(TriggerTraversalPath::Column(
-            DEFAULT_TRIGGER_TRAVERSAL_PATH_COLUMN.to_string(),
+        return Ok(PathResolution::Column(
+            DEFAULT_TRAVERSAL_PATH_COLUMN.to_string(),
         ));
     };
 
     match (raw.column, raw.dictionary, raw.key_column) {
-        (Some(column), None, None) => Ok(TriggerTraversalPath::Column(column)),
-        (None, Some(dictionary), Some(key_column)) => Ok(TriggerTraversalPath::Dictionary {
+        (Some(column), None, None) => Ok(PathResolution::Column(column)),
+        (None, Some(dictionary), Some(key_column)) => Ok(PathResolution::Dictionary {
             dictionary,
             key_column,
         }),
         (Some(_), Some(_), _) => Err(OntologyError::Validation(format!(
-            "{entity_name}: triggers.traversal_path must use column or dictionary, not both"
+            "{entity_name}: source_tables.traversal_path must use column or dictionary, not both"
         ))),
         (None, Some(_), None) => Err(OntologyError::Validation(format!(
-            "{entity_name}: triggers.traversal_path.dictionary requires key_column"
+            "{entity_name}: source_tables.traversal_path.dictionary requires key_column"
         ))),
         (None, None, Some(_)) => Err(OntologyError::Validation(format!(
-            "{entity_name}: triggers.traversal_path.key_column requires dictionary"
+            "{entity_name}: source_tables.traversal_path.key_column requires dictionary"
         ))),
         (Some(_), None, Some(_)) => Err(OntologyError::Validation(format!(
-            "{entity_name}: triggers.traversal_path.column cannot use key_column"
+            "{entity_name}: source_tables.traversal_path.column cannot use key_column"
         ))),
-        (None, None, None) => Ok(TriggerTraversalPath::Column(
-            DEFAULT_TRIGGER_TRAVERSAL_PATH_COLUMN.to_string(),
+        (None, None, None) => Ok(PathResolution::Column(
+            DEFAULT_TRAVERSAL_PATH_COLUMN.to_string(),
         )),
     }
 }
@@ -744,7 +711,7 @@ impl EtlYaml {
                 deleted,
                 order_by,
                 transform: _,
-                triggers,
+                source_tables,
                 edges,
             } => {
                 let watermark = match watermark {
@@ -755,13 +722,10 @@ impl EtlYaml {
                     Some(d) => render_etl_placeholders(entity_name, "deleted", &d, wm, del)?,
                     None => del.clone(),
                 };
-                let triggers = convert_triggers(
+                let source_tables = convert_source_tables(
                     entity_name,
-                    triggers,
+                    source_tables,
                     (scope == EtlScope::Namespaced).then_some(source.as_str()),
-                    &watermark,
-                    wm,
-                    del,
                 )?;
                 Ok(EtlConfig::Table {
                     scope,
@@ -769,7 +733,7 @@ impl EtlYaml {
                     watermark,
                     deleted,
                     order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
-                    triggers,
+                    source_tables,
                     edges: convert_edge_mappings(edges)?,
                 })
             }
@@ -785,7 +749,7 @@ impl EtlYaml {
                 table_alias,
                 page_join,
                 transform: _,
-                triggers,
+                source_tables,
                 edges,
             } => {
                 let select = render_etl_placeholders(entity_name, "select", &select, wm, del)?;
@@ -838,13 +802,10 @@ impl EtlYaml {
                         }))
                     })
                     .transpose()?;
-                let triggers = convert_triggers(
+                let source_tables = convert_source_tables(
                     entity_name,
-                    triggers,
+                    source_tables,
                     (scope == EtlScope::Namespaced).then_some(source.as_str()),
-                    &watermark,
-                    wm,
-                    del,
                 )?;
 
                 Ok(EtlConfig::Query {
@@ -856,7 +817,7 @@ impl EtlYaml {
                     watermark,
                     deleted,
                     order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
-                    triggers,
+                    source_tables,
                     traversal_path_filter,
                     table_alias,
                     page_join,
@@ -981,44 +942,39 @@ mod tests {
     }
 
     #[test]
-    fn embedded_ontology_includes_edge_and_system_note_triggers() {
+    fn every_namespaced_entity_declares_source_tables() {
         let ontology = Ontology::load_embedded().expect("embedded ontology should load");
-        let missing_node_triggers: Vec<&str> = ontology
+        let missing_node_sources: Vec<&str> = ontology
             .nodes()
             .filter_map(|node| {
                 let etl = node.etl.as_ref()?;
-                (etl.scope() == EtlScope::Namespaced && etl.triggers().is_empty())
+                (etl.scope() == EtlScope::Namespaced && etl.source_tables().is_empty())
                     .then_some(node.name.as_str())
             })
             .collect();
-        assert!(
-            missing_node_triggers.is_empty(),
-            "{missing_node_triggers:?}"
-        );
+        assert!(missing_node_sources.is_empty(), "{missing_node_sources:?}");
 
-        let missing_derived_triggers: Vec<&str> = ontology
+        let missing_derived_sources: Vec<&str> = ontology
             .derived_entities()
             .filter_map(|entity| {
-                (entity.etl.scope() == EtlScope::Namespaced && entity.etl.triggers().is_empty())
-                    .then_some(entity.name.as_str())
+                (entity.etl.scope() == EtlScope::Namespaced
+                    && entity.etl.source_tables().is_empty())
+                .then_some(entity.name.as_str())
             })
             .collect();
         assert!(
-            missing_derived_triggers.is_empty(),
-            "{missing_derived_triggers:?}"
+            missing_derived_sources.is_empty(),
+            "{missing_derived_sources:?}"
         );
 
-        let missing_edge_triggers: Vec<&str> = ontology
+        let missing_edge_sources: Vec<&str> = ontology
             .edge_etl_configs()
             .filter_map(|(relationship_kind, config)| {
-                (config.scope == EtlScope::Namespaced && config.triggers.is_empty())
+                (config.scope == EtlScope::Namespaced && config.source_tables.is_empty())
                     .then_some(relationship_kind)
             })
             .collect();
-        assert!(
-            missing_edge_triggers.is_empty(),
-            "{missing_edge_triggers:?}"
-        );
+        assert!(missing_edge_sources.is_empty(), "{missing_edge_sources:?}");
 
         let system_note = ontology
             .derived_entities()
@@ -1026,15 +982,15 @@ mod tests {
             .expect("SystemNote derived entity");
         let system_note_tables: Vec<&str> = system_note
             .etl
-            .triggers()
+            .source_tables()
             .iter()
-            .map(|trigger| trigger.table.as_str())
+            .map(|source_table| source_table.table.as_str())
             .collect();
         assert!(system_note_tables.contains(&"siphon_notes"));
         assert!(system_note_tables.contains(&"siphon_system_note_metadata"));
 
         let has_label = ontology.get_edge_etl("HAS_LABEL").unwrap();
-        assert_eq!(has_label[0].triggers[0].table, "siphon_label_links");
+        assert_eq!(has_label[0].source_tables[0].table, "siphon_label_links");
     }
 
     fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
@@ -1209,7 +1165,7 @@ mod tests {
     }
 
     #[test]
-    fn triggers_default_to_etl_watermark_and_traversal_path_column() {
+    fn source_tables_default_to_primary_source_and_traversal_path_column() {
         let etl = parse_etl_yaml(
             r#"
             node_type: entity
@@ -1222,28 +1178,22 @@ mod tests {
             etl:
               type: table
               source: source_table
-              triggers:
-                - table: source_table
             "#,
         )
-        .expect("trigger should parse");
+        .expect("source table should default from etl source");
 
-        let [trigger] = etl.triggers() else {
-            panic!("expected one trigger");
+        let [source_table] = etl.source_tables() else {
+            panic!("expected one source table");
         };
-        assert_eq!(trigger.table, "source_table");
+        assert_eq!(source_table.table, "source_table");
         assert_eq!(
-            trigger.watermark,
-            crate::constants::siphon_watermark_column()
-        );
-        assert_eq!(
-            trigger.traversal_path,
-            TriggerTraversalPath::Column("traversal_path".to_string())
+            source_table.traversal_path,
+            PathResolution::Column("traversal_path".to_string())
         );
     }
 
     #[test]
-    fn triggers_accept_dictionary_traversal_path() {
+    fn source_tables_accept_dictionary_traversal_path() {
         let etl = parse_etl_yaml(
             r#"
             node_type: entity
@@ -1258,21 +1208,21 @@ mod tests {
               source: project_namespace_traversal_paths
               select: "id, traversal_path"
               from: "project_namespace_traversal_paths"
-              triggers:
+              source_tables:
                 - table: siphon_projects
                   traversal_path:
                     dictionary: project_traversal_paths_dict
                     key_column: id
             "#,
         )
-        .expect("dictionary trigger should parse");
+        .expect("dictionary source table should parse");
 
-        let [trigger] = etl.triggers() else {
-            panic!("expected one trigger");
+        let [source_table] = etl.source_tables() else {
+            panic!("expected one source table");
         };
         assert_eq!(
-            trigger.traversal_path,
-            TriggerTraversalPath::Dictionary {
+            source_table.traversal_path,
+            PathResolution::Dictionary {
                 dictionary: "project_traversal_paths_dict".to_string(),
                 key_column: "id".to_string()
             }
@@ -1280,76 +1230,7 @@ mod tests {
     }
 
     #[test]
-    fn triggers_default_to_unqualified_etl_watermark() {
-        let etl = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "source.id, source.traversal_path"
-              from: "source_table AS source"
-              watermark: source.{{watermark_column}}
-              triggers:
-                - table: source_table
-            "#,
-        )
-        .expect("trigger should parse");
-
-        let [trigger] = etl.triggers() else {
-            panic!("expected one trigger");
-        };
-        assert_eq!(
-            trigger.watermark,
-            crate::constants::siphon_watermark_column()
-        );
-    }
-
-    #[test]
-    fn triggers_render_custom_watermark_and_explicit_column() {
-        let etl = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: source_table
-              watermark: source.{{watermark_column}}
-              triggers:
-                - table: source_table
-                  watermark: source.{{watermark_column}}
-                  traversal_path:
-                    column: source.traversal_path
-            "#,
-        )
-        .expect("custom trigger should parse");
-
-        let [trigger] = etl.triggers() else {
-            panic!("expected one trigger");
-        };
-        assert_eq!(
-            trigger.watermark,
-            format!("source.{}", crate::constants::siphon_watermark_column())
-        );
-        assert_eq!(
-            trigger.traversal_path,
-            TriggerTraversalPath::Column("source.traversal_path".to_string())
-        );
-    }
-
-    #[test]
-    fn triggers_reject_ambiguous_traversal_path() {
+    fn source_tables_reject_ambiguous_traversal_path() {
         let result = parse_etl_yaml(
             r#"
             node_type: entity
@@ -1362,7 +1243,7 @@ mod tests {
             etl:
               type: table
               source: source_table
-              triggers:
+              source_tables:
                 - table: source_table
                   traversal_path:
                     column: traversal_path

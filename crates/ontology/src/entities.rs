@@ -425,7 +425,7 @@ pub struct EdgeSourceEtlConfig {
     /// select a row subset of a shared source table (e.g. one Rails enum value)
     /// without a dedicated source table or a Rust transform.
     pub filter: Option<String>,
-    pub triggers: Vec<crate::etl::Trigger>,
+    pub source_tables: Vec<crate::etl::SourceTable>,
     /// Source endpoint configuration.
     pub from: EdgeEndpoint,
     /// Target endpoint configuration.

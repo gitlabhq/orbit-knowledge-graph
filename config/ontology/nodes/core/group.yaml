@@ -118,7 +118,7 @@ etl:
   watermark: namespace.{{watermark_column}}
   table_alias: namespace
   deleted: "(namespace.{{deleted_column}} OR namespace.type != 'Group')"
-  triggers:
+  source_tables:
     - table: siphon_namespaces
       traversal_path:
         dictionary: namespace_traversal_paths_dict
