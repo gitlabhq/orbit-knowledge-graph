@@ -22,19 +22,44 @@ pub struct CSharpDsl;
 
 type N<'a> = Node<'a, SyntaxTree>;
 
-fn csharp_super_types(node: &N<'_>) -> Vec<String> {
-    let mut result = Vec::new();
-    for child in node.children() {
-        if child.kind() == "base_list" {
-            for inner in child.children() {
-                let ik = inner.kind();
-                if ik == "identifier" || ik == "qualified_name" || ik == "generic_name" {
-                    result.push(inner.text().to_string());
+const CSHARP_BASE_KINDS: &[&str] = &["identifier", "qualified_name", "generic_name"];
+
+fn rewrite_csharp(tree: &mut SyntaxTree) {
+    let mut renames: Vec<(u32, &str)> = Vec::new();
+    let mut supertypes: Vec<(u32, String)> = Vec::new();
+
+    let class_kinds = [
+        "class_declaration",
+        "struct_declaration",
+        "record_declaration",
+        "interface_declaration",
+    ];
+    for kind in class_kinds {
+        for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
+            for bl in tree.children_of_kind(cls, "base_list").collect::<Vec<_>>() {
+                for &inner in tree.children(bl) {
+                    if CSHARP_BASE_KINDS.contains(&tree.kind(inner)) {
+                        supertypes.push((cls, tree.text(inner).to_string()));
+                    }
                 }
             }
         }
     }
-    result
+
+    for imp in tree.nodes_of_kind("using_directive").collect::<Vec<_>>() {
+        if tree.has_child_text(imp, "static") {
+            renames.push((imp, "__static_using"));
+        } else if tree.has_child_text(imp, "=") {
+            renames.push((imp, "__aliased_using"));
+        }
+    }
+
+    for (id, kind) in renames {
+        tree.set_kind(id, kind);
+    }
+    for (cls, text) in supertypes {
+        tree.insert_child(cls, "__supertype", &text);
+    }
 }
 
 impl DslLanguage for CSharpDsl {
@@ -55,8 +80,19 @@ impl DslLanguage for CSharpDsl {
         }
     }
 
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_csharp(tree);
+    }
+
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(csharp_super_types);
+        let class_meta = || {
+            metadata().super_types(|n: &Node<'_, SyntaxTree>| {
+                n.children()
+                    .filter(|c| c.kind().as_ref() == "__supertype")
+                    .map(|c| c.text().to_string())
+                    .collect()
+            })
+        };
 
         vec![
             scope("namespace_declaration", "Namespace").def_kind(DefKind::Other),
@@ -125,29 +161,18 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        fn csharp_import_classify(node: &N<'_>) -> &'static str {
-            let text = node.text().to_string();
-            if text.contains("static") {
-                "StaticImport"
-            } else if text.contains('=') {
-                "AliasedImport"
-            } else {
-                // Regular using directives are namespace-level wildcards:
-                // `using MyApp.Models;` makes all types in MyApp.Models available.
-                "WildcardImport"
-            }
-        }
-
+        let using_path = || Extract::one(Child, AnyKind(&["qualified_name", "identifier"]));
         vec![
+            import("__static_using")
+                .label("StaticImport")
+                .path_from(using_path())
+                .always_wildcard(),
+            // Aliased using is handled by on_import hook (csharp_extract_alias_using).
+            // The rewrite renamed it to __aliased_using so it won't match using_directive.
             import("using_directive")
-                .path_from(Extract::one(
-                    Child,
-                    AnyKind(&["qualified_name", "identifier"]),
-                ))
+                .label("WildcardImport")
+                .path_from(using_path())
                 .alias_from(field("name"))
-                .classify(csharp_import_classify)
-                // C# using directives import all types from a namespace.
-                // `using MyApp.Models;` ≈ Java's `import MyApp.Models.*;`
                 .always_wildcard(),
         ]
     }
