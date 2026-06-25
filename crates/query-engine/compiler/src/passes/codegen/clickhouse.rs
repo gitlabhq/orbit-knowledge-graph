@@ -1041,4 +1041,41 @@ mod tests {
 
         assert_eq!(pq.render(), "SELECT {p0:String} AND {p1:Int64}");
     }
+
+    #[test]
+    fn fuzzy_match_operator() {
+        use crate::input::{FilterOp, InputFilter};
+        use crate::passes::shared::filter_to_expr;
+
+        let filter = InputFilter {
+            op: Some(FilterOp::FuzzyMatch),
+            value: Some(Value::from("antigravity")),
+            data_type: Some(ontology::DataType::String),
+            ..Default::default()
+        };
+        let expr = filter_to_expr("n", "name", &filter);
+        let q = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("n", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("nodes", "n"),
+            where_clause: Some(expr),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), QueryConfig::empty()).unwrap();
+        assert_eq!(
+            result.sql,
+            "SELECT n.id FROM nodes AS n WHERE (ngramDistanceCaseInsensitive(n.name, {p0:String}) < {p1:Float64})"
+        );
+        assert_eq!(
+            result.params.get("p0").map(|p| &p.value),
+            Some(&Value::from("antigravity"))
+        );
+        assert_eq!(
+            result.params.get("p1").map(|p| &p.value),
+            Some(&Value::from(0.3))
+        );
+    }
 }

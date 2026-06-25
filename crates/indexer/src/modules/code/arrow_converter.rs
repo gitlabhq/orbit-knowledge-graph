@@ -95,7 +95,7 @@ fn convert_repository_graph(
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     Ok(ConvertedGraphData {
-        branch: convert_branch_row(envelope)?,
+        branch: convert_branch_row(envelope, &specs.branch)?,
         directories: convert_directories(graph, ids, envelope, &specs.directory)?,
         files: convert_files(graph, ids, envelope, &specs.file)?,
         definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
@@ -111,7 +111,7 @@ fn convert_semantic_graph(
     specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     Ok(ConvertedGraphData {
-        branch: convert_empty_branch()?,
+        branch: convert_empty_branch(&specs.branch)?,
         directories: convert_empty_directories(envelope, &specs.directory)?,
         files: convert_empty_files(envelope, &specs.file)?,
         definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
@@ -330,46 +330,6 @@ fn convert_imports(
     })
 }
 
-fn branch_specs() -> Vec<ColumnSpec> {
-    vec![
-        ColumnSpec {
-            name: "id".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "traversal_path".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "project_id".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "name".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "is_default".into(),
-            col_type: ColumnType::Bool,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "_version".into(),
-            col_type: ColumnType::TimestampMicros,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "_deleted".into(),
-            col_type: ColumnType::Bool,
-            nullable: false,
-        },
-    ]
-}
-
 struct BranchRow<'a> {
     id: i64,
     env: &'a IndexerEnvelope,
@@ -390,14 +350,14 @@ impl AsRecordBatch for BranchRow<'_> {
     }
 }
 
-fn convert_branch_row(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
+fn convert_branch_row(env: &IndexerEnvelope, branch_specs: &[ColumnSpec]) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
-    BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &branch_specs(), &())
+    BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], branch_specs, &())
 }
 
-fn convert_empty_branch() -> Result<RecordBatch, ArrowError> {
+fn convert_empty_branch(branch_specs: &[ColumnSpec]) -> Result<RecordBatch, ArrowError> {
     let rows: Vec<BranchRow<'_>> = Vec::new();
-    BranchRow::to_record_batch(&rows, &branch_specs(), &())
+    BranchRow::to_record_batch(&rows, branch_specs, &())
 }
 
 fn convert_repository_edges(
@@ -665,6 +625,7 @@ fn build_tag_properties(ontology: &Ontology) -> TagProperties {
 }
 
 pub struct ConverterSpecs {
+    branch: Vec<ColumnSpec>,
     directory: Vec<ColumnSpec>,
     file: Vec<ColumnSpec>,
     definition: Vec<ColumnSpec>,
@@ -676,6 +637,7 @@ pub struct ConverterSpecs {
 impl ConverterSpecs {
     pub fn from_ontology(ontology: &Ontology) -> Self {
         Self {
+            branch: entity_specs(ontology, "Branch"),
             directory: entity_specs(ontology, "Directory"),
             file: entity_specs(ontology, "File"),
             definition: entity_specs(ontology, "Definition"),

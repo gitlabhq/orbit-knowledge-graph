@@ -534,6 +534,12 @@ impl<'a> Validator<'a> {
     ) -> Result<()> {
         let op = filter.op.unwrap_or(FilterOp::Eq);
 
+        if op == FilterOp::FuzzyMatch && data_type != DataType::String {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: fuzzy_match requires a string field, got {data_type}"
+            )));
+        }
+
         // Ops without a value — nothing to type-check.
         if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
             return Ok(());
@@ -541,7 +547,7 @@ impl<'a> Validator<'a> {
 
         let is_like_op = matches!(
             op,
-            FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith
+            FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith | FilterOp::FuzzyMatch
         );
 
         let is_token_op = matches!(
@@ -2504,6 +2510,71 @@ mod tests {
         assert!(
             validator.check_references(&input).is_ok(),
             "equality filter on like_allowed:false field should pass"
+        );
+    }
+
+    #[test]
+    fn rejects_fuzzy_match_on_disallowed_field() {
+        let ont = ontology_with_sensitive_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": {"op": "fuzzy_match", "value": "example"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("LIKE operators"),
+            "expected like_allowed rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_short_fuzzy_match_pattern() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"username": {"op": "fuzzy_match", "value": "ab"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("search pattern must be at least 3 characters"),
+            "expected min length error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_fuzzy_match_on_non_string_field() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"created_at": {"op": "fuzzy_match", "value": "2024-01-01"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("fuzzy_match requires a string field"),
+            "expected non-string field rejection, got: {err}"
         );
     }
 
