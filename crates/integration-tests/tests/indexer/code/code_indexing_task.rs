@@ -2,11 +2,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
-use arrow::record_batch::RecordBatch;
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::destination::{Destination, DestinationError, DestinationReport};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
 use indexer::modules::code::{
@@ -621,7 +619,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
             "public class Other { public void run() {} }",
         )],
     );
-    let failing_handler = deps.code_indexing_task_handler_with_writer(Arc::new(FailingWriter));
+    let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
     let (context, indexing_status) = handler_context_with_status();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
     let error = failing_handler
@@ -871,8 +869,8 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     .await;
 }
 
-async fn index_code<W: indexer::destination::Destination + 'static>(
-    handler: &indexer::modules::code::CodeIndexingTaskHandler<W>,
+async fn index_code(
+    handler: &indexer::modules::code::CodeIndexingTaskHandler,
     _clickhouse: &integration_testkit::TestContext,
     project_id: i64,
     commit_sha: &str,
@@ -937,20 +935,17 @@ fn handler_context_with_status() -> (HandlerContext, Arc<IndexingStatusStore>) {
     (context, indexing_status)
 }
 
-struct FailingWriter;
-
-impl Destination for FailingWriter {
-    async fn write(
-        &self,
-        _table: &str,
-        _batches: Vec<RecordBatch>,
-        _durability: Option<indexer::durability::WriteDurability>,
-    ) -> Result<DestinationReport, DestinationError> {
-        Err(DestinationError::Write(
-            "forced write failure".to_string(),
-            None,
-        ))
-    }
+fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
+    Arc::new(
+        indexer::clickhouse::ClickHouseWriter::new(
+            gkg_server_config::ClickHouseConfiguration {
+                url: "http://127.0.0.1:1".into(),
+                ..Default::default()
+            },
+            Arc::new(indexer::metrics::EngineMetrics::new()),
+        )
+        .expect("config is valid"),
+    )
 }
 
 async fn latest_checkpoint_task_id(

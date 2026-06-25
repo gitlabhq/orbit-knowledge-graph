@@ -22,7 +22,7 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::clickhouse::ClickHouseConfigurationExt;
-use crate::destination::Destination;
+
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
@@ -40,11 +40,11 @@ pub use repository::{
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
-pub async fn register_handlers<W: Destination + 'static>(
+pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
-    writer: Arc<W>,
+    writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {

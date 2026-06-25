@@ -2,10 +2,7 @@
 
 use std::error::Error as StdError;
 
-use arrow::record_batch::RecordBatch;
 use thiserror::Error;
-
-use crate::durability::WriteDurability;
 
 #[derive(Debug, Error)]
 pub enum DestinationError {
@@ -24,13 +21,4 @@ pub struct DestinationReport {
     pub table: String,
     pub rows: u64,
     pub bytes: u64,
-}
-
-pub trait Destination: Send + Sync {
-    fn write(
-        &self,
-        table: &str,
-        batches: Vec<RecordBatch>,
-        durability: Option<WriteDurability>,
-    ) -> impl std::future::Future<Output = Result<DestinationReport, DestinationError>> + Send;
 }

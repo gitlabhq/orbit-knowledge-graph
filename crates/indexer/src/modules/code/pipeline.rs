@@ -15,7 +15,7 @@ use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use super::writer::{ChannelSink, drain_writes};
-use crate::destination::{Destination, DestinationReport};
+use crate::destination::DestinationReport;
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -47,9 +47,9 @@ pub fn indexing_slot_count(concurrency_limit: usize) -> usize {
     concurrency_limit / 2
 }
 
-pub struct CodeIndexingPipeline<W: Destination> {
+pub struct CodeIndexingPipeline {
     resolver: RepositoryResolver,
-    writer: Arc<W>,
+    writer: Arc<crate::clickhouse::ClickHouseWriter>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -62,14 +62,14 @@ pub struct CodeIndexingPipeline<W: Destination> {
     indexing_slots: Option<Arc<Semaphore>>,
 }
 
-impl<W: Destination + 'static> CodeIndexingPipeline<W> {
+impl CodeIndexingPipeline {
     #[allow(
         clippy::too_many_arguments,
         reason = "pipeline constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
     )]
     pub fn new(
         resolver: RepositoryResolver,
-        writer: Arc<W>,
+        writer: Arc<crate::clickhouse::ClickHouseWriter>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,

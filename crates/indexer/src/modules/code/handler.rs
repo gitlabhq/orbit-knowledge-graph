@@ -13,7 +13,7 @@ use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
-use crate::destination::Destination;
+
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
@@ -33,8 +33,8 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
     format!("project.{project_id}.{encoded_branch}")
 }
 
-pub struct CodeIndexingTaskHandler<W: Destination> {
-    pipeline: Arc<CodeIndexingPipeline<W>>,
+pub struct CodeIndexingTaskHandler {
+    pipeline: Arc<CodeIndexingPipeline>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
@@ -43,13 +43,13 @@ pub struct CodeIndexingTaskHandler<W: Destination> {
     analytics: IndexingAnalytics,
 }
 
-impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
+impl CodeIndexingTaskHandler {
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
     )]
     pub fn new(
-        pipeline: Arc<CodeIndexingPipeline<W>>,
+        pipeline: Arc<CodeIndexingPipeline>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
@@ -70,7 +70,7 @@ impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
 }
 
 #[async_trait]
-impl<W: Destination + 'static> Handler for CodeIndexingTaskHandler<W> {
+impl Handler for CodeIndexingTaskHandler {
     fn name(&self) -> &str {
         "code_indexing_task"
     }
@@ -104,7 +104,7 @@ impl<W: Destination + 'static> Handler for CodeIndexingTaskHandler<W> {
     }
 }
 
-impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
+impl CodeIndexingTaskHandler {
     /// Returns `Ok(Some(branch))` when the branch is known, `Ok(None)` when
     /// the project is gone from Rails (terminal: the dispatcher has a stale
     /// view; acking avoids DLQ churn), and `Err` for transient failures.
@@ -331,7 +331,7 @@ impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
     }
 }
 
-impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
+impl CodeIndexingTaskHandler {
     async fn load_checkpoint(
         &self,
         request: &CodeIndexingTaskRequest,
@@ -367,7 +367,7 @@ mod tests {
     }
 
     struct TestContext {
-        handler: CodeIndexingTaskHandler<crate::testkit::MockDestination>,
+        handler: CodeIndexingTaskHandler,
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
@@ -403,7 +403,7 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let writer = Arc::new(crate::testkit::MockDestination::new());
+            let writer = crate::testkit::test_writer();
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
                 writer,

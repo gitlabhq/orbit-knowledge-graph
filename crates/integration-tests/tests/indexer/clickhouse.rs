@@ -10,7 +10,6 @@ use arrow::record_batch::RecordBatch;
 use gkg_server_config::ClickHouseConfiguration;
 use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseWriter};
-use indexer::destination::Destination;
 use indexer::durability::WriteDurability;
 use indexer::metrics::EngineMetrics;
 use testcontainers::GenericImage;

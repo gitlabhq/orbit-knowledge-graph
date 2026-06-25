@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::Utc;
@@ -13,7 +12,6 @@ use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::destination::{Destination, DestinationError, DestinationReport};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
 use crate::nats::{
@@ -124,38 +122,18 @@ impl nats_client::KvServices for MockNatsServices {
     }
 }
 
-pub struct MockDestination;
-
-impl MockDestination {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for MockDestination {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Destination for MockDestination {
-    async fn write(
-        &self,
-        table: &str,
-        batches: Vec<RecordBatch>,
-        _durability: Option<crate::durability::WriteDurability>,
-    ) -> Result<DestinationReport, DestinationError> {
-        let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-        let bytes: u64 = batches
-            .iter()
-            .map(|b| b.get_array_memory_size() as u64)
-            .sum();
-        Ok(DestinationReport {
-            table: table.to_string(),
-            rows,
-            bytes,
-        })
-    }
+/// Creates a `ClickHouseWriter` with a dummy config for tests that never actually write.
+pub fn test_writer() -> Arc<crate::clickhouse::ClickHouseWriter> {
+    Arc::new(
+        crate::clickhouse::ClickHouseWriter::new(
+            gkg_server_config::ClickHouseConfiguration {
+                url: "http://localhost:0".into(),
+                ..Default::default()
+            },
+            Arc::new(crate::metrics::EngineMetrics::new()),
+        )
+        .expect("test writer config is valid"),
+    )
 }
 
 /// Mock handler for testing.

@@ -33,7 +33,7 @@ use std::collections::HashMap;
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
 pub struct CodeIndexingDeps {
-    pub pipeline: Arc<CodeIndexingPipeline<indexer::clickhouse::ClickHouseWriter>>,
+    pub pipeline: Arc<CodeIndexingPipeline>,
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
@@ -107,12 +107,10 @@ impl CodeIndexingDeps {
         self.cache_dir.path()
     }
 
-    pub fn code_indexing_task_handler_with_writer<
-        W: indexer::destination::Destination + 'static,
-    >(
+    pub fn code_indexing_task_handler_with_writer(
         &self,
-        writer: Arc<W>,
-    ) -> CodeIndexingTaskHandler<W> {
+        writer: Arc<indexer::clickhouse::ClickHouseWriter>,
+    ) -> CodeIndexingTaskHandler {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
@@ -150,9 +148,7 @@ impl CodeIndexingDeps {
         )
     }
 
-    pub fn code_indexing_task_handler(
-        &self,
-    ) -> CodeIndexingTaskHandler<indexer::clickhouse::ClickHouseWriter> {
+    pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
         CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),

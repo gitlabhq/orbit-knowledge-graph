@@ -7,7 +7,8 @@ use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
 use tokio::sync::mpsc;
 
-use crate::destination::{Destination, DestinationError, DestinationReport};
+use crate::clickhouse::ClickHouseWriter;
+use crate::destination::{DestinationError, DestinationReport};
 use crate::durability::WriteDurability;
 
 /// `BatchSink` that forwards to an mpsc channel for async draining.
@@ -25,8 +26,8 @@ impl code_graph::v2::BatchSink for ChannelSink {
 }
 
 /// Drain batches from the channel, coalesce per table, and write concurrently.
-pub async fn drain_writes<W: Destination + 'static>(
-    writer: Arc<W>,
+pub async fn drain_writes(
+    writer: Arc<ClickHouseWriter>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
     max_rows_per_insert: usize,
     max_concurrent: usize,
@@ -70,7 +71,7 @@ pub async fn drain_writes<W: Destination + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testkit::MockDestination;
+    use crate::testkit::test_writer;
     use arrow::array::Int64Array;
     use arrow::datatypes::{DataType, Field, Schema};
     use code_graph::v2::BatchSink;
@@ -79,12 +80,7 @@ mod tests {
     async fn drain_writes_returns_per_table_reports() {
         let (tx, rx) = mpsc::channel(8);
         let sink = Arc::new(ChannelSink(tx));
-        let drain = tokio::spawn(drain_writes(
-            Arc::new(MockDestination::new()),
-            rx,
-            500_000,
-            4,
-        ));
+        let drain = tokio::spawn(drain_writes(test_writer(), rx, 500_000, 4));
 
         let s = Arc::clone(&sink);
         tokio::task::spawn_blocking(move || {

@@ -4,7 +4,7 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 
-use crate::destination::{Destination, DestinationError, DestinationReport};
+use crate::destination::{DestinationError, DestinationReport};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 
@@ -34,8 +34,8 @@ fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'s
     }
 }
 
-impl Destination for ClickHouseWriter {
-    async fn write(
+impl ClickHouseWriter {
+    pub async fn write(
         &self,
         table: &str,
         batches: Vec<RecordBatch>,

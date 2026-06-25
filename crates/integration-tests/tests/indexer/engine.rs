@@ -17,7 +17,6 @@ use gkg_server_config::{
 use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseWriter};
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
-use indexer::destination::Destination;
 use indexer::durability::WriteDurability;
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};

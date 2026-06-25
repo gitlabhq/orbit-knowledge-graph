@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
-use crate::destination::Destination;
+
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
@@ -30,12 +30,12 @@ const NAMESPACE_GATED_TRANSFORMS: &[(&str, gkg_server_config::Feature)] = &[(
     gkg_server_config::Feature::SystemNotes,
 )];
 
-pub struct EntityHandler<W: Destination> {
+pub struct EntityHandler {
     handler_name: String,
     plan: Plan,
     scope: EtlScope,
     pipeline: Arc<Pipeline>,
-    writer: Arc<W>,
+    writer: Arc<crate::clickhouse::ClickHouseWriter>,
     datalake: Arc<dyn DatalakeQuery>,
     checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
@@ -53,7 +53,7 @@ struct IndexingRequest {
     campaign_id: Option<String>,
 }
 
-impl<W: Destination + 'static> EntityHandler<W> {
+impl EntityHandler {
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -62,7 +62,7 @@ impl<W: Destination + 'static> EntityHandler<W> {
         plan: Plan,
         scope: EtlScope,
         pipeline: Arc<Pipeline>,
-        writer: Arc<W>,
+        writer: Arc<crate::clickhouse::ClickHouseWriter>,
         datalake: Arc<dyn DatalakeQuery>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
@@ -287,7 +287,7 @@ impl<W: Destination + 'static> EntityHandler<W> {
         window: WindowBounds,
         durability: RunDurability,
         context: &HandlerContext,
-        parent_pipeline_context: &PipelineContext<W>,
+        parent_pipeline_context: &PipelineContext,
     ) -> Result<PipelineStats, HandlerError> {
         let mut set: JoinSet<Result<PipelineStats, HandlerError>> = JoinSet::new();
         for (assignment, query) in partitions {
@@ -398,7 +398,7 @@ fn serialization_error(error: SerializationError) -> HandlerError {
 }
 
 #[async_trait]
-impl<W: Destination + 'static> Handler for EntityHandler<W> {
+impl Handler for EntityHandler {
     fn name(&self) -> &str {
         &self.handler_name
     }
@@ -499,10 +499,7 @@ mod tests {
         )
     }
 
-    fn build_handler(
-        entity_name: &str,
-        scope: EtlScope,
-    ) -> EntityHandler<crate::testkit::MockDestination> {
+    fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1000, 1000, &Default::default());
         let scope_plans = match scope {
@@ -527,7 +524,7 @@ mod tests {
             EtlScope::Namespaced => NamespaceIndexingRequest::subscription(),
         };
 
-        let writer = Arc::new(crate::testkit::MockDestination::new());
+        let writer = crate::testkit::test_writer();
         EntityHandler::new(
             plan,
             scope,

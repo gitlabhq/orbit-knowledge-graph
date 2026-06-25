@@ -11,7 +11,6 @@ use futures::stream::FuturesUnordered;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -84,8 +83,8 @@ impl Page {
     }
 }
 
-pub(in crate::modules::sdlc) struct PipelineContext<W: Destination> {
-    pub writer: Arc<W>,
+pub(in crate::modules::sdlc) struct PipelineContext {
+    pub writer: Arc<crate::clickhouse::ClickHouseWriter>,
     pub progress: ProgressNotifier,
     pub observer: Arc<std::sync::Mutex<dyn IndexingObserver>>,
 }
@@ -121,9 +120,9 @@ impl Pipeline {
         self
     }
 
-    pub async fn run_plan<W: Destination>(
+    pub async fn run_plan(
         &self,
-        context: &PipelineContext<W>,
+        context: &PipelineContext,
         plan: &Plan,
         base_query: PreparedQuery,
         position_key: &str,
@@ -456,7 +455,7 @@ mod tests {
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::observer::NoOpObserver;
-    use crate::testkit::MockDestination;
+    use crate::testkit::test_writer;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
@@ -548,9 +547,9 @@ mod tests {
     use crate::modules::sdlc::test_helpers::FailingDatalake;
     use crate::nats::ProgressNotifier;
 
-    fn noop_context() -> PipelineContext<MockDestination> {
+    fn noop_context() -> PipelineContext {
         PipelineContext {
-            writer: Arc::new(MockDestination::new()),
+            writer: test_writer(),
             progress: ProgressNotifier::noop(),
             observer: Arc::new(Mutex::new(NoOpObserver)),
         }
