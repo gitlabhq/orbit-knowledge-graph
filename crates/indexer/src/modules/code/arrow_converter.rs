@@ -914,7 +914,9 @@ struct Pending {
 }
 
 /// Combine small per-family batches and split large ones toward `slice_rows` rows per
-/// insert, written through a bounded set of concurrent futures.
+/// insert, written through a bounded set of concurrent futures. At the lower limit (every
+/// table under `slice_rows`) this matches the old sink: one concurrent insert per table per
+/// family; multi-part slicing only triggers on a mega repo.
 async fn write_loop(
     destination: Arc<dyn crate::destination::Destination>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
