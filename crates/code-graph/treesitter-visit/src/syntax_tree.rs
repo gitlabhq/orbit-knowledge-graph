@@ -55,52 +55,73 @@ pub struct SyntaxTree {
 impl SyntaxTree {
     // ── Construction from tree-sitter ────────────────────────────
 
+    /// Single-pass iterative conversion from a tree-sitter tree.
+    /// Uses one cursor for the entire DFS with no recursion and no
+    /// per-node cursor allocation.
     pub fn from_tree_sitter(source: &str, ts_tree: &tree_sitter::Tree, lang: SupportLang) -> Self {
-        let mut tree = SyntaxTree {
-            source: source.to_string(),
-            lang,
-            nodes: Vec::with_capacity(ts_tree.root_node().descendant_count()),
-            root: 0,
-        };
-        tree.root = tree.convert_node(ts_tree.root_node(), NO_PARENT);
-        tree
-    }
+        let ts_root = ts_tree.root_node();
+        let mut nodes: Vec<SyntaxNode> = Vec::with_capacity(ts_root.descendant_count());
+        let mut parent_stack: Vec<NodeId> = Vec::with_capacity(32);
+        let mut cursor = ts_root.walk();
+        let mut done = false;
 
-    fn convert_node(&mut self, ts: tree_sitter::Node<'_>, parent: u32) -> NodeId {
-        let id = self.nodes.len() as NodeId;
-        let start = ts.start_position();
-        let end = ts.end_position();
-        self.nodes.push(SyntaxNode {
-            kind: SmolStr::new(ts.kind()),
-            is_named: ts.is_named(),
-            start_byte: ts.start_byte() as u32,
-            end_byte: ts.end_byte() as u32,
-            start_row: start.row as u32,
-            start_col: start.column as u32,
-            end_row: end.row as u32,
-            end_col: end.column as u32,
-            parent,
-            children: SmallVec::new(),
-            fields: SmallVec::new(),
-            virtual_text: None,
-        });
+        loop {
+            let ts = cursor.node();
+            let id = nodes.len() as NodeId;
+            let parent = parent_stack.last().copied().unwrap_or(NO_PARENT);
+            let start = ts.start_position();
+            let end = ts.end_position();
 
-        let mut cursor = ts.walk();
-        if cursor.goto_first_child() {
-            loop {
-                let child_ts = cursor.node();
-                let child_id = self.convert_node(child_ts, id);
-                self.nodes[id as usize].children.push(child_id);
+            nodes.push(SyntaxNode {
+                kind: SmolStr::new(ts.kind()),
+                is_named: ts.is_named(),
+                start_byte: ts.start_byte() as u32,
+                end_byte: ts.end_byte() as u32,
+                start_row: start.row as u32,
+                start_col: start.column as u32,
+                end_row: end.row as u32,
+                end_col: end.column as u32,
+                parent,
+                children: SmallVec::new(),
+                fields: SmallVec::new(),
+                virtual_text: None,
+            });
+
+            if parent != NO_PARENT {
+                nodes[parent as usize].children.push(id);
                 if let Some(field_name) = cursor.field_name() {
-                    self.nodes[id as usize].fields.push((field_name, child_id));
+                    nodes[parent as usize].fields.push((field_name, id));
                 }
-                if !cursor.goto_next_sibling() {
+            }
+
+            if cursor.goto_first_child() {
+                parent_stack.push(id);
+                continue;
+            }
+            if cursor.goto_next_sibling() {
+                continue;
+            }
+            loop {
+                if !cursor.goto_parent() {
+                    done = true;
+                    break;
+                }
+                parent_stack.pop();
+                if cursor.goto_next_sibling() {
                     break;
                 }
             }
+            if done {
+                break;
+            }
         }
 
-        id
+        SyntaxTree {
+            source: source.to_string(),
+            lang,
+            nodes,
+            root: 0,
+        }
     }
 
     // ── Read API ────────────────────────────────────────────────
