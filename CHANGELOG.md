@@ -1,3 +1,38 @@
+## [0.80.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.79.0...v0.80.0) (2026-06-25)
+
+### Features
+
+* **code-graph:** add Lua language support to the v2 code indexer ([9af05ef](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9af05efbac60fb8da13792bfb71f4c3e74b16ff4)) by anush
+* **code-graph:** add Swift language support ([#765](https://gitlab.com/gitlab-org/orbit/knowledge-graph/issues/765)) ([bd91e8d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bd91e8d373faee12649f7070a54a915cc753a514)) by anush
+* **code-graph:** record per-file skip/fault reason on gl_file ([d4912df](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d4912df8bfe949142f8ee665d0fbf3533fa4282d)) by Michael Usachenko
+* **indexer:** hard wall-clock timeout for code indexing jobs ([318b3e0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/318b3e0bf095e8a4ebfa427c5d1c6b2bdb6095f2)) by Michael Usachenko
+* **orbit-local:** add --db flag to orbit index ([c5f2e37](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c5f2e37522c02bcad347fa6cd1300315faf6f8c9)) by Michael Usachenko
+
+### Fixes
+
+* **code-graph:** python __init__.py at root must not emit module scope ([bfa5889](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bfa58899822eb6ff74673f4c9e27feb4e9d6bb0f)) by Anna Tchijova
+* **code-graph:** route missing ast cli extensions ([eb419af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb419af2551f4cbaa088da96159d1c6de802bb88)) by Joseph Karam
+* **e2e:** use current scheduled-task names in dispatcher config ([661e309](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/661e3092ddb998067ed2ecd3c7a91548ee6a2708)) by Michael Usachenko
+* **indexer:** correct inverted MENTIONS edge direction in system-note transform ([10e3a56](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10e3a5663c84dfa6359dba3a8d5558ecbd14d879)) by Dmitry Gruzd
+* **ontology:** emit REOPENED edges from resource_state_events ([c601f56](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c601f5617f6c71e44669bcb7c30b4d8823c4f612)) by Dmitry Gruzd
+* **server-config:** truncate sub-second precision in cron schedule to prevent drift ([012164d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/012164d777344beed02392711c9e6e6bdae74acc)) by Dmitry Gruzd
+
+### Performance
+
+* **indexer:** skip soft-deleted source rows on full SDLC re-index ([fcbd959](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fcbd95948d0138162ea709dcf500c743cf687052)) by Jean-Gabriel Doyon
+* **indexer:** stream code-graph writes to bound indexer memory ([bd40170](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bd40170714bb7ae06f793b3e30bada9e443774fe)) by Michael Usachenko
+* **schema:** reduce timestamp and edge source_id storage ([cba4fb3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cba4fb356a9d3b37fb90e4da723e386f65629c06)) by Michael Usachenko
+
+### Other
+
+* **code-graph:** replace BatchSink trait with Fn callback ([b81b257](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b81b257f77dfa865dc83a451f4721e611ff1eb5f)) by Michael Usachenko
+* **code-graph:** unified file stream as the single filtering surface ([44de863](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/44de86393ffafa6d16484fb1072124569759d652)) by Michael Usachenko
+* **docs:** validate Orbit examples ([7c5792e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7c5792e75dad6c56aac75f04006565e908dd538f)) by Michael Angelo Rivera
+* **indexer:** collapse Destination to ClickHouseWriter ([96a3251](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/96a3251abffb7a41f8aec3591351bdbb097f80de)) by Michael Usachenko
+* **indexer:** move scheduler and dispatch into orchestrator module ([43c182c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/43c182c46dfbb0f2ba3a3d454331eb9fad878d6b)) by Jean-Gabriel Doyon
+* **indexer:** restructure orchestrator into trigger models ([d355e22](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d355e2232cf36719f0b8c61fd3de84d71f6435cb)) by Jean-Gabriel Doyon
+* **mise:** auto-install lefthook hooks on project enter ([8df6df9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8df6df9207824a5e19fcc93dd40093278975b43a)) by Dmitry Gruzd
+
 ## [0.79.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.78.0...v0.79.0) (2026-06-22)
 
 ### Features
