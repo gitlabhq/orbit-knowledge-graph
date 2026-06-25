@@ -1,8 +1,8 @@
 use rustc_hash::FxHashMap;
+use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, default_name};
 use treesitter_visit::predicate::Pred;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::types::{DefKind, DefinitionMetadata};
 
@@ -11,7 +11,7 @@ use super::extractors::MetadataRule;
 /// Signature for import path resolution hooks.
 /// Called with (raw_path, module_scope, separator). Returns resolved path or None.
 pub type ImportPathResolver = fn(&str, &str, &str) -> Option<String>;
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 /// Shared behavior for scope and reference rules.
@@ -456,6 +456,10 @@ pub trait DslLanguage: Send + Sync + Default {
         LanguageHooks::default()
     }
 
+    /// Mutate the syntax tree before the DSL engine walks it.
+    /// Runs after tree-sitter parsing and SyntaxTree conversion.
+    fn rewrite(_tree: &mut SyntaxTree) {}
+
     fn bindings() -> Vec<BindingRule> {
         vec![]
     }
@@ -479,7 +483,8 @@ pub trait DslLanguage: Send + Sync + Default {
                 .with_bindings(Self::bindings())
                 .with_branches(Self::branches())
                 .with_loops(Self::loops())
-                .with_ssa_config(Self::ssa_config());
+                .with_ssa_config(Self::ssa_config())
+                .with_rewrite(Self::rewrite);
         if let Some(cc) = Self::chain_config() {
             spec = spec.chain(cc);
         }
@@ -852,12 +857,10 @@ pub struct LanguageSpec {
     pub loops: Vec<LoopRule>,
     pub chain_config: Option<ChainConfig>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
-    /// Use the filename (without extension) as the root scope for all
-    /// top-level definitions. For languages without namespaces/modules
-    /// (C, C++, header files) where the file IS the scope.
     pub(crate) file_scope: bool,
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
+    pub(crate) rewrite: fn(&mut SyntaxTree),
 
     // Dispatch tables: node_kind → indices into the corresponding rule Vec.
     // Built once at construction, O(1) lookup per node during walk.
@@ -892,6 +895,7 @@ impl LanguageSpec {
             file_scope: false,
             hooks: LanguageHooks::default(),
             ssa_config: SsaConfig::default(),
+            rewrite: |_| {},
             scope_dispatch,
             ref_dispatch,
             import_dispatch,
@@ -938,6 +942,11 @@ impl LanguageSpec {
 
     pub fn with_ssa_config(mut self, config: SsaConfig) -> Self {
         self.ssa_config = config;
+        self
+    }
+
+    pub fn with_rewrite(mut self, rewrite: fn(&mut SyntaxTree)) -> Self {
+        self.rewrite = rewrite;
         self
     }
 }

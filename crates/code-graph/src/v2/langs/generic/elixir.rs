@@ -11,10 +11,10 @@ use treesitter_visit::predicate::{Pred, field_kind, has_child, has_named_prev_si
 
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage, ResolverHooks};
 use crate::v2::linker::{HasRules, ResolutionRules};
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::Node;
+use treesitter_visit::syntax_tree::SyntaxTree;
 
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 
 /// Tree-sitter-elixir parses every keyword construct (`defmodule`,
 /// `def`, `alias`, ...) as a `call` whose `target` field holds the

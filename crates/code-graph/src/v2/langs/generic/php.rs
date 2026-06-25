@@ -4,17 +4,17 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::Node;
 use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
 use treesitter_visit::predicate::has_child_text;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolutionRules, ResolveSettings};
 
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 
 // PHP scalar/pseudo types, never user-defined classes.
 const PHP_PRIMITIVE_TYPES: &[&str] = &[

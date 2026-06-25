@@ -4,11 +4,11 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::Node;
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, constant, default_name, field, no_extract, text};
 use treesitter_visit::predicate::*;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::types::BindingKind;
 
@@ -23,7 +23,7 @@ use crate::v2::linker::rules::{
 #[derive(Default)]
 pub struct KotlinDsl;
 
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 
 fn extract_user_type(node: &N<'_>) -> Option<String> {
     // Look for user_type in direct children first, then in constructor_invocation

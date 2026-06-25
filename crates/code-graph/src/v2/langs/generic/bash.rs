@@ -1,14 +1,14 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use treesitter_visit::Node;
 use treesitter_visit::extract::field;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{ReceiverMode, ResolutionRules};
 use crate::v2::linker::{HasRules, ResolveSettings};
 
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 
 // ── DSL parser spec ─────────────────────────────────────────────
 

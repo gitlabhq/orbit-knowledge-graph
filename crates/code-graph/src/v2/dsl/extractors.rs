@@ -1,9 +1,9 @@
 //! Domain-specific metadata extraction built on `treesitter_visit::extract`.
 
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::Node;
+use treesitter_visit::syntax_tree::SyntaxTree;
 
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 
 // Re-export Extract type and constructors for lang specs
 pub use treesitter_visit::extract::{

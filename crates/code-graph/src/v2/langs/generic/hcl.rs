@@ -10,10 +10,10 @@ use crate::v2::linker::rules::{
 use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::Axis;
 use treesitter_visit::Match;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::Node;
+use treesitter_visit::syntax_tree::SyntaxTree;
 
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 
 /// Extract the text of the Nth `string_lit` child's inner `template_literal`.
 fn nth_label(n: isize) -> treesitter_visit::extract::Extract {

@@ -52,6 +52,10 @@ impl<D: Doc> Root<D> {
         Self { doc }
     }
 
+    pub fn inner(&self) -> &D {
+        &self.doc
+    }
+
     pub fn lang(&self) -> &D::Lang {
         self.doc.get_lang()
     }

@@ -12,9 +12,9 @@ use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
     ImportBindingKind, ImportMode,
 };
-use treesitter_visit::tree_sitter::StrDoc;
+use treesitter_visit::syntax_tree::SyntaxTree;
 use treesitter_visit::{Axis, Match};
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::{Node, Root, SupportLang};
 
 /// Result of a defs-only parse. Just definitions and imports.
 pub struct ParsedDefs {
@@ -143,9 +143,9 @@ struct ScopeMatch {
 impl LanguageSpec {
     fn evaluate_scope(
         &self,
-        node: &Node<StrDoc<SupportLang>>,
+        node: &Node<'_, SyntaxTree>,
         node_kind: &str,
-        resolve: impl Fn(String, &Node<StrDoc<SupportLang>>) -> String,
+        resolve: impl Fn(String, &Node<'_, SyntaxTree>) -> String,
     ) -> Option<ScopeMatch> {
         let indices = self.scope_dispatch.get(node_kind)?;
         let rule = indices
@@ -170,7 +170,7 @@ impl LanguageSpec {
 
     fn evaluate_reference(
         &self,
-        node: &Node<StrDoc<SupportLang>>,
+        node: &Node<'_, SyntaxTree>,
         node_kind: &str,
         import_map: &rustc_hash::FxHashMap<String, String>,
         module_prefix: Option<&str>,
@@ -216,7 +216,7 @@ impl LanguageSpec {
     #[allow(clippy::too_many_arguments)]
     fn build_expression_chain(
         &self,
-        node: &Node<StrDoc<SupportLang>>,
+        node: &Node<'_, SyntaxTree>,
         chain: &mut Vec<ExpressionStep>,
         cc: &super::types::ChainConfig,
         import_map: &rustc_hash::FxHashMap<String, String>,
@@ -431,7 +431,7 @@ impl LanguageSpec {
 
     fn evaluate_imports(
         &self,
-        node: &Node<StrDoc<SupportLang>>,
+        node: &Node<'_, SyntaxTree>,
         node_kind: &str,
         imports: &mut Vec<CanonicalImport>,
         module_scope: Option<&str>,
@@ -617,13 +617,17 @@ impl LanguageSpec {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
         let parse_start = cpu_time::ThreadTime::now();
-        let ast = language
+        let ts_ast = language
             .parse_ast(source_str, timeouts.parse)
             .map_err(|detail| ParseFullError::Aborted {
                 phase: crate::v2::error::AbortPhase::Parse,
                 detail,
             })?;
         let parse_cpu = parse_start.elapsed();
+        let lang = language.to_support_lang().unwrap_or(SupportLang::Python);
+        let mut syntax_tree = SyntaxTree::from_tree_sitter(source_str, &ts_ast.inner().tree, lang);
+        (self.rewrite)(&mut syntax_tree);
+        let ast = Root::doc(syntax_tree);
         let root = ast.root();
         let sep = language.fqn_separator();
 
@@ -824,7 +828,7 @@ impl LanguageSpec {
 
     fn walk_full<'a>(
         &self,
-        node: &Node<StrDoc<SupportLang>>,
+        node: &Node<'_, SyntaxTree>,
         state: &mut WalkFullState<'a>,
         sep: &'static str,
         module_prefix: Option<&str>,
@@ -1337,7 +1341,7 @@ impl LanguageSpec {
 
     fn walk_full_branch<'a>(
         &self,
-        node: &Node<StrDoc<SupportLang>>,
+        node: &Node<'_, SyntaxTree>,
         rule_idx: usize,
         state: &mut WalkFullState<'a>,
         sep: &'static str,
@@ -1425,7 +1429,7 @@ impl LanguageSpec {
 
     fn walk_full_loop<'a>(
         &self,
-        node: &Node<StrDoc<SupportLang>>,
+        node: &Node<'_, SyntaxTree>,
         rule_idx: usize,
         state: &mut WalkFullState<'a>,
         sep: &'static str,

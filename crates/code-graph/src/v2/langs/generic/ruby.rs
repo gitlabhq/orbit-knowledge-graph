@@ -21,10 +21,10 @@ use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 /// `Class` instance. Shared between `SsaConfig` (binding analysis) and
 /// `ResolverHooks` (chain resolution) to ensure consistency.
 const CONSTRUCTOR_METHODS: &[&str] = &["new", "find", "find_by", "create", "first", "last"];
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::Node;
+use treesitter_visit::syntax_tree::SyntaxTree;
 
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
+type N<'a> = Node<'a, SyntaxTree>;
 
 #[derive(Default)]
 pub struct RubyDsl;

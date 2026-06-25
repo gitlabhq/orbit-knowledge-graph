@@ -6,8 +6,7 @@ pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024;
 
 use rust_lapper::{Interval, Lapper};
 use serde::{Deserialize, Serialize};
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
+use treesitter_visit::Node;
 
 /// Represents a position in source code (line, column)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -100,7 +99,7 @@ pub fn compare_positions(p1: &Position, p2: &Position) -> std::cmp::Ordering {
 }
 
 /// Convert a tree-sitter node to a Range
-pub fn node_to_range(node: &Node<StrDoc<SupportLang>>) -> Range {
+pub fn node_to_range<D: treesitter_visit::Doc>(node: &Node<'_, D>) -> Range {
     let start_pos = node.start_pos();
     let end_pos = node.end_pos();
     let byte_range = node.range();
