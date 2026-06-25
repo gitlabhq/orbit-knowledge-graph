@@ -170,12 +170,13 @@ where
             // lifecycle point. ADR 013: out of scope.
             Action::Opened => {}
 
-            // Cross-reference / relate / hierarchy: Mentioner → Mentioned.
-            // Rails writes the system note on the *mentioned* entity (the
-            // noteable), with the body naming the *mentioner* (the resolved
-            // ref). So `resolved.id` is the mentioner (source) and
-            // `row.noteable_id` is the mentioned (target). The edge lands in
-            // the noteable's namespace partition (`row.traversal_path`) so
+            // Cross-reference / relate / hierarchy / move / clone / duplicate.
+            // For the note row being processed, the noteable is the entity
+            // whose page receives the system note, and the parsed ref is
+            // the other endpoint. The edge points from the parsed ref
+            // (source) to the noteable (target), matching the ontology's
+            // directional mentioner → mentioned. The edge lands in the
+            // noteable's namespace partition (`row.traversal_path`) so
             // inbound-degree queries on the target hit the right partition.
             // All collapse to MENTIONS edges in v1; link-type taxonomy is
             // an open question in the ADR.
