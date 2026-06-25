@@ -387,7 +387,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 }
 
 #[tokio::test]
-async fn skips_stale_data_cleanup_on_first_index() {
+async fn cleans_stale_data_on_first_index() {
     let project_id: i64 = 13;
     let traversal_path = "1/13/";
     let branch = "main";
@@ -408,6 +408,7 @@ async fn skips_stale_data_cleanup_on_first_index() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
+    // The canary stands in for rows a killed prior run left with no checkpoint; the first successful index must sweep them.
     insert_stale_canary_file(&clickhouse, project_id, traversal_path, branch).await;
     assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
 
@@ -417,23 +418,6 @@ async fn skips_stale_data_cleanup_on_first_index() {
         project_id,
         "commit1",
         1,
-        traversal_path,
-    )
-    .await;
-
-    assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
-    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-
-    mock.replace_archive(
-        project_id,
-        &[("src/Main.java", "public class Main { public void v2() {} }")],
-    );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit2",
-        2,
         traversal_path,
     )
     .await;
