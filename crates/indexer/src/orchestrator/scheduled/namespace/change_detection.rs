@@ -121,8 +121,6 @@ fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
 
     format!(
         r#"WITH
-  {{upper:String}} AS upper,
-  {{lower:String}} AS lower,
   enabled AS (
     SELECT DISTINCT root_namespace_id, traversal_path
     FROM {ENABLED_NAMESPACE_TABLE}
@@ -142,7 +140,7 @@ fn render_change_branch(source_table: &ReindexSource) -> String {
     let watermark = ontology::siphon_watermark_column();
 
     format!(
-        "    SELECT {root_path} AS root_path\n    FROM {table}\n    WHERE {watermark} > lower\n      AND {watermark} <= upper\n      AND match({path}, '{ROOT_PATH_PATTERN}')",
+        "    SELECT {root_path} AS root_path\n    FROM {table}\n    WHERE {watermark} > {{lower:String}}\n      AND {watermark} <= {{upper:String}}\n      AND match({path}, '{ROOT_PATH_PATTERN}')",
         root_path = root_path_expression(&path),
         table = source_table.table,
     )
@@ -192,8 +190,8 @@ mod tests {
     #[test]
     fn change_query_uses_watermark_bounds() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
-        assert!(query.sql.contains("_siphon_watermark > lower"));
-        assert!(query.sql.contains("_siphon_watermark <= upper"));
+        assert!(query.sql.contains("_siphon_watermark > {lower:String}"));
+        assert!(query.sql.contains("_siphon_watermark <= {upper:String}"));
     }
 
     #[test]
