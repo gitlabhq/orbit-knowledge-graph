@@ -384,7 +384,7 @@ The fix:
   migration into fresh `v71_` tables that are re-indexed from scratch,
   so no stale inverted rows survive.
 
-See [`dgruzd/tasks#2991`](https://gitlab.com/dgruzd/tasks/-/work_items/2991)
+See [#912](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/912)
 for the full investigation.
 
 ## References
