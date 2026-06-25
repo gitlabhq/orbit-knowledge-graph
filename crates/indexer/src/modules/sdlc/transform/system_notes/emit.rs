@@ -170,7 +170,13 @@ where
             // lifecycle point. ADR 013: out of scope.
             Action::Opened => {}
 
-            // Cross-reference / relate / hierarchy: Noteable → Target.
+            // Cross-reference / relate / hierarchy: Mentioner → Mentioned.
+            // Rails writes the system note on the *mentioned* entity (the
+            // noteable), with the body naming the *mentioner* (the resolved
+            // ref). So `resolved.id` is the mentioner (source) and
+            // `row.noteable_id` is the mentioned (target). The edge lands in
+            // the noteable's namespace partition (`row.traversal_path`) so
+            // inbound-degree queries on the target hit the right partition.
             // All collapse to MENTIONS edges in v1; link-type taxonomy is
             // an open question in the ADR.
             Action::CrossReference
@@ -191,17 +197,17 @@ where
                     };
                     // Skip self-loops (MR !100 "mentioned in !100"): pollutes
                     // degree counts and the reader doesn't need them.
-                    let target_kind = NoteableKind::from(r.kind);
-                    if target_kind == row.noteable_kind && resolved.id == row.noteable_id {
+                    let ref_kind = NoteableKind::from(r.kind);
+                    if ref_kind == row.noteable_kind && resolved.id == row.noteable_id {
                         continue;
                     }
                     edges.push(EmittedEdge {
-                        traversal_path: resolved.traversal_path.clone(),
+                        traversal_path: row.traversal_path.clone(),
                         relationship_kind: edge_kinds::MENTIONS,
-                        source_id: row.noteable_id,
-                        source_kind: row.noteable_kind.as_str(),
-                        target_id: resolved.id,
-                        target_kind: target_kind.as_str(),
+                        source_id: resolved.id,
+                        source_kind: ref_kind.as_str(),
+                        target_id: row.noteable_id,
+                        target_kind: row.noteable_kind.as_str(),
                     });
                 }
             }
@@ -247,34 +253,41 @@ mod tests {
     }
 
     #[test]
-    fn cross_reference_emits_mr_to_mr_mentions_edge() {
+    fn cross_reference_emits_mentioner_to_mentioned_mentions_edge() {
         let row = row_for(
             Action::CrossReference,
             "mentioned in !456",
             NoteableKind::MergeRequest,
             100,
         );
-        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
+        let edges = build_edges(&[row], always_resolve(456, "3/4/"));
         assert_eq!(edges.len(), 1);
         let e = &edges[0];
         assert_eq!(e.relationship_kind, "MENTIONS");
-        assert_eq!(e.source_id, 100);
+        assert_eq!(e.source_id, 456);
         assert_eq!(e.source_kind, "MergeRequest");
-        assert_eq!(e.target_id, 456);
+        assert_eq!(e.target_id, 100);
         assert_eq!(e.target_kind, "MergeRequest");
+        assert_eq!(
+            e.traversal_path, "1/2/",
+            "edge lands in the noteable's (target's) namespace partition"
+        );
     }
 
     #[test]
-    fn cross_reference_collapses_issue_target_to_work_item() {
+    fn cross_reference_collapses_issue_ref_to_work_item_source() {
         let row = row_for(
             Action::CrossReference,
             "mentioned in #99",
             NoteableKind::MergeRequest,
             100,
         );
-        let edges = build_edges(&[row], always_resolve(99, "1/2/"));
+        let edges = build_edges(&[row], always_resolve(99, "3/4/"));
         assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].target_kind, "WorkItem");
+        assert_eq!(edges[0].source_id, 99);
+        assert_eq!(edges[0].source_kind, "WorkItem");
+        assert_eq!(edges[0].target_id, 100);
+        assert_eq!(edges[0].target_kind, "MergeRequest");
     }
 
     #[test]
