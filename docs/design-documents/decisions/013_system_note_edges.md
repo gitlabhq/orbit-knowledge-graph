@@ -350,6 +350,43 @@ Cross-top-level resolution is deferred to the graph-DB dictionary lever ([§ Fut
 
 The system-notes handler is implemented as a `BlockTransform` (ADR 015) rather than the `EntityPipeline` described in the original decision section. ADR 015 refined ADR 014's extension point: the seam is the **transform stage**, not a custom pipeline. The `SystemNotesTransform` implements `BlockTransform` and is registered via `TransformRegistry::register("system_notes", factory)`. The extract plan is declared as a derived entity in `config/ontology/derived/core/system_note.yaml` and rides the shared `Pipeline` for paging, checkpointing, and streaming writes. Resolver lookups against `siphon_routes`, `merge_requests`, and `work_items` split bound array params into `engine.handlers.entity-handler.system_notes_resolve_lookup_batch_size` chunks and union the decoded rows, because ClickHouse HTTP params are serialized into the request URL.
 
+#### Update (2026-06-25): MENTIONS edge direction corrected
+
+The original emitter set `source = noteable` (the entity the note
+lives on) and `target = body-ref` (the entity parsed from the note
+body). For every note row processed, this is backwards: for the note
+being processed, the noteable is the entity whose page receives the
+system note, and the parsed ref is the other endpoint. The ontology's
+directional `from_node → to_node` means *mentioner → mentioned*, so
+the source should be the parsed ref and the target the noteable.
+
+For one-sided actions (`cross_reference`, `new_merge_request`) this
+was a clear global inversion — every edge pointed the wrong way. For
+symmetric actions (`relate`/`unrelate`, hierarchy, `moved`, `cloned`,
+`duplicate`), Rails writes reciprocal notes so the graph already
+contained both directions; the per-row orientation was still wrong, but
+the aggregate graph was not missing a direction.
+
+The fix:
+
+- **Direction:** swaps `source_id`/`target_id` and
+  `source_kind`/`target_kind` so the edge points from the parsed ref
+  (mentioner) to the noteable (mentioned).
+- **Partition:** changes the edge's `traversal_path` from the resolved
+  ref's namespace to the noteable's namespace, so inbound-degree
+  queries on the target still hit the correct `gl_edge` partition.
+- **Rollout:** requires a `SCHEMA_VERSION` bump (70 → 71). The
+  corrected rows have a different `ReplacingMergeTree` sort-key
+  identity (`source_id`, `target_id`, `source_kind`, `target_kind`,
+  and for cross-project rows `traversal_path` all change), so an
+  in-place re-index would insert corrected rows alongside the stale
+  inverted ones without replacing them. The version bump forces
+  migration into fresh `v71_` tables that are re-indexed from scratch,
+  so no stale inverted rows survive.
+
+See [#912](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/912)
+for the full investigation.
+
 ## References
 
 - Upstream issue: [`gitlab-org/orbit/knowledge-graph#499`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499)
@@ -363,6 +400,6 @@ The system-notes handler is implemented as a `BlockTransform` (ADR 015) rather t
 - Siphon repo: `gitlab-org/analytics-section/siphon`
 - ADR precedent: [009 (Code Indexer Service)](009_code_indexer_service.md) for implementation-plan shape; [012 (GOON Format)](012_goon_format.md) for benchmark-driven decision rationale and the vendored-constant + CI drift-check pattern
 - Custom-handler precedent in code: `crates/indexer/src/modules/code/`, `crates/indexer/src/modules/namespace_deletion/`
-- Schema version file: `config/SCHEMA_VERSION` (50 → 51 with this work)
+- Schema version file: `config/SCHEMA_VERSION` (50 → 51 with the initial system-notes work; 70 → 71 with the MENTIONS direction fix)
 - Routes-join precedent: `config/ontology/nodes/core/project.yaml:115-121`, `config/ontology/nodes/core/group.yaml:101-107`
 - Note filter today: `config/ontology/nodes/core/note.yaml` (`where: "system = false"`)

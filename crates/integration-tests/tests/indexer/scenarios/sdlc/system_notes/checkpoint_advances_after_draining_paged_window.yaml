@@ -30,9 +30,9 @@ expect:
     - kind: MENTIONS
       count: 3
       rows:
-        - { source_id: 1000, target_id: 10, target_kind: WorkItem }
-        - { source_id: 1000, target_id: 11, target_kind: WorkItem }
-        - { source_id: 1000, target_id: 12, target_kind: WorkItem }
+        - { source_id: 10, source_kind: WorkItem, target_id: 1000, target_kind: MergeRequest }
+        - { source_id: 11, source_kind: WorkItem, target_id: 1000, target_kind: MergeRequest }
+        - { source_id: 12, source_kind: WorkItem, target_id: 1000, target_kind: MergeRequest }
   nodes:
     checkpoint:
       rows:
