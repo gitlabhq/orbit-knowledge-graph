@@ -12,6 +12,7 @@ pub mod languages;
 mod node;
 pub mod predicate;
 mod source;
+pub mod syntax_tree;
 pub mod tree_sitter;
 
 // Re-export core types

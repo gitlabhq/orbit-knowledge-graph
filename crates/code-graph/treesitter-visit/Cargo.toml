@@ -10,6 +10,7 @@ authors = ["GitLab Inc."]
 tracing = { workspace = true }
 serde = { workspace = true }
 smallvec = { workspace = true }
+smol_str = "0.3"
 thiserror = { workspace = true }
 cpu-time = { workspace = true }
 
