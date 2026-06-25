@@ -12,7 +12,7 @@ use treesitter_visit::{Node, SupportLang};
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
-use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules, ResolveSettings};
+use crate::v2::linker::{HasRules, ResolutionRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
@@ -461,20 +461,6 @@ fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec
     });
 }
 
-/// Resolve a bare/qualified class name to its FQN for chain bases with no SSA value.
-fn php_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
-    let lookup = name.trim_start_matches('\\');
-    for &node in &graph.resolve_scope_nodes(lookup) {
-        if let Some(did) = graph.graph[node].def_id() {
-            let gdef = &graph.defs[did.0 as usize];
-            if gdef.kind.is_type_container() {
-                return Some(graph.str(gdef.fqn).to_string());
-            }
-        }
-    }
-    None
-}
-
 // ── Resolution rules ────────────────────────────────────────────
 
 pub struct PhpRules;
@@ -505,7 +491,6 @@ impl HasRules for PhpRules {
         )
         .with_hooks(ResolverHooks {
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
-            resolve_ident_type: Some(php_resolve_ident_type),
             ..Default::default()
         })
         .with_settings(ResolveSettings {

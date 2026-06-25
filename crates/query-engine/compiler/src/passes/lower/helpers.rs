@@ -192,12 +192,12 @@ fn node_join_condition(
     on
 }
 
+// Authoritative filter: dedup with FINAL before filtering so a stale matching version can't resurrect a row.
 pub(super) fn emit_filter_subquery(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
     ctes: &mut Vec<Cte>,
-    sort_key: &[String],
 ) -> Result<Vec<Expr>> {
     let table = np
         .table
@@ -208,7 +208,12 @@ pub(super) fn emit_filter_subquery(
 
     ctes.push(Cte::new(
         &cte_name,
-        node_ids_dedup_scan(alias, table, np, sort_key)?,
+        Query {
+            select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+            from: TableRef::scan_final(table, alias),
+            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+            ..Default::default()
+        },
     ));
 
     Ok(vec![Expr::InSubquery {
@@ -343,70 +348,23 @@ pub(super) fn push_edge_predicates(
     }
 }
 
+// FINAL streams the latest edge version in bounded memory; argMax GROUP BY held every key resident and OOM'd on fat rels.
 pub(super) fn dedup_edge_scan(
     edge_table: &str,
     alias: &str,
-    table_columns: &HashMap<String, HashSet<String>>,
     inner_predicates: Vec<Expr>,
 ) -> TableRef {
-    let Some(cols) = table_columns.get(edge_table) else {
-        return TableRef::scan_final(edge_table, alias);
-    };
-
-    let identity: Vec<&str> = EDGE_RESERVED_COLUMNS
-        .iter()
-        .copied()
-        .filter(|c| cols.contains(*c))
-        .collect();
-
-    let mut projected: Vec<&str> = cols
-        .iter()
-        .map(String::as_str)
-        .filter(|c| !identity.contains(c) && *c != VERSION_COLUMN && *c != DELETED_COLUMN)
-        .collect();
-    projected.sort_unstable();
-
-    let mut select = Vec::with_capacity(identity.len() + projected.len());
-    for col in &identity {
-        select.push(SelectExpr::col(alias, *col));
-    }
-    for col in projected {
-        select.push(SelectExpr::new(
-            Expr::func(
-                "argMax",
-                vec![Expr::col(alias, col), Expr::col(alias, VERSION_COLUMN)],
-            ),
-            col,
-        ));
-    }
-
-    let group_by = identity
-        .iter()
-        .map(|c| Expr::col(alias, *c))
-        .collect::<Vec<_>>();
-
-    let having = Expr::eq(
-        Expr::func(
-            "argMax",
-            vec![
-                Expr::col(alias, DELETED_COLUMN),
-                Expr::col(alias, VERSION_COLUMN),
-            ],
-        ),
-        Expr::lit(false),
-    );
-
-    let where_clause = Expr::conjoin(inner_predicates);
-
-    let query = Query {
-        select,
-        from: TableRef::scan(edge_table, alias),
-        where_clause,
-        group_by,
-        having: Some(having),
-        ..Default::default()
-    };
-    TableRef::subquery(query, alias)
+    let mut where_parts = inner_predicates;
+    where_parts.push(deleted_false(alias));
+    TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan_final(edge_table, alias),
+            where_clause: Expr::conjoin(where_parts),
+            ..Default::default()
+        },
+        alias,
+    )
 }
 
 /// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery

@@ -1248,12 +1248,13 @@ impl<'a> ResolveCtx<'a> {
                 if types.is_empty()
                     && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
                 {
-                    // Language hook: resolve identifier as a type directly.
-                    // Ruby uses this for constants like `Model` that are class names.
-                    if let Some(resolve_fn) = self.rules.hooks.resolve_ident_type
-                        && let Some(fqn) = resolve_fn(self.graph, name)
-                    {
-                        types.push(fqn);
+                    for &node in &self.graph.resolve_scope_nodes(name) {
+                        if let Some(did) = self.graph.graph[node].def_id() {
+                            let gdef = &self.graph.defs[did.0 as usize];
+                            if gdef.kind.is_type_container() {
+                                types.push(self.graph.str(gdef.fqn).to_string());
+                            }
+                        }
                     }
                     if !types.is_empty() {
                         return Ok(types);

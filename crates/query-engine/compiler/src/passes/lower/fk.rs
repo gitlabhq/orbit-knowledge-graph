@@ -44,17 +44,11 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
 
     // Elevated access: FilterOnly CTE so SecurityPass injects the role-gated filter.
     if center_np.needs_elevated_filter {
-        let center_sk = plan
-            .table_sort_keys
-            .get(center_table)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
         center_where_parts.extend(emit_filter_subquery(
             center_np,
             center_alias,
             DEFAULT_PRIMARY_KEY,
             &mut ctes,
-            center_sk,
         )?);
     }
 
@@ -227,18 +221,11 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         } else if target_np.hydration == HydrationStrategy::FilterOnly
             || target_np.needs_elevated_filter
         {
-            let target_table = target_np.table.as_deref().unwrap_or("");
-            let target_sk = plan
-                .table_sort_keys
-                .get(target_table)
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
             where_parts.extend(emit_filter_subquery(
                 target_np,
                 &fk_alias,
                 &fk.fk_column,
                 &mut ctes,
-                target_sk,
             )?);
         }
     }

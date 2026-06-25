@@ -170,11 +170,6 @@ pub struct ResolverHooks {
     /// Derive a synthetic external base type for unresolved import chains.
     /// Language modules own any source-language semantics here.
     pub external_import_type: Option<ExternalImportTypeHook>,
-    /// Resolve an identifier to a type FQN when SSA has no reaching
-    /// values. Called for chain bases like `Model.new.save!` where
-    /// `Model` is a constant with no SSA write. Ruby uses this to
-    /// look up constants as class names in the graph.
-    pub resolve_ident_type: Option<fn(&super::CodeGraph, &str) -> Option<String>>,
 }
 
 // ── Top-level config ────────────────────────────────────────────
