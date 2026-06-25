@@ -13,7 +13,7 @@ use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphO
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 

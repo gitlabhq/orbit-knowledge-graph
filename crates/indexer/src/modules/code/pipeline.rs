@@ -7,14 +7,14 @@ use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
-use super::arrow_converter::IndexerEnvelope;
-use super::writer::{StreamWriter, WriteTotals};
+use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
+use super::writer::{StreamWriter, WriteTotals};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -339,13 +339,7 @@ impl CodeIndexingPipeline {
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         config: PipelineConfig,
-    ) -> Result<
-        (
-            code_graph::v2::PipelineResult,
-            Vec<WriteTotals>,
-        ),
-        HandlerError,
-    > {
+    ) -> Result<(code_graph::v2::PipelineResult, Vec<WriteTotals>), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -355,12 +349,11 @@ impl CodeIndexingPipeline {
             indexed_at,
         );
 
-        let converter: Arc<dyn code_graph::v2::GraphConverter> =
-            Arc::new(arrow_converter::IndexerConverter::new(
-                envelope,
-                &self.ontology,
-                self.table_names.clone(),
-            ));
+        let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(IndexerConverter::new(
+            envelope,
+            &self.ontology,
+            self.table_names.clone(),
+        ));
         let streaming_sink = Arc::new(StreamWriter::new(
             context.destination.clone(),
             self.pipeline_config.write_channel_capacity,

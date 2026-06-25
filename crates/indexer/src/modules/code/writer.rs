@@ -18,7 +18,10 @@ use crate::durability::WriteDurability;
 pub struct StreamWriteError(pub String);
 
 type Outcome = Result<Vec<WriteTotals>, StreamWriteError>;
-type State = (mpsc::Sender<(String, RecordBatch)>, tokio::task::JoinHandle<Outcome>);
+type State = (
+    mpsc::Sender<(String, RecordBatch)>,
+    tokio::task::JoinHandle<Outcome>,
+);
 
 pub struct StreamWriter {
     state: Mutex<Option<State>>,
@@ -34,15 +37,26 @@ impl StreamWriter {
     ) -> Self {
         let max_rows = max_rows_per_insert.max(1);
         let (tx, rx) = mpsc::channel(channel_capacity.max(1));
-        let task = tokio::runtime::Handle::current().spawn(
-            drain_loop(destination, rx, max_concurrent.max(1), max_rows),
-        );
-        Self { state: Mutex::new(Some((tx, task))), max_rows_per_send: max_rows }
+        let task = tokio::runtime::Handle::current().spawn(drain_loop(
+            destination,
+            rx,
+            max_concurrent.max(1),
+            max_rows,
+        ));
+        Self {
+            state: Mutex::new(Some((tx, task))),
+            max_rows_per_send: max_rows,
+        }
     }
 
     pub fn send(&self, table: &str, batch: &RecordBatch) -> Result<(), StreamWriteError> {
-        if batch.num_rows() == 0 { return Ok(()); }
-        let tx = self.state.lock().as_ref()
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+        let tx = self
+            .state
+            .lock()
+            .as_ref()
             .map(|(tx, _)| tx.clone())
             .ok_or_else(|| StreamWriteError("stream writer already finished".into()))?;
         let table = table.to_string();
@@ -57,16 +71,21 @@ impl StreamWriter {
     }
 
     pub async fn finish(&self) -> Outcome {
-        let (tx, task) = self.state.lock().take()
+        let (tx, task) = self
+            .state
+            .lock()
+            .take()
             .ok_or_else(|| StreamWriteError("finish already called".into()))?;
         drop(tx);
-        task.await.map_err(|e| StreamWriteError(format!("join: {e}")))?
+        task.await
+            .map_err(|e| StreamWriteError(format!("join: {e}")))?
     }
 }
 
 impl code_graph::v2::BatchSink for StreamWriter {
     fn write_batch(&self, table: &str, batch: &RecordBatch) -> Result<(), SinkError> {
-        self.send(table, batch).map_err(|e| SinkError(e.to_string()))
+        self.send(table, batch)
+            .map_err(|e| SinkError(e.to_string()))
     }
 }
 
@@ -105,7 +124,11 @@ async fn drain_loop(
 
     while let Some(res) = set.join_next().await {
         let (t, r, b) = res.map_err(|e| StreamWriteError(format!("join: {e}")))??;
-        let e = totals.entry(t.clone()).or_insert(WriteTotals { table: t, rows: 0, bytes: 0 });
+        let e = totals.entry(t.clone()).or_insert(WriteTotals {
+            table: t,
+            rows: 0,
+            bytes: 0,
+        });
         e.rows += r;
         e.bytes += b;
     }
@@ -122,14 +145,24 @@ fn spawn_write(
     let permit = Arc::clone(sem);
     let dest = destination.clone();
     set.spawn(async move {
-        let permit = permit.acquire_owned().await
+        let permit = permit
+            .acquire_owned()
+            .await
             .map_err(|e| StreamWriteError(format!("semaphore: {e}")))?;
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-        let bytes: u64 = batches.iter().map(|b| b.get_array_memory_size() as u64).sum();
-        let opts = BatchWriterOptions { durability: Some(WriteDurability::Durable) };
-        let w = dest.new_batch_writer(&table, opts).await
+        let bytes: u64 = batches
+            .iter()
+            .map(|b| b.get_array_memory_size() as u64)
+            .sum();
+        let opts = BatchWriterOptions {
+            durability: Some(WriteDurability::Durable),
+        };
+        let w = dest
+            .new_batch_writer(&table, opts)
+            .await
             .map_err(|e| StreamWriteError(format!("writer for {table}: {e}")))?;
-        w.write_batch(&batches).await
+        w.write_batch(&batches)
+            .await
             .map_err(|e| StreamWriteError(format!("write to {table}: {e}")))?;
         drop(permit);
         Ok((table, rows, bytes))
@@ -152,18 +185,27 @@ mod tests {
 
     #[tokio::test]
     async fn finish_returns_per_table_totals() {
-        let sw = Arc::new(StreamWriter::new(Arc::new(MockDestination::new()), 8, 4, 500_000));
+        let sw = Arc::new(StreamWriter::new(
+            Arc::new(MockDestination::new()),
+            8,
+            4,
+            500_000,
+        ));
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
-        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
 
         let w = Arc::clone(&sw);
         tokio::task::spawn_blocking(move || {
             w.send("gl_file", &batch).unwrap();
             w.send("gl_definition", &batch).unwrap();
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         let per_table = sw.finish().await.expect("finish should succeed");
-        let by_table: HashMap<&str, &WriteTotals> = per_table.iter().map(|t| (t.table.as_str(), t)).collect();
+        let by_table: HashMap<&str, &WriteTotals> =
+            per_table.iter().map(|t| (t.table.as_str(), t)).collect();
         assert_eq!(by_table.len(), 2);
         assert_eq!(by_table["gl_file"].rows, 3);
         assert_eq!(by_table["gl_definition"].rows, 3);
