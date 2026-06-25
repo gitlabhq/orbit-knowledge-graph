@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use super::types::{
-    ImportPathContext, ImportPathResolution, ImportPathResolver, LanguageSpec, Rule,
-};
+use super::types::{ImportTransformContext, ImportTransformer, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -18,7 +16,12 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Axis, Match};
 use treesitter_visit::{Node, SupportLang};
 
-type ImportPathResolverOverride<'a> = &'a dyn ImportPathResolver;
+type ImportTransformerOverride<'a> = &'a dyn ImportTransformer;
+
+#[derive(Default)]
+pub(crate) struct ParseFullOptions<'a> {
+    pub import_transformer: Option<ImportTransformerOverride<'a>>,
+}
 
 /// Result of a defs-only parse. Just definitions and imports.
 pub struct ParsedDefs {
@@ -440,7 +443,6 @@ impl LanguageSpec {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
         state: &mut WalkFullState<'_>,
-        sep: &str,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -455,15 +457,10 @@ impl LanguageSpec {
 
         let range = canonical_range(&node_to_range(node));
         let label = rule.resolve_label(node);
-        let module_scope = state.scope_stack.first().map(ToString::to_string);
-        let module_scope = module_scope.as_deref();
-        let import_path_resolver = state.import_path_resolver;
 
         if let Some(child_kinds) = rule.multi_child_kinds {
             let raw_path = rule.extract().apply(node).unwrap_or_default();
-            let base_resolution =
-                self.resolve_import_path(raw_path.clone(), module_scope, sep, import_path_resolver);
-            let base_path = base_resolution.path;
+            let base_path = raw_path.clone();
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -473,16 +470,10 @@ impl LanguageSpec {
                     if let Some(name_node) = child.field("name") {
                         let alias = child.field("alias").map(|a| a.text().to_string());
                         let name = name_node.text().to_string();
-                        let (path, name, scope_name) = if base_path.is_empty() {
-                            let resolution = self.resolve_import_path(
-                                name.clone(),
-                                module_scope,
-                                sep,
-                                import_path_resolver,
-                            );
-                            (resolution.path, None, resolution.scope_name)
+                        let (path, name) = if base_path.is_empty() {
+                            (name, None)
                         } else {
-                            (base_path.clone(), Some(name), None)
+                            (base_path.clone(), Some(name))
                         };
                         let binding_kind = if !path.is_empty() {
                             ImportBindingKind::Named
@@ -502,7 +493,7 @@ impl LanguageSpec {
                                 is_type_only: false,
                                 wildcard: false,
                             },
-                            scope_name,
+                            None,
                         );
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
@@ -511,16 +502,10 @@ impl LanguageSpec {
                     {
                         continue;
                     }
-                    let (path, name, scope_name) = if base_path.is_empty() {
-                        let resolution = self.resolve_import_path(
-                            child_text,
-                            module_scope,
-                            sep,
-                            import_path_resolver,
-                        );
-                        (resolution.path, None, resolution.scope_name)
+                    let (path, name) = if base_path.is_empty() {
+                        (child_text, None)
                     } else {
-                        (base_path.clone(), Some(child_text), None)
+                        (base_path.clone(), Some(child_text))
                     };
                     let binding_kind = if !path.is_empty() {
                         ImportBindingKind::Named
@@ -540,7 +525,7 @@ impl LanguageSpec {
                             is_type_only: false,
                             wildcard: false,
                         },
-                        scope_name,
+                        None,
                     );
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
                     state.push_import(
@@ -561,9 +546,7 @@ impl LanguageSpec {
                 }
             }
         } else if let Some(raw_path) = rule.extract().apply(node) {
-            let resolution =
-                self.resolve_import_path(raw_path, module_scope, sep, import_path_resolver);
-            let full_path = resolution.path;
+            let full_path = raw_path;
             let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
             // in `import com.example.*`) or the always_wildcard flag (e.g. C#
@@ -615,32 +598,10 @@ impl LanguageSpec {
                         is_type_only: false,
                         wildcard: is_wildcard,
                     },
-                    resolution.scope_name,
+                    None,
                 );
             }
         }
-    }
-
-    fn resolve_import_path(
-        &self,
-        raw_path: String,
-        module_scope: Option<&str>,
-        sep: &str,
-        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
-    ) -> ImportPathResolution {
-        let Some(module_scope) = module_scope else {
-            return ImportPathResolution::path(raw_path);
-        };
-        if let Some(resolver) = import_path_resolver
-            && let Some(resolved) = resolver.resolve(ImportPathContext {
-                raw_path: &raw_path,
-                module_scope,
-                sep,
-            })
-        {
-            return resolved;
-        }
-        ImportPathResolution::path(raw_path)
     }
 
     // ── parse_full_and_resolve: single walk with SSA + inline callback ──
@@ -664,19 +625,24 @@ impl LanguageSpec {
         tracer: &Tracer,
         timeouts: PhaseTimeouts,
     ) -> Result<ParseFullResult, ParseFullError> {
-        self.parse_full_collect_with_import_resolver(
-            source, file_path, language, tracer, timeouts, None,
+        self.parse_full_collect_with_options(
+            source,
+            file_path,
+            language,
+            tracer,
+            timeouts,
+            ParseFullOptions::default(),
         )
     }
 
-    pub(crate) fn parse_full_collect_with_import_resolver(
+    pub(crate) fn parse_full_collect_with_options(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
         tracer: &Tracer,
         timeouts: PhaseTimeouts,
-        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
+        options: ParseFullOptions<'_>,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
@@ -697,7 +663,7 @@ impl LanguageSpec {
             tracer,
             file_path,
             timeouts.walk,
-            import_path_resolver,
+            options.import_transformer,
         );
 
         if let Some(f) = self.hooks.module_scope
@@ -1134,9 +1100,12 @@ impl LanguageSpec {
                 .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
-                self.evaluate_imports(node, nk, state, sep);
+                self.evaluate_imports(node, nk, state);
             }
+            let module_scope = state.scope_stack.first().map(ToString::to_string);
+            let module_scope = module_scope.as_deref();
             for idx in import_count_before..state.imports.len() {
+                state.transform_import(idx, module_scope, sep);
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
                 let effective_name = import_scope_name(
@@ -1583,7 +1552,7 @@ struct WalkFullState<'a> {
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
-    import_path_resolver: Option<ImportPathResolverOverride<'a>>,
+    import_transformer: Option<ImportTransformerOverride<'a>>,
     top_level_depth: usize,
     in_return: bool,
     tracer: &'a Tracer,
@@ -1598,7 +1567,7 @@ impl<'a> WalkFullState<'a> {
         tracer: &'a Tracer,
         file_path: &'a str,
         budget: Option<std::time::Duration>,
-        import_path_resolver: Option<ImportPathResolverOverride<'a>>,
+        import_transformer: Option<ImportTransformerOverride<'a>>,
     ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
@@ -1616,7 +1585,7 @@ impl<'a> WalkFullState<'a> {
             pending_refs: Vec::new(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
-            import_path_resolver,
+            import_transformer,
             top_level_depth: 0,
             in_return: false,
             tracer,
@@ -1630,6 +1599,19 @@ impl<'a> WalkFullState<'a> {
         let idx = self.imports.len();
         self.imports.push(import);
         if let Some(scope_name) = scope_name {
+            self.import_scope_overrides.insert(idx, scope_name);
+        }
+    }
+
+    fn transform_import(&mut self, idx: usize, module_scope: Option<&str>, sep: &str) {
+        let Some(transformer) = self.import_transformer else {
+            return;
+        };
+        let result = transformer.transform(
+            &mut self.imports[idx],
+            ImportTransformContext { module_scope, sep },
+        );
+        if let Some(scope_name) = result.scope_name {
             self.import_scope_overrides.insert(idx, scope_name);
         }
     }

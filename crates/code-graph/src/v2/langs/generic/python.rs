@@ -11,7 +11,7 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::BindingKind;
 
-use crate::v2::dsl::types::{ImportPathResolver, LanguageHooks};
+use crate::v2::dsl::types::{ImportTransformer, LanguageHooks};
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
@@ -101,7 +101,7 @@ impl DslLanguage for PythonDsl {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["decorator"],
-            import_path_resolver: Some(build_python_import_path_resolver),
+            import_transformer: Some(build_python_import_transformer),
             import_scope_name: Some(python_import_scope_name),
             ..LanguageHooks::default()
         }
@@ -370,11 +370,11 @@ impl HasRules for PythonRules {
     }
 }
 
-pub(crate) struct PythonImportPathResolver {
+pub(crate) struct PythonImportTransformer {
     importable_paths: rustc_hash::FxHashSet<String>,
 }
 
-impl PythonImportPathResolver {
+impl PythonImportTransformer {
     pub(crate) fn from_paths<'a>(paths: impl IntoIterator<Item = &'a str>, sep: &str) -> Self {
         let mut importable_paths = rustc_hash::FxHashSet::default();
         for module in paths
@@ -415,32 +415,45 @@ impl PythonImportPathResolver {
     }
 }
 
-impl ImportPathResolver for PythonImportPathResolver {
-    fn resolve(&self, cx: ImportPathContext<'_>) -> Option<ImportPathResolution> {
-        if let Some(path) = resolve_python_relative_import(cx.raw_path, cx.module_scope, cx.sep) {
-            return Some(ImportPathResolution::path(path));
+impl ImportTransformer for PythonImportTransformer {
+    fn transform(
+        &self,
+        import: &mut CanonicalImport,
+        cx: ImportTransformContext<'_>,
+    ) -> ImportTransformResult {
+        let Some(module_scope) = cx.module_scope else {
+            return ImportTransformResult::default();
+        };
+
+        if let Some(path) = resolve_python_relative_import(&import.path, module_scope, cx.sep) {
+            import.path = path;
+            return ImportTransformResult::default();
         }
 
-        self.resolve_source_root(cx.raw_path, cx.module_scope, cx.sep)
-            .map(|path| {
-                let mut resolution = ImportPathResolution::path(path);
-                if let Some(scope_name) = cx
-                    .raw_path
-                    .split(cx.sep)
-                    .next()
-                    .filter(|segment| !segment.is_empty())
-                {
-                    resolution = resolution.with_scope_name(scope_name);
-                }
-                resolution
-            })
+        if let Some(path) = self.resolve_source_root(&import.path, module_scope, cx.sep) {
+            let scope_name =
+                if import.import_type == "Import" || import.import_type == "AliasedImport" {
+                    import
+                        .path
+                        .split(cx.sep)
+                        .next()
+                        .filter(|segment| !segment.is_empty())
+                        .map(ToString::to_string)
+                } else {
+                    None
+                };
+            import.path = path;
+            return scope_name.map_or_else(ImportTransformResult::default, |scope_name| {
+                ImportTransformResult::default().with_scope_name(scope_name)
+            });
+        }
+
+        ImportTransformResult::default()
     }
 }
 
-fn build_python_import_path_resolver(
-    cx: ImportPathResolverConfig<'_>,
-) -> Box<dyn ImportPathResolver> {
-    Box::new(PythonImportPathResolver::from_paths(
+fn build_python_import_transformer(cx: ImportTransformConfig<'_>) -> Box<dyn ImportTransformer> {
+    Box::new(PythonImportTransformer::from_paths(
         cx.files
             .iter()
             .filter(|file| file.language == cx.language)
@@ -550,17 +563,35 @@ fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> 
 mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
+    use crate::v2::types::{ImportBindingKind, ImportMode, Range};
 
-    fn resolve_import_path(
-        resolver: &PythonImportPathResolver,
-        raw_path: &str,
+    fn transform_import(
+        transformer: &PythonImportTransformer,
+        import_type: &'static str,
+        path: &str,
+        name: Option<&str>,
         module_scope: &str,
-    ) -> Option<ImportPathResolution> {
-        resolver.resolve(ImportPathContext {
-            raw_path,
-            module_scope,
-            sep: ".",
-        })
+    ) -> (String, Option<String>) {
+        let mut import = CanonicalImport {
+            import_type,
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
+            path: path.to_string(),
+            name: name.map(ToString::to_string),
+            alias: None,
+            scope_fqn: None,
+            range: Range::empty(),
+            is_type_only: false,
+            wildcard: false,
+        };
+        let result = transformer.transform(
+            &mut import,
+            ImportTransformContext {
+                module_scope: Some(module_scope),
+                sep: ".",
+            },
+        );
+        (import.path, result.scope_name)
     }
 
     fn parse(
@@ -699,8 +730,8 @@ mod tests {
     }
 
     #[test]
-    fn import_path_resolver_uses_actual_module_files() {
-        let resolver = PythonImportPathResolver::from_paths(
+    fn import_transformer_uses_actual_module_files() {
+        let transformer = PythonImportTransformer::from_paths(
             [
                 "lib/myapp/service.py",
                 "lib/myapp/worker.py",
@@ -711,37 +742,47 @@ mod tests {
         );
 
         assert_eq!(
-            resolve_import_path(&resolver, "myapp.worker", "lib.myapp.service")
-                .map(|resolution| resolution.path),
-            Some("lib.myapp.worker".to_string())
+            transform_import(
+                &transformer,
+                "FromImport",
+                "myapp.worker",
+                Some("Worker"),
+                "lib.myapp.service"
+            ),
+            ("lib.myapp.worker".to_string(), None)
         );
         assert_eq!(
-            resolve_import_path(&resolver, "scoring", "src.pipeline"),
-            Some(ImportPathResolution::path("src.scoring").with_scope_name("scoring"))
+            transform_import(&transformer, "Import", "scoring", None, "src.pipeline"),
+            ("src.scoring".to_string(), Some("scoring".to_string()))
         );
         assert_eq!(
-            resolve_import_path(&resolver, "requests", "src.pipeline"),
-            None
+            transform_import(&transformer, "Import", "requests", None, "src.pipeline"),
+            ("requests".to_string(), None)
         );
     }
 
     #[test]
-    fn import_path_resolver_uses_module_parent_packages() {
-        let resolver = PythonImportPathResolver::from_paths(
+    fn import_transformer_uses_module_parent_packages() {
+        let transformer = PythonImportTransformer::from_paths(
             ["src/package/module.py", "src/test_package_import.py"],
             ".",
         );
 
         assert_eq!(
-            resolve_import_path(&resolver, "package", "src.test_package_import")
-                .map(|resolution| resolution.path),
-            Some("src.package".to_string())
+            transform_import(
+                &transformer,
+                "FromImport",
+                "package",
+                Some("module"),
+                "src.test_package_import"
+            ),
+            ("src.package".to_string(), None)
         );
     }
 
     #[test]
-    fn import_path_resolver_rejects_ambiguous_ancestor_matches() {
-        let resolver = PythonImportPathResolver::from_paths(
+    fn import_transformer_rejects_ambiguous_ancestor_matches() {
+        let transformer = PythonImportTransformer::from_paths(
             [
                 "src/alpha/common/scoring.py",
                 "src/alpha/other/common/scoring.py",
@@ -751,18 +792,30 @@ mod tests {
         );
 
         assert_eq!(
-            resolve_import_path(&resolver, "common.scoring", "src.alpha.other.reporting"),
-            None
+            transform_import(
+                &transformer,
+                "FromImport",
+                "common.scoring",
+                Some("score_review"),
+                "src.alpha.other.reporting"
+            ),
+            ("common.scoring".to_string(), None)
         );
     }
 
     #[test]
-    fn import_path_resolver_handles_relative_imports() {
-        let resolver = PythonImportPathResolver::from_paths(std::iter::empty(), ".");
+    fn import_transformer_handles_relative_imports() {
+        let transformer = PythonImportTransformer::from_paths(std::iter::empty(), ".");
 
         assert_eq!(
-            resolve_import_path(&resolver, ".models", "src.package.views"),
-            Some(ImportPathResolution::path("src.package.models"))
+            transform_import(
+                &transformer,
+                "FromImport",
+                ".models",
+                Some("User"),
+                "src.package.views"
+            ),
+            ("src.package.models".to_string(), None)
         );
     }
 }

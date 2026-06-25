@@ -9,50 +9,44 @@ use crate::v2::types::{DefKind, DefinitionMetadata};
 
 use super::extractors::MetadataRule;
 
-pub struct ImportPathContext<'a> {
-    pub raw_path: &'a str,
-    pub module_scope: &'a str,
+pub struct ImportTransformContext<'a> {
+    pub module_scope: Option<&'a str>,
     pub sep: &'a str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImportPathResolution {
-    pub path: String,
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportTransformResult {
     pub scope_name: Option<String>,
 }
 
-impl ImportPathResolution {
-    pub fn path(path: impl Into<String>) -> Self {
-        Self {
-            path: path.into(),
-            scope_name: None,
-        }
-    }
-
+impl ImportTransformResult {
     pub fn with_scope_name(mut self, scope_name: impl Into<String>) -> Self {
         self.scope_name = Some(scope_name.into());
         self
     }
 }
 
-pub trait ImportPathResolver: Send + Sync {
-    fn resolve(&self, cx: ImportPathContext<'_>) -> Option<ImportPathResolution>;
+pub trait ImportTransformer: Send + Sync {
+    fn transform(
+        &self,
+        import: &mut crate::v2::types::CanonicalImport,
+        cx: ImportTransformContext<'_>,
+    ) -> ImportTransformResult;
 }
 
 #[derive(Clone, Copy)]
-pub struct ImportPathResolverFile<'a> {
+pub struct ImportTransformFile<'a> {
     pub language: Language,
     pub path: &'a str,
 }
 
-pub struct ImportPathResolverConfig<'a> {
+pub struct ImportTransformConfig<'a> {
     pub language: Language,
-    pub files: &'a [ImportPathResolverFile<'a>],
+    pub files: &'a [ImportTransformFile<'a>],
     pub sep: &'a str,
 }
 
-pub type ImportPathResolverFactory =
-    fn(ImportPathResolverConfig<'_>) -> Box<dyn ImportPathResolver>;
+pub type ImportTransformerFactory = fn(ImportTransformConfig<'_>) -> Box<dyn ImportTransformer>;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
@@ -836,9 +830,8 @@ pub struct LanguageHooks {
     /// to the new def. Handles decorators/annotations that are CST siblings
     /// of the decorated function/class definition.
     pub adopt_sibling_refs: &'static [&'static str],
-    /// Build an import path resolver from the current parse family.
-    /// Used by languages whose import paths depend on repository layout.
-    pub import_path_resolver: Option<ImportPathResolverFactory>,
+    /// Build an import transformer from the current parse family.
+    pub import_transformer: Option<ImportTransformerFactory>,
     /// Node kinds that represent expression-bodied function bodies
     /// (e.g. Kotlin's `function_body` when it contains `=`).
     /// When the engine encounters one of these nodes with a `=` child,

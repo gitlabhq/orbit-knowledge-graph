@@ -1156,25 +1156,25 @@ impl FamilyPipeline {
             })
             .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
-        let import_path_resolver_files = files
+        let import_transform_files = files
             .iter()
-            .map(|file| crate::v2::dsl::types::ImportPathResolverFile {
+            .map(|file| crate::v2::dsl::types::ImportTransformFile {
                 language: file.language,
                 path: file.path.as_str(),
             })
             .collect::<Vec<_>>();
-        let import_path_resolvers: FxHashMap<
+        let import_transformers: FxHashMap<
             Language,
-            Box<dyn crate::v2::dsl::types::ImportPathResolver>,
+            Box<dyn crate::v2::dsl::types::ImportTransformer>,
         > = member_ctxs
             .iter()
             .filter_map(|(&language, lctx)| {
-                let build = lctx.spec.hooks.import_path_resolver?;
+                let build = lctx.spec.hooks.import_transformer?;
                 Some((
                     language,
-                    build(crate::v2::dsl::types::ImportPathResolverConfig {
+                    build(crate::v2::dsl::types::ImportTransformConfig {
                         language,
-                        files: &import_path_resolver_files,
+                        files: &import_transform_files,
                         sep: expected_sep,
                     }),
                 ))
@@ -1255,19 +1255,18 @@ impl FamilyPipeline {
                     walk: ctx.config.per_file_walk_timeout,
                     ssa: ctx.config.per_file_ssa_timeout,
                 };
-                let result = if let Some(resolver) = import_path_resolvers.get(&f.language) {
-                    lctx.spec.parse_full_collect_with_import_resolver(
-                        &source,
-                        &f.path,
-                        f.language,
-                        tracer,
-                        timeouts,
-                        Some(resolver.as_ref()),
-                    )
-                } else {
-                    lctx.spec
-                        .parse_full_collect(&source, &f.path, f.language, tracer, timeouts)
-                };
+                let result = lctx.spec.parse_full_collect_with_options(
+                    &source,
+                    &f.path,
+                    f.language,
+                    tracer,
+                    timeouts,
+                    crate::v2::dsl::engine::ParseFullOptions {
+                        import_transformer: import_transformers
+                            .get(&f.language)
+                            .map(|transformer| transformer.as_ref()),
+                    },
+                );
                 let result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
