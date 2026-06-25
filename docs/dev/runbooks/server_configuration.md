@@ -208,7 +208,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 |------|-------------|-------------|-------------|
 | Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
 | Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for enabled root namespaces with Siphon changes |
-| Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 */5 * * * *` (every 5 minutes) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
+| Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.namespace-code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |

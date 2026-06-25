@@ -408,7 +408,7 @@ impl Default for NamespaceSweepConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                cron: Some("0 */5 * * * *".into()),
+                cron: Some("0 0 * * * *".into()),
             },
         }
     }
