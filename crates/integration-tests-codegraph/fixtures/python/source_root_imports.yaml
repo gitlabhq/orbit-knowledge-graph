@@ -46,22 +46,6 @@ fixtures:
       def emit_task_event():
           return Event()
 
-  - path: src/requests/api.py
-    content: |
-      def request(method, url):
-          return method, url
-
-  - path: src/requests/__init__.py
-    content: |
-      pass
-
-  - path: src/requests/sessions.py
-    content: |
-      from requests.api import request as send_request
-
-      def replay():
-          return send_request("GET", "https://example.com")
-
   - path: src/package_imports/module.py
     content: |
       def build_module():
@@ -73,6 +57,13 @@ fixtures:
 
       def build_package_import():
           return module.build_module()
+
+  - path: src/prefect/task_engine.py
+    content: |
+      from prefect.events.schemas.events import Event as PrefectEvent
+
+      def build_prefect_event():
+          return PrefectEvent()
 
   - path: apps/orion/src/orion/worker.py
     content: |
@@ -146,11 +137,11 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: "Requests-style aliased package import resolves"
+  - name: "Prefect-style aliased nested package import resolves"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'src.requests.sessions.replay'
-        AND callee.fqn = 'src.requests.api.request'
+      WHERE caller.fqn = 'src.prefect.task_engine.build_prefect_event'
+        AND callee.fqn = 'src.prefect.events.schemas.events.Event'
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
