@@ -11,21 +11,38 @@ use crate::clickhouse::ClickHouseWriter;
 use crate::clickhouse::{WriteError, WriteReport};
 use crate::durability::WriteDurability;
 
-/// `BatchSink` that forwards to an mpsc channel for async draining.
-pub struct ChannelSink(pub mpsc::Sender<(String, RecordBatch)>);
+pub struct ChannelSink {
+    tx: mpsc::Sender<(String, RecordBatch)>,
+    max_rows_per_send: usize,
+}
+
+impl ChannelSink {
+    pub fn new(tx: mpsc::Sender<(String, RecordBatch)>, max_rows_per_send: usize) -> Self {
+        Self {
+            tx,
+            max_rows_per_send: max_rows_per_send.max(1),
+        }
+    }
+}
 
 impl code_graph::v2::BatchSink for ChannelSink {
     fn write_batch(&self, table: &str, batch: &RecordBatch) -> Result<(), SinkError> {
         if batch.num_rows() == 0 {
             return Ok(());
         }
-        self.0
-            .blocking_send((table.to_string(), batch.clone()))
-            .map_err(|_| SinkError("channel closed".into()))
+        let table = table.to_string();
+        let mut offset = 0;
+        while offset < batch.num_rows() {
+            let len = (batch.num_rows() - offset).min(self.max_rows_per_send);
+            self.tx
+                .blocking_send((table.clone(), batch.slice(offset, len)))
+                .map_err(|_| SinkError("channel closed".into()))?;
+            offset += len;
+        }
+        Ok(())
     }
 }
 
-/// Drain batches from the channel, coalesce per table, and write concurrently.
 pub async fn drain_writes(
     writer: Arc<ClickHouseWriter>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
@@ -45,7 +62,7 @@ pub async fn drain_writes(
             let (batches, _) = pending.remove(&table).unwrap();
             let (w, p) = (writer.clone(), sem.clone());
             set.spawn(async move {
-                let _permit = p.acquire_owned().await;
+                let _permit = p.acquire_owned().await.expect("write semaphore closed");
                 w.write(&table, batches, Some(WriteDurability::Durable))
                     .await
             });
@@ -55,7 +72,7 @@ pub async fn drain_writes(
     for (table, (batches, _)) in pending {
         let (w, p) = (writer.clone(), sem.clone());
         set.spawn(async move {
-            let _permit = p.acquire_owned().await;
+            let _permit = p.acquire_owned().await.expect("write semaphore closed");
             w.write(&table, batches, Some(WriteDurability::Durable))
                 .await
         });
@@ -79,7 +96,7 @@ mod tests {
     #[tokio::test]
     async fn drain_writes_returns_per_table_reports() {
         let (tx, rx) = mpsc::channel(8);
-        let sink = Arc::new(ChannelSink(tx));
+        let sink = Arc::new(ChannelSink::new(tx, 500_000));
         let drain = tokio::spawn(drain_writes(test_writer(), rx, 500_000, 4));
 
         let s = Arc::clone(&sink);

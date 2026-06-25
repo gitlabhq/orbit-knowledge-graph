@@ -359,7 +359,8 @@ impl CodeIndexingPipeline {
         ));
         let (tx, rx) =
             tokio::sync::mpsc::channel(self.pipeline_config.write_channel_capacity.max(1));
-        let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(ChannelSink(tx));
+        let sink: Arc<dyn code_graph::v2::BatchSink> =
+            Arc::new(ChannelSink::new(tx, self.pipeline_config.write_slice_rows));
         let drain = tokio::spawn(drain_writes(
             Arc::clone(&self.writer),
             rx,

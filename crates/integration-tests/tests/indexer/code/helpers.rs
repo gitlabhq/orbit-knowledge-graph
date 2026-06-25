@@ -118,9 +118,8 @@ impl CodeIndexingDeps {
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
 
-        let cache_dir = tempfile::TempDir::new().expect("temp dir");
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            cache_dir.path().to_path_buf(),
+            self.cache_dir.path().to_path_buf(),
             u64::MAX,
             0,
             self.metrics.clone(),
