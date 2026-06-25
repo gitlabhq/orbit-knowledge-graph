@@ -519,6 +519,7 @@ mod tests {
                  ORDER BY id LIMIT {{batch_size}}"
                 .to_string(),
             watermark_column: "_siphon_watermark".to_string(),
+            deleted_column: "_siphon_deleted".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
             transform: TransformSpec::DataFusion(vec![Transformation {

@@ -123,6 +123,16 @@ pub(in crate::modules::sdlc) struct TraversalPathFilter<'a> {
     pub path: &'a str,
 }
 
+pub(in crate::modules::sdlc) struct DeletedFilter<'a> {
+    pub column: &'a str,
+}
+
+impl Filter for DeletedFilter<'_> {
+    fn condition(&self) -> String {
+        format!("{} = false", self.column)
+    }
+}
+
 impl Filter for TraversalPathFilter<'_> {
     fn condition(&self) -> String {
         "startsWith(traversal_path, {traversal_path:String})".to_string()
@@ -229,6 +239,7 @@ pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
     pub extract_template: String,
     pub watermark_column: String,
+    pub deleted_column: String,
     pub sort_key: Vec<String>,
     pub batch_size: u64,
     pub transform: TransformSpec,
@@ -373,6 +384,7 @@ mod tests {
                  LIMIT {{{{batch_size}}}}"
             ),
             watermark_column: "_siphon_watermark".to_string(),
+            deleted_column: "_siphon_deleted".to_string(),
             sort_key,
             batch_size,
             transform: TransformSpec::DataFusion(vec![]),
@@ -557,6 +569,25 @@ mod tests {
         let map = params.as_object().unwrap();
         assert!(map.contains_key("last_watermark"));
         assert!(map.contains_key("watermark"));
+    }
+
+    #[test]
+    fn deleted_filter_full_load_drops_soft_deleted_rows() {
+        let plan = test_plan(vec!["id"], 1000);
+        let sql = plan
+            .prepare()
+            .with(Some(DeletedFilter {
+                column: &plan.deleted_column,
+            }))
+            .to_sql();
+        assert!(sql.contains("_siphon_deleted = false"), "sql: {sql}");
+    }
+
+    #[test]
+    fn deleted_filter_omitted_on_incremental() {
+        let plan = test_plan(vec!["id"], 1000);
+        let sql = plan.prepare().with(None::<DeletedFilter>).to_sql();
+        assert!(!sql.contains("_siphon_deleted = false"), "sql: {sql}");
     }
 
     #[test]

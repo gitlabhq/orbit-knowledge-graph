@@ -17,10 +17,10 @@ use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
 use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats, WindowBounds};
 use crate::modules::sdlc::plan::{
-    Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
+    DeletedFilter, Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
 };
 use crate::modules::sdlc::transform::system_notes;
-use crate::observer::{self, IndexingObserver, PipelineType};
+use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
@@ -171,7 +171,10 @@ impl EntityHandler {
                     .traversal_path
                     .as_deref()
                     .map(|path| TraversalPathFilter { path }),
-            );
+            )
+            .with((mode == IndexingMode::Full).then_some(DeletedFilter {
+                column: &self.plan.deleted_column,
+            }));
 
         let should_partition = self.partition_strategy.is_some() && parent_checkpoint.is_none();
         let ranges = if should_partition {
