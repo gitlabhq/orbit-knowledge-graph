@@ -71,6 +71,26 @@ def _nodes(result: dict, node_type: str | None = None) -> list[dict]:
     return nodes
 
 
+def _lookup_nodes(
+    entity: str,
+    filters: dict,
+    columns: list[str],
+    *,
+    node_id: str = "node",
+    limit: int = 100,
+) -> list[dict]:
+    return _nodes(_query({"query": {
+        "query_type": "traversal",
+        "node": {
+            "id": node_id,
+            "entity": entity,
+            "filters": filters,
+            "columns": columns,
+        },
+        "limit": limit,
+    }}), entity)
+
+
 def _edges(result: dict) -> list[dict]:
     """Return the instance-level edges from a graph/raw query response.
 
@@ -87,26 +107,6 @@ def _base_filters(project_id: int, branch: str) -> dict:
         "project_id": {"op": "eq", "value": project_id},
         "branch":     {"op": "eq", "value": branch},
     }
-
-
-def _node_query(
-    entity: str,
-    filters: dict,
-    columns: list[str],
-    *,
-    node_id: str = "node",
-    limit: int = 100,
-) -> dict:
-    return {"query": {
-        "query_type": "traversal",
-        "node": {
-            "id": node_id,
-            "entity": entity,
-            "filters": filters,
-            "columns": columns,
-        },
-        "limit": limit,
-    }}
 
 
 # ── Pure helpers (no I/O — unit-testable against canned responses) ─────────────
@@ -618,14 +618,11 @@ def cmd_callers(args: argparse.Namespace) -> None:
         callers = [n for n in all_defs if n.get("id") not in target_ids]
 
     if not targets:
-        targets = _nodes(
-            _query(_node_query(
-                "Definition",
-                target_filters,
-                ["id", "name", "fqn", "file_path", "start_line"],
-                node_id="target",
-            )),
+        targets = _lookup_nodes(
             "Definition",
+            target_filters,
+            ["id", "name", "fqn", "file_path", "start_line"],
+            node_id="target",
         )
 
     imported_callers: list[dict] = []
@@ -657,14 +654,11 @@ def cmd_callers(args: argparse.Namespace) -> None:
         imported_callers = _unique_by_id(_nodes(_query(import_body), "Definition"))
         if not imported_callers:
             imported_symbols = _unique_by_id(
-                _nodes(
-                    _query(_node_query(
-                        "ImportedSymbol",
-                        import_filters,
-                        ["id", "import_path", "identifier_name", "file_path", "start_line"],
-                        node_id="target_import",
-                    )),
+                _lookup_nodes(
                     "ImportedSymbol",
+                    import_filters,
+                    ["id", "import_path", "identifier_name", "file_path", "start_line"],
+                    node_id="target_import",
                 )
             )
 
