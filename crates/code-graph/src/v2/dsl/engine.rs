@@ -435,10 +435,8 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-        imports: &mut Vec<CanonicalImport>,
-        module_scope: Option<&str>,
+        state: &mut WalkFullState<'_>,
         sep: &str,
-        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -453,6 +451,8 @@ impl LanguageSpec {
 
         let range = canonical_range(&node_to_range(node));
         let label = rule.resolve_label(node);
+        let module_scope = state.scope_stack.first().map(|s| s.as_ref());
+        let import_path_resolver = state.import_path_resolver;
 
         if let Some(child_kinds) = rule.multi_child_kinds {
             let raw_path = rule.extract().apply(node).unwrap_or_default();
@@ -477,7 +477,7 @@ impl LanguageSpec {
                         } else {
                             infer_import_binding_kind(name.as_deref(), alias.as_deref(), false)
                         };
-                        imports.push(CanonicalImport {
+                        state.imports.push(CanonicalImport {
                             import_type: label,
                             path,
                             binding_kind,
@@ -506,7 +506,7 @@ impl LanguageSpec {
                     } else {
                         infer_import_binding_kind(name.as_deref(), None, false)
                     };
-                    imports.push(CanonicalImport {
+                    state.imports.push(CanonicalImport {
                         import_type: label,
                         binding_kind,
                         mode: ImportMode::Declarative,
@@ -519,7 +519,7 @@ impl LanguageSpec {
                         wildcard: false,
                     });
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
-                    imports.push(CanonicalImport {
+                    state.imports.push(CanonicalImport {
                         import_type: label,
                         binding_kind: ImportBindingKind::Named,
                         mode: ImportMode::Declarative,
@@ -550,7 +550,7 @@ impl LanguageSpec {
 
             if is_wildcard_import {
                 // Wildcard import: path is the full extracted name, no split needed.
-                imports.push(CanonicalImport {
+                state.imports.push(CanonicalImport {
                     import_type: label,
                     binding_kind: ImportBindingKind::Named,
                     mode: ImportMode::Declarative,
@@ -571,7 +571,7 @@ impl LanguageSpec {
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
                 let binding_kind =
                     infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
-                imports.push(CanonicalImport {
+                state.imports.push(CanonicalImport {
                     import_type: label,
                     binding_kind,
                     mode: ImportMode::Declarative,
@@ -659,7 +659,13 @@ impl LanguageSpec {
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path, timeouts.walk);
+        let mut state = WalkFullState::new(
+            &arena,
+            tracer,
+            file_path,
+            timeouts.walk,
+            import_path_resolver,
+        );
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -692,13 +698,7 @@ impl LanguageSpec {
         });
 
         let walk_start = cpu_time::ThreadTime::now();
-        self.walk_full(
-            &root,
-            &mut state,
-            sep,
-            module_prefix.as_deref(),
-            import_path_resolver,
-        );
+        self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
         if state.timed_out {
             return Err(ParseFullError::Aborted {
                 phase: crate::v2::error::AbortPhase::Walk,
@@ -865,7 +865,6 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
         module_prefix: Option<&str>,
-        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         // CPU budget tripped: bail so the walk unwinds; parse_full_collect then skips the file.
         if state.timed_out {
@@ -1071,14 +1070,7 @@ impl LanguageSpec {
         if !custom_handled {
             // Branch matching → SSA fork/join (handles own children)
             if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
-                self.walk_full_branch(
-                    node,
-                    rule_idx,
-                    state,
-                    sep,
-                    module_prefix,
-                    import_path_resolver,
-                );
+                self.walk_full_branch(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
@@ -1091,14 +1083,7 @@ impl LanguageSpec {
 
             // Loop matching → SSA header/body/exit (handles own children)
             if let Some(&rule_idx) = self.loop_dispatch.get(nk).and_then(|v| v.first()) {
-                self.walk_full_loop(
-                    node,
-                    rule_idx,
-                    state,
-                    sep,
-                    module_prefix,
-                    import_path_resolver,
-                );
+                self.walk_full_loop(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
@@ -1116,8 +1101,7 @@ impl LanguageSpec {
                 .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
-                let ms = state.scope_stack.first().map(|s| s.as_ref());
-                self.evaluate_imports(node, nk, &mut state.imports, ms, sep, import_path_resolver);
+                self.evaluate_imports(node, nk, state, sep);
             }
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
@@ -1360,7 +1344,7 @@ impl LanguageSpec {
 
         // Recurse children
         for child in node.children() {
-            self.walk_full(&child, state, sep, module_prefix, import_path_resolver);
+            self.walk_full(&child, state, sep, module_prefix);
         }
 
         // Clear return context after children
@@ -1394,7 +1378,6 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
         module_prefix: Option<&str>,
-        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         let rule = &self.branches[rule_idx];
         let pre_block = state.current_block;
@@ -1410,7 +1393,7 @@ impl LanguageSpec {
         if let Some(cond_field) = rule.condition_field
             && let Some(cond_node) = node.field(cond_field)
         {
-            self.walk_full(&cond_node, state, sep, module_prefix, import_path_resolver);
+            self.walk_full(&cond_node, state, sep, module_prefix);
         }
 
         let has_catch_all = rule
@@ -1441,7 +1424,7 @@ impl LanguageSpec {
 
                 // Walk arm contents
                 for arm_child in child.children() {
-                    self.walk_full(&arm_child, state, sep, module_prefix, import_path_resolver);
+                    self.walk_full(&arm_child, state, sep, module_prefix);
                 }
 
                 end_blocks.push(state.current_block);
@@ -1452,7 +1435,7 @@ impl LanguageSpec {
                 let is_condition = cond_range.is_some_and(|(s, e)| cs >= s && ce <= e);
                 if !is_condition {
                     state.current_block = pre_block;
-                    self.walk_full(&child, state, sep, module_prefix, import_path_resolver);
+                    self.walk_full(&child, state, sep, module_prefix);
                 }
             }
         }
@@ -1483,7 +1466,6 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
         module_prefix: Option<&str>,
-        import_path_resolver: Option<ImportPathResolverOverride<'_>>,
     ) {
         let rule = &self.loops[rule_idx];
         let pre_block = state.current_block;
@@ -1492,7 +1474,7 @@ impl LanguageSpec {
         if let Some(iter_field) = rule.iter_field
             && let Some(iter_node) = node.field(iter_field)
         {
-            self.walk_full(&iter_node, state, sep, module_prefix, import_path_resolver);
+            self.walk_full(&iter_node, state, sep, module_prefix);
         }
 
         // Header block (NOT sealed yet — back edge comes after body)
@@ -1516,11 +1498,11 @@ impl LanguageSpec {
 
         // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
-            self.walk_full(&body_node, state, sep, module_prefix, import_path_resolver);
+            self.walk_full(&body_node, state, sep, module_prefix);
         } else {
             // No explicit body field — walk all children
             for child in node.children() {
-                self.walk_full(&child, state, sep, module_prefix, import_path_resolver);
+                self.walk_full(&child, state, sep, module_prefix);
             }
         }
 
@@ -1562,6 +1544,7 @@ struct WalkFullState<'a> {
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
+    import_path_resolver: Option<ImportPathResolverOverride<'a>>,
     top_level_depth: usize,
     in_return: bool,
     tracer: &'a Tracer,
@@ -1576,6 +1559,7 @@ impl<'a> WalkFullState<'a> {
         tracer: &'a Tracer,
         file_path: &'a str,
         budget: Option<std::time::Duration>,
+        import_path_resolver: Option<ImportPathResolverOverride<'a>>,
     ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
@@ -1592,6 +1576,7 @@ impl<'a> WalkFullState<'a> {
             pending_refs: Vec::new(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
+            import_path_resolver,
             top_level_depth: 0,
             in_return: false,
             tracer,
