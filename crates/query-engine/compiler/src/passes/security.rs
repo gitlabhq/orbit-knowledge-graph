@@ -234,9 +234,8 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 ///
 /// Each `startsWith` is visible to ClickHouse's PK index analyser, enabling
 /// granule pruning per path prefix. This matters inside `dedup_edge_scan`
-/// subqueries where `argMax GROUP BY` must materialise every matching row:
-/// PK range pruning reduces the scan from the entire LCP namespace to
-/// only the user's authorized paths.
+/// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
+/// namespace to only the user's authorized paths.
 fn path_or_filter(alias: &str, paths: &[String]) -> Expr {
     let mut iter = paths.iter().map(|p| starts_with_expr(alias, p));
     let first = iter.next().expect("paths is non-empty (caller checks)");
