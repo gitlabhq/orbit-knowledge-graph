@@ -168,7 +168,13 @@ class ImportPathCandidatesTest(unittest.TestCase):
     def test_nested_src_candidate(self):
         self.assertEqual(
             rrm._import_path_candidates("src.agent.scoring.score_review"),
-            ["src.agent.scoring", "scoring", "agent.scoring"],
+            ["src.agent.scoring", "agent.scoring", "scoring"],
+        )
+
+    def test_arbitrary_prefix_candidates_use_suffixes(self):
+        self.assertEqual(
+            rrm._import_path_candidates("packages.agent.scoring.score_review"),
+            ["packages.agent.scoring", "agent.scoring", "scoring"],
         )
 
     def test_non_dotted_fqn_has_no_candidates(self):
@@ -211,6 +217,25 @@ class CallersCommandTest(unittest.TestCase):
         self.assertEqual(call_count, 3)
         self.assertIn("target: src.scoring.score_review", output)
         self.assertIn("src.pipeline.run_tier_reviews", output)
+        self.assertNotIn("method not found", output)
+
+    def test_imported_callers_are_reported_without_definition_target(self):
+        output, call_count = self.run_callers([
+            graph([]),
+            graph([]),
+            graph([node(
+                "caller",
+                name="run_tier_reviews",
+                fqn="src.pipeline.run_tier_reviews",
+                file_path="src/pipeline.py",
+                start_line=102,
+                definition_type="Function",
+            )]),
+        ])
+
+        self.assertEqual(call_count, 3)
+        self.assertIn("src.pipeline.run_tier_reviews", output)
+        self.assertIn("included calls that target imported symbols", output)
         self.assertNotIn("method not found", output)
 
     def test_imported_symbol_records_are_last_fallback(self):

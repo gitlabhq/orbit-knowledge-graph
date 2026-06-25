@@ -166,13 +166,7 @@ def _import_path_candidates(fqn: str | None) -> list[str]:
 
     module_path = fqn.rsplit(".", 1)[0]
     parts = module_path.split(".")
-    candidates = [module_path, parts[-1]]
-
-    if len(parts) > 1 and parts[0] in {"src", "lib", "app"}:
-        candidates.append(".".join(parts[1:]))
-
-    seen = set()
-    return [c for c in candidates if c and not (c in seen or seen.add(c))]
+    return [".".join(parts[i:]) for i in range(len(parts))]
 
 
 def _unique_by_id(rows: list[dict]) -> list[dict]:
@@ -620,7 +614,7 @@ def cmd_callers(args: argparse.Namespace) -> None:
     imported_callers: list[dict] = []
     imported_symbols: list[dict] = []
     import_paths = _import_path_candidates(orbit_fqn)
-    if targets and import_paths and not callers:
+    if import_paths and not callers:
         import_filters = {
             **_base_filters(pid, branch),
             "identifier_name": {"op": "eq", "value": method_name},
@@ -660,7 +654,7 @@ def cmd_callers(args: argparse.Namespace) -> None:
 
     print(f"CALLERS — of {raw!r}")
     print("=" * 78)
-    if not targets:
+    if not targets and not imported_callers and not imported_symbols:
         print("(method not found — may not be indexed)")
         if orbit_fqn:
             print(f"  Hint: tried name={method_name!r} with fqn filter. "
