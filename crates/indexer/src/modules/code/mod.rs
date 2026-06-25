@@ -11,6 +11,7 @@ mod handler;
 pub mod metrics;
 pub(crate) mod observer;
 mod pipeline;
+mod writer;
 pub mod repository;
 mod stale_data_cleaner;
 #[cfg(test)]

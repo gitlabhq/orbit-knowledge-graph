@@ -7,7 +7,8 @@ use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
-use super::arrow_converter::{self, IndexerEnvelope};
+use super::arrow_converter::IndexerEnvelope;
+use super::writer;
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -341,7 +342,7 @@ impl CodeIndexingPipeline {
     ) -> Result<
         (
             code_graph::v2::PipelineResult,
-            Vec<arrow_converter::TableWriteTotals>,
+            Vec<writer::TableWriteTotals>,
         ),
         HandlerError,
     > {
@@ -360,11 +361,11 @@ impl CodeIndexingPipeline {
                 &self.ontology,
                 self.table_names.clone(),
             ));
-        let streaming_sink = Arc::new(arrow_converter::StreamingClickHouseSink::new(
+        let streaming_sink = Arc::new(writer::StreamingClickHouseSink::new(
             context.destination.clone(),
             self.pipeline_config.write_channel_capacity,
-            self.pipeline_config.write_slice_rows,
             self.pipeline_config.write_max_concurrent_writes,
+            self.pipeline_config.write_slice_rows,
         ));
         let sink: Arc<dyn code_graph::v2::BatchSink> = streaming_sink.clone();
 
@@ -416,7 +417,7 @@ impl CodeIndexingPipeline {
     fn record_indexing_results(
         &self,
         result: &code_graph::v2::PipelineResult,
-        per_table_writes: &[arrow_converter::TableWriteTotals],
+        per_table_writes: &[writer::TableWriteTotals],
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,
