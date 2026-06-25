@@ -492,7 +492,7 @@
           "minimum": 0
         },
         "write_slice_rows": {
-          "description": "Target rows per ClickHouse insert; the sink combines small per-language batches and splits large ones toward this. Defaults to 500000.",
+          "description": "Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.",
           "type": "integer",
           "format": "uint",
           "default": 500000,
