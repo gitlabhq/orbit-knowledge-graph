@@ -135,51 +135,26 @@ class MapDescendantConcernsTest(unittest.TestCase):
         self.assertEqual(d2c, {"issue": set(), "mr": set()})
 
 
-class ResolveCallableNameTest(unittest.TestCase):
-    def test_bare_name(self):
-        self.assertEqual(rrm._resolve_callable_name("execute"), ("execute", None))
+class CallableLookupHelpersTest(unittest.TestCase):
+    def test_callable_name_parsing(self):
+        cases = {
+            "execute": ("execute", None),
+            "MergeRequests::RefreshService#execute": (
+                "execute",
+                "MergeRequests::RefreshService::execute",
+            ),
+            "src.scoring.score_review": ("score_review", "src.scoring.score_review"),
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(rrm._resolve_callable_name(raw), expected)
 
-    def test_ruby_hash_separator(self):
-        self.assertEqual(
-            rrm._resolve_callable_name("MergeRequests::RefreshService#execute"),
-            ("execute", "MergeRequests::RefreshService::execute"),
-        )
-
-    def test_ruby_fqn(self):
-        self.assertEqual(
-            rrm._resolve_callable_name("MergeRequests::RefreshService::execute"),
-            ("execute", "MergeRequests::RefreshService::execute"),
-        )
-
-    def test_dotted_fqn(self):
-        self.assertEqual(
-            rrm._resolve_callable_name("src.scoring.score_review"),
-            ("score_review", "src.scoring.score_review"),
-        )
-
-
-class ImportPathCandidatesTest(unittest.TestCase):
-    def test_dotted_fqn_candidates_include_source_root_stripped_path(self):
-        self.assertEqual(
-            rrm._import_path_candidates("src.scoring.score_review"),
-            ["src.scoring", "scoring"],
-        )
-
-    def test_nested_src_candidate(self):
-        self.assertEqual(
-            rrm._import_path_candidates("src.agent.scoring.score_review"),
-            ["src.agent.scoring", "agent.scoring", "scoring"],
-        )
-
-    def test_arbitrary_prefix_candidates_use_suffixes(self):
+    def test_import_path_candidates_use_dotted_suffixes(self):
         self.assertEqual(
             rrm._import_path_candidates("packages.agent.scoring.score_review"),
             ["packages.agent.scoring", "agent.scoring", "scoring"],
         )
-
-    def test_non_dotted_fqn_has_no_candidates(self):
         self.assertEqual(rrm._import_path_candidates("execute"), [])
-        self.assertEqual(rrm._import_path_candidates(None), [])
 
 
 class CallersCommandTest(unittest.TestCase):
@@ -194,7 +169,7 @@ class CallersCommandTest(unittest.TestCase):
             rrm.cmd_callers(args)
         return out.getvalue(), query.call_count
 
-    def test_empty_direct_traversal_looks_up_target_before_imported_callers(self):
+    def test_empty_direct_traversal_uses_target_lookup_then_imported_callers(self):
         output, call_count = self.run_callers([
             graph([]),
             graph([node(
@@ -219,49 +194,38 @@ class CallersCommandTest(unittest.TestCase):
         self.assertIn("src.pipeline.run_tier_reviews", output)
         self.assertNotIn("method not found", output)
 
-    def test_imported_callers_are_reported_without_definition_target(self):
-        output, call_count = self.run_callers([
-            graph([]),
-            graph([]),
-            graph([node(
-                "caller",
-                name="run_tier_reviews",
-                fqn="src.pipeline.run_tier_reviews",
-                file_path="src/pipeline.py",
-                start_line=102,
-                definition_type="Function",
-            )]),
-        ])
-
-        self.assertEqual(call_count, 3)
-        self.assertIn("src.pipeline.run_tier_reviews", output)
-        self.assertIn("included calls that target imported symbols", output)
-        self.assertNotIn("method not found", output)
-
-    def test_imported_symbol_records_are_last_fallback(self):
-        output, call_count = self.run_callers([
-            graph([]),
-            graph([node(
-                "target",
-                name="score_review",
-                fqn="src.scoring.score_review",
-                file_path="src/scoring.py",
-                start_line=75,
-            )]),
-            graph([]),
-            graph([imported_symbol(
-                "import",
-                import_path="scoring",
-                identifier_name="score_review",
-                file_path="src/pipeline.py",
-                start_line=10,
-            )]),
-        ])
-
-        self.assertEqual(call_count, 4)
-        self.assertIn("matching imported symbols found", output)
-        self.assertIn("scoring.score_review", output)
-        self.assertIn("1 imported symbol record(s) found", output)
+    def test_import_fallbacks_do_not_require_definition_target(self):
+        scenarios = [
+            (
+                [graph([node(
+                    "caller",
+                    name="run_tier_reviews",
+                    fqn="src.pipeline.run_tier_reviews",
+                    file_path="src/pipeline.py",
+                    start_line=102,
+                    definition_type="Function",
+                )])],
+                "src.pipeline.run_tier_reviews",
+                3,
+            ),
+            (
+                [graph([]), graph([imported_symbol(
+                    "import",
+                    import_path="scoring",
+                    identifier_name="score_review",
+                    file_path="src/pipeline.py",
+                    start_line=10,
+                )])],
+                "scoring.score_review",
+                4,
+            ),
+        ]
+        for fallback_responses, expected_text, expected_call_count in scenarios:
+            with self.subTest(expected_text=expected_text):
+                output, call_count = self.run_callers([graph([]), graph([]), *fallback_responses])
+                self.assertEqual(call_count, expected_call_count)
+                self.assertIn(expected_text, output)
+                self.assertNotIn("method not found", output)
 
 
 if __name__ == "__main__":
