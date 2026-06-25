@@ -7,13 +7,14 @@ use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
-use super::arrow_converter::{self, IndexerEnvelope};
+use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
+use super::writer::{StreamWriter, WriteTotals};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -338,13 +339,7 @@ impl CodeIndexingPipeline {
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         config: PipelineConfig,
-    ) -> Result<
-        (
-            code_graph::v2::PipelineResult,
-            Vec<arrow_converter::TableWriteTotals>,
-        ),
-        HandlerError,
-    > {
+    ) -> Result<(code_graph::v2::PipelineResult, Vec<WriteTotals>), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -354,16 +349,18 @@ impl CodeIndexingPipeline {
             indexed_at,
         );
 
-        let converter: Arc<dyn code_graph::v2::GraphConverter> =
-            Arc::new(arrow_converter::IndexerConverter::new(
-                envelope,
-                &self.ontology,
-                self.table_names.clone(),
-            ));
-        let buffered_sink = Arc::new(arrow_converter::BufferedClickHouseSink::new(
-            context.destination.clone(),
+        let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(IndexerConverter::new(
+            envelope,
+            &self.ontology,
+            self.table_names.clone(),
         ));
-        let sink: Arc<dyn code_graph::v2::BatchSink> = buffered_sink.clone();
+        let (writer, stream_handle) = StreamWriter::new(
+            context.destination.clone(),
+            self.pipeline_config.write_channel_capacity,
+            self.pipeline_config.write_max_concurrent_writes,
+            self.pipeline_config.write_slice_rows,
+        );
+        let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(writer);
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
@@ -389,7 +386,7 @@ impl CodeIndexingPipeline {
         );
 
         let flush_start = Instant::now();
-        let per_table_writes = match buffered_sink.flush().await {
+        let per_table_writes = match stream_handle.finish().await {
             Ok(totals) => totals,
             Err(e) => {
                 return Err(HandlerError::Permanent {
@@ -413,7 +410,7 @@ impl CodeIndexingPipeline {
     fn record_indexing_results(
         &self,
         result: &code_graph::v2::PipelineResult,
-        per_table_writes: &[arrow_converter::TableWriteTotals],
+        per_table_writes: &[WriteTotals],
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,
@@ -508,17 +505,7 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         result: &code_graph::v2::PipelineResult,
     ) {
-        if !request.had_prior_checkpoint {
-            debug!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                traversal_path = request.traversal_path.as_str(),
-                "first-time indexing detected, skipping stale data cleanup"
-            );
-            return;
-        }
-
-        // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
+        // A killed first-time run can leave partial rows that only this sweep removes.
         info!(
             project_id = request.project_id,
             branch = %request.branch,

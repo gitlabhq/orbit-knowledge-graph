@@ -8,16 +8,14 @@
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
+use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
-use parking_lot::RwLock;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-
-use crate::destination::BatchWriterOptions;
 
 /// ClickHouse row envelope. Adds `traversal_path`, `_version`, `_deleted`
 /// around the core node columns.
@@ -713,9 +711,9 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     fn convert(
         &self,
         graph: code_graph::v2::linker::CodeGraph,
-    ) -> Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
+    ) -> Result<Vec<(String, RecordBatch)>, SinkError> {
         let data = convert_code_graph(&graph, &self.envelope, &self.specs)
-            .map_err(|e| code_graph::v2::SinkError(format!("ClickHouse graph conversion: {e}")))?;
+            .map_err(|e| SinkError(format!("ClickHouse graph conversion: {e}")))?;
         let mut result = vec![
             (self.table_names.branch.clone(), data.branch),
             (self.table_names.directory.clone(), data.directories),
@@ -735,15 +733,11 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             let rel_col = data
                 .edges
                 .column_by_name("relationship_kind")
-                .ok_or_else(|| {
-                    code_graph::v2::SinkError("edges batch missing relationship_kind column".into())
-                })?;
+                .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?;
             // The column may be dictionary-encoded (DictStr) or plain Utf8.
             // Cast to StringArray for uniform access.
             let rel_col_str = arrow::compute::cast(rel_col, &arrow::datatypes::DataType::Utf8)
-                .map_err(|e| {
-                    code_graph::v2::SinkError(format!("cast relationship_kind to string: {e}"))
-                })?;
+                .map_err(|e| SinkError(format!("cast relationship_kind to string: {e}")))?;
             let rel_array = rel_col_str.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
@@ -779,7 +773,7 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             for (table, indices) in table_rows {
                 let idx_array = arrow::array::UInt32Array::from(indices);
                 let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
-                    .map_err(|e| code_graph::v2::SinkError(format!("edge routing: {e}")))?;
+                    .map_err(|e| SinkError(format!("edge routing: {e}")))?;
                 if !table.contains("code_edge") {
                     batch = drop_columns(&batch, code_only_cols);
                 }
@@ -804,126 +798,9 @@ fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
     batch.project(&indices).expect("column projection")
 }
 
-/// `BatchSink` for ClickHouse that buffers all batches per table in memory
-/// during pipeline execution, then flushes all tables in parallel via
-/// [`flush()`](BufferedClickHouseSink::flush).
-///
-/// This avoids sequential HTTP round-trips during the CPU-bound pipeline
-/// phase and instead issues one concurrent write per distinct table at the
-/// end. Benchmarking shows a ~3x wall-time improvement over the previous
-/// streaming approach.
-pub struct BufferedClickHouseSink {
-    destination: Arc<dyn crate::destination::Destination>,
-    buffers: RwLock<HashMap<String, Vec<RecordBatch>>>,
-}
-
-impl BufferedClickHouseSink {
-    pub fn new(destination: Arc<dyn crate::destination::Destination>) -> Self {
-        Self {
-            destination,
-            buffers: RwLock::new(HashMap::new()),
-        }
-    }
-
-    /// Flush all buffered tables to ClickHouse in parallel. Each table
-    /// gets a single `insert_arrow_streaming` call with all its batches,
-    /// and all tables are written concurrently. Returns the total rows and
-    /// in-memory bytes written across all tables.
-    pub async fn flush(&self) -> Result<Vec<TableWriteTotals>, code_graph::v2::SinkError> {
-        let buffers = std::mem::take(&mut *self.buffers.write());
-        let mut handles = Vec::new();
-        let mut per_table = Vec::new();
-
-        for (table, batches) in buffers {
-            if batches.is_empty() {
-                continue;
-            }
-            let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-            let bytes: u64 = batches
-                .iter()
-                .map(|b| b.get_array_memory_size() as u64)
-                .sum();
-            per_table.push(TableWriteTotals {
-                table: table.clone(),
-                rows,
-                bytes,
-            });
-            let dest = self.destination.clone();
-            handles.push(tokio::spawn(async move {
-                let writer = dest
-                    .new_batch_writer(&table, BatchWriterOptions::default())
-                    .await
-                    .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
-                writer
-                    .write_batch(&batches)
-                    .await
-                    .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))?;
-                Ok::<(), code_graph::v2::SinkError>(())
-            }));
-        }
-
-        let results = futures::future::join_all(handles).await;
-        for result in results {
-            result.map_err(|e| code_graph::v2::SinkError(format!("flush join: {e}")))??;
-        }
-        Ok(per_table)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TableWriteTotals {
-    pub table: String,
-    pub rows: u64,
-    pub bytes: u64,
-}
-
-impl code_graph::v2::BatchSink for BufferedClickHouseSink {
-    fn write_batch(
-        &self,
-        table: &str,
-        batch: &RecordBatch,
-    ) -> Result<(), code_graph::v2::SinkError> {
-        if batch.num_rows() == 0 {
-            return Ok(());
-        }
-        self.buffers
-            .write()
-            .entry(table.to_string())
-            .or_default()
-            .push(batch.clone());
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn flush_returns_per_table_totals() {
-        use crate::testkit::MockDestination;
-        use arrow::array::Int64Array;
-        use arrow::datatypes::{DataType, Field, Schema};
-        use code_graph::v2::BatchSink;
-        use std::collections::HashMap;
-
-        let sink = BufferedClickHouseSink::new(Arc::new(MockDestination::new()));
-        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
-        let batch =
-            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
-
-        sink.write_batch("gl_file", &batch).unwrap();
-        sink.write_batch("gl_definition", &batch).unwrap();
-
-        let per_table = sink.flush().await.expect("flush should succeed");
-        let by_table: HashMap<&str, &TableWriteTotals> =
-            per_table.iter().map(|t| (t.table.as_str(), t)).collect();
-
-        assert_eq!(by_table.len(), 2);
-        assert_eq!(by_table["gl_file"].rows, 3);
-        assert_eq!(by_table["gl_definition"].rows, 3);
-        assert!(by_table.values().all(|t| t.bytes > 0));
-    }
 
     #[test]
     fn compute_branch_id_is_always_non_negative() {

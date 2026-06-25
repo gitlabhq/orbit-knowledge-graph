@@ -98,6 +98,9 @@ engine:
         cross_file_resolve_timeout_ms: 180000
         job_timeout_secs: 250
         fetch_concurrency: 6
+        write_channel_capacity: 8
+        write_slice_rows: 500000
+        write_max_concurrent_writes: 8
 
 schedule:
   tasks:
