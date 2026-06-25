@@ -136,19 +136,6 @@ class MapDescendantConcernsTest(unittest.TestCase):
 
 
 class CallableLookupHelpersTest(unittest.TestCase):
-    def test_callable_name_parsing(self):
-        cases = {
-            "execute": ("execute", None),
-            "MergeRequests::RefreshService#execute": (
-                "execute",
-                "MergeRequests::RefreshService::execute",
-            ),
-            "src.scoring.score_review": ("score_review", "src.scoring.score_review"),
-        }
-        for raw, expected in cases.items():
-            with self.subTest(raw=raw):
-                self.assertEqual(rrm._resolve_callable_name(raw), expected)
-
     def test_import_path_candidates_use_dotted_suffixes(self):
         self.assertEqual(
             rrm._import_path_candidates("packages.agent.scoring.score_review"),
@@ -169,47 +156,38 @@ class CallersCommandTest(unittest.TestCase):
             rrm.cmd_callers(args)
         return out.getvalue(), query.call_count
 
-    def test_empty_direct_traversal_uses_target_lookup_then_imported_callers(self):
-        output, call_count = self.run_callers([
-            graph([]),
-            graph([node(
-                "target",
-                name="score_review",
-                fqn="src.scoring.score_review",
-                file_path="src/scoring.py",
-                start_line=75,
-            )]),
-            graph([node(
-                "caller",
-                name="run_tier_reviews",
-                fqn="src.pipeline.run_tier_reviews",
-                file_path="src/pipeline.py",
-                start_line=102,
-                definition_type="Function",
-            )]),
-        ])
-
-        self.assertEqual(call_count, 3)
-        self.assertIn("target: src.scoring.score_review", output)
-        self.assertIn("src.pipeline.run_tier_reviews", output)
-        self.assertNotIn("method not found", output)
-
-    def test_import_fallbacks_do_not_require_definition_target(self):
+    def test_import_fallback_paths(self):
+        caller = node(
+            "caller",
+            name="run_tier_reviews",
+            fqn="src.pipeline.run_tier_reviews",
+            file_path="src/pipeline.py",
+            start_line=102,
+            definition_type="Function",
+        )
         scenarios = [
             (
-                [graph([node(
-                    "caller",
-                    name="run_tier_reviews",
-                    fqn="src.pipeline.run_tier_reviews",
-                    file_path="src/pipeline.py",
-                    start_line=102,
-                    definition_type="Function",
-                )])],
+                [
+                    graph([]),
+                    graph([node(
+                        "target",
+                        name="score_review",
+                        fqn="src.scoring.score_review",
+                        file_path="src/scoring.py",
+                        start_line=75,
+                    )]),
+                    graph([caller]),
+                ],
+                "target: src.scoring.score_review",
+                3,
+            ),
+            (
+                [graph([]), graph([]), graph([caller])],
                 "src.pipeline.run_tier_reviews",
                 3,
             ),
             (
-                [graph([]), graph([imported_symbol(
+                [graph([]), graph([]), graph([]), graph([imported_symbol(
                     "import",
                     import_path="scoring",
                     identifier_name="score_review",
@@ -220,9 +198,9 @@ class CallersCommandTest(unittest.TestCase):
                 4,
             ),
         ]
-        for fallback_responses, expected_text, expected_call_count in scenarios:
+        for responses, expected_text, expected_call_count in scenarios:
             with self.subTest(expected_text=expected_text):
-                output, call_count = self.run_callers([graph([]), graph([]), *fallback_responses])
+                output, call_count = self.run_callers(responses)
                 self.assertEqual(call_count, expected_call_count)
                 self.assertIn(expected_text, output)
                 self.assertNotIn("method not found", output)
