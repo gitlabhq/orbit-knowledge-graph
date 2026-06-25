@@ -33,7 +33,7 @@ use std::collections::HashMap;
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
 pub struct CodeIndexingDeps {
-    pub pipeline: Arc<CodeIndexingPipeline>,
+    pub pipeline: Arc<CodeIndexingPipeline<indexer::clickhouse::ClickHouseWriter>>,
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
@@ -72,8 +72,17 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
+        let writer = Arc::new(
+            indexer::clickhouse::ClickHouseWriter::new(
+                clickhouse.config.clone(),
+                Arc::new(indexer::metrics::EngineMetrics::new()),
+            )
+            .expect("writer must build"),
+        );
+
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
+            writer,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
@@ -96,7 +105,52 @@ impl CodeIndexingDeps {
         self.cache_dir.path()
     }
 
-    pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
+    pub fn code_indexing_task_handler_with_writer<
+        W: indexer::destination::TableWriter + 'static,
+    >(
+        &self,
+        writer: Arc<W>,
+    ) -> CodeIndexingTaskHandler<W> {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let table_names =
+            Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
+        let graph_client = Arc::new(self.checkpoint_store.client().clone());
+        let stale_data_cleaner =
+            Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
+
+        let cache_dir = tempfile::TempDir::new().expect("temp dir");
+        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+            cache_dir.path().to_path_buf(),
+            u64::MAX,
+            0,
+            self.metrics.clone(),
+        ));
+        let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
+        let pipeline = Arc::new(CodeIndexingPipeline::new(
+            resolver,
+            writer,
+            Arc::clone(&self.checkpoint_store) as _,
+            stale_data_cleaner,
+            self.metrics.clone(),
+            table_names,
+            Arc::new(ontology),
+            CodeIndexingPipelineConfig::default(),
+            0,
+        ));
+        CodeIndexingTaskHandler::new(
+            pipeline,
+            Arc::clone(&self.repository_service),
+            Arc::clone(&self.checkpoint_store) as _,
+            self.metrics.clone(),
+            std::time::Duration::from_secs(60),
+            CodeIndexingTaskRequest::subscription(),
+            indexer::analytics::IndexingAnalytics::disabled(),
+        )
+    }
+
+    pub fn code_indexing_task_handler(
+        &self,
+    ) -> CodeIndexingTaskHandler<indexer::clickhouse::ClickHouseWriter> {
         CodeIndexingTaskHandler::new(
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),

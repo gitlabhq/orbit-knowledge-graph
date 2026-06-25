@@ -3,15 +3,12 @@ use std::sync::Arc;
 
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
-use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::destination::{BatchWriter, Destination, DestinationError};
+use indexer::destination::{TableWriter, WriteError, WriteReport};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
-use indexer::modules::code::config::CodeTableNames;
-use indexer::modules::code::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
@@ -621,9 +618,10 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
             "public class Other { public void run() {} }",
         )],
     );
-    let (context, indexing_status) = handler_context_with_destination(Arc::new(FailingDestination));
+    let failing_handler = deps.code_indexing_task_handler_with_writer(Arc::new(FailingWriter));
+    let (context, _indexing_status) = handler_context();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
-    let error = handler
+    let error = failing_handler
         .handle(context, envelope)
         .await
         .expect_err("writer failure should fail the task");
@@ -924,44 +922,29 @@ async fn insert_stale_canary_file(
     clickhouse.execute(&sql).await;
 }
 
-struct FailingDestination;
-
-#[async_trait]
-impl Destination for FailingDestination {
-    async fn new_batch_writer(
-        &self,
-        _table: &str,
-        _options: indexer::destination::BatchWriterOptions,
-    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        Ok(Box::new(FailingBatchWriter))
-    }
-}
-
-struct FailingBatchWriter;
-
-#[async_trait]
-impl BatchWriter for FailingBatchWriter {
-    async fn write_batch(&self, _batch: &[RecordBatch]) -> Result<(), DestinationError> {
-        Err(DestinationError::Write(
-            "forced write failure".to_string(),
-            None,
-        ))
-    }
-}
-
-fn handler_context_with_destination(
-    destination: Arc<dyn Destination>,
-) -> (HandlerContext, Arc<IndexingStatusStore>) {
+fn handler_context() -> (HandlerContext, Arc<IndexingStatusStore>) {
     let mock_nats = Arc::new(MockNatsServices::new());
     let indexing_status = Arc::new(IndexingStatusStore::new(mock_nats.clone()));
     let context = HandlerContext::new(
-        destination,
         mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
         indexing_status.clone(),
     );
     (context, indexing_status)
+}
+
+struct FailingWriter;
+
+impl TableWriter for FailingWriter {
+    async fn write(
+        &self,
+        _table: &str,
+        _batches: Vec<RecordBatch>,
+        _durability: Option<indexer::durability::WriteDurability>,
+    ) -> Result<WriteReport, WriteError> {
+        Err(WriteError::Write("forced write failure".to_string(), None))
+    }
 }
 
 async fn latest_checkpoint_task_id(
