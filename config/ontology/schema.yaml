@@ -217,7 +217,11 @@ settings:
     exclude:
       - {node: Note, columns: [st_diff]}
   internal_column_prefix: "_gkg_"
-  skip_security_filter_for_entities: [User, Runner]
+  # Global nodes (no traversal_path) must skip the path-based security filter,
+  # which references traversal_path. Per-row authz still runs via redaction
+  # (Rails RedactionService). The Pm* package-metadata nodes are global like
+  # User/Runner.
+  skip_security_filter_for_entities: [User, Runner, PmAdvisory, PmAffectedPackage, PmCveEnrichment, PmPackage, PmPackageVersion, PmLicense]
   local_db:
     entities:
       - name: Directory
