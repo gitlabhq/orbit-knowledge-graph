@@ -14,7 +14,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use crate::clickhouse::{ClickHouseWriter, WriteReport};
+use crate::clickhouse::WriteReport;
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
