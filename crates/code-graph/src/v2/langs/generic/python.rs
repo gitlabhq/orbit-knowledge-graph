@@ -391,19 +391,21 @@ impl PythonImportPathResolver {
             return None;
         }
 
-        let mut candidates = source_root_candidates(module_scope, sep)
-            .into_iter()
-            .map(|source_root| format!("{source_root}{sep}{raw_path}"))
-            .filter(|candidate| self.importable_paths.contains(candidate))
-            .collect::<Vec<_>>();
-        candidates.sort();
-        candidates.dedup();
-
-        if candidates.len() == 1 {
-            candidates.pop()
-        } else {
-            None
+        let mut candidate = String::with_capacity(module_scope.len() + sep.len() + raw_path.len());
+        let mut resolved = None;
+        for (source_root_end, _) in module_scope.match_indices(sep) {
+            candidate.clear();
+            candidate.push_str(&module_scope[..source_root_end]);
+            candidate.push_str(sep);
+            candidate.push_str(raw_path);
+            if self.importable_paths.contains(candidate.as_str()) {
+                if resolved.is_some() {
+                    return None;
+                }
+                resolved = Some(candidate.clone());
+            }
         }
+        resolved
     }
 }
 
@@ -412,21 +414,14 @@ fn insert_importable_path_prefixes(
     sep: &str,
     importable_paths: &mut rustc_hash::FxHashSet<String>,
 ) {
-    let parts = module
-        .split(sep)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    for end in 1..=parts.len() {
-        importable_paths.insert(parts[..end].join(sep));
+    let mut prefix = String::with_capacity(module.len());
+    for part in module.split(sep).filter(|part| !part.is_empty()) {
+        if !prefix.is_empty() {
+            prefix.push_str(sep);
+        }
+        prefix.push_str(part);
+        importable_paths.insert(prefix.clone());
     }
-}
-
-fn source_root_candidates(module_scope: &str, sep: &str) -> Vec<String> {
-    let parts = module_scope
-        .split(sep)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    (1..parts.len()).map(|end| parts[..end].join(sep)).collect()
 }
 
 /// Resolve Python relative import paths against the current module scope.
