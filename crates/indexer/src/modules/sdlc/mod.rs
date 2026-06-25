@@ -45,17 +45,17 @@ pub async fn register_handlers(
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
 
-    let inputs = plan::input::from_ontology(ontology);
-    let partition_strategies = partitioning::build_strategies(
-        &inputs,
-        &entity_handler_config.partition_overrides,
-        entity_handler_config.partition_min_rows,
-    );
-    let plans = plan::build_plans(
+    let (inputs, plans) = plan::compile(
         ontology,
         entity_handler_config.datalake_batch_size,
         entity_handler_config.datalake_batch_size,
         &entity_handler_config.batch_size_overrides,
+    )
+    .into_parts();
+    let partition_strategies = partitioning::build_strategies(
+        &inputs,
+        &entity_handler_config.partition_overrides,
+        entity_handler_config.partition_min_rows,
     );
 
     let mut transform_registry = transform::TransformRegistry::default();
@@ -147,27 +147,31 @@ mod tests {
     use super::*;
     use ontology::Ontology;
 
+    fn runtime_plans(ontology: &Ontology) -> plan::Plans {
+        plan::compile(ontology, 1000, 1000, &Default::default()).into_plans()
+    }
+
     #[test]
-    fn build_plans_returns_global_entities() {
+    fn compile_returns_global_entities() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+        let plans = runtime_plans(&ontology);
         let names: Vec<_> = plans.global.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"User"));
     }
 
     #[test]
-    fn build_plans_returns_namespaced_entities() {
+    fn compile_returns_namespaced_entities() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+        let plans = runtime_plans(&ontology);
         let names: Vec<_> = plans.namespaced.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"Group"));
         assert!(names.contains(&"Project"));
     }
 
     #[test]
-    fn build_plans_wires_system_note_derived_entity_as_extract_only_plan() {
+    fn compile_wires_system_note_derived_entity_as_source_query_only_plan() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+        let plans = runtime_plans(&ontology);
 
         let system_note = plans
             .namespaced

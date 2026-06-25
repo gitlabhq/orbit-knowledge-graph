@@ -8,7 +8,7 @@ use tracing::{debug, warn};
 use crate::handler::HandlerError;
 
 use super::datalake::DatalakeQuery;
-use super::plan::input::PlanInput;
+use super::plan::input::EtlInputs;
 
 /// The probe derives its bucket width from the id span to land near this count;
 /// a fixed width would collapse a narrow id range into a single bucket.
@@ -42,7 +42,7 @@ pub(in crate::modules::sdlc) struct PartitionStrategy {
 }
 
 pub(in crate::modules::sdlc) fn build_strategies(
-    inputs: &PlanInput,
+    inputs: &EtlInputs,
     overrides: &HashMap<String, u32>,
     min_rows: u64,
 ) -> HashMap<String, PartitionStrategy> {
@@ -497,20 +497,20 @@ mod tests {
     #[test]
     fn build_strategies_resolves_composite_key_for_overridden_entities() {
         use crate::modules::sdlc::plan::input::{
-            ExtractColumn, ExtractPlan, ExtractSource, NodePlan,
+            NodePlan, SourceColumn, SourceFrom, SourceQuerySpec,
         };
         use ontology::EtlScope;
 
-        let inputs = PlanInput {
+        let inputs = EtlInputs {
             node_plans: vec![NodePlan {
                 name: "User".to_string(),
                 scope: EtlScope::Global,
                 columns: vec![],
                 edges: vec![],
-                extract: ExtractPlan {
+                extract: SourceQuerySpec {
                     destination_table: "gl_user".to_string(),
-                    columns: vec![ExtractColumn::Bare("id".to_string())],
-                    source: ExtractSource::Table("siphon_users".to_string()),
+                    columns: vec![SourceColumn::Bare("id".to_string())],
+                    source: SourceFrom::Table("siphon_users".to_string()),
                     base_table: "siphon_users".to_string(),
                     watermark: "_siphon_watermark".to_string(),
                     deleted: "_siphon_deleted".to_string(),

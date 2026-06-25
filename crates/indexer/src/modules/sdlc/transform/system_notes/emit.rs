@@ -21,9 +21,7 @@ use super::resolve::ResolvedTarget;
 /// Source-entity kind of a system note. Derived from `siphon_notes.noteable_type`.
 ///
 /// Rails uses an STI discriminator with these string values. We collapse
-/// the `Issue` family into `WorkItem` to match the upstream graph schema
-/// (see `lower_edge_kind` precedent in
-/// `crates/indexer/src/modules/sdlc/plan/lower.rs`).
+/// the `Issue` family into `WorkItem` to match the upstream graph schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteableKind {
     MergeRequest,
@@ -36,9 +34,7 @@ impl NoteableKind {
         Some(match noteable_type {
             "MergeRequest" => Self::MergeRequest,
             // Rails ships Issue, Epic, WorkItem, Task all as work-item-like
-            // noteable_type strings. The graph collapses them to WorkItem,
-            // mirroring the `lower_edge_kind` mapping for HAS_NOTE in
-            // `modules/sdlc/plan/lower.rs`.
+            // noteable_type strings. The graph collapses them to WorkItem.
             "Issue" | "WorkItem" | "Epic" | "Task" => Self::WorkItem,
             "Commit" => Self::Commit,
             _ => return None,

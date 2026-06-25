@@ -1,5 +1,8 @@
+pub(crate) mod assemble;
+pub(crate) mod compiler;
 pub(crate) mod input;
-pub(crate) mod lower;
+mod projection;
+mod source_query;
 
 use std::collections::HashSet;
 
@@ -348,19 +351,33 @@ pub(in crate::modules::sdlc) struct Plans {
     pub namespaced: Vec<Plan>,
 }
 
-pub(in crate::modules::sdlc) fn build_plans(
+pub(in crate::modules::sdlc) struct CompiledEtl {
+    pub inputs: input::EtlInputs,
+    pub plans: Plans,
+}
+
+impl CompiledEtl {
+    pub(in crate::modules::sdlc) fn into_parts(self) -> (input::EtlInputs, Plans) {
+        (self.inputs, self.plans)
+    }
+
+    #[cfg(test)]
+    pub(in crate::modules::sdlc) fn into_plans(self) -> Plans {
+        self.plans
+    }
+}
+
+pub(in crate::modules::sdlc) fn compile(
     ontology: &ontology::Ontology,
     global_batch_size: u64,
     namespaced_batch_size: u64,
     batch_size_overrides: &std::collections::HashMap<String, u64>,
-) -> Plans {
-    lower::lower(
-        input::from_ontology(ontology),
-        ontology,
-        global_batch_size,
-        namespaced_batch_size,
-        batch_size_overrides,
-    )
+) -> CompiledEtl {
+    compiler::EtlCompiler::new(ontology)
+        .with_global_batch_size(global_batch_size)
+        .with_namespaced_batch_size(namespaced_batch_size)
+        .with_batch_size_overrides(batch_size_overrides)
+        .compile()
 }
 
 #[cfg(test)]

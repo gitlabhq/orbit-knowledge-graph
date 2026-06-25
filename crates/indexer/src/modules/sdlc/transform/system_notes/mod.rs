@@ -139,8 +139,8 @@ pub(in crate::modules::sdlc) fn register(
 ) {
     // Every write path targets the current schema version's table-set, so the
     // hand-written transform must prefix its destination exactly like the
-    // lowered DataFusion plans do (`lower.rs`); a bare `gl_edge` writes to the
-    // wrong (unprefixed) table.
+    // generated projection SQL; a bare `gl_edge` writes to the wrong
+    // (unprefixed) table.
     let edge_table = prefixed_table_name(edge_table, *SCHEMA_VERSION);
     let factory: TransformFactory = Box::new(move |_plan| {
         Arc::new(SystemNotesTransform::new(

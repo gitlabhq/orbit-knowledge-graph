@@ -481,7 +481,7 @@ impl Handler for EntityHandler {
 mod tests {
     use super::*;
 
-    use crate::modules::sdlc::plan::build_plans;
+    use crate::modules::sdlc::plan::compile;
     use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
@@ -502,7 +502,7 @@ mod tests {
 
     fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
+        let plans = compile(&ontology, 1000, 1000, &Default::default()).into_plans();
         let scope_plans = match scope {
             EtlScope::Global => plans.global,
             EtlScope::Namespaced => plans.namespaced,

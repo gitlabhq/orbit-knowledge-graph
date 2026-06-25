@@ -7,10 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
-// CTE fragments for standalone-edge enrichment. lower::render_cte_template
-// stitches them into `WITH _batch AS (...) ... LEFT JOIN` so each endpoint
-// does a point lookup (`id IN (SELECT DISTINCT fk FROM _batch)`) rather
-// than a full namespace scan.
+// CTE fragments for standalone-edge enrichment. Source-query rendering stitches
+// them into `WITH _batch AS (...) ... LEFT JOIN` so each endpoint does a point
+// lookup (`id IN (SELECT DISTINCT fk FROM _batch)`) rather than a full namespace
+// scan.
+#[derive(Clone)]
 pub(in crate::modules::sdlc) struct EnrichmentSql {
     pub cte_defs: Vec<String>,
     pub join_clauses: Vec<String>,
@@ -18,6 +19,7 @@ pub(in crate::modules::sdlc) struct EnrichmentSql {
 }
 
 /// A node property to project onto the edge row during transform.
+#[derive(Clone)]
 pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
     /// Column in the source MemTable (e.g. "status").
     pub source_column: String,
@@ -29,7 +31,8 @@ pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
     pub enum_mapping: Option<BTreeMap<i64, String>>,
 }
 
-pub(in crate::modules::sdlc) struct PlanInput {
+#[derive(Clone)]
+pub(in crate::modules::sdlc) struct EtlInputs {
     pub node_plans: Vec<NodePlan>,
     pub standalone_edge_plans: Vec<StandaloneEdgePlan>,
     pub derived_entity_plans: Vec<DerivedEntityPlan>,
@@ -38,21 +41,24 @@ pub(in crate::modules::sdlc) struct PlanInput {
 /// An edge-producing derived entity whose transform is a Rust implementation
 /// resolved from the registry. Carries only the extract; it has no node
 /// columns and no declarative transform.
+#[derive(Clone)]
 pub(in crate::modules::sdlc) struct DerivedEntityPlan {
     pub name: String,
     pub scope: EtlScope,
     pub transform: String,
-    pub extract: ExtractPlan,
+    pub extract: SourceQuerySpec,
 }
 
+#[derive(Clone)]
 pub(in crate::modules::sdlc) struct NodePlan {
     pub name: String,
     pub scope: EtlScope,
     pub columns: Vec<NodeColumn>,
     pub edges: Vec<FkEdgeTransform>,
-    pub extract: ExtractPlan,
+    pub extract: SourceQuerySpec,
 }
 
+#[derive(Clone)]
 pub(in crate::modules::sdlc) enum NodeColumn {
     Identity(String),
     Rename {
@@ -69,6 +75,7 @@ pub(in crate::modules::sdlc) enum NodeColumn {
 
 /// An FK edge is derived from the same source data as its parent node.
 /// It produces edge rows by reading FK columns from the already-extracted batch.
+#[derive(Clone)]
 pub(in crate::modules::sdlc) struct FkEdgeTransform {
     pub relationship_kind: String,
     pub source_id: EdgeId,
@@ -84,6 +91,7 @@ pub(in crate::modules::sdlc) struct FkEdgeTransform {
 }
 
 /// A standalone edge has its own dedicated source table and extraction.
+#[derive(Clone)]
 pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub relationship_kind: String,
     pub scope: EtlScope,
@@ -93,12 +101,13 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub target_kind: EdgeKind,
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
-    pub extract: ExtractPlan,
+    pub extract: SourceQuerySpec,
     /// Node properties projected onto the edge row (denormalized).
     /// Empty for standalone edges (join table lacks node properties).
     pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
+#[derive(Clone)]
 pub(in crate::modules::sdlc) enum EdgeId {
     Column(String),
     Exploded { column: String, delimiter: String },
@@ -106,6 +115,7 @@ pub(in crate::modules::sdlc) enum EdgeId {
     ArrayUnnest { column: String },
 }
 
+#[derive(Clone)]
 pub(in crate::modules::sdlc) enum EdgeKind {
     Literal(String),
     Column {
@@ -114,6 +124,7 @@ pub(in crate::modules::sdlc) enum EdgeKind {
     },
 }
 
+#[derive(Clone)]
 pub(in crate::modules::sdlc) enum EdgeFilter {
     IsNotNull(String),
     NotEmpty(String),
@@ -121,10 +132,11 @@ pub(in crate::modules::sdlc) enum EdgeFilter {
     TypeIn { column: String, types: Vec<String> },
 }
 
-pub(in crate::modules::sdlc) struct ExtractPlan {
+#[derive(Clone)]
+pub(in crate::modules::sdlc) struct SourceQuerySpec {
     pub destination_table: String,
-    pub columns: Vec<ExtractColumn>,
-    pub source: ExtractSource,
+    pub columns: Vec<SourceColumn>,
+    pub source: SourceFrom,
     pub base_table: String,
     pub watermark: String,
     pub deleted: String,
@@ -132,13 +144,14 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     pub namespaced: bool,
     pub traversal_path_filter: Option<String>,
     pub additional_where: Option<String>,
-    /// CTE-based enrichment for standalone edges. When set, the lowering
+    /// CTE-based enrichment for standalone edges. When set, source query rendering
     /// wraps the base query in a `_batch` CTE and appends enrichment CTEs
     /// that do point lookups by FK, avoiding full namespace scans.
     pub enrichment: Option<EnrichmentSql>,
 }
 
-pub(in crate::modules::sdlc) enum ExtractColumn {
+#[derive(Clone)]
+pub(in crate::modules::sdlc) enum SourceColumn {
     Bare(String),
     ToString(String),
     /// Postgres `date` is wider than ClickHouse `Date32` (1900-01-01..2299-12-31).
@@ -147,22 +160,23 @@ pub(in crate::modules::sdlc) enum ExtractColumn {
     DateClamp(String),
 }
 
-impl ExtractColumn {
+impl SourceColumn {
     fn name(&self) -> &str {
         match self {
-            ExtractColumn::Bare(name)
-            | ExtractColumn::ToString(name)
-            | ExtractColumn::DateClamp(name) => name,
+            SourceColumn::Bare(name)
+            | SourceColumn::ToString(name)
+            | SourceColumn::DateClamp(name) => name,
         }
     }
 }
 
-pub(in crate::modules::sdlc) enum ExtractSource {
+#[derive(Clone)]
+pub(in crate::modules::sdlc) enum SourceFrom {
     Table(String),
     Raw(String),
 }
 
-pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput {
+pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> EtlInputs {
     let mut node_plans = Vec::new();
     let mut standalone_edge_plans = Vec::new();
     let mut derived_entity_plans = Vec::new();
@@ -180,7 +194,7 @@ pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput 
         derived_entity_plans.push(resolve_derived_entity(derived));
     }
 
-    PlanInput {
+    EtlInputs {
         node_plans,
         standalone_edge_plans,
         derived_entity_plans,
@@ -190,7 +204,7 @@ pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput 
 /// A derived entity has no node/edge destination of its own; the Rust transform
 /// owns its outputs. Only the extract is derived from the ontology.
 fn resolve_derived_entity(derived: &DerivedEntity) -> DerivedEntityPlan {
-    let extract = build_extract_plan(&derived.etl, Vec::new(), "");
+    let extract = source_query(&derived.etl, Vec::new(), "");
     DerivedEntityPlan {
         name: derived.name.clone(),
         scope: derived.etl.scope(),
@@ -205,22 +219,22 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
 
     let edges = resolve_fk_edges(etl, &node.name, namespaced, ontology);
 
-    let mut node_columns: Vec<ExtractColumn> = node
+    let mut node_columns: Vec<SourceColumn> = node
         .fields
         .iter()
         .filter_map(|field| {
             let col = field.column_name()?;
             Some(match &field.data_type {
-                DataType::Uuid => ExtractColumn::ToString(col.to_string()),
-                DataType::Date => ExtractColumn::DateClamp(col.to_string()),
-                _ => ExtractColumn::Bare(col.to_string()),
+                DataType::Uuid => SourceColumn::ToString(col.to_string()),
+                DataType::Date => SourceColumn::DateClamp(col.to_string()),
+                _ => SourceColumn::Bare(col.to_string()),
             })
         })
         .collect();
 
-    // FK edge transforms read from the same extracted batch, so their columns
-    // (FK id, type discriminator, traversal_path) must be in the extract too.
-    let extra_fk_columns = collect_fk_extract_columns(etl, namespaced);
+    // FK edge transforms read from the same source batch, so their columns
+    // (FK id, type discriminator, traversal_path) must be selected too.
+    let extra_fk_columns = collect_fk_source_columns(etl, namespaced);
     append_missing(&mut node_columns, &extra_fk_columns);
 
     let node_destination = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
@@ -229,13 +243,13 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
         scope,
         columns: resolve_node_columns(&node.fields),
         edges,
-        extract: build_extract_plan(etl, node_columns, &node_destination),
+        extract: source_query(etl, node_columns, &node_destination),
     }
 }
 
 /// Collects all extra column names that FK edge transforms need beyond the
-/// node's own fields. This ensures the extract query includes them.
-fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> BTreeSet<String> {
+/// node's own fields. This ensures the source query includes them.
+fn collect_fk_source_columns(etl: &EtlConfig, namespaced: bool) -> BTreeSet<String> {
     let mut columns = BTreeSet::from(["id".to_string()]);
 
     for (fk_column, mapping) in etl.edge_mappings() {
@@ -448,26 +462,26 @@ fn resolve_standalone_edge(
         filters.push(f);
     }
 
-    let mut extract_columns = vec![
-        ExtractColumn::Bare(config.from.id_column.clone()),
-        ExtractColumn::Bare(config.to.id_column.clone()),
+    let mut source_columns = vec![
+        SourceColumn::Bare(config.from.id_column.clone()),
+        SourceColumn::Bare(config.to.id_column.clone()),
     ];
     if let EdgeEndpointType::Column { column, .. } = &config.from.node_type {
-        append_missing(&mut extract_columns, std::iter::once(column));
+        append_missing(&mut source_columns, std::iter::once(column));
     }
     if let EdgeEndpointType::Column { column, .. } = &config.to.node_type {
-        append_missing(&mut extract_columns, std::iter::once(column));
+        append_missing(&mut source_columns, std::iter::once(column));
     }
-    append_missing(&mut extract_columns, &config.order_by);
+    append_missing(&mut source_columns, &config.order_by);
 
     if namespaced {
         append_missing(
-            &mut extract_columns,
+            &mut source_columns,
             std::iter::once(&TRAVERSAL_PATH_COLUMN.to_string()),
         );
     }
 
-    // Build CTE-based enrichment for endpoint columns declared in the ETL config.
+    // Create CTE-based enrichment for endpoint columns declared in the ETL config.
     // Each endpoint can request extra columns from its node's datalake table.
     // Instead of a LEFT JOIN that scans the entire namespace, we wrap the base
     // query in a _batch CTE and build enrichment CTEs that do point lookups
@@ -562,8 +576,8 @@ fn resolve_standalone_edge(
     let enrichment = if cte_defs.is_empty() {
         None
     } else {
-        // Don't add enriched columns to extract_columns -- they'll be projected
-        // in the outer SELECT by the lowering via EnrichmentSql.select_exprs.
+        // Don't add enriched columns to source_columns -- they'll be projected
+        // in the outer SELECT from EnrichmentSql.select_exprs.
         Some(EnrichmentSql {
             cte_defs,
             join_clauses,
@@ -571,7 +585,7 @@ fn resolve_standalone_edge(
         })
     };
 
-    let source = ExtractSource::Table(config.source.clone());
+    let source = SourceFrom::Table(config.source.clone());
     let base_table = config.source.clone();
     let order_by = config.order_by.clone();
     let watermark = config.watermark.clone();
@@ -588,9 +602,9 @@ fn resolve_standalone_edge(
         filters,
         namespaced,
         denormalized_columns,
-        extract: ExtractPlan {
+        extract: SourceQuerySpec {
             destination_table: edge_table,
-            columns: extract_columns,
+            columns: source_columns,
             source,
             base_table,
             watermark,
@@ -617,8 +631,8 @@ fn resolve_endpoint(
             type_mapping,
         } => {
             // The TypeIn filter runs in the source table before the CASE in
-            // `lower_edge_kind` rewrites raw Rails values to ontology names.
-            // Include mapping source values so polymorphic rows survive.
+            // The projection renderer rewrites raw Rails values to ontology
+            // names. Include mapping source values so polymorphic rows survive.
             let mut filter_types = resolve_allowed_types();
             for raw in type_mapping.keys() {
                 if !filter_types.iter().any(|t| t == raw) {
@@ -642,11 +656,11 @@ fn resolve_endpoint(
     }
 }
 
-fn build_extract_plan(
+fn source_query(
     etl: &EtlConfig,
-    table_columns: Vec<ExtractColumn>,
+    table_columns: Vec<SourceColumn>,
     destination_table: &str,
-) -> ExtractPlan {
+) -> SourceQuerySpec {
     let namespaced = etl.scope() == EtlScope::Namespaced;
 
     match etl {
@@ -672,10 +686,10 @@ fn build_extract_plan(
             let mut columns = table_columns;
             append_missing(&mut columns, &order_by);
 
-            ExtractPlan {
+            SourceQuerySpec {
                 destination_table: destination_table.to_string(),
                 columns,
-                source: ExtractSource::Table(source.clone()),
+                source: SourceFrom::Table(source.clone()),
                 base_table: source.clone(),
                 watermark: watermark.clone(),
                 deleted: deleted.clone(),
@@ -698,9 +712,9 @@ fn build_extract_plan(
             page_join,
             ..
         } => {
-            let mut columns: Vec<ExtractColumn> = select
+            let mut columns: Vec<SourceColumn> = select
                 .split(", ")
-                .map(|s| ExtractColumn::Bare(s.trim().to_string()))
+                .map(|s| SourceColumn::Bare(s.trim().to_string()))
                 .collect();
             append_missing(&mut columns, order_by);
 
@@ -749,10 +763,10 @@ fn build_extract_plan(
                 }
             });
 
-            ExtractPlan {
+            SourceQuerySpec {
                 destination_table: destination_table.to_string(),
                 columns,
-                source: ExtractSource::Raw(from.clone()),
+                source: SourceFrom::Raw(from.clone()),
                 base_table: source.clone(),
                 watermark: watermark.clone(),
                 deleted: deleted.clone(),
@@ -766,7 +780,7 @@ fn build_extract_plan(
     }
 }
 
-fn append_missing<'a, I>(columns: &mut Vec<ExtractColumn>, names: I)
+fn append_missing<'a, I>(columns: &mut Vec<SourceColumn>, names: I)
 where
     I: IntoIterator<Item = &'a String>,
 {
@@ -778,7 +792,7 @@ where
                 || col_name.ends_with(&format!(".{name}"))
         });
         if !already_present {
-            columns.push(ExtractColumn::Bare(name.clone()));
+            columns.push(SourceColumn::Bare(name.clone()));
         }
     }
 }
@@ -787,7 +801,7 @@ where
 mod tests {
     use super::*;
 
-    fn find_column<'a>(plan: &'a NodePlan, name: &str) -> Option<&'a ExtractColumn> {
+    fn find_column<'a>(plan: &'a NodePlan, name: &str) -> Option<&'a SourceColumn> {
         plan.extract.columns.iter().find(|c| c.name() == name)
     }
 
@@ -803,12 +817,12 @@ mod tests {
             .expect("WorkItem plan should exist");
         let due = find_column(work_item, "due_date").expect("WorkItem due_date column");
         assert!(
-            matches!(due, ExtractColumn::DateClamp(_)),
+            matches!(due, SourceColumn::DateClamp(_)),
             "WorkItem.due_date must be DateClamp, got different variant"
         );
         let start = find_column(work_item, "start_date").expect("WorkItem start_date column");
         assert!(
-            matches!(start, ExtractColumn::DateClamp(_)),
+            matches!(start, SourceColumn::DateClamp(_)),
             "WorkItem.start_date must be DateClamp"
         );
 
@@ -819,12 +833,12 @@ mod tests {
             .expect("Milestone plan should exist");
         let due = find_column(milestone, "due_date").expect("Milestone due_date column");
         assert!(
-            matches!(due, ExtractColumn::DateClamp(_)),
+            matches!(due, SourceColumn::DateClamp(_)),
             "Milestone.due_date must be DateClamp"
         );
         let start = find_column(milestone, "start_date").expect("Milestone start_date column");
         assert!(
-            matches!(start, ExtractColumn::DateClamp(_)),
+            matches!(start, SourceColumn::DateClamp(_)),
             "Milestone.start_date must be DateClamp"
         );
     }
@@ -1008,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_emit_fk_does_not_duplicate_extract_columns() {
+    fn multi_emit_fk_does_not_duplicate_source_columns() {
         use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
         use std::collections::BTreeMap;
 
@@ -1046,7 +1060,7 @@ mod tests {
             edges: edges_map,
         };
 
-        let columns = collect_fk_extract_columns(&etl, true);
+        let columns = collect_fk_source_columns(&etl, true);
         let commit_id_count = columns.iter().filter(|c| c.as_str() == "commit_id").count();
         assert_eq!(
             commit_id_count, 1,

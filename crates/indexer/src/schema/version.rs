@@ -34,7 +34,7 @@ const VERSION_TABLE: &str = "gkg_schema_version";
 ///   stores the string value and old rows become invisible to the new compiler
 /// - ETL mapping changes (column renames, enum value changes, FK rewiring)
 ///
-/// The ETL pipeline is fully ontology-driven (`PlanInput` is built from
+/// The ETL pipeline is fully ontology-driven (`EtlInputs` is built from
 /// `&Ontology`), so all data-affecting changes are ontology YAML changes and
 /// the CI `schema-version-check` job catches them automatically.
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
