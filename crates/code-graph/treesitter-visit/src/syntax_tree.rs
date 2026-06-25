@@ -22,24 +22,19 @@ const NO_PARENT: u32 = u32::MAX;
 
 // ── SyntaxNode ──────────────────────────────────────────────────
 
-/// A single node in the arena. Real nodes point into source; virtual
-/// nodes carry their own text.
+/// A single node in the arena. Real nodes slice text from source;
+/// virtual nodes carry their own text in `virtual_text`.
+/// Line/column positions are derived from byte offsets on demand.
 pub struct SyntaxNode {
     kind: SmolStr,
-    is_named: bool,
+    /// Byte offset into source (or parent's range for virtual nodes).
     start_byte: u32,
     end_byte: u32,
-    start_row: u32,
-    start_col: u32,
-    end_row: u32,
-    end_col: u32,
     parent: u32,
     children: SmallVec<[NodeId; 6]>,
-    /// Field-name → child index. Only populated for children that have
-    /// a grammar field name (e.g. `name`, `body`, `arguments`).
     fields: SmallVec<[(&'static str, NodeId); 4]>,
-    /// Virtual nodes store their text here. Real nodes slice from source.
     virtual_text: Option<SmolStr>,
+    is_named: bool,
 }
 
 // ── SyntaxTree ──────────────────────────────────────────────────
@@ -69,22 +64,16 @@ impl SyntaxTree {
             let ts = cursor.node();
             let id = nodes.len() as NodeId;
             let parent = parent_stack.last().copied().unwrap_or(NO_PARENT);
-            let start = ts.start_position();
-            let end = ts.end_position();
 
             nodes.push(SyntaxNode {
                 kind: SmolStr::new(ts.kind()),
-                is_named: ts.is_named(),
                 start_byte: ts.start_byte() as u32,
                 end_byte: ts.end_byte() as u32,
-                start_row: start.row as u32,
-                start_col: start.column as u32,
-                end_row: end.row as u32,
-                end_col: end.column as u32,
                 parent,
                 children: SmallVec::new(),
                 fields: SmallVec::new(),
                 virtual_text: None,
+                is_named: ts.is_named(),
             });
 
             if parent != NO_PARENT {
@@ -234,29 +223,18 @@ impl SyntaxTree {
     /// Returns the new node's ID.
     pub fn insert_child(&mut self, parent: NodeId, kind: &str, text: &str) -> NodeId {
         let p = self.node(parent);
-        let (sb, eb, sr, sc, er, ec) = (
-            p.start_byte,
-            p.end_byte,
-            p.start_row,
-            p.start_col,
-            p.end_row,
-            p.end_col,
-        );
+        let (sb, eb) = (p.start_byte, p.end_byte);
 
         let id = self.nodes.len() as NodeId;
         self.nodes.push(SyntaxNode {
             kind: SmolStr::new(kind),
-            is_named: true,
             start_byte: sb,
             end_byte: eb,
-            start_row: sr,
-            start_col: sc,
-            end_row: er,
-            end_col: ec,
             parent,
             children: SmallVec::new(),
             fields: SmallVec::new(),
             virtual_text: Some(SmolStr::new(text)),
+            is_named: true,
         });
         self.nodes[parent as usize].children.push(id);
         id
@@ -298,6 +276,20 @@ impl SyntaxTree {
 }
 
 // ── SgNode implementation ───────────────────────────────────────
+
+fn byte_to_row_col(src: &[u8], byte: usize) -> (usize, usize) {
+    let mut row = 0;
+    let mut col = 0;
+    for &b in &src[..byte.min(src.len())] {
+        if b == b'\n' {
+            row += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    (row, col)
+}
 
 /// Lightweight reference into a [`SyntaxTree`].
 #[derive(Clone, Copy)]
@@ -342,16 +334,14 @@ impl<'a> SgNode<'a> for SyntaxNodeRef<'a> {
 
     fn start_pos(&self) -> Position {
         let n = self.tree.node(self.id);
-        Position::new(
-            n.start_row as usize,
-            n.start_col as usize,
-            n.start_byte as usize,
-        )
+        let (row, col) = byte_to_row_col(self.tree.source.as_bytes(), n.start_byte as usize);
+        Position::new(row, col, n.start_byte as usize)
     }
 
     fn end_pos(&self) -> Position {
         let n = self.tree.node(self.id);
-        Position::new(n.end_row as usize, n.end_col as usize, n.end_byte as usize)
+        let (row, col) = byte_to_row_col(self.tree.source.as_bytes(), n.end_byte as usize);
+        Position::new(row, col, n.end_byte as usize)
     }
 
     fn is_named(&self) -> bool {
@@ -440,17 +430,13 @@ impl Clone for SyntaxTree {
                 .iter()
                 .map(|n| SyntaxNode {
                     kind: n.kind.clone(),
-                    is_named: n.is_named,
                     start_byte: n.start_byte,
                     end_byte: n.end_byte,
-                    start_row: n.start_row,
-                    start_col: n.start_col,
-                    end_row: n.end_row,
-                    end_col: n.end_col,
                     parent: n.parent,
                     children: n.children.clone(),
                     fields: n.fields.clone(),
                     virtual_text: n.virtual_text.clone(),
+                    is_named: n.is_named,
                 })
                 .collect(),
             root: self.root,
