@@ -85,15 +85,13 @@ impl HandlerInitError {
     }
 }
 
-/// Context provided to handlers during message processing.
-///
-/// Contains shared resources that handlers need to process messages
-/// and write results.
 #[derive(Clone)]
 pub struct HandlerContext {
     pub nats: Arc<dyn NatsServices>,
     pub lock_service: Arc<dyn LockService>,
+    /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
+    /// Records indexing run progress to NATS KV for `GetGraphStatus`.
     pub indexing_status: Arc<IndexingStatusStore>,
 }
 

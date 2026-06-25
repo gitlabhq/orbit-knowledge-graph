@@ -437,6 +437,7 @@ async fn subject_is_unblocked_after_handler_panic() {
     let should_panic = Arc::new(AtomicBool::new(true));
     let writer = context.create_writer();
 
+    // Phase 1: the handler panics; the engine should term-ack, freeing the subject slot.
     {
         let broker = context.create_broker_with_config(nats_config.clone()).await;
 
@@ -475,6 +476,7 @@ async fn subject_is_unblocked_after_handler_panic() {
         "panicked message should not be written"
     );
 
+    // Phase 2: subject slot is free; a non-panicking handler processes the next message.
     should_panic.store(false, Ordering::SeqCst);
 
     let broker = context.create_broker_with_config(nats_config).await;

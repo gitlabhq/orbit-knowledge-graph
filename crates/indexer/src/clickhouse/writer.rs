@@ -28,6 +28,9 @@ pub struct WriteReport {
     pub bytes: u64,
 }
 
+/// No internal throttling. Backpressure comes from the message source (NATS ack window,
+/// channel capacity). Handlers control batch sizes per entity; self-managed deployments
+/// with limited memory should watch ClickHouse's query queue.
 #[derive(Clone)]
 pub struct ClickHouseWriter {
     client: ArrowClickHouseClient,
@@ -47,6 +50,7 @@ impl ClickHouseWriter {
     }
 }
 
+/// Both variants pin `async_insert` so the many small per-page inserts coalesce into fewer parts.
 fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'static str)] {
     match durability {
         WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],

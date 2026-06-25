@@ -211,6 +211,7 @@ impl Pipeline {
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
 
+            // Overlap the next page's read with this page's writes; peak memory is roughly two pages.
             let (write_elapsed, next_page) = if has_more {
                 let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor);
                 let (write_result, extract_result) = tokio::join!(
