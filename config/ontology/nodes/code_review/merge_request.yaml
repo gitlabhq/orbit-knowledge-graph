@@ -471,11 +471,7 @@ etl:
   deleted: m.{{deleted_column}}
   traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
   order_by: [traversal_path, id]
-  source_tables:
-    - table: merge_requests
-    - table: siphon_merge_request_metrics
-    - table: siphon_merge_request_reviewers
-    - table: siphon_approvals
+  reindex_on: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
   edges:
     target_project_id:
       to: Project

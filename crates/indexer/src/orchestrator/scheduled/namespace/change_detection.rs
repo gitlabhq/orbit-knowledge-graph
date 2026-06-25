@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
-use ontology::{PathResolution, SourceTable};
+use ontology::{PathResolution, ReindexSource};
 
 use super::DispatchNamespace;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
@@ -74,27 +74,27 @@ struct NamespaceChangeQuery {
 
 impl NamespaceChangeQuery {
     fn from_ontology(ontology: &ontology::Ontology) -> Self {
-        Self::new(collect_source_tables(ontology))
+        Self::new(collect_reindex_sources(ontology))
     }
 
-    fn new(source_tables: impl IntoIterator<Item = SourceTable>) -> Self {
+    fn new(reindex_sources: impl IntoIterator<Item = ReindexSource>) -> Self {
         Self {
-            sql: render_change_query(&source_tables.into_iter().collect()),
+            sql: render_change_query(&reindex_sources.into_iter().collect()),
         }
     }
 }
 
-fn collect_source_tables(ontology: &ontology::Ontology) -> BTreeSet<SourceTable> {
+fn collect_reindex_sources(ontology: &ontology::Ontology) -> BTreeSet<ReindexSource> {
     let node_sources = ontology
         .nodes()
         .filter_map(|node| node.etl.as_ref())
-        .flat_map(|etl| etl.source_tables().iter().cloned());
+        .flat_map(|etl| etl.reindex_on().iter().cloned());
     let derived_sources = ontology
         .derived_entities()
-        .flat_map(|derived| derived.etl.source_tables().iter().cloned());
+        .flat_map(|derived| derived.etl.reindex_on().iter().cloned());
     let edge_sources = ontology
         .edge_etl_configs()
-        .flat_map(|(_, config)| config.source_tables.iter().cloned());
+        .flat_map(|(_, config)| config.reindex_on.iter().cloned());
 
     node_sources
         .chain(derived_sources)
@@ -103,15 +103,15 @@ fn collect_source_tables(ontology: &ontology::Ontology) -> BTreeSet<SourceTable>
         .collect()
 }
 
-fn enabled_namespace_source() -> SourceTable {
-    SourceTable {
+fn enabled_namespace_source() -> ReindexSource {
+    ReindexSource {
         table: ENABLED_NAMESPACE_TABLE.to_string(),
         traversal_path: PathResolution::Column("traversal_path".to_string()),
     }
 }
 
-fn render_change_query(source_tables: &BTreeSet<SourceTable>) -> String {
-    let changed = source_tables
+fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
+    let changed = reindex_sources
         .iter()
         .map(render_change_branch)
         .collect::<Vec<_>>()
@@ -137,7 +137,7 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
     )
 }
 
-fn render_change_branch(source_table: &SourceTable) -> String {
+fn render_change_branch(source_table: &ReindexSource) -> String {
     let path = path_expression(&source_table.traversal_path);
     let watermark = ontology::siphon_watermark_column();
 
@@ -168,8 +168,8 @@ fn root_path_expression(path: &str) -> String {
 mod tests {
     use super::*;
 
-    fn column_source(table: &str) -> SourceTable {
-        SourceTable {
+    fn column_source(table: &str) -> ReindexSource {
+        ReindexSource {
             table: table.to_string(),
             traversal_path: PathResolution::Column("traversal_path".to_string()),
         }
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn change_query_renders_dictionary_lookup() {
-        let query = NamespaceChangeQuery::new([SourceTable {
+        let query = NamespaceChangeQuery::new([ReindexSource {
             table: "siphon_projects".to_string(),
             traversal_path: PathResolution::Dictionary {
                 dictionary: "project_traversal_paths_dict".to_string(),
@@ -226,16 +226,16 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_source_tables_render_once() {
+    fn duplicate_reindex_sources_render_once() {
         let query =
             NamespaceChangeQuery::new([column_source("work_items"), column_source("work_items")]);
         assert_eq!(query.sql.matches("FROM work_items").count(), 1);
     }
 
     #[test]
-    fn ontology_source_tables_include_enabled_namespaces() {
+    fn ontology_reindex_sources_include_enabled_namespaces() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let sources = collect_source_tables(&ontology);
+        let sources = collect_reindex_sources(&ontology);
         assert!(sources.contains(&enabled_namespace_source()));
     }
 }

@@ -79,11 +79,11 @@ pub struct EdgeMapping {
     pub mutable: bool,
 }
 
-/// A datalake table feeding an entity, and how to resolve one of its rows to a
-/// `traversal_path`. Consumed by the indexer's namespace dispatch, not by graph
-/// construction.
+/// A datalake table whose Siphon changes mean an entity's namespace must be
+/// re-indexed, and how to resolve one of its rows to a `traversal_path`.
+/// Consumed by the indexer's namespace dispatch, not by graph construction.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SourceTable {
+pub struct ReindexSource {
     pub table: String,
     pub traversal_path: PathResolution,
 }
@@ -105,7 +105,7 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
-        source_tables: Vec<SourceTable>,
+        reindex_on: Vec<ReindexSource>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -119,7 +119,7 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
-        source_tables: Vec<SourceTable>,
+        reindex_on: Vec<ReindexSource>,
         traversal_path_filter: Option<String>,
         /// Alias of the main table in the `from` JOIN expression.
         /// Used to qualify bare column references (e.g. `id`) that would
@@ -188,10 +188,10 @@ impl EtlConfig {
         }
     }
 
-    pub fn source_tables(&self) -> &[SourceTable] {
+    pub fn reindex_on(&self) -> &[ReindexSource] {
         match self {
-            EtlConfig::Table { source_tables, .. } => source_tables,
-            EtlConfig::Query { source_tables, .. } => source_tables,
+            EtlConfig::Table { reindex_on, .. } => reindex_on,
+            EtlConfig::Query { reindex_on, .. } => reindex_on,
         }
     }
 
@@ -251,7 +251,7 @@ mod tests {
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
-            source_tables: Vec::new(),
+            reindex_on: Vec::new(),
             traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
             page_join: None,
@@ -306,7 +306,7 @@ mod tests {
             watermark: "w".to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
-            source_tables: Vec::new(),
+            reindex_on: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert!(config.validate_query_parameters().is_empty());
@@ -320,7 +320,7 @@ mod tests {
             watermark: "w".to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
-            source_tables: Vec::new(),
+            reindex_on: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert_eq!(table.deleted(), crate::constants::siphon_deleted_column());
@@ -337,7 +337,7 @@ mod tests {
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
-            source_tables: Vec::new(),
+            reindex_on: Vec::new(),
             edges: BTreeMap::new(),
         };
         assert_eq!(

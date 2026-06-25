@@ -40,7 +40,7 @@ pub use entities::{
 };
 pub use etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
-    SourceTable,
+    ReindexSource,
 };
 
 use std::collections::BTreeMap;
