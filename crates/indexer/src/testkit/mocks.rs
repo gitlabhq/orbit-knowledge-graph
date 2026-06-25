@@ -13,13 +13,13 @@ use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
+use crate::destination::{Destination, DestinationError, DestinationReport};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
 use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
 use crate::types::{Envelope, MessageId, Subscription};
-use crate::write::{TableWriter, WriteError, WriteReport};
 
 #[derive(Clone, Default)]
 pub struct MockNatsServices {
@@ -124,33 +124,33 @@ impl nats_client::KvServices for MockNatsServices {
     }
 }
 
-pub struct MockTableWriter;
+pub struct MockDestination;
 
-impl MockTableWriter {
+impl MockDestination {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Default for MockTableWriter {
+impl Default for MockDestination {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TableWriter for MockTableWriter {
+impl Destination for MockDestination {
     async fn write(
         &self,
         table: &str,
         batches: Vec<RecordBatch>,
         _durability: Option<crate::durability::WriteDurability>,
-    ) -> Result<WriteReport, WriteError> {
+    ) -> Result<DestinationReport, DestinationError> {
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
         let bytes: u64 = batches
             .iter()
             .map(|b| b.get_array_memory_size() as u64)
             .sum();
-        Ok(WriteReport {
+        Ok(DestinationReport {
             table: table.to_string(),
             rows,
             bytes,

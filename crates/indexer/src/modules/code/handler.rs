@@ -13,12 +13,12 @@ use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
+use crate::destination::Destination;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
-use crate::write::TableWriter;
 
 /// Sentinel branch value written to the checkpoint when the project is
 /// resolved as deleted from Rails (404) and we cannot determine its default
@@ -33,7 +33,7 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
     format!("project.{project_id}.{encoded_branch}")
 }
 
-pub struct CodeIndexingTaskHandler<W: TableWriter> {
+pub struct CodeIndexingTaskHandler<W: Destination> {
     pipeline: Arc<CodeIndexingPipeline<W>>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -43,7 +43,7 @@ pub struct CodeIndexingTaskHandler<W: TableWriter> {
     analytics: IndexingAnalytics,
 }
 
-impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
+impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -70,7 +70,7 @@ impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
 }
 
 #[async_trait]
-impl<W: TableWriter + 'static> Handler for CodeIndexingTaskHandler<W> {
+impl<W: Destination + 'static> Handler for CodeIndexingTaskHandler<W> {
     fn name(&self) -> &str {
         "code_indexing_task"
     }
@@ -104,7 +104,7 @@ impl<W: TableWriter + 'static> Handler for CodeIndexingTaskHandler<W> {
     }
 }
 
-impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
+impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
     /// Returns `Ok(Some(branch))` when the branch is known, `Ok(None)` when
     /// the project is gone from Rails (terminal: the dispatcher has a stale
     /// view; acking avoids DLQ churn), and `Err` for transient failures.
@@ -331,7 +331,7 @@ impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
     }
 }
 
-impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
+impl<W: Destination + 'static> CodeIndexingTaskHandler<W> {
     async fn load_checkpoint(
         &self,
         request: &CodeIndexingTaskRequest,

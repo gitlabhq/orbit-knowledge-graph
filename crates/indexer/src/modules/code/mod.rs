@@ -22,10 +22,10 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::destination::Destination;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
-use crate::write::TableWriter;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
@@ -40,7 +40,7 @@ pub use repository::{
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
-pub async fn register_handlers<W: TableWriter + 'static>(
+pub async fn register_handlers<W: Destination + 'static>(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,

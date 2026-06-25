@@ -60,7 +60,7 @@ pub enum IndexerError {
     NatsConnection(#[from] crate::nats::NatsError),
 
     #[error("ClickHouse connection failed: {0}")]
-    ClickHouseConnection(#[from] crate::engine::write::WriteError),
+    ClickHouseConnection(#[from] crate::engine::destination::DestinationError),
 
     #[error("Engine error: {0}")]
     Engine(#[from] crate::engine::EngineError),

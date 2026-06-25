@@ -9,13 +9,13 @@
 //!
 //! You provide:
 //! - A [`NatsBroker`](nats::NatsBroker) for message streaming
-//! - A [`TableWriter`](engine::write::TableWriter) for writing record batches
+//! - A [`Destination`](engine::destination::Destination) for writing record batches
 //! - One or more [`Handler`](engine::handler::Handler)s registered in a [`HandlerRegistry`](engine::handler::HandlerRegistry)
 //!
 //! ```text
 //! NatsBroker ──▶ Engine ──▶ HandlerRegistry
-//!                              └─ Handler (owns TableWriter)
-//!                              └─ Handler (owns TableWriter)
+//!                              └─ Handler (owns Destination)
+//!                              └─ Handler (owns Destination)
 //! ```
 //!
 //! ## Domain modules
@@ -44,7 +44,7 @@ pub mod testkit;
 
 // Re-export engine submodules at crate root for external API stability.
 pub use config::*;
-pub use engine::{dead_letter, durability, handler, types, worker_pool, write};
+pub use engine::{dead_letter, destination, durability, handler, types, worker_pool};
 
 /// Re-export metrics from their canonical locations for external API stability.
 pub mod metrics {

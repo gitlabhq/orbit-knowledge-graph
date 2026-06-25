@@ -17,6 +17,7 @@ use gkg_server_config::{
 use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseWriter};
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
+use indexer::destination::Destination;
 use indexer::durability::WriteDurability;
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
@@ -24,7 +25,6 @@ use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::types::{Envelope, Event, Subscription};
-use indexer::write::TableWriter;
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt, WaitFor};

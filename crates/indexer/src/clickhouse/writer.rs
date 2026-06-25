@@ -4,9 +4,9 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 
+use crate::destination::{Destination, DestinationError, DestinationReport};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
-use crate::write::{TableWriter, WriteError, WriteReport};
 
 #[derive(Clone)]
 pub struct ClickHouseWriter {
@@ -18,10 +18,10 @@ impl ClickHouseWriter {
     pub fn new(
         configuration: ClickHouseConfiguration,
         metrics: Arc<EngineMetrics>,
-    ) -> Result<Self, WriteError> {
+    ) -> Result<Self, DestinationError> {
         configuration
             .validate()
-            .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
+            .map_err(|e| DestinationError::InvalidConfiguration(e.to_string()))?;
         let client = configuration.build_client();
         Ok(Self { client, metrics })
     }
@@ -34,15 +34,15 @@ fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'s
     }
 }
 
-impl TableWriter for ClickHouseWriter {
+impl Destination for ClickHouseWriter {
     async fn write(
         &self,
         table: &str,
         batches: Vec<RecordBatch>,
         durability: Option<WriteDurability>,
-    ) -> Result<WriteReport, WriteError> {
+    ) -> Result<DestinationReport, DestinationError> {
         if batches.is_empty() {
-            return Ok(WriteReport {
+            return Ok(DestinationReport {
                 table: table.to_string(),
                 rows: 0,
                 bytes: 0,
@@ -75,7 +75,7 @@ impl TableWriter for ClickHouseWriter {
         self.metrics
             .record_write_success(table, start.elapsed().as_secs_f64(), rows, bytes);
 
-        Ok(WriteReport {
+        Ok(DestinationReport {
             table: table.to_string(),
             rows,
             bytes,

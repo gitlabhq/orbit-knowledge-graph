@@ -27,12 +27,12 @@
 //! ```
 
 pub mod dead_letter;
+pub mod destination;
 pub mod durability;
 pub mod handler;
 pub mod metrics;
 pub mod types;
 pub mod worker_pool;
-pub mod write;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

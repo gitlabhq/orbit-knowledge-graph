@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::durability::WriteDurability;
 
 #[derive(Debug, Error)]
-pub enum WriteError {
+pub enum DestinationError {
     #[error("failed to write: {0}")]
     Write(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
 
@@ -20,17 +20,17 @@ pub enum WriteError {
 }
 
 #[derive(Debug, Clone)]
-pub struct WriteReport {
+pub struct DestinationReport {
     pub table: String,
     pub rows: u64,
     pub bytes: u64,
 }
 
-pub trait TableWriter: Send + Sync {
+pub trait Destination: Send + Sync {
     fn write(
         &self,
         table: &str,
         batches: Vec<RecordBatch>,
         durability: Option<WriteDurability>,
-    ) -> impl std::future::Future<Output = Result<WriteReport, WriteError>> + Send;
+    ) -> impl std::future::Future<Output = Result<DestinationReport, DestinationError>> + Send;
 }

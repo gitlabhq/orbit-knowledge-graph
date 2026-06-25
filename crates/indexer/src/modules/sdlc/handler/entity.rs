@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+use crate::destination::Destination;
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
@@ -23,14 +24,13 @@ use crate::modules::sdlc::transform::system_notes;
 use crate::observer::{self, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
-use crate::write::TableWriter;
 
 const NAMESPACE_GATED_TRANSFORMS: &[(&str, gkg_server_config::Feature)] = &[(
     system_notes::TRANSFORM_NAME,
     gkg_server_config::Feature::SystemNotes,
 )];
 
-pub struct EntityHandler<W: TableWriter> {
+pub struct EntityHandler<W: Destination> {
     handler_name: String,
     plan: Plan,
     scope: EtlScope,
@@ -53,7 +53,7 @@ struct IndexingRequest {
     campaign_id: Option<String>,
 }
 
-impl<W: TableWriter + 'static> EntityHandler<W> {
+impl<W: Destination + 'static> EntityHandler<W> {
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -398,7 +398,7 @@ fn serialization_error(error: SerializationError) -> HandlerError {
 }
 
 #[async_trait]
-impl<W: TableWriter + 'static> Handler for EntityHandler<W> {
+impl<W: Destination + 'static> Handler for EntityHandler<W> {
     fn name(&self) -> &str {
         &self.handler_name
     }

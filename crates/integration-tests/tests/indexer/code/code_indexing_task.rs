@@ -6,13 +6,13 @@ use arrow::record_batch::RecordBatch;
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_utils::arrow::ArrowUtils;
+use indexer::destination::{Destination, DestinationError, DestinationReport};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
-use indexer::write::{TableWriter, WriteError, WriteReport};
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
 
 use super::helpers::*;
@@ -936,14 +936,17 @@ fn handler_context() -> (HandlerContext, Arc<IndexingStatusStore>) {
 
 struct FailingWriter;
 
-impl TableWriter for FailingWriter {
+impl Destination for FailingWriter {
     async fn write(
         &self,
         _table: &str,
         _batches: Vec<RecordBatch>,
         _durability: Option<indexer::durability::WriteDurability>,
-    ) -> Result<WriteReport, WriteError> {
-        Err(WriteError::Write("forced write failure".to_string(), None))
+    ) -> Result<DestinationReport, DestinationError> {
+        Err(DestinationError::Write(
+            "forced write failure".to_string(),
+            None,
+        ))
     }
 }
 

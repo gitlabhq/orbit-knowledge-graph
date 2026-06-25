@@ -15,19 +15,19 @@ use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::destination::Destination;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{
     GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest, NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
 };
 use crate::types::Event;
-use crate::write::TableWriter;
 use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use pipeline::Pipeline;
 use tracing::info;
 
-pub async fn register_handlers<W: TableWriter + 'static>(
+pub async fn register_handlers<W: Destination + 'static>(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,

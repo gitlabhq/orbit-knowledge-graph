@@ -1,29 +1,29 @@
 use clickhouse_client::ClickHouseError;
 
-use crate::write::WriteError;
+use crate::destination::DestinationError;
 
-impl From<ClickHouseError> for WriteError {
+impl From<ClickHouseError> for DestinationError {
     fn from(error: ClickHouseError) -> Self {
         match error {
             ClickHouseError::Query(source) => {
-                WriteError::Write(format!("query error: {source}"), Some(Box::new(source)))
+                DestinationError::Write(format!("query error: {source}"), Some(Box::new(source)))
             }
             ClickHouseError::Insert(source) => {
-                WriteError::Write(source.to_string(), Some(Box::new(source)))
+                DestinationError::Write(source.to_string(), Some(Box::new(source)))
             }
-            ClickHouseError::ArrowDecode(source) => WriteError::Write(
+            ClickHouseError::ArrowDecode(source) => DestinationError::Write(
                 format!("arrow decode error: {source}"),
                 Some(Box::new(source)),
             ),
-            ClickHouseError::ArrowEncode(source) => WriteError::Write(
+            ClickHouseError::ArrowEncode(source) => DestinationError::Write(
                 format!("arrow encode error: {source}"),
                 Some(Box::new(source)),
             ),
             ClickHouseError::BadResponse { status, body } => {
-                WriteError::Write(format!("bad response ({status}): {body}"), None)
+                DestinationError::Write(format!("bad response ({status}): {body}"), None)
             }
             ClickHouseError::CircuitOpen { service } => {
-                WriteError::Connection(format!("circuit open for {service}"), None)
+                DestinationError::Connection(format!("circuit open for {service}"), None)
             }
         }
     }

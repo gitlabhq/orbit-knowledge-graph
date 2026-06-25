@@ -7,8 +7,8 @@ use arrow::record_batch::RecordBatch;
 use code_graph::v2::SinkError;
 use tokio::sync::mpsc;
 
+use crate::destination::{Destination, DestinationError, DestinationReport};
 use crate::durability::WriteDurability;
-use crate::write::{TableWriter, WriteError, WriteReport};
 
 /// `BatchSink` that forwards to an mpsc channel for async draining.
 pub struct ChannelSink(pub mpsc::Sender<(String, RecordBatch)>);
@@ -25,12 +25,12 @@ impl code_graph::v2::BatchSink for ChannelSink {
 }
 
 /// Drain batches from the channel, coalesce per table, and write concurrently.
-pub async fn drain_writes<W: TableWriter + 'static>(
+pub async fn drain_writes<W: Destination + 'static>(
     writer: Arc<W>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
     max_rows_per_insert: usize,
     max_concurrent: usize,
-) -> Result<Vec<WriteReport>, WriteError> {
+) -> Result<Vec<DestinationReport>, DestinationError> {
     let max_rows = max_rows_per_insert.max(1);
     let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
     let mut set = tokio::task::JoinSet::new();
@@ -62,7 +62,7 @@ pub async fn drain_writes<W: TableWriter + 'static>(
 
     let mut reports = Vec::new();
     while let Some(r) = set.join_next().await {
-        reports.push(r.map_err(|e| WriteError::Write(format!("join: {e}"), None))??);
+        reports.push(r.map_err(|e| DestinationError::Write(format!("join: {e}"), None))??);
     }
     Ok(reports)
 }
@@ -70,7 +70,7 @@ pub async fn drain_writes<W: TableWriter + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testkit::MockTableWriter;
+    use crate::testkit::MockDestination;
     use arrow::array::Int64Array;
     use arrow::datatypes::{DataType, Field, Schema};
     use code_graph::v2::BatchSink;
@@ -80,7 +80,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(8);
         let sink = Arc::new(ChannelSink(tx));
         let drain = tokio::spawn(drain_writes(
-            Arc::new(MockTableWriter::new()),
+            Arc::new(MockDestination::new()),
             rx,
             500_000,
             4,

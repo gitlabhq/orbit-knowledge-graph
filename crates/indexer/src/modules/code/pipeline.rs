@@ -15,9 +15,9 @@ use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use super::writer::{ChannelSink, drain_writes};
+use crate::destination::{Destination, DestinationReport};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
-use crate::write::{TableWriter, WriteReport};
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -47,7 +47,7 @@ pub fn indexing_slot_count(concurrency_limit: usize) -> usize {
     concurrency_limit / 2
 }
 
-pub struct CodeIndexingPipeline<W: TableWriter> {
+pub struct CodeIndexingPipeline<W: Destination> {
     resolver: RepositoryResolver,
     writer: Arc<W>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -62,7 +62,7 @@ pub struct CodeIndexingPipeline<W: TableWriter> {
     indexing_slots: Option<Arc<Semaphore>>,
 }
 
-impl<W: TableWriter + 'static> CodeIndexingPipeline<W> {
+impl<W: Destination + 'static> CodeIndexingPipeline<W> {
     #[allow(
         clippy::too_many_arguments,
         reason = "pipeline constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -342,7 +342,7 @@ impl<W: TableWriter + 'static> CodeIndexingPipeline<W> {
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         config: PipelineConfig,
-    ) -> Result<(code_graph::v2::PipelineResult, Vec<WriteReport>), HandlerError> {
+    ) -> Result<(code_graph::v2::PipelineResult, Vec<DestinationReport>), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -413,7 +413,7 @@ impl<W: TableWriter + 'static> CodeIndexingPipeline<W> {
     fn record_indexing_results(
         &self,
         result: &code_graph::v2::PipelineResult,
-        per_table_writes: &[WriteReport],
+        per_table_writes: &[DestinationReport],
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,
