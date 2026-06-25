@@ -14,7 +14,8 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use super::writer::{StreamWriter, WriteTotals};
+use super::writer::StreamBridge;
+use crate::destination::{TableWriter, WriteReport, WriteStrategy};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -46,8 +47,9 @@ pub fn indexing_slot_count(concurrency_limit: usize) -> usize {
     concurrency_limit / 2
 }
 
-pub struct CodeIndexingPipeline {
+pub struct CodeIndexingPipeline<W: TableWriter> {
     resolver: RepositoryResolver,
+    writer: Arc<W>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -60,13 +62,14 @@ pub struct CodeIndexingPipeline {
     indexing_slots: Option<Arc<Semaphore>>,
 }
 
-impl CodeIndexingPipeline {
+impl<W: TableWriter + 'static> CodeIndexingPipeline<W> {
     #[allow(
         clippy::too_many_arguments,
         reason = "pipeline constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
     )]
     pub fn new(
         resolver: RepositoryResolver,
+        writer: Arc<W>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
@@ -81,6 +84,7 @@ impl CodeIndexingPipeline {
         let indexing_slots = sem(ic);
         Self {
             resolver,
+            writer,
             checkpoint_store,
             stale_data_cleaner,
             metrics,
@@ -264,7 +268,7 @@ impl CodeIndexingPipeline {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel);
         let (result, per_table_writes) = self
-            .build_code_graph(context, request, repository, indexed_at, config)
+            .build_code_graph(request, repository, indexed_at, config)
             .await?;
 
         context.progress.notify_in_progress().await;
@@ -334,12 +338,11 @@ impl CodeIndexingPipeline {
 
     async fn build_code_graph(
         &self,
-        context: &HandlerContext,
         request: &IndexingRequest,
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         config: PipelineConfig,
-    ) -> Result<(code_graph::v2::PipelineResult, Vec<WriteTotals>), HandlerError> {
+    ) -> Result<(code_graph::v2::PipelineResult, Vec<WriteReport>), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -354,13 +357,13 @@ impl CodeIndexingPipeline {
             &self.ontology,
             self.table_names.clone(),
         ));
-        let (writer, stream_handle) = StreamWriter::new(
-            context.destination.clone(),
-            self.pipeline_config.write_channel_capacity,
-            self.pipeline_config.write_max_concurrent_writes,
-            self.pipeline_config.write_slice_rows,
-        );
-        let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(writer);
+        let strategy = WriteStrategy {
+            channel_capacity: self.pipeline_config.write_channel_capacity,
+            max_rows_per_insert: self.pipeline_config.write_slice_rows,
+            max_concurrent: self.pipeline_config.write_max_concurrent_writes,
+        };
+        let (bridge, stream_handle) = StreamBridge::new(Arc::clone(&self.writer), strategy);
+        let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(bridge);
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
@@ -410,7 +413,7 @@ impl CodeIndexingPipeline {
     fn record_indexing_results(
         &self,
         result: &code_graph::v2::PipelineResult,
-        per_table_writes: &[WriteTotals],
+        per_table_writes: &[WriteReport],
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,

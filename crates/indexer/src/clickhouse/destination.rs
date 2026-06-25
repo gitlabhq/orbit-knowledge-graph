@@ -44,10 +44,9 @@ impl TableWriter for ClickHouseWriter {
         }
 
         let insert_sql = match w.durability {
-            Some(durability) => {
-                self.client
-                    .build_insert_sql_with_overrides(&w.table, insert_overrides(durability))
-            }
+            Some(durability) => self
+                .client
+                .build_insert_sql_with_overrides(&w.table, insert_overrides(durability)),
             None => self.client.build_insert_sql(&w.table),
         };
 

@@ -9,16 +9,13 @@
 //!
 //! You provide:
 //! - A [`NatsBroker`](nats::NatsBroker) for message streaming
-//! - A [`Destination`](engine::destination::Destination) (database, data lake, etc.)
+//! - A [`TableWriter`](engine::destination::TableWriter) for writing record batches
 //! - One or more [`Handler`](engine::handler::Handler)s registered in a [`HandlerRegistry`](engine::handler::HandlerRegistry)
 //!
 //! ```text
-//! NatsBroker ──▶ Engine ──▶ Destination
-//!                  │
-//!                  ▼
-//!            HandlerRegistry
-//!              └─ Handler
-//!              └─ Handler
+//! NatsBroker ──▶ Engine ──▶ HandlerRegistry
+//!                              └─ Handler (owns TableWriter)
+//!                              └─ Handler (owns TableWriter)
 //! ```
 //!
 //! ## Domain modules
@@ -172,14 +169,28 @@ pub async fn run(
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");
-        modules::sdlc::register_handlers(&registry, config, &ontology, writer.clone(), analytics.clone()).await?;
+        modules::sdlc::register_handlers(
+            &registry,
+            config,
+            &ontology,
+            writer.clone(),
+            analytics.clone(),
+        )
+        .await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
     }
 
     if config.engine.is_module_enabled(IndexerModule::Code) {
         info!("initializing Code handlers");
-        modules::code::register_handlers(&registry, config, &ontology, writer.clone(), analytics.clone()).await?;
+        modules::code::register_handlers(
+            &registry,
+            config,
+            &ontology,
+            writer.clone(),
+            analytics.clone(),
+        )
+        .await?;
     } else {
         info!("Code handlers disabled by engine.modules");
     }

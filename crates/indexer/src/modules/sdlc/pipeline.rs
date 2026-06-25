@@ -6,13 +6,12 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use futures::future::BoxFuture;
+use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::destination::{BatchWriterOptions, Destination};
+use crate::destination::{TableWriter, Writable};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -22,12 +21,10 @@ use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
-use crate::durability::{RunDurability, WriteDurability};
+use crate::durability::RunDurability;
 use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
-
-type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
@@ -87,8 +84,8 @@ impl Page {
     }
 }
 
-pub(in crate::modules::sdlc) struct PipelineContext {
-    pub destination: Arc<dyn Destination>,
+pub(in crate::modules::sdlc) struct PipelineContext<W: TableWriter> {
+    pub writer: Arc<W>,
     pub progress: ProgressNotifier,
     pub observer: Arc<std::sync::Mutex<dyn IndexingObserver>>,
 }
@@ -124,9 +121,9 @@ impl Pipeline {
         self
     }
 
-    pub async fn run_plan(
+    pub async fn run_plan<W: TableWriter>(
         &self,
-        context: &PipelineContext,
+        context: &PipelineContext<W>,
         plan: &Plan,
         base_query: PreparedQuery,
         position_key: &str,
@@ -183,36 +180,47 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let (write_futures, per_table) = self
-                .build_writes(
-                    context.destination.as_ref(),
-                    &outputs,
-                    grouped,
-                    durability.data_writes,
-                )
-                .await?;
+            let mut write_futures = FuturesUnordered::new();
+            for (index, batches) in grouped.into_iter().enumerate() {
+                if batches.is_empty() {
+                    continue;
+                }
+                let table = outputs[index].clone();
+                let w = Arc::clone(&context.writer);
+                let d = durability.data_writes;
+                write_futures.push(async move {
+                    w.write(Writable::new(table, batches).with_durability(d))
+                        .await
+                        .map_err(|e| HandlerError::Processing(e.to_string()))
+                });
+            }
 
             {
                 let mut observer = context.observer.lock().unwrap();
                 observer.extracted(rows_in_page, bytes_in_page);
-                for (index, rows, bytes) in &per_table {
-                    observer.record_graph_write(&outputs[*index], *rows, *bytes);
-                    stats.written_rows += rows;
-                    stats.written_bytes += bytes;
-                }
             }
 
-            // Overlap the next page's read with this page's writes, exactly as
-            // the pre-streaming pipeline did: peak memory is roughly two pages.
+            let write_start = Instant::now();
+            let drain_writes = async {
+                while let Some(report) = write_futures.next().await {
+                    let report = report?;
+                    let mut observer = context.observer.lock().unwrap();
+                    observer.record_graph_write(&report.table, report.rows, report.bytes);
+                    stats.written_rows += report.rows;
+                    stats.written_bytes += report.bytes;
+                }
+                Ok::<_, HandlerError>(write_start.elapsed())
+            };
+
             let (write_elapsed, next_page) = if has_more {
                 let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor);
                 let (write_result, extract_result) = tokio::join!(
-                    self.drain_writes(write_futures),
+                    drain_writes,
                     self.extract_batch(transform.name(), &next_sql, params.clone()),
                 );
                 (write_result?, Some(extract_result?))
             } else {
-                (self.drain_writes(write_futures).await?, None)
+                (drain_writes.await?, None)
             };
             stats.write_ms += write_elapsed.as_millis() as u64;
 
@@ -373,57 +381,6 @@ impl Pipeline {
             }
         }
         Ok(grouped)
-    }
-
-    /// One bulk insert per non-empty destination table, returned as futures so
-    /// the writes overlap the next page's extract.
-    async fn build_writes(
-        &self,
-        destination: &dyn Destination,
-        outputs: &[String],
-        grouped: Vec<Vec<RecordBatch>>,
-        durability: Option<WriteDurability>,
-    ) -> Result<(WriteFutures, Vec<(usize, u64, u64)>), HandlerError> {
-        let write_futures = WriteFutures::new();
-        let mut per_table = Vec::new();
-
-        for (index, batches) in grouped.into_iter().enumerate() {
-            if batches.is_empty() {
-                continue;
-            }
-            let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-            let bytes: u64 = batches
-                .iter()
-                .map(|b| b.get_array_memory_size() as u64)
-                .sum();
-            per_table.push((index, rows, bytes));
-
-            let table = outputs[index].clone();
-            let writer = destination
-                .new_batch_writer(&table, BatchWriterOptions { durability })
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
-                })?;
-            write_futures.push(
-                async move {
-                    writer.write_batch(&batches).await.map_err(|err| {
-                        HandlerError::Processing(format!("failed to write to {table}: {err}"))
-                    })
-                }
-                .boxed(),
-            );
-        }
-
-        Ok((write_futures, per_table))
-    }
-
-    async fn drain_writes(&self, mut futures: WriteFutures) -> Result<Duration, HandlerError> {
-        let start = Instant::now();
-        while let Some(result) = futures.next().await {
-            result?;
-        }
-        Ok(start.elapsed())
     }
 
     async fn save_batch_progress(

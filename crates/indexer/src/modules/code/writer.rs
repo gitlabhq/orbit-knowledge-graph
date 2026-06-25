@@ -8,8 +8,7 @@ use code_graph::v2::SinkError;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::destination::{TableWriter, Writable, WriteReport};
-use crate::durability::WriteDurability;
+use crate::destination::{DestinationError, TableWriter, Writable, WriteReport, WriteStrategy};
 
 #[derive(Debug, Error)]
 #[error("{0}")]
@@ -17,7 +16,7 @@ pub struct StreamWriteError(pub String);
 
 type Outcome = Result<Vec<WriteReport>, StreamWriteError>;
 
-pub struct StreamWriter {
+pub struct StreamBridge {
     tx: mpsc::Sender<(String, RecordBatch)>,
     max_rows_per_send: usize,
 }
@@ -26,19 +25,17 @@ pub struct StreamHandle {
     task: tokio::task::JoinHandle<Outcome>,
 }
 
-impl StreamWriter {
+impl StreamBridge {
     pub fn new<W: TableWriter + 'static>(
         writer: Arc<W>,
-        channel_capacity: usize,
-        max_concurrent: usize,
-        max_rows_per_insert: usize,
+        strategy: WriteStrategy,
     ) -> (Self, StreamHandle) {
-        let max_rows = max_rows_per_insert.max(1);
-        let (tx, rx) = mpsc::channel(channel_capacity.max(1));
+        let max_rows = strategy.max_rows_per_insert.max(1);
+        let (tx, rx) = mpsc::channel(strategy.channel_capacity.max(1));
         let task = tokio::runtime::Handle::current().spawn(drain_loop(
             writer,
             rx,
-            max_concurrent.max(1),
+            strategy.max_concurrent.max(1),
             max_rows,
         ));
         (
@@ -75,7 +72,7 @@ impl StreamHandle {
     }
 }
 
-impl code_graph::v2::BatchSink for StreamWriter {
+impl code_graph::v2::BatchSink for StreamBridge {
     fn write_batch(&self, table: &str, batch: &RecordBatch) -> Result<(), SinkError> {
         self.send(table, batch)
             .map_err(|e| SinkError(e.to_string()))
@@ -88,7 +85,7 @@ struct Pending {
     rows: usize,
 }
 
-async fn drain_loop<W: TableWriter>(
+async fn drain_loop<W: TableWriter + 'static>(
     writer: Arc<W>,
     mut rx: mpsc::Receiver<(String, RecordBatch)>,
     max_concurrent: usize,
@@ -116,15 +113,17 @@ async fn drain_loop<W: TableWriter>(
     }
 
     while let Some(res) = set.join_next().await {
-        reports.push(res.map_err(|e| StreamWriteError(format!("join: {e}")))?
-            .map_err(|e| StreamWriteError(format!("write: {e}")))?);
+        reports.push(
+            res.map_err(|e| StreamWriteError(format!("join: {e}")))?
+                .map_err(|e| StreamWriteError(format!("write: {e}")))?,
+        );
     }
     Ok(reports)
 }
 
 fn spawn_write<W: TableWriter + 'static>(
     sem: &Arc<tokio::sync::Semaphore>,
-    set: &mut tokio::task::JoinSet<Result<WriteReport, crate::destination::DestinationError>>,
+    set: &mut tokio::task::JoinSet<Result<WriteReport, DestinationError>>,
     writer: &Arc<W>,
     table: String,
     batches: Vec<RecordBatch>,
@@ -135,7 +134,7 @@ fn spawn_write<W: TableWriter + 'static>(
         let permit = permit
             .acquire_owned()
             .await
-            .map_err(|e| crate::destination::DestinationError::Write(format!("semaphore: {e}"), None))?;
+            .map_err(|e| DestinationError::Write(format!("semaphore: {e}"), None))?;
         let report = w.write(Writable::new(table, batches).durable()).await?;
         drop(permit);
         Ok(report)
@@ -152,14 +151,18 @@ mod tests {
 
     #[tokio::test]
     async fn finish_returns_per_table_reports() {
-        let (writer, handle) =
-            StreamWriter::new(Arc::new(MockTableWriter::new()), 8, 4, 500_000);
-        let writer = Arc::new(writer);
+        let strategy = WriteStrategy {
+            channel_capacity: 8,
+            max_rows_per_insert: 500_000,
+            max_concurrent: 4,
+        };
+        let (bridge, handle) = StreamBridge::new(Arc::new(MockTableWriter::new()), strategy);
+        let bridge = Arc::new(bridge);
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
         let batch =
             RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
 
-        let w = Arc::clone(&writer);
+        let w = Arc::clone(&bridge);
         tokio::task::spawn_blocking(move || {
             w.write_batch("gl_file", &batch).unwrap();
             w.write_batch("gl_definition", &batch).unwrap();
@@ -167,7 +170,7 @@ mod tests {
         .await
         .unwrap();
 
-        drop(writer);
+        drop(bridge);
         let reports = handle.finish().await.expect("finish should succeed");
         assert_eq!(reports.len(), 2);
         assert!(reports.iter().all(|r| r.rows == 3));

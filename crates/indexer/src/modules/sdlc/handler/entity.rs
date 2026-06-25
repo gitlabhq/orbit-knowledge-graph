@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+use crate::destination::TableWriter;
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
@@ -29,11 +30,12 @@ const NAMESPACE_GATED_TRANSFORMS: &[(&str, gkg_server_config::Feature)] = &[(
     gkg_server_config::Feature::SystemNotes,
 )];
 
-pub struct EntityHandler {
+pub struct EntityHandler<W: TableWriter> {
     handler_name: String,
     plan: Plan,
     scope: EtlScope,
     pipeline: Arc<Pipeline>,
+    writer: Arc<W>,
     datalake: Arc<dyn DatalakeQuery>,
     checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
@@ -51,7 +53,7 @@ struct IndexingRequest {
     campaign_id: Option<String>,
 }
 
-impl EntityHandler {
+impl<W: TableWriter + 'static> EntityHandler<W> {
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -60,6 +62,7 @@ impl EntityHandler {
         plan: Plan,
         scope: EtlScope,
         pipeline: Arc<Pipeline>,
+        writer: Arc<W>,
         datalake: Arc<dyn DatalakeQuery>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
@@ -73,6 +76,7 @@ impl EntityHandler {
             plan,
             scope,
             pipeline,
+            writer,
             datalake,
             checkpoint_store,
             metrics,
@@ -153,7 +157,7 @@ impl EntityHandler {
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
         let pipeline_context = PipelineContext {
-            destination: Arc::clone(&context.destination),
+            writer: Arc::clone(&self.writer),
             progress: context.progress.clone(),
             observer: Arc::clone(&observer),
         };
@@ -283,7 +287,7 @@ impl EntityHandler {
         window: WindowBounds,
         durability: RunDurability,
         context: &HandlerContext,
-        parent_pipeline_context: &PipelineContext,
+        parent_pipeline_context: &PipelineContext<W>,
     ) -> Result<PipelineStats, HandlerError> {
         let mut set: JoinSet<Result<PipelineStats, HandlerError>> = JoinSet::new();
         for (assignment, query) in partitions {
@@ -304,7 +308,7 @@ impl EntityHandler {
             let plan = self.plan.clone();
             let pipeline = Arc::clone(&self.pipeline);
             let partition_context = PipelineContext {
-                destination: Arc::clone(&context.destination),
+                writer: Arc::clone(&self.writer),
                 progress: context.progress.clone(),
                 observer: Arc::clone(&parent_pipeline_context.observer),
             };
@@ -394,7 +398,7 @@ fn serialization_error(error: SerializationError) -> HandlerError {
 }
 
 #[async_trait]
-impl Handler for EntityHandler {
+impl<W: TableWriter + 'static> Handler for EntityHandler<W> {
     fn name(&self) -> &str {
         &self.handler_name
     }

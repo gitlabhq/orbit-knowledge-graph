@@ -15,6 +15,7 @@ use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::destination::TableWriter;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{
     GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest, NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
@@ -26,10 +27,11 @@ use metrics::SdlcMetrics;
 use pipeline::Pipeline;
 use tracing::info;
 
-pub async fn register_handlers(
+pub async fn register_handlers<W: TableWriter + 'static>(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    writer: Arc<W>,
     analytics: IndexingAnalytics,
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
@@ -100,6 +102,7 @@ pub async fn register_handlers(
             plan,
             EtlScope::Global,
             Arc::clone(&pipeline),
+            Arc::clone(&writer),
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
             metrics.clone(),
@@ -119,6 +122,7 @@ pub async fn register_handlers(
             plan,
             EtlScope::Namespaced,
             Arc::clone(&pipeline),
+            Arc::clone(&writer),
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
             metrics.clone(),

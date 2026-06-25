@@ -1,7 +1,6 @@
 //! Write abstraction for the indexer ETL pipeline.
 
 use std::error::Error as StdError;
-use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use thiserror::Error;
@@ -89,4 +88,11 @@ pub trait TableWriter: Send + Sync {
         &self,
         writable: Writable,
     ) -> impl std::future::Future<Output = Result<WriteReport, DestinationError>> + Send;
+}
+
+#[derive(Debug, Clone)]
+pub struct WriteStrategy {
+    pub channel_capacity: usize,
+    pub max_rows_per_insert: usize,
+    pub max_concurrent: usize,
 }

@@ -141,8 +141,16 @@ impl Default for MockTableWriter {
 impl TableWriter for MockTableWriter {
     async fn write(&self, w: Writable) -> Result<WriteReport, DestinationError> {
         let rows: u64 = w.batches.iter().map(|b| b.num_rows() as u64).sum();
-        let bytes: u64 = w.batches.iter().map(|b| b.get_array_memory_size() as u64).sum();
-        Ok(WriteReport { table: w.table, rows, bytes })
+        let bytes: u64 = w
+            .batches
+            .iter()
+            .map(|b| b.get_array_memory_size() as u64)
+            .sum();
+        Ok(WriteReport {
+            table: w.table,
+            rows,
+            bytes,
+        })
     }
 }
 

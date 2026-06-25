@@ -13,6 +13,7 @@ use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
+use crate::destination::TableWriter;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
@@ -32,8 +33,8 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
     format!("project.{project_id}.{encoded_branch}")
 }
 
-pub struct CodeIndexingTaskHandler {
-    pipeline: Arc<CodeIndexingPipeline>,
+pub struct CodeIndexingTaskHandler<W: TableWriter> {
+    pipeline: Arc<CodeIndexingPipeline<W>>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
@@ -42,13 +43,13 @@ pub struct CodeIndexingTaskHandler {
     analytics: IndexingAnalytics,
 }
 
-impl CodeIndexingTaskHandler {
+impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
     )]
     pub fn new(
-        pipeline: Arc<CodeIndexingPipeline>,
+        pipeline: Arc<CodeIndexingPipeline<W>>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
@@ -69,7 +70,7 @@ impl CodeIndexingTaskHandler {
 }
 
 #[async_trait]
-impl Handler for CodeIndexingTaskHandler {
+impl<W: TableWriter + 'static> Handler for CodeIndexingTaskHandler<W> {
     fn name(&self) -> &str {
         "code_indexing_task"
     }
@@ -103,7 +104,7 @@ impl Handler for CodeIndexingTaskHandler {
     }
 }
 
-impl CodeIndexingTaskHandler {
+impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
     /// Returns `Ok(Some(branch))` when the branch is known, `Ok(None)` when
     /// the project is gone from Rails (terminal: the dispatcher has a stale
     /// view; acking avoids DLQ churn), and `Err` for transient failures.
@@ -330,7 +331,7 @@ impl CodeIndexingTaskHandler {
     }
 }
 
-impl CodeIndexingTaskHandler {
+impl<W: TableWriter + 'static> CodeIndexingTaskHandler<W> {
     async fn load_checkpoint(
         &self,
         request: &CodeIndexingTaskRequest,
