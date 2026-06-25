@@ -22,42 +22,6 @@ use crate::v2::linker::rules::{
 #[derive(Default)]
 pub struct PythonDsl;
 
-type N<'a> = Node<'a, SyntaxTree>;
-
-fn python_super_types(node: &N<'_>) -> Vec<String> {
-    let mut result = Vec::new();
-    if let Some(superclasses) = node.field("superclasses") {
-        for child in superclasses.children() {
-            let kind = child.kind();
-            if kind == "identifier" || kind == "attribute" || kind == "call" {
-                let text = if kind == "call" {
-                    child
-                        .field("function")
-                        .map(|f| f.text().to_string())
-                        .unwrap_or_else(|| child.text().to_string())
-                } else {
-                    child.text().to_string()
-                };
-                if !text.is_empty() {
-                    result.push(text);
-                }
-            }
-        }
-    }
-    result
-}
-
-fn python_decorators(node: &N<'_>) -> Vec<String> {
-    if let Some(parent) = node.find(Parent, Kind("decorated_definition")) {
-        parent
-            .children_matching(Kind("decorator"))
-            .map(|c| c.text().trim_start_matches('@').trim().to_string())
-            .collect()
-    } else {
-        vec![]
-    }
-}
-
 fn in_class_body() -> Pred {
     Pred::Exists(Box::new(
         Extract::one(Parent, Any)
@@ -66,23 +30,121 @@ fn in_class_body() -> Pred {
     ))
 }
 
-fn classify_python_function(node: &N<'_>) -> &'static str {
-    let is_async = node.has(Child, Kind("async"));
-    let has_decorator = node.has(Parent, Kind("decorated_definition"));
-    let is_method = node.parent().and_then(|p| p.parent()).is_some_and(|gp| {
-        gp.kind() == "class_definition"
-            || gp.kind() == "block" && gp.has(Parent, Kind("class_definition"))
-    });
+fn rewrite_python(tree: &mut SyntaxTree) {
+    let mut renames: Vec<(u32, &str)> = Vec::new();
+    let mut supertypes: Vec<(u32, String)> = Vec::new();
+    let mut decorators: Vec<(u32, String)> = Vec::new();
 
-    match (is_method, is_async, has_decorator) {
-        (true, true, true) => "DecoratedAsyncMethod",
-        (true, true, false) => "AsyncMethod",
-        (true, false, true) => "DecoratedMethod",
-        (true, false, false) => "Method",
-        (false, true, true) => "DecoratedAsyncFunction",
-        (false, true, false) => "AsyncFunction",
-        (false, false, true) => "DecoratedFunction",
-        (false, false, false) => "Function",
+    // Classify function_definition by context + modifiers
+    for func in tree
+        .nodes_of_kind("function_definition")
+        .collect::<Vec<_>>()
+    {
+        let is_async = tree.has_child_text(func, "async");
+        let has_decorator = tree
+            .parent(func)
+            .is_some_and(|p| tree.kind(p) == "decorated_definition");
+        let is_method = tree
+            .parent(func)
+            .and_then(|p| tree.parent(p))
+            .is_some_and(|gp| {
+                tree.kind(gp) == "class_definition"
+                    || tree.kind(gp) == "block"
+                        && tree
+                            .parent(gp)
+                            .is_some_and(|ggp| tree.kind(ggp) == "class_definition")
+            });
+
+        let kind = match (is_method, is_async, has_decorator) {
+            (true, true, true) => "__decorated_async_method",
+            (true, true, false) => "__async_method",
+            (true, false, true) => "__decorated_method",
+            (true, false, false) => "__method",
+            (false, true, true) => "__decorated_async_function",
+            (false, true, false) => "__async_function",
+            (false, false, true) => "__decorated_function",
+            (false, false, false) => continue,
+        };
+        renames.push((func, kind));
+    }
+
+    // Classify class_definition
+    for cls in tree.nodes_of_kind("class_definition").collect::<Vec<_>>() {
+        if tree
+            .parent(cls)
+            .is_some_and(|p| tree.kind(p) == "decorated_definition")
+        {
+            renames.push((cls, "__decorated_class"));
+        }
+
+        // Super types: extract from superclasses field
+        if let Some(superclasses) = tree.field(cls, "superclasses") {
+            for &child in tree.children(superclasses) {
+                let kind = tree.kind(child);
+                let text = match kind {
+                    "call" => tree
+                        .field_text(child, "function")
+                        .unwrap_or(tree.text(child)),
+                    "identifier" | "attribute" => tree.text(child),
+                    _ => continue,
+                };
+                if !text.is_empty() {
+                    supertypes.push((cls, text.to_string()));
+                }
+            }
+        }
+    }
+
+    // Move decorators: for each decorated_definition, copy decorator texts
+    // as __decorator children of the inner definition
+    for dd in tree
+        .nodes_of_kind("decorated_definition")
+        .collect::<Vec<_>>()
+    {
+        let dec_texts: Vec<String> = tree
+            .children_of_kind(dd, "decorator")
+            .map(|d| tree.text(d).trim_start_matches('@').trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        // The definition is the last named child of decorated_definition
+        let def_node = tree
+            .children(dd)
+            .iter()
+            .copied()
+            .rev()
+            .find(|&c| tree.kind(c) != "decorator" && tree.kind(c) != "comment");
+        if let Some(def) = def_node {
+            for text in dec_texts {
+                decorators.push((def, text));
+            }
+        }
+    }
+
+    // Classify imports
+    for imp in tree.nodes_of_kind("import_statement").collect::<Vec<_>>() {
+        if tree.has_child_of_kind(imp, "wildcard_import") {
+            renames.push((imp, "__wildcard_import_statement"));
+        } else if tree.has_child_of_kind(imp, "aliased_import") {
+            renames.push((imp, "__aliased_import_statement"));
+        }
+    }
+    for imp in tree
+        .nodes_of_kind("import_from_statement")
+        .collect::<Vec<_>>()
+    {
+        if tree.has_child_of_kind(imp, "wildcard_import") {
+            renames.push((imp, "__wildcard_from_statement"));
+        }
+    }
+
+    for (id, kind) in renames {
+        tree.set_kind(id, kind);
+    }
+    for (cls, text) in supertypes {
+        tree.insert_child(cls, "__supertype", &text);
+    }
+    for (def, text) in decorators {
+        tree.insert_child(def, "__decorator", &text);
     }
 }
 
@@ -106,25 +168,55 @@ impl DslLanguage for PythonDsl {
         }
     }
 
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_python(tree);
+    }
+
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(python_super_types);
+        let collect_supertypes = |n: &Node<'_, SyntaxTree>| -> Vec<String> {
+            n.children()
+                .filter(|c| c.kind().as_ref() == "__supertype")
+                .map(|c| c.text().to_string())
+                .collect()
+        };
+        let collect_decorators = |n: &Node<'_, SyntaxTree>| -> Vec<String> {
+            n.children()
+                .filter(|c| c.kind().as_ref() == "__decorator")
+                .map(|c| c.text().to_string())
+                .collect()
+        };
+        let class_meta = || metadata().super_types(collect_supertypes);
         let func_meta = || {
             metadata()
                 .return_type(field("return_type"))
-                .decorators(python_decorators)
+                .decorators(collect_decorators)
+        };
+        let func = |kind, label| {
+            scope(kind, label)
+                .def_kind(DefKind::Function)
+                .metadata(func_meta())
+        };
+        let method = |kind, label| {
+            scope(kind, label)
+                .def_kind(DefKind::Method)
+                .metadata(func_meta())
         };
 
-        let mut rules = vec![
+        vec![
             scope("class_definition", "Class")
                 .def_kind(DefKind::Class)
                 .metadata(class_meta()),
-            scope("class_definition", "DecoratedClass")
+            scope("__decorated_class", "DecoratedClass")
                 .def_kind(DefKind::Class)
-                .when(parent_is("decorated_definition"))
                 .metadata(class_meta()),
-            scope_fn("function_definition", classify_python_function)
-                .def_kind(DefKind::Function)
-                .metadata(func_meta()),
+            func("function_definition", "Function"),
+            func("__async_function", "AsyncFunction"),
+            func("__decorated_function", "DecoratedFunction"),
+            func("__decorated_async_function", "DecoratedAsyncFunction"),
+            method("__method", "Method"),
+            method("__async_method", "AsyncMethod"),
+            method("__decorated_method", "DecoratedMethod"),
+            method("__decorated_async_method", "DecoratedAsyncMethod"),
             scope("assignment", "Lambda")
                 .def_kind(DefKind::Lambda)
                 .when(field_kind("right", &["lambda"]))
@@ -136,19 +228,7 @@ impl DslLanguage for PythonDsl {
                 .when(field_kind("type", &["type"]).and(in_class_body()))
                 .name_from(field("left"))
                 .metadata(metadata().type_annotation(field("type"))),
-        ];
-
-        // Inside a class: functions become methods
-        rules.extend(within(
-            grandparent_is("class_definition"),
-            vec![
-                scope_fn("function_definition", |_| "Method")
-                    .def_kind(DefKind::Method)
-                    .metadata(func_meta()),
-            ],
-        ));
-
-        rules
+        ]
     }
 
     fn refs() -> Vec<ReferenceRule> {
@@ -184,36 +264,39 @@ impl DslLanguage for PythonDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        fn python_import_classify(node: &N<'_>) -> &'static str {
-            if node.has(Child, Kind("wildcard_import")) {
-                return "WildcardImport";
-            }
-            if node.has(Child, Kind("aliased_import")) {
-                return "AliasedImport";
-            }
-            "Import"
-        }
-
-        fn python_from_classify(node: &N<'_>) -> &'static str {
-            if node.has(Child, Kind("wildcard_import")) {
-                return "WildcardImport";
-            }
-            "FromImport"
-        }
-
-        vec![
+        let import_base = || {
             import("import_statement")
-                .classify(python_import_classify)
                 .path_from(no_extract())
                 .multi(&["dotted_name"])
                 .alias_child("aliased_import")
-                .wildcard_child("wildcard_import"),
+                .wildcard_child("wildcard_import")
+        };
+        let from_base = || {
             import("import_from_statement")
-                .classify(python_from_classify)
                 .path_from(field("module_name"))
                 .multi(&["dotted_name", "identifier"])
                 .alias_child("aliased_import")
+                .wildcard_child("wildcard_import")
+        };
+
+        vec![
+            import("__wildcard_import_statement")
+                .label("WildcardImport")
+                .path_from(no_extract())
+                .multi(&["dotted_name"])
                 .wildcard_child("wildcard_import"),
+            import("__aliased_import_statement")
+                .label("AliasedImport")
+                .path_from(no_extract())
+                .multi(&["dotted_name"])
+                .alias_child("aliased_import"),
+            import_base().label("Import"),
+            import("__wildcard_from_statement")
+                .label("WildcardImport")
+                .path_from(field("module_name"))
+                .multi(&["dotted_name", "identifier"])
+                .wildcard_child("wildcard_import"),
+            from_base().label("FromImport"),
             import("future_import_statement")
                 .label("FutureImport")
                 .path_from(child_of_kind("__future__"))
