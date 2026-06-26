@@ -31,38 +31,12 @@ const SWIFT_IMPORT_KINDS: &[&str] = &[
     "actor",
 ];
 
-fn rewrite_swift(tree: &mut SyntaxTree) {
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
-
-    let class_kinds = ["class_declaration", "protocol_declaration"];
-    for kind in class_kinds {
-        for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
-            for tic in tree
-                .children_of_kind(cls, "type_inheritance_clause")
-                .collect::<Vec<_>>()
-            {
-                for &inner in tree.children(tic) {
-                    match tree.kind(inner) {
-                        "type_identifier" => {
-                            supertypes.push((cls, tree.text(inner).to_string()));
-                        }
-                        "inheritance_specifier" => {
-                            for &t in tree.children(inner) {
-                                if tree.kind(t) == "type_identifier" {
-                                    supertypes.push((cls, tree.text(t).to_string()));
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    for (cls, text) in supertypes {
-        tree.insert_child(cls, "__supertype", &text);
-    }
+fn swift_supertype_rule(kind: &'static str) -> rw::Rule {
+    rw::insert(
+        kind,
+        child_of_kind("type_inheritance_clause").collect_shallow(Kind("type_identifier")),
+        "__supertype",
+    )
 }
 
 fn rewrite_swift_imports(tree: &mut SyntaxTree) {
@@ -229,7 +203,11 @@ impl DslLanguage for SwiftDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[rw::custom(rewrite_swift), rw::custom(rewrite_swift_imports)]);
+        tree.apply_rewrites(&[
+            swift_supertype_rule("class_declaration"),
+            swift_supertype_rule("protocol_declaration"),
+            rw::custom(rewrite_swift_imports),
+        ]);
     }
 
     fn hooks() -> types::LanguageHooks {

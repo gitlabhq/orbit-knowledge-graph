@@ -25,42 +25,23 @@ type N<'a> = Node<'a, SyntaxTree>;
 
 const CSHARP_BASE_KINDS: &[&str] = &["identifier", "qualified_name", "generic_name"];
 
-fn rewrite_csharp(tree: &mut SyntaxTree) {
-    let mut renames: Vec<(u32, &str)> = Vec::new();
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
-
-    let class_kinds = [
-        "class_declaration",
-        "struct_declaration",
-        "record_declaration",
-        "interface_declaration",
-    ];
-    for kind in class_kinds {
-        for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
-            for bl in tree.children_of_kind(cls, "base_list").collect::<Vec<_>>() {
-                for &inner in tree.children(bl) {
-                    if CSHARP_BASE_KINDS.contains(&tree.kind(inner)) {
-                        supertypes.push((cls, tree.text(inner).to_string()));
-                    }
-                }
-            }
-        }
-    }
-
-    for imp in tree.nodes_of_kind("using_directive").collect::<Vec<_>>() {
-        if tree.has_child_text(imp, "static") {
-            renames.push((imp, "__static_using"));
-        } else if tree.has_child_text(imp, "=") {
-            renames.push((imp, "__aliased_using"));
-        }
-    }
-
-    for (id, kind) in renames {
-        tree.set_kind(id, kind);
-    }
-    for (cls, text) in supertypes {
-        tree.insert_child(cls, "__supertype", &text);
-    }
+fn csharp_rules() -> Vec<rw::Rule> {
+    use treesitter_visit::Match::AnyKind;
+    let st = |kind| {
+        rw::insert(
+            kind,
+            child_of_kind("base_list").collect(AnyKind(CSHARP_BASE_KINDS)),
+            "__supertype",
+        )
+    };
+    vec![
+        st("class_declaration"),
+        st("struct_declaration"),
+        st("record_declaration"),
+        st("interface_declaration"),
+        rw::rename("using_directive", "__static_using").when(has_child_text("static")),
+        rw::rename("using_directive", "__aliased_using").when(has_child_text("=")),
+    ]
 }
 
 impl DslLanguage for CSharpDsl {
@@ -81,10 +62,9 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[
-            rw::custom(rewrite_csharp),
-            rw::custom(rewrite_csharp_aliased_using),
-        ]);
+        let mut rules = csharp_rules();
+        rules.push(rw::custom(rewrite_csharp_aliased_using));
+        tree.apply_rewrites(&rules);
     }
 
     fn scopes() -> Vec<ScopeRule> {
