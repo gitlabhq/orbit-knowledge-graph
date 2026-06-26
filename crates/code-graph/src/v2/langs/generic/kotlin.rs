@@ -20,68 +20,39 @@ use crate::v2::linker::rules::{
 #[derive(Default)]
 pub struct KotlinDsl;
 
-fn find_first_user_type(tree: &SyntaxTree, id: u32) -> Option<String> {
-    match tree.kind(id) {
-        "user_type" => Some(tree.text(id).to_string()),
-        "delegation_specifier" | "constructor_invocation" => tree
-            .children_of_kind(id, "user_type")
-            .next()
-            .or_else(|| {
-                tree.children_of_kind(id, "constructor_invocation")
-                    .flat_map(|ci| tree.children_of_kind(ci, "user_type"))
-                    .next()
-            })
-            .map(|ut| tree.text(ut).to_string()),
-        _ => None,
-    }
-}
+use treesitter_visit::syntax_tree as rw;
 
-fn rewrite_kotlin(tree: &mut SyntaxTree) {
-    let mut renames: Vec<(u32, &str)> = Vec::new();
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
-
-    for cls in tree.nodes_of_kind("class_declaration").collect::<Vec<_>>() {
-        if tree.has_child_of_kind(cls, "enum_class_body") {
-            renames.push((cls, "__enum_declaration"));
-        } else if tree.has_child_text(cls, "interface") {
-            renames.push((cls, "__interface_declaration"));
-        } else if tree.descendant_text(cls, "class_modifier", "data") {
-            renames.push((cls, "__data_class_declaration"));
-        } else if tree.descendant_text(cls, "class_modifier", "value") {
-            renames.push((cls, "__value_class_declaration"));
-        } else if tree.descendant_text(cls, "class_modifier", "annotation") {
-            renames.push((cls, "__annotation_class_declaration"));
-        }
-
-        for ds in tree
-            .children_of_kind(cls, "delegation_specifiers")
-            .collect::<Vec<_>>()
-        {
-            for &child in tree.children(ds) {
-                if let Some(text) = find_first_user_type(tree, child) {
-                    supertypes.push((cls, text));
-                }
-            }
-        }
-    }
-
-    for imp in tree.nodes_of_kind("import_header").collect::<Vec<_>>() {
-        if tree.has_child_of_kind(imp, "wildcard_import")
-            || tree.has_child_of_kind(imp, "MULT")
-            || tree.has_child_text(imp, "*")
-        {
-            renames.push((imp, "__wildcard_import"));
-        } else if tree.has_child_of_kind(imp, "import_alias") {
-            renames.push((imp, "__aliased_import"));
-        }
-    }
-
-    for (id, kind) in renames {
-        tree.set_kind(id, kind);
-    }
-    for (cls, text) in supertypes {
-        tree.insert_child(cls, "__supertype", &text);
-    }
+fn kotlin_rewrites() -> Vec<rw::RewriteRule> {
+    vec![
+        rw::rename("class_declaration")
+            .when(rw::has_child("enum_class_body"))
+            .to("__enum_declaration"),
+        rw::rename("class_declaration")
+            .when(rw::child_text("interface"))
+            .to("__interface_declaration"),
+        rw::rename("class_declaration")
+            .when(rw::descendant_text("class_modifier", "data"))
+            .to("__data_class_declaration"),
+        rw::rename("class_declaration")
+            .when(rw::descendant_text("class_modifier", "value"))
+            .to("__value_class_declaration"),
+        rw::rename("class_declaration")
+            .when(rw::descendant_text("class_modifier", "annotation"))
+            .to("__annotation_class_declaration"),
+        rw::collect("class_declaration", "delegation_specifiers")
+            .kinds(&["user_type"])
+            .shallow()
+            .as_child("__supertype"),
+        rw::rename("import_header")
+            .when(rw::has_child("wildcard_import"))
+            .to("__wildcard_import"),
+        rw::rename("import_header")
+            .when(rw::has_child("MULT"))
+            .to("__wildcard_import"),
+        rw::rename("import_header")
+            .when(rw::has_child("import_alias"))
+            .to("__aliased_import"),
+    ]
 }
 
 impl DslLanguage for KotlinDsl {
@@ -94,7 +65,7 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_kotlin(tree);
+        tree.apply_rewrites(&kotlin_rewrites());
     }
 
     fn scopes() -> Vec<ScopeRule> {
