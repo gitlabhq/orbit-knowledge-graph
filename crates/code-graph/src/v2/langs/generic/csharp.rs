@@ -62,8 +62,19 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
+        use treesitter_visit::extract::text;
+        let target_extract = || text().nth(Child, AnyKind(CSHARP_ALIAS_TARGET_KINDS), 1);
         let mut rules = csharp_rules();
-        rules.push(rw::custom(rewrite_csharp_aliased_using));
+        rules.push(rw::insert(
+            "__aliased_using",
+            target_extract(),
+            "__import_path",
+        ));
+        rules.push(rw::insert(
+            "__aliased_using",
+            target_extract().split_last("."),
+            "__import_name",
+        ));
         tree.apply_rewrites(&rules);
     }
 
@@ -278,46 +289,12 @@ impl DslLanguage for CSharpDsl {
     }
 }
 
-fn rewrite_csharp_aliased_using(tree: &mut SyntaxTree) {
-    let target_kinds = [
-        "qualified_name",
-        "identifier",
-        "generic_name",
-        "alias_qualified_name",
-    ];
-    let mut inserts: Vec<(u32, String, String)> = Vec::new();
-
-    for ud in tree.nodes_of_kind("__aliased_using").collect::<Vec<_>>() {
-        let Some(alias_node) = tree.field(ud, "name") else {
-            continue;
-        };
-        let alias_end = tree.n(alias_node).end_byte;
-
-        let target = tree
-            .children(ud)
-            .iter()
-            .copied()
-            .find(|&c| target_kinds.contains(&tree.kind(c)) && tree.n(c).start_byte > alias_end)
-            .map(|c| tree.text(c).to_string());
-
-        let Some(path) = target else { continue };
-        let name = path
-            .rsplit('.')
-            .next()
-            .map(|seg| {
-                let seg = seg.rsplit("::").next().unwrap_or(seg);
-                seg.split('<').next().unwrap_or(seg).to_string()
-            })
-            .unwrap_or_default();
-
-        inserts.push((ud, path, name));
-    }
-
-    for (ud, path, name) in inserts {
-        tree.insert_child(ud, "__import_path", &path);
-        tree.insert_child(ud, "__import_name", &name);
-    }
-}
+const CSHARP_ALIAS_TARGET_KINDS: &[&str] = &[
+    "qualified_name",
+    "identifier",
+    "generic_name",
+    "alias_qualified_name",
+];
 
 // ── Resolution rules ────────────────────────────────────────────
 
