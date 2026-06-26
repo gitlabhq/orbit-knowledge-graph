@@ -224,4 +224,9 @@ mod tests {
     fn is_valid_rejects_empty() {
         assert!(!is_valid(""));
     }
+
+    #[test]
+    fn is_valid_rejects_subgroup() {
+        assert!(!is_valid("1/100/1000/"));
+    }
 }
