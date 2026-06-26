@@ -21,6 +21,7 @@ etl:
   deleted: sn.{{deleted_column}}
   table_alias: sn
   order_by: [traversal_path, id]
+  reindex_on: [siphon_notes, siphon_system_note_metadata]
   page_join:
     table: siphon_system_note_metadata
     alias: snm

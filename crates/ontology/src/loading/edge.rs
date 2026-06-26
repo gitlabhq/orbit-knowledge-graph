@@ -8,7 +8,7 @@ use crate::entities::{
 use crate::etl::EtlScope;
 
 use super::EtlSettings;
-use super::node::render_etl_placeholders;
+use super::node::{ReindexOnYaml, convert_reindex_on, render_etl_placeholders};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct EdgeYaml {
@@ -52,6 +52,8 @@ struct EdgeEtlYaml {
     order_by: Vec<String>,
     #[serde(rename = "where", default)]
     filter: Option<String>,
+    #[serde(default)]
+    reindex_on: Vec<ReindexOnYaml>,
     from: EdgeEndpointYaml,
     to: EdgeEndpointYaml,
 }
@@ -117,6 +119,11 @@ impl EdgeYaml {
                     }
                     None => del.clone(),
                 };
+                let reindex_on = convert_reindex_on(
+                    relationship_kind,
+                    etl.reindex_on,
+                    (etl.scope == EtlScope::Namespaced).then_some(etl.source.as_str()),
+                )?;
 
                 Ok(EdgeSourceEtlConfig {
                     scope: etl.scope,
@@ -125,6 +132,7 @@ impl EdgeYaml {
                     deleted,
                     order_by: etl.order_by,
                     filter: etl.filter,
+                    reindex_on,
                     from,
                     to,
                 })

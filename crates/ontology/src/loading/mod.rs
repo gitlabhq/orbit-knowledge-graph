@@ -879,6 +879,7 @@ mod tests {
                 watermark: "w".to_string(),
                 deleted: "d".to_string(),
                 order_by: vec![],
+                reindex_on: Vec::new(),
                 edges: BTreeMap::new(),
             },
         }
