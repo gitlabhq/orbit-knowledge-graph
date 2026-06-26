@@ -33,18 +33,6 @@ pub struct WriteReport {
     pub bytes: u64,
 }
 
-/// A channel of `(table, batch, seq)` items. `seq` is a per-project monotonic id so the
-/// drain can compute a durability watermark across projects.
-struct SeqReceiver {
-    rx: tokio::sync::mpsc::Receiver<(String, RecordBatch, u64)>,
-}
-
-impl SeqReceiver {
-    async fn recv(&mut self) -> Option<(String, RecordBatch, u64)> {
-        self.rx.recv().await
-    }
-}
-
 /// No internal throttling. Backpressure comes from the message source (NATS ack window,
 /// channel capacity). Handlers control batch sizes per entity; self-managed deployments
 /// with limited memory should watch ClickHouse's query queue.
@@ -139,18 +127,17 @@ impl ClickHouseWriter {
         })
     }
 
-    /// Cross-project drain. Coalesces `(table, batch, seq)` items into one ~`max_rows` part
-    /// per table, also flushing a table once `max_buffer_age` elapses. After each successful
-    /// flush it advances a watermark to the highest seq with no row still buffered, so a
-    /// handler whose project seq is at or below the watermark knows its rows are durable. A
-    /// failed flush propagates without advancing the watermark, so contributors don't
-    /// checkpoint.
-    async fn drain_buffered(
-        self: &Arc<Self>,
-        mut rx: SeqReceiver,
+    /// Coalesce `(table, batch, seq)` items into one ~`max_rows` part per table, also flushing
+    /// a table once `max_buffer_age` elapses. After each successful flush it advances a
+    /// watermark to the highest seq with no row still buffered, so a handler whose project seq
+    /// is at or below the watermark knows its rows are durable. A failed flush propagates
+    /// without advancing the watermark, so contributors don't checkpoint.
+    async fn drain(
+        &self,
+        rx: &mut tokio::sync::mpsc::Receiver<(String, RecordBatch, u64)>,
         max_rows: usize,
-        flushed_seq_tx: tokio::sync::watch::Sender<u64>,
         max_buffer_age: Duration,
+        flushed_seq_tx: tokio::sync::watch::Sender<u64>,
     ) -> Result<(), WriteError> {
         let max_rows = max_rows.max(1);
         let mut pending: HashMap<String, (Vec<RecordBatch>, usize, u64)> = HashMap::new();
@@ -217,47 +204,48 @@ fn publish_watermark(
     });
 }
 
-/// Process-wide write coalescer shared by every code-indexing job.
+/// Process-wide ClickHouse write sink shared by every code-indexing job. Coalesces the
+/// long tail of tiny projects into well-sized parts instead of one small part each.
 ///
-/// Each project takes a monotonic seq from [`begin_project`], streams its batches in with
-/// that seq, then waits on [`subscribe`] until the flush watermark reaches the seq before
-/// checkpointing. Many small projects coalesce into one well-sized part per table; big
-/// projects cross the row cap on their own and flush promptly. A failed flush never
-/// advances the watermark, so contributing projects do not checkpoint.
-pub struct CodeWriteAggregator {
+/// Each project takes a monotonic seq from [`next_seq`], streams its batches in with that
+/// seq, then waits on [`subscribe`] until the flush watermark reaches the seq before
+/// checkpointing. Big projects cross the row cap on their own and flush promptly. A failed
+/// flush never advances the watermark, so contributing projects do not checkpoint.
+pub struct CodeWriteSink {
     tx: tokio::sync::mpsc::Sender<(String, RecordBatch, u64)>,
     flushed_rx: watch::Receiver<u64>,
-    next_seq: AtomicU64,
+    seq: AtomicU64,
 }
 
-impl CodeWriteAggregator {
-    pub fn start(
+impl CodeWriteSink {
+    pub fn new(
         writer: Arc<ClickHouseWriter>,
         channel_capacity: usize,
         max_rows: usize,
         max_buffer_age: Duration,
     ) -> Arc<Self> {
-        let (tx, rx) = tokio::sync::mpsc::channel(channel_capacity.max(1));
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<(String, RecordBatch, u64)>(channel_capacity.max(1));
         let (flushed_tx, flushed_rx) = watch::channel(0u64);
         tokio::spawn(async move {
             if let Err(e) = writer
-                .drain_buffered(SeqReceiver { rx }, max_rows, flushed_tx, max_buffer_age)
+                .drain(&mut rx, max_rows, max_buffer_age, flushed_tx)
                 .await
             {
-                warn!(error = %e, "code write aggregator drain ended with error");
+                warn!(error = %e, "code write sink drain ended with error");
             }
         });
         Arc::new(Self {
             tx,
             flushed_rx,
-            next_seq: AtomicU64::new(1),
+            seq: AtomicU64::new(1),
         })
     }
 
     /// Reserve a seq for one project. All of that project's batches must be submitted with
     /// this seq and contiguously, so the watermark cleanly separates durable from buffered.
-    pub fn begin_project(&self) -> u64 {
-        self.next_seq.fetch_add(1, Ordering::Relaxed)
+    pub fn next_seq(&self) -> u64 {
+        self.seq.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Buffer one batch from the blocking parse thread, backpressuring the parser when the
@@ -265,7 +253,7 @@ impl CodeWriteAggregator {
     pub fn submit(&self, table: String, batch: RecordBatch, seq: u64) -> Result<(), WriteError> {
         self.tx
             .blocking_send((table, batch, seq))
-            .map_err(|_| WriteError::Write("code write aggregator drain closed".into(), None))
+            .map_err(|_| WriteError::Write("code write sink drain closed".into(), None))
     }
 
     /// Watch receiver reporting the highest fully-durable project seq.
@@ -305,7 +293,7 @@ mod tests {
 
     /// `submit` uses `blocking_send` (it runs on the parse `spawn_blocking` thread in prod),
     /// so tests must submit off the async worker thread too.
-    async fn submit(agg: &Arc<CodeWriteAggregator>, table: &str, batch: RecordBatch, seq: u64) {
+    async fn submit(agg: &Arc<CodeWriteSink>, table: &str, batch: RecordBatch, seq: u64) {
         let agg = agg.clone();
         let table = table.to_string();
         tokio::task::spawn_blocking(move || agg.submit(table, batch, seq))
@@ -327,11 +315,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn watermark_advances_to_highest_seq_when_buffer_fully_flushed() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 1_000_000, Duration::from_millis(30));
+        let agg = CodeWriteSink::new(writer, 16, 1_000_000, Duration::from_millis(30));
         let mut wm = agg.subscribe();
 
         for _ in 0..3 {
-            let seq = agg.begin_project();
+            let seq = agg.next_seq();
             submit(&agg, "gl_edge", batch(10), seq).await;
         }
 
@@ -341,10 +329,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn watermark_holds_back_seq_whose_other_table_is_still_buffered() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 100, Duration::from_secs(3600));
+        let agg = CodeWriteSink::new(writer, 16, 100, Duration::from_secs(3600));
         let wm = agg.subscribe();
 
-        let seq = agg.begin_project();
+        let seq = agg.next_seq();
         submit(&agg, "gl_code_edge", batch(10), seq).await;
         submit(&agg, "gl_edge", batch(100), seq).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -358,10 +346,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn age_flush_fires_without_reaching_row_cap() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 1_000_000, Duration::from_millis(50));
+        let agg = CodeWriteSink::new(writer, 16, 1_000_000, Duration::from_millis(50));
         let mut wm = agg.subscribe();
 
-        let seq = agg.begin_project();
+        let seq = agg.next_seq();
         submit(&agg, "gl_edge", batch(5), seq).await;
 
         wait_for_watermark(&mut wm, seq).await;
@@ -370,10 +358,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn size_flush_coalesces_then_advances_watermark() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 50, Duration::from_secs(3600));
+        let agg = CodeWriteSink::new(writer, 16, 50, Duration::from_secs(3600));
         let mut wm = agg.subscribe();
 
-        let seq = agg.begin_project();
+        let seq = agg.next_seq();
         submit(&agg, "gl_edge", batch(60), seq).await;
 
         wait_for_watermark(&mut wm, seq).await;

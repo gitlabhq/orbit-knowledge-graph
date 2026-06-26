@@ -54,7 +54,7 @@ pub struct PendingFlush {
 
 pub struct CodeIndexingPipeline {
     resolver: RepositoryResolver,
-    aggregator: Arc<crate::clickhouse::CodeWriteAggregator>,
+    sink: Arc<crate::clickhouse::CodeWriteSink>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -75,7 +75,7 @@ impl CodeIndexingPipeline {
     )]
     pub fn new(
         resolver: RepositoryResolver,
-        aggregator: Arc<crate::clickhouse::CodeWriteAggregator>,
+        sink: Arc<crate::clickhouse::CodeWriteSink>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
@@ -88,7 +88,7 @@ impl CodeIndexingPipeline {
         let big = pipeline_config.big_indexing_slots;
         Self {
             resolver,
-            aggregator,
+            sink,
             checkpoint_store,
             stale_data_cleaner,
             metrics,
@@ -244,7 +244,7 @@ impl CodeIndexingPipeline {
 
         Ok(IndexOutcome::Indexed(PendingFlush {
             seq,
-            watermark: self.aggregator.subscribe(),
+            watermark: self.sink.subscribe(),
             checkpoint: CodeIndexingCheckpoint {
                 traversal_path: request.traversal_path.clone(),
                 project_id: request.project_id,
@@ -381,8 +381,8 @@ impl CodeIndexingPipeline {
             self.table_names.clone(),
         ));
 
-        let seq = self.aggregator.begin_project();
-        let aggregator = self.aggregator.clone();
+        let seq = self.sink.next_seq();
+        let sink = self.sink.clone();
         let max_rows = self.pipeline_config.write_slice_rows.max(1);
         let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new(
             move |table: &str, batch: arrow::record_batch::RecordBatch| {
@@ -390,8 +390,7 @@ impl CodeIndexingPipeline {
                 let mut offset = 0;
                 while offset < batch.num_rows() {
                     let len = (batch.num_rows() - offset).min(max_rows);
-                    aggregator
-                        .submit(table.clone(), batch.slice(offset, len), seq)
+                    sink.submit(table.clone(), batch.slice(offset, len), seq)
                         .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
                     offset += len;
                 }

@@ -39,7 +39,7 @@ pub struct CodeIndexingTaskHandler {
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
     lock_ttl: Duration,
-    aggregator_heartbeat: Duration,
+    write_buffer_heartbeat: Duration,
     subscription: Subscription,
     analytics: IndexingAnalytics,
 }
@@ -55,7 +55,7 @@ impl CodeIndexingTaskHandler {
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
         lock_ttl: Duration,
-        aggregator_heartbeat: Duration,
+        write_buffer_heartbeat: Duration,
         subscription: Subscription,
         analytics: IndexingAnalytics,
     ) -> Self {
@@ -65,7 +65,7 @@ impl CodeIndexingTaskHandler {
             checkpoint_store,
             metrics,
             lock_ttl,
-            aggregator_heartbeat,
+            write_buffer_heartbeat,
             subscription,
             analytics,
         }
@@ -350,7 +350,7 @@ impl CodeIndexingTaskHandler {
         branch: &str,
         mut pending: PendingFlush,
     ) -> Result<(), HandlerError> {
-        let mut beat = tokio::time::interval(self.aggregator_heartbeat);
+        let mut beat = tokio::time::interval(self.write_buffer_heartbeat);
         beat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         beat.tick().await;
 
@@ -359,7 +359,7 @@ impl CodeIndexingTaskHandler {
                 changed = pending.watermark.changed() => {
                     if changed.is_err() {
                         return Err(HandlerError::Processing(
-                            "code write aggregator closed before flushing buffered project".into(),
+                            "code write sink closed before flushing buffered project".into(),
                         ));
                     }
                 }
@@ -452,10 +452,10 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let aggregator = crate::testkit::test_aggregator();
+            let sink = crate::testkit::test_write_sink();
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
-                aggregator,
+                sink,
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),

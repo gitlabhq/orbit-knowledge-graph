@@ -126,8 +126,8 @@ pub fn test_writer() -> Arc<crate::clickhouse::ClickHouseWriter> {
     Arc::new(crate::clickhouse::ClickHouseWriter::noop())
 }
 
-pub fn test_aggregator() -> Arc<crate::clickhouse::CodeWriteAggregator> {
-    crate::clickhouse::CodeWriteAggregator::start(
+pub fn test_write_sink() -> Arc<crate::clickhouse::CodeWriteSink> {
+    crate::clickhouse::CodeWriteSink::new(
         test_writer(),
         8,
         500_000,

@@ -66,8 +66,6 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
-              "aggregator_heartbeat_secs": 90,
-              "aggregator_max_buffer_age_secs": 60,
               "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
@@ -83,6 +81,8 @@
               "small_indexing_slots": 6,
               "small_repo_max_files": 650,
               "worker_threads": 0,
+              "write_buffer_age_secs": 60,
+              "write_buffer_heartbeat_secs": 90,
               "write_channel_capacity": 8,
               "write_slice_rows": 500000
             }
@@ -404,20 +404,6 @@
     "CodeIndexingPipelineConfig": {
       "type": "object",
       "properties": {
-        "aggregator_heartbeat_secs": {
-          "description": "While a project waits for its flush, the handler heartbeats the NATS lease and renews\nits per-project lock on this interval. Must stay below `nats.ack_wait_secs`. Defaults\nto 90.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 90,
-          "minimum": 0
-        },
-        "aggregator_max_buffer_age_secs": {
-          "description": "Flush the shared write coalescer after this many seconds even if no table reached\n`write_slice_rows`, so a trickle of small repos still lands with bounded latency. Must\nstay below `nats.ack_wait_secs`. Defaults to 60.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 60,
-          "minimum": 0
-        },
         "big_indexing_slots": {
           "description": "Concurrent indexing+write slots reserved for big repositories so a flood of\nsmall repos cannot starve monorepos. Defaults to 2.",
           "type": "integer",
@@ -516,6 +502,20 @@
           "default": 0,
           "minimum": 0
         },
+        "write_buffer_age_secs": {
+          "description": "Flush the shared write coalescer after this many seconds even if no table reached\n`write_slice_rows`, so a trickle of small repos still lands with bounded latency. Must\nstay below `nats.ack_wait_secs`. Defaults to 60.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        },
+        "write_buffer_heartbeat_secs": {
+          "description": "While a project waits for its flush, the handler heartbeats the NATS lease and renews\nits per-project lock on this interval. Must stay below `nats.ack_wait_secs`. Defaults\nto 90.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 90,
+          "minimum": 0
+        },
         "write_channel_capacity": {
           "description": "In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.",
           "type": "integer",
@@ -539,8 +539,6 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
-            "aggregator_heartbeat_secs": 90,
-            "aggregator_max_buffer_age_secs": 60,
             "big_indexing_slots": 2,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 6,
@@ -556,6 +554,8 @@
             "small_indexing_slots": 6,
             "small_repo_max_files": 650,
             "worker_threads": 0,
+            "write_buffer_age_secs": 60,
+            "write_buffer_heartbeat_secs": 90,
             "write_channel_capacity": 8,
             "write_slice_rows": 500000
           }
@@ -642,8 +642,6 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
-                "aggregator_heartbeat_secs": 90,
-                "aggregator_max_buffer_age_secs": 60,
                 "big_indexing_slots": 2,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 6,
@@ -659,6 +657,8 @@
                 "small_indexing_slots": 6,
                 "small_repo_max_files": 650,
                 "worker_threads": 0,
+                "write_buffer_age_secs": 60,
+                "write_buffer_heartbeat_secs": 90,
                 "write_channel_capacity": 8,
                 "write_slice_rows": 500000
               }
@@ -895,8 +895,6 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
-              "aggregator_heartbeat_secs": 90,
-              "aggregator_max_buffer_age_secs": 60,
               "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
@@ -912,6 +910,8 @@
               "small_indexing_slots": 6,
               "small_repo_max_files": 650,
               "worker_threads": 0,
+              "write_buffer_age_secs": 60,
+              "write_buffer_heartbeat_secs": 90,
               "write_channel_capacity": 8,
               "write_slice_rows": 500000
             }

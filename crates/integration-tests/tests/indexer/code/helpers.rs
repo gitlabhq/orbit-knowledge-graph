@@ -80,16 +80,16 @@ impl CodeIndexingDeps {
             )
             .expect("writer must build"),
         );
-        let aggregator = indexer::clickhouse::CodeWriteAggregator::start(
+        let sink = indexer::clickhouse::CodeWriteSink::new(
             writer,
             pipeline_config.write_channel_capacity,
             pipeline_config.write_slice_rows,
-            pipeline_config.aggregator_max_buffer_age(),
+            pipeline_config.write_buffer_age(),
         );
 
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
-            aggregator,
+            sink,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
@@ -131,15 +131,15 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
         let config = CodeIndexingPipelineConfig::default();
-        let aggregator = indexer::clickhouse::CodeWriteAggregator::start(
+        let sink = indexer::clickhouse::CodeWriteSink::new(
             writer,
             config.write_channel_capacity,
             config.write_slice_rows,
-            config.aggregator_max_buffer_age(),
+            config.write_buffer_age(),
         );
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
-            aggregator,
+            sink,
             Arc::clone(&self.checkpoint_store) as _,
             stale_data_cleaner,
             self.metrics.clone(),

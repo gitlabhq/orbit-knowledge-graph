@@ -100,8 +100,8 @@ engine:
         fetch_concurrency: 6
         write_channel_capacity: 8
         write_slice_rows: 500000
-        aggregator_max_buffer_age_secs: 60
-        aggregator_heartbeat_secs: 90
+        write_buffer_age_secs: 60
+        write_buffer_heartbeat_secs: 90
         small_repo_max_files: 650
         small_indexing_slots: 6
         big_indexing_slots: 2
