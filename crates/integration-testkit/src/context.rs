@@ -154,7 +154,7 @@ impl TestContext {
     pub async fn truncate_all_tables(&self) {
         let batches = self
             .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{}' AND engine != 'View'",
+                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'Dictionary')",
                 self.config.database
             ))
             .await;
@@ -192,7 +192,7 @@ impl TestContext {
         let src = &self.config.database;
         let batches = self
             .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{name}' AND engine != 'View'"
+                "SELECT name FROM system.tables WHERE database = '{name}' AND engine NOT IN ('View', 'Dictionary')"
             ))
             .await;
         for batch in &batches {
@@ -353,6 +353,11 @@ impl TestContext {
         );
 
         for schema_sql in schema_sqls {
+            let schema_sql = schema_sql
+                .replace("$DICTIONARY_USER", TEST_USERNAME)
+                .replace("$DICTIONARY_PASSWORD", TEST_PASSWORD)
+                .replace("$DICTIONARY_SECURE", "0")
+                .replace("$DICTIONARY_DATABASE", database);
             for statement in schema_sql.split(';') {
                 let statement = statement.trim();
                 if statement.is_empty() {

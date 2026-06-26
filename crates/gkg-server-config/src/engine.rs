@@ -418,10 +418,46 @@ pub struct GlobalDispatcherConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+
+    #[serde(default = "NamespaceDispatcherConfig::default_max_lookback_secs")]
+    pub max_lookback_secs: u64,
+}
+
+impl NamespaceDispatcherConfig {
+    fn default_max_lookback_secs() -> u64 {
+        30
+    }
+}
+
+impl Default for NamespaceDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("*/30 * * * * *".into()),
+            },
+            max_lookback_secs: Self::default_max_lookback_secs(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct NamespaceSweepConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
+impl Default for NamespaceSweepConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 0 * * * *".into()),
+            },
+        }
+    }
 }
 
 fn default_events_stream_name() -> String {
@@ -537,6 +573,8 @@ pub struct ScheduledTasksConfiguration {
     pub global: GlobalDispatcherConfig,
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
+    #[serde(default)]
+    pub namespace_sweep: NamespaceSweepConfig,
     #[serde(default)]
     pub siphon: SiphonRouterConfig,
     #[serde(default)]
