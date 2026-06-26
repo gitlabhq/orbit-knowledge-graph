@@ -321,6 +321,32 @@ impl SyntaxTree {
                         }
                     }
                 }
+                Act::InsertDiff {
+                    source,
+                    exclude,
+                    target,
+                } => {
+                    let root = crate::Root::doc(self.clone());
+                    for id in ids {
+                        let node = root.adopt(SyntaxNodeRef {
+                            tree: root.inner(),
+                            id,
+                        });
+                        let excludes: Vec<String> = exclude.apply_all(&node);
+                        let mut results: Vec<String> = source.apply_all(&node);
+                        if rule.skip > 0 {
+                            results = results.into_iter().skip(rule.skip).collect();
+                        }
+                        if rule.limit > 0 {
+                            results.truncate(rule.limit);
+                        }
+                        for text in results {
+                            if !excludes.contains(&text) {
+                                inserts.push((id, target, text));
+                            }
+                        }
+                    }
+                }
                 Act::Custom(_) => unreachable!(),
             }
             for (id, kind) in renames {
@@ -364,6 +390,12 @@ pub enum Act {
     SetFieldText {
         field_name: &'static str,
         extract: crate::extract::Extract,
+    },
+    /// Insert results from `source` extract, minus any results from `exclude` extract.
+    InsertDiff {
+        source: crate::extract::Extract,
+        exclude: crate::extract::Extract,
+        target: &'static str,
     },
     Custom(fn(&mut SyntaxTree)),
 }
@@ -424,6 +456,22 @@ pub fn set_field_text(
         Act::SetFieldText {
             field_name,
             extract,
+        },
+    )
+}
+
+pub fn insert_diff(
+    source_kind: &'static str,
+    source: crate::extract::Extract,
+    exclude: crate::extract::Extract,
+    target: &'static str,
+) -> Rule {
+    Rule::new(
+        source_kind,
+        Act::InsertDiff {
+            source,
+            exclude,
+            target,
         },
     )
 }

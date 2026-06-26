@@ -8,8 +8,8 @@ use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolutionRules};
-use treesitter_visit::Axis;
-use treesitter_visit::Match;
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
 use treesitter_visit::Node;
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
@@ -19,7 +19,7 @@ type N<'a> = Node<'a, SyntaxTree>;
 /// Extract the text of the Nth `string_lit` child's inner `template_literal`.
 fn nth_label(n: isize) -> treesitter_visit::extract::Extract {
     text()
-        .nth(Axis::Child, Match::Kind("string_lit"), n)
+        .nth(Child, Kind("string_lit"), n)
         .child_of_kind("template_literal")
 }
 
@@ -135,7 +135,32 @@ impl DslLanguage for HclDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[rw::custom(rewrite_hcl)]);
+        use treesitter_visit::extract::text;
+        tree.apply_rewrites(&[
+            rw::insert(
+                "block",
+                text()
+                    .nth(Child, Kind("string_lit"), 1)
+                    .child_of_kind("template_literal"),
+                "__resource",
+            )
+            .when(has_child_text("resource")),
+            rw::insert(
+                "block",
+                text()
+                    .nth(Child, Kind("string_lit"), 1)
+                    .child_of_kind("template_literal"),
+                "__data_source",
+            )
+            .when(has_child_text("data")),
+            rw::insert(
+                "block",
+                child_of_kind("body").collect_nested(Kind("attribute"), Kind("identifier")),
+                "__local",
+            )
+            .when(has_child_text("locals")),
+            rw::custom(hcl_ref_rewrite),
+        ]);
     }
 
     fn hooks() -> LanguageHooks {
@@ -188,49 +213,8 @@ fn get_attr_ident(tree: &SyntaxTree, get_attr: u32) -> Option<String> {
         .map(|id| tree.text(id).to_string())
 }
 
-fn rewrite_hcl(tree: &mut SyntaxTree) {
-    let mut inserts: Vec<(u32, &str, String)> = Vec::new();
+fn hcl_ref_rewrite(tree: &mut SyntaxTree) {
     let mut text_rewrites: Vec<(u32, String)> = Vec::new();
-
-    // on_scope: resource/data second-label defs, locals attribute defs
-    for block in tree.nodes_of_kind("block").collect::<Vec<_>>() {
-        let block_type = tree
-            .children_of_kind(block, "identifier")
-            .next()
-            .map(|id| tree.text(id).to_string());
-
-        match block_type.as_deref() {
-            Some("resource") | Some("data") => {
-                let labels: Vec<_> = tree.children_of_kind(block, "string_lit").collect();
-                if labels.len() >= 2 {
-                    if let Some(name) = tree
-                        .children_of_kind(labels[1], "template_literal")
-                        .next()
-                        .map(|tl| tree.text(tl).to_string())
-                    {
-                        let kind = if block_type.as_deref() == Some("data") {
-                            "__data_source"
-                        } else {
-                            "__resource"
-                        };
-                        inserts.push((block, kind, name));
-                    }
-                }
-            }
-            Some("locals") => {
-                for body in tree.children_of_kind(block, "body") {
-                    for attr in tree.children_of_kind(body, "attribute").collect::<Vec<_>>() {
-                        if let Some(id) = tree.children_of_kind(attr, "identifier").next() {
-                            inserts.push((block, "__local", tree.text(id).to_string()));
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // ref_name_rewrite: merge variable_expr + get_attr into one text
     for var_expr in tree.nodes_of_kind("variable_expr").collect::<Vec<_>>() {
         let name = tree.text(var_expr).to_string();
         if TF_BUILTIN_NAMESPACES.contains(&name.as_str()) {
@@ -246,14 +230,12 @@ fn rewrite_hcl(tree: &mut SyntaxTree) {
         let Some(first_attr) = get_attrs.first().and_then(|&ga| get_attr_ident(tree, ga)) else {
             continue;
         };
-
         let new_text = match name.as_str() {
             "var" | "module" => first_attr,
             "local" => format!("locals.{first_attr}"),
             "data" => {
-                if let Some(second_attr) = get_attrs.get(1).and_then(|&ga| get_attr_ident(tree, ga))
-                {
-                    format!("{first_attr}.{second_attr}")
+                if let Some(second) = get_attrs.get(1).and_then(|&ga| get_attr_ident(tree, ga)) {
+                    format!("{first_attr}.{second}")
                 } else {
                     continue;
                 }
@@ -261,10 +243,6 @@ fn rewrite_hcl(tree: &mut SyntaxTree) {
             _ => format!("{name}.{first_attr}"),
         };
         text_rewrites.push((var_expr, new_text));
-    }
-
-    for (parent, kind, text) in inserts {
-        tree.insert_child(parent, kind, &text);
     }
     for (id, text) in text_rewrites {
         tree.set_text(id, &text);
