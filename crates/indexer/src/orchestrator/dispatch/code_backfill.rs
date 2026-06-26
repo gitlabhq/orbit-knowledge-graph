@@ -10,6 +10,7 @@ use rand::seq::SliceRandom;
 use tracing::{debug, info};
 use uuid::Uuid;
 
+use super::DispatchOutcome;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -45,11 +46,6 @@ static ENABLED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
          WHERE {del} = false AND traversal_path != ''"
     )
 });
-
-pub struct DispatchOutcome {
-    pub dispatched: u64,
-    pub skipped: u64,
-}
 
 pub struct PendingProject {
     pub project_id: i64,

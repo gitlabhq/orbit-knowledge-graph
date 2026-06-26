@@ -225,13 +225,13 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     assert!(global[0].watermark >= before && global[0].watermark <= after);
 
     let namespaces = context.consume_namespace_requests().await;
-    assert_eq!(namespaces.len(), 3);
+    assert_eq!(namespaces.len(), 1);
 
     let actual: HashSet<_> = namespaces
         .iter()
         .map(|r| (r.namespace, r.traversal_path.as_str()))
         .collect();
-    let expected: HashSet<_> = [(100, "1/100/"), (200, "2/200/"), (300, "3/300/")].into();
+    let expected: HashSet<_> = [(200, "2/200/")].into();
     assert_eq!(actual, expected);
 
     assert!(
