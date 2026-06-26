@@ -222,7 +222,7 @@ impl LanguageSpec {
     /// Type names in `New` steps are resolved via `import_map`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "recursive tree walk threading node, chain, config, imports, prefix, separator, and tracer; a context struct would duplicate the caller's scope"
+        reason = "iterative tree walk threading node, chain, config, imports, prefix, separator, and tracer; a context struct would duplicate the caller's scope"
     )]
     fn build_expression_chain(
         &self,
