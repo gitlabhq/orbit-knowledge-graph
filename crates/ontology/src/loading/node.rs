@@ -4,14 +4,15 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
+use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::entities::{
     DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
     RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookupSpec,
     VirtualSource,
 };
 use crate::etl::{
-    DEFAULT_TRANSFORM, DEFAULT_TRAVERSAL_PATH_COLUMN, EdgeDirection, EdgeMapping, EdgeTarget,
-    EtlConfig, EtlScope, PathResolution, ReindexSource,
+    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
+    ReindexSource,
 };
 
 use super::EtlSettings;
@@ -610,7 +611,7 @@ pub(crate) fn convert_reindex_on(
         .map(|entry| match entry {
             ReindexOnYaml::Bare(table) => Ok(ReindexSource {
                 table,
-                traversal_path: PathResolution::Column(DEFAULT_TRAVERSAL_PATH_COLUMN.to_string()),
+                traversal_path: PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string()),
             }),
             ReindexOnYaml::Detailed(detailed) => Ok(ReindexSource {
                 table: detailed.table,
@@ -625,9 +626,7 @@ fn convert_path_resolution(
     raw: Option<PathResolutionYaml>,
 ) -> Result<PathResolution, OntologyError> {
     let Some(raw) = raw else {
-        return Ok(PathResolution::Column(
-            DEFAULT_TRAVERSAL_PATH_COLUMN.to_string(),
-        ));
+        return Ok(PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string()));
     };
 
     match (raw.column, raw.dictionary, raw.key_column) {
@@ -648,9 +647,7 @@ fn convert_path_resolution(
         (Some(_), None, Some(_)) => Err(OntologyError::Validation(format!(
             "{entity_name}: reindex_on.traversal_path.column cannot use key_column"
         ))),
-        (None, None, None) => Ok(PathResolution::Column(
-            DEFAULT_TRAVERSAL_PATH_COLUMN.to_string(),
-        )),
+        (None, None, None) => Ok(PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string())),
     }
 }
 

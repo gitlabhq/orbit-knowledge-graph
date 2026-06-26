@@ -9,8 +9,6 @@ use std::collections::BTreeMap;
 /// use it implicitly; derived entities must name a different one.
 pub const DEFAULT_TRANSFORM: &str = "data_fusion";
 
-pub const DEFAULT_TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EtlScope {
