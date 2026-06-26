@@ -454,16 +454,15 @@ impl MigrationCompletionChecker {
         let ids = i64::extract_column(&batches, 0).map_err(|e| e.to_string())?;
         let paths = String::extract_column(&batches, 1).map_err(|e| e.to_string())?;
 
-        let (count, top_level_paths, skipped) =
-            gkg_utils::traversal_path::split_top_level(ids, paths);
-        if !skipped.is_empty() {
+        let split = gkg_utils::traversal_path::split_top_level(ids, paths);
+        if !split.skipped.is_empty() {
             warn!(
-                skipped = ?skipped,
+                skipped = ?split.skipped,
                 reason = "traversal_path is not a top-level org/namespace path",
                 "excluding enabled namespaces from migration completion gate"
             );
         }
-        Ok((count, top_level_paths))
+        Ok((split.count, split.paths))
     }
 
     async fn count_eligible_projects(&self) -> Result<u64, String> {

@@ -88,13 +88,19 @@ pub fn is_top_level(path: &str) -> bool {
     path.split('/').filter(|s| !s.is_empty()).count() == 2
 }
 
-/// Partitions enabled `(id, path)` rows into the distinct count of top-level
-/// namespaces with their paths, and the `(id, path)` rows dropped for not
-/// being top-level.
-pub fn split_top_level(
-    ids: Vec<i64>,
-    paths: Vec<String>,
-) -> (u64, Vec<String>, Vec<(i64, String)>) {
+/// Result of [`split_top_level`].
+pub struct TopLevelSplit {
+    /// Distinct count of top-level namespaces.
+    pub count: u64,
+    /// Traversal paths of the top-level namespaces.
+    pub paths: Vec<String>,
+    /// `(id, path)` rows dropped for not being top-level.
+    pub skipped: Vec<(i64, String)>,
+}
+
+/// Partitions enabled `(id, path)` rows into top-level namespaces and the rows
+/// dropped for not being top-level.
+pub fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> TopLevelSplit {
     let mut kept_ids = HashSet::new();
     let mut kept_paths = Vec::new();
     let mut skipped = Vec::new();
@@ -106,7 +112,11 @@ pub fn split_top_level(
             skipped.push((id, path));
         }
     }
-    (kept_ids.len() as u64, kept_paths, skipped)
+    TopLevelSplit {
+        count: kept_ids.len() as u64,
+        paths: kept_paths,
+        skipped,
+    }
 }
 
 #[cfg(test)]
@@ -285,11 +295,14 @@ mod tests {
             "0/".to_string(),
             "1/300/".to_string(),
         ];
-        let (count, kept, skipped) = split_top_level(ids, paths);
-        assert_eq!(count, 2);
-        assert_eq!(kept, vec!["1/100/".to_string(), "1/300/".to_string()]);
+        let split = split_top_level(ids, paths);
+        assert_eq!(split.count, 2);
         assert_eq!(
-            skipped,
+            split.paths,
+            vec!["1/100/".to_string(), "1/300/".to_string()]
+        );
+        assert_eq!(
+            split.skipped,
             vec![(2, "1/100/200/".to_string()), (3, "0/".to_string())]
         );
     }
