@@ -364,6 +364,34 @@ impl SyntaxTree {
                         self.set_text(id, &text);
                     }
                 }
+                RewriteRule::MoveChildren {
+                    parent_kind,
+                    source_child_kind,
+                    target_kind,
+                    transform,
+                } => {
+                    let parents: Vec<_> = self.nodes_of_kind(parent_kind).collect();
+                    let mut inserts: Vec<(NodeId, String)> = Vec::new();
+                    for parent in parents {
+                        let texts: Vec<String> = self
+                            .children_of_kind(parent, source_child_kind)
+                            .map(|c| apply_transform(self.text(c), *transform))
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let target = self.children(parent).iter().copied().rev().find(|&c| {
+                            self.kind(c) != *source_child_kind && self.kind(c) != "comment"
+                        });
+                        if let Some(def) = target {
+                            for text in texts {
+                                inserts.push((def, text));
+                            }
+                        }
+                    }
+                    for (def, text) in inserts {
+                        self.insert_child(def, target_kind, &text);
+                    }
+                }
+                RewriteRule::Custom(f) => f(self),
             }
         }
     }
@@ -417,6 +445,13 @@ pub enum RewriteCondition {
     HasChildOfKind(&'static str),
     HasChildText(&'static str),
     DescendantText(&'static str, &'static str),
+    ParentIs(&'static str),
+    GrandparentIs(&'static str),
+    /// True when grandparent is X, or grandparent is "block" whose parent is X.
+    /// Handles Python's `class_definition > block > function_definition` nesting.
+    InScope(&'static str),
+    And(Box<RewriteCondition>, Box<RewriteCondition>),
+    FieldIs(&'static str, &'static str),
 }
 
 impl RewriteCondition {
@@ -426,7 +461,26 @@ impl RewriteCondition {
             Self::HasChildOfKind(k) => tree.has_child_of_kind(id, k),
             Self::HasChildText(t) => tree.has_child_text(id, t),
             Self::DescendantText(k, t) => tree.descendant_text(id, k, t),
+            Self::ParentIs(k) => tree.parent(id).is_some_and(|p| tree.kind(p) == *k),
+            Self::GrandparentIs(k) => tree
+                .parent(id)
+                .and_then(|p| tree.parent(p))
+                .is_some_and(|gp| tree.kind(gp) == *k),
+            Self::InScope(k) => tree
+                .parent(id)
+                .and_then(|p| tree.parent(p))
+                .is_some_and(|gp| {
+                    tree.kind(gp) == *k
+                        || tree.kind(gp) == "block"
+                            && tree.parent(gp).is_some_and(|ggp| tree.kind(ggp) == *k)
+                }),
+            Self::And(a, b) => a.test(tree, id) && b.test(tree, id),
+            Self::FieldIs(f, k) => tree.field(id, f).is_some_and(|c| tree.kind(c) == *k),
         }
+    }
+
+    pub fn and(self, other: RewriteCondition) -> Self {
+        Self::And(Box::new(self), Box::new(other))
     }
 }
 
@@ -462,6 +516,17 @@ pub enum RewriteRule {
         kind: &'static str,
         transform: fn(&str) -> String,
     },
+    /// For each node of `parent_kind`, copy children of `source_child_kind`
+    /// (transformed) as virtual children of the LAST non-matching child.
+    /// Used for moving decorators from `decorated_definition` to the inner def.
+    MoveChildren {
+        parent_kind: &'static str,
+        source_child_kind: &'static str,
+        target_kind: &'static str,
+        transform: fn(&str) -> String,
+    },
+    /// Custom rewrite function for patterns that don't fit the declarative rules.
+    Custom(fn(&mut SyntaxTree)),
 }
 
 // ── Builders ────────────────────────────────────────────────────
@@ -526,6 +591,28 @@ pub fn extract_import(source: &'static str, path_child: &'static str) -> Rewrite
 }
 pub fn rewrite_text(kind: &'static str, transform: fn(&str) -> String) -> RewriteRule {
     RewriteRule::RewriteText { kind, transform }
+}
+
+pub fn move_children(
+    parent_kind: &'static str,
+    source_child_kind: &'static str,
+    target_kind: &'static str,
+    transform: fn(&str) -> String,
+) -> RewriteRule {
+    RewriteRule::MoveChildren {
+        parent_kind,
+        source_child_kind,
+        target_kind,
+        transform,
+    }
+}
+
+pub fn custom(f: fn(&mut SyntaxTree)) -> RewriteRule {
+    RewriteRule::Custom(f)
+}
+
+pub fn strip_at(s: &str) -> String {
+    s.trim_start_matches('@').trim().to_string()
 }
 
 impl RenameBuilder {
@@ -599,6 +686,15 @@ pub fn child_text(text: &'static str) -> RewriteCondition {
 }
 pub fn descendant_text(kind: &'static str, text: &'static str) -> RewriteCondition {
     RewriteCondition::DescendantText(kind, text)
+}
+pub fn parent_is(kind: &'static str) -> RewriteCondition {
+    RewriteCondition::ParentIs(kind)
+}
+pub fn in_scope(kind: &'static str) -> RewriteCondition {
+    RewriteCondition::InScope(kind)
+}
+pub fn field_is(field: &'static str, kind: &'static str) -> RewriteCondition {
+    RewriteCondition::FieldIs(field, kind)
 }
 
 // ── SgNode / Doc ────────────────────────────────────────────────

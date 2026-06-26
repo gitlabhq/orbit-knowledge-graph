@@ -38,7 +38,7 @@ impl DslLanguage for RubyDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_ruby(tree);
+        tree.apply_rewrites(&ruby_rewrites());
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -274,270 +274,171 @@ fn ruby_lambda_assignment() -> Pred {
         .or(proc_new)
 }
 
-fn symbol_name(tree: &SyntaxTree, id: u32) -> Option<String> {
-    if tree.kind(id) != "simple_symbol" {
-        return None;
-    }
-    tree.text(id)
-        .strip_prefix(':')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-}
+use treesitter_visit::syntax_tree as rw;
 
-fn literal_name(tree: &SyntaxTree, id: u32) -> Option<String> {
-    match tree.kind(id) {
-        "simple_symbol" => symbol_name(tree, id),
-        "string" => tree
-            .children_of_kind(id, "string_content")
-            .next()
-            .map(|c| tree.text(c).to_string())
-            .filter(|s| !s.is_empty()),
-        _ => None,
-    }
-}
-
-fn rewrite_ruby_synthetics(tree: &mut SyntaxTree) {
-    let mut inserts: Vec<(u32, &str, String)> = Vec::new();
-    let mut send_rewrites: Vec<(u32, String)> = Vec::new();
-
-    // alias → __method
-    for alias in tree.nodes_of_kind("alias").collect::<Vec<_>>() {
-        if let Some(name) = tree.field(alias, "name") {
-            let text = tree.text(name);
-            if !text.is_empty() {
-                inserts.push((alias, "__method", text.to_string()));
-            }
-        }
-    }
-
+fn ruby_send_rewrite(tree: &mut SyntaxTree) {
+    let mut rewrites: Vec<(u32, String)> = Vec::new();
     for call in tree.nodes_of_kind("call").collect::<Vec<_>>() {
-        let method = tree
-            .field_text(call, "method")
-            .unwrap_or_default()
-            .to_string();
-        let args = match tree.field(call, "arguments") {
-            Some(a) => a,
-            None => continue,
+        let method = tree.field_text(call, "method").unwrap_or_default();
+        if !matches!(method, "send" | "public_send" | "__send__") {
+            continue;
+        }
+        let Some(args) = tree.field(call, "arguments") else {
+            continue;
         };
-
-        match method.as_str() {
-            "attr_accessor" | "attr_reader" | "attr_writer" | "class_attribute"
-            | "mattr_accessor" | "cattr_accessor" | "mattr_reader" | "mattr_writer"
-            | "cattr_reader" | "cattr_writer" => {
-                for &arg in tree.children(args) {
-                    if let Some(name) = symbol_name(tree, arg) {
-                        inserts.push((call, "__property", name));
-                    }
+        for &arg in tree.children(args) {
+            let name = match tree.kind(arg) {
+                "simple_symbol" => tree
+                    .text(arg)
+                    .strip_prefix(':')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                "string" => tree
+                    .children_of_kind(arg, "string_content")
+                    .next()
+                    .map(|c| tree.text(c).to_string())
+                    .filter(|s| !s.is_empty()),
+                _ => None,
+            };
+            if let Some(name) = name {
+                if let Some(m) = tree.field(call, "method") {
+                    rewrites.push((m, name));
                 }
+                break;
             }
-            "delegate" => {
-                for &arg in tree.children(args) {
-                    if let Some(name) = symbol_name(tree, arg) {
-                        inserts.push((call, "__method", name));
-                    }
-                }
-            }
-            "def_delegators" | "def_delegator" => {
-                let mut skip = true;
-                for &arg in tree.children(args) {
-                    if let Some(name) = symbol_name(tree, arg) {
-                        if skip {
-                            skip = false;
-                            continue;
-                        }
-                        inserts.push((call, "__method", name));
-                    }
-                }
-            }
-            "define_method" => {
-                for &arg in tree.children(args) {
-                    if let Some(name) = literal_name(tree, arg) {
-                        inserts.push((call, "__method", name));
-                        break;
-                    }
-                }
-            }
-            "scope" => {
-                for &arg in tree.children(args) {
-                    if let Some(name) = symbol_name(tree, arg) {
-                        inserts.push((call, "__static_method", name));
-                        break;
-                    }
-                }
-            }
-            "has_many" | "belongs_to" | "has_one" | "has_and_belongs_to_many" => {
-                for &arg in tree.children(args) {
-                    if let Some(name) = symbol_name(tree, arg) {
-                        inserts.push((call, "__method", name));
-                        break;
-                    }
-                }
-            }
-            // send/public_send/__send__: rewrite the method text
-            "send" | "public_send" | "__send__" => {
-                for &arg in tree.children(args) {
-                    if let Some(name) = literal_name(tree, arg) {
-                        if let Some(method_node) = tree.field(call, "method") {
-                            send_rewrites.push((method_node, name));
-                        }
-                        break;
-                    }
-                }
-            }
-            _ => {}
         }
     }
-
-    for (parent, kind, text) in inserts {
-        tree.insert_child(parent, kind, &text);
-    }
-    for (id, text) in send_rewrites {
+    for (id, text) in rewrites {
         tree.set_text(id, &text);
     }
 }
 
-fn strip_leading_scope(s: &str) -> String {
-    s.strip_prefix("::").unwrap_or(s).to_string()
-}
-
-const INCLUDE_METHODS: &[&str] = &["include", "extend", "prepend"];
-
-fn collect_include_supertypes(
-    tree: &SyntaxTree,
-    call: u32,
-    out: &mut Vec<(u32, String)>,
-    target: u32,
-) {
-    if let Some(args) = tree.field(call, "arguments") {
-        for &arg in tree.children(args) {
-            let k = tree.kind(arg);
-            if k == "constant" || k == "scope_resolution" {
-                let name = strip_leading_scope(tree.text(arg));
-                if !name.is_empty() {
-                    out.push((target, name));
-                }
-            }
-        }
+fn ruby_super_types(tree: &mut SyntaxTree) {
+    fn strip_scope(s: &str) -> String {
+        s.strip_prefix("::").unwrap_or(s).to_string()
     }
-}
-
-fn rewrite_ruby_supertypes(tree: &mut SyntaxTree) {
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
-
+    let mut out: Vec<(u32, String)> = Vec::new();
     for cls in tree
         .nodes_of_kind("class")
         .chain(tree.nodes_of_kind("module"))
         .collect::<Vec<_>>()
     {
-        // Direct superclass
         if let Some(sc) = tree.field(cls, "superclass") {
             for &child in tree.children(sc) {
-                let k = tree.kind(child);
-                if k == "constant" || k == "scope_resolution" {
-                    let name = strip_leading_scope(tree.text(child));
-                    if !name.is_empty() {
-                        supertypes.push((cls, name));
+                if matches!(tree.kind(child), "constant" | "scope_resolution") {
+                    let n = strip_scope(tree.text(child));
+                    if !n.is_empty() {
+                        out.push((cls, n));
                     }
                 }
             }
         }
-        // include/extend/prepend in body
         if let Some(body) = tree.field(cls, "body") {
             for call in tree.children_of_kind(body, "call").collect::<Vec<_>>() {
-                let method = tree
+                let m = tree
                     .field_text(call, "method")
                     .unwrap_or_default()
                     .to_string();
-                if INCLUDE_METHODS.contains(&method.as_str()) {
-                    collect_include_supertypes(tree, call, &mut supertypes, cls);
-                } else if method == "included" || method == "prepended" {
-                    // Walk into do-block body for nested include/extend/prepend
-                    let block_body = tree
-                        .field(call, "block")
-                        .and_then(|b| tree.field(b, "body"));
-                    if let Some(bb) = block_body {
-                        for inner in tree.children_of_kind(bb, "call").collect::<Vec<_>>() {
-                            let m = tree
-                                .field_text(inner, "method")
-                                .unwrap_or_default()
-                                .to_string();
-                            if INCLUDE_METHODS.contains(&m.as_str()) {
-                                collect_include_supertypes(tree, inner, &mut supertypes, cls);
+                let collect = |tree: &SyntaxTree, call, out: &mut Vec<(u32, String)>, cls| {
+                    if let Some(args) = tree.field(call, "arguments") {
+                        for &arg in tree.children(args) {
+                            if matches!(tree.kind(arg), "constant" | "scope_resolution") {
+                                let n = strip_scope(tree.text(arg));
+                                if !n.is_empty() {
+                                    out.push((cls, n));
+                                }
                             }
                         }
                     }
+                };
+                match m.as_str() {
+                    "include" | "extend" | "prepend" => collect(tree, call, &mut out, cls),
+                    "included" | "prepended" => {
+                        if let Some(bb) = tree
+                            .field(call, "block")
+                            .and_then(|b| tree.field(b, "body"))
+                        {
+                            for inner in tree.children_of_kind(bb, "call").collect::<Vec<_>>() {
+                                if matches!(
+                                    tree.field_text(inner, "method").unwrap_or_default(),
+                                    "include" | "extend" | "prepend"
+                                ) {
+                                    collect(tree, inner, &mut out, cls);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     }
-
-    for (cls, text) in supertypes {
+    for (cls, text) in out {
         tree.insert_child(cls, "__supertype", &text);
     }
 }
 
-fn rewrite_ruby_imports(tree: &mut SyntaxTree) {
-    struct RubyImport {
+fn ruby_import_rewrite(tree: &mut SyntaxTree) {
+    fn strip_scope(s: &str) -> String {
+        s.strip_prefix("::").unwrap_or(s).to_string()
+    }
+    struct Imp {
         call: u32,
         kind: &'static str,
         path: String,
         name: Option<String>,
     }
-
-    let mut imports: Vec<RubyImport> = Vec::new();
-
+    let mut out: Vec<Imp> = Vec::new();
     for call in tree.nodes_of_kind("call").collect::<Vec<_>>() {
-        let method = tree
+        let m = tree
             .field_text(call, "method")
             .unwrap_or_default()
             .to_string();
-        let args = match tree.field(call, "arguments") {
-            Some(a) => a,
-            None => continue,
+        let Some(args) = tree.field(call, "arguments") else {
+            continue;
         };
-        match method.as_str() {
+        match m.as_str() {
             "require" | "require_relative" => {
                 let path = tree
                     .children_of_kind(args, "string")
                     .next()
                     .and_then(|s| tree.children_of_kind(s, "string_content").next())
                     .map(|c| tree.text(c).to_string());
-                if let Some(path) = path.filter(|p| !p.is_empty()) {
-                    let kind = if method == "require_relative" {
+                if let Some(p) = path.filter(|p| !p.is_empty()) {
+                    let k = if m == "require_relative" {
                         "__require_relative"
                     } else {
                         "__require"
                     };
-                    imports.push(RubyImport {
+                    out.push(Imp {
                         call,
-                        kind,
-                        path,
+                        kind: k,
+                        path: p,
                         name: None,
                     });
                 }
             }
             "include" | "extend" | "prepend" => {
-                let kind = match method.as_str() {
+                let k = match m.as_str() {
                     "include" => "__include",
                     "extend" => "__extend",
                     _ => "__prepend",
                 };
                 for &arg in tree.children(args) {
-                    let k = tree.kind(arg);
-                    if k == "constant" || k == "scope_resolution" {
-                        let fqn = strip_leading_scope(tree.text(arg));
+                    if matches!(tree.kind(arg), "constant" | "scope_resolution") {
+                        let fqn = strip_scope(tree.text(arg));
                         if fqn.is_empty() {
                             continue;
                         }
-                        let (path, leaf) = match fqn.rsplit_once("::") {
-                            Some((p, l)) => (p.to_string(), l.to_string()),
-                            None => (String::new(), fqn),
-                        };
-                        imports.push(RubyImport {
+                        let (p, l) = fqn
+                            .rsplit_once("::")
+                            .map(|(p, l)| (p.to_string(), l.to_string()))
+                            .unwrap_or((String::new(), fqn));
+                        out.push(Imp {
                             call,
-                            kind,
-                            path,
-                            name: Some(leaf),
+                            kind: k,
+                            path: p,
+                            name: Some(l),
                         });
                     }
                 }
@@ -545,20 +446,60 @@ fn rewrite_ruby_imports(tree: &mut SyntaxTree) {
             _ => {}
         }
     }
-
-    for imp in imports {
+    for imp in out {
         tree.set_kind(imp.call, imp.kind);
         tree.insert_child(imp.call, "__import_path", &imp.path);
-        if let Some(name) = &imp.name {
-            tree.insert_child(imp.call, "__import_name", name);
+        if let Some(n) = &imp.name {
+            tree.insert_child(imp.call, "__import_name", n);
         }
     }
 }
 
-fn rewrite_ruby(tree: &mut SyntaxTree) {
-    rewrite_ruby_synthetics(tree);
-    rewrite_ruby_supertypes(tree);
-    rewrite_ruby_imports(tree);
+const ATTR_METHODS: &[&str] = &[
+    "attr_accessor",
+    "attr_reader",
+    "attr_writer",
+    "class_attribute",
+    "mattr_accessor",
+    "cattr_accessor",
+    "mattr_reader",
+    "mattr_writer",
+    "cattr_reader",
+    "cattr_writer",
+];
+
+fn ruby_rewrites() -> Vec<rw::RewriteRule> {
+    vec![
+        // Synthetic defs from DSL methods
+        rw::expand(ATTR_METHODS).as_child("__property"),
+        rw::expand(&["delegate"]).as_child("__method"),
+        rw::expand(&["def_delegators", "def_delegator"])
+            .skip(1)
+            .as_child("__method"),
+        rw::expand(&["define_method"])
+            .first()
+            .with_strings()
+            .as_child("__method"),
+        rw::expand(&["scope"]).first().as_child("__static_method"),
+        rw::expand(&[
+            "has_many",
+            "belongs_to",
+            "has_one",
+            "has_and_belongs_to_many",
+        ])
+        .first()
+        .as_child("__method"),
+        // alias → __method from name field
+        rw::collect_self("alias")
+            .kinds(&["method_name", "identifier", "constant", "operator"])
+            .as_child("__method"),
+        // send/public_send/__send__ → rewrite method text
+        rw::custom(ruby_send_rewrite),
+        // Super types (include/extend/prepend + superclass)
+        rw::custom(ruby_super_types),
+        // Imports
+        rw::custom(ruby_import_rewrite),
+    ]
 }
 
 fn ruby_imported_symbol_candidates(

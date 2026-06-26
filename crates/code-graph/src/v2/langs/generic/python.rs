@@ -22,6 +22,8 @@ use crate::v2::linker::rules::{
 #[derive(Default)]
 pub struct PythonDsl;
 
+use treesitter_visit::syntax_tree as rw;
+
 fn in_class_body() -> Pred {
     Pred::Exists(Box::new(
         Extract::one(Parent, Any)
@@ -30,58 +32,12 @@ fn in_class_body() -> Pred {
     ))
 }
 
-fn rewrite_python(tree: &mut SyntaxTree) {
-    let mut renames: Vec<(u32, &str)> = Vec::new();
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
-    let mut decorators: Vec<(u32, String)> = Vec::new();
-
-    // Classify function_definition by context + modifiers
-    for func in tree
-        .nodes_of_kind("function_definition")
-        .collect::<Vec<_>>()
-    {
-        let is_async = tree.has_child_text(func, "async");
-        let has_decorator = tree
-            .parent(func)
-            .is_some_and(|p| tree.kind(p) == "decorated_definition");
-        let is_method = tree
-            .parent(func)
-            .and_then(|p| tree.parent(p))
-            .is_some_and(|gp| {
-                tree.kind(gp) == "class_definition"
-                    || tree.kind(gp) == "block"
-                        && tree
-                            .parent(gp)
-                            .is_some_and(|ggp| tree.kind(ggp) == "class_definition")
-            });
-
-        let kind = match (is_method, is_async, has_decorator) {
-            (true, true, true) => "__decorated_async_method",
-            (true, true, false) => "__async_method",
-            (true, false, true) => "__decorated_method",
-            (true, false, false) => "__method",
-            (false, true, true) => "__decorated_async_function",
-            (false, true, false) => "__async_function",
-            (false, false, true) => "__decorated_function",
-            (false, false, false) => continue,
-        };
-        renames.push((func, kind));
-    }
-
-    // Classify class_definition
+fn python_super_types(tree: &mut SyntaxTree) {
+    let mut inserts: Vec<(u32, String)> = Vec::new();
     for cls in tree.nodes_of_kind("class_definition").collect::<Vec<_>>() {
-        if tree
-            .parent(cls)
-            .is_some_and(|p| tree.kind(p) == "decorated_definition")
-        {
-            renames.push((cls, "__decorated_class"));
-        }
-
-        // Super types: extract from superclasses field
-        if let Some(superclasses) = tree.field(cls, "superclasses") {
-            for &child in tree.children(superclasses) {
-                let kind = tree.kind(child);
-                let text = match kind {
+        if let Some(sc) = tree.field(cls, "superclasses") {
+            for &child in tree.children(sc) {
+                let text = match tree.kind(child) {
                     "call" => tree
                         .field_text(child, "function")
                         .unwrap_or(tree.text(child)),
@@ -89,63 +45,73 @@ fn rewrite_python(tree: &mut SyntaxTree) {
                     _ => continue,
                 };
                 if !text.is_empty() {
-                    supertypes.push((cls, text.to_string()));
+                    inserts.push((cls, text.to_string()));
                 }
             }
         }
     }
-
-    // Move decorators: for each decorated_definition, copy decorator texts
-    // as __decorator children of the inner definition
-    for dd in tree
-        .nodes_of_kind("decorated_definition")
-        .collect::<Vec<_>>()
-    {
-        let dec_texts: Vec<String> = tree
-            .children_of_kind(dd, "decorator")
-            .map(|d| tree.text(d).trim_start_matches('@').trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        // The definition is the last named child of decorated_definition
-        let def_node = tree
-            .children(dd)
-            .iter()
-            .copied()
-            .rev()
-            .find(|&c| tree.kind(c) != "decorator" && tree.kind(c) != "comment");
-        if let Some(def) = def_node {
-            for text in dec_texts {
-                decorators.push((def, text));
-            }
-        }
-    }
-
-    // Classify imports
-    for imp in tree.nodes_of_kind("import_statement").collect::<Vec<_>>() {
-        if tree.has_child_of_kind(imp, "wildcard_import") {
-            renames.push((imp, "__wildcard_import_statement"));
-        } else if tree.has_child_of_kind(imp, "aliased_import") {
-            renames.push((imp, "__aliased_import_statement"));
-        }
-    }
-    for imp in tree
-        .nodes_of_kind("import_from_statement")
-        .collect::<Vec<_>>()
-    {
-        if tree.has_child_of_kind(imp, "wildcard_import") {
-            renames.push((imp, "__wildcard_from_statement"));
-        }
-    }
-
-    for (id, kind) in renames {
-        tree.set_kind(id, kind);
-    }
-    for (cls, text) in supertypes {
+    for (cls, text) in inserts {
         tree.insert_child(cls, "__supertype", &text);
     }
-    for (def, text) in decorators {
-        tree.insert_child(def, "__decorator", &text);
-    }
+}
+
+fn python_rewrites() -> Vec<rw::RewriteRule> {
+    let is_method = rw::in_scope("class_definition");
+    let is_async = rw::child_text("async");
+    let is_decorated = rw::parent_is("decorated_definition");
+
+    vec![
+        // Function classify (8 variants, most specific first)
+        rw::rename("function_definition")
+            .when(
+                is_method
+                    .clone()
+                    .and(is_async.clone())
+                    .and(is_decorated.clone()),
+            )
+            .to("__decorated_async_method"),
+        rw::rename("function_definition")
+            .when(is_method.clone().and(is_async.clone()))
+            .to("__async_method"),
+        rw::rename("function_definition")
+            .when(is_method.clone().and(is_decorated.clone()))
+            .to("__decorated_method"),
+        rw::rename("function_definition")
+            .when(is_method)
+            .to("__method"),
+        rw::rename("function_definition")
+            .when(is_async.clone().and(is_decorated.clone()))
+            .to("__decorated_async_function"),
+        rw::rename("function_definition")
+            .when(is_async)
+            .to("__async_function"),
+        rw::rename("function_definition")
+            .when(is_decorated)
+            .to("__decorated_function"),
+        // Class classify
+        rw::rename("class_definition")
+            .when(rw::parent_is("decorated_definition"))
+            .to("__decorated_class"),
+        // Import classify
+        rw::rename("import_statement")
+            .when(rw::has_child("wildcard_import"))
+            .to("__wildcard_import_statement"),
+        rw::rename("import_statement")
+            .when(rw::has_child("aliased_import"))
+            .to("__aliased_import_statement"),
+        rw::rename("import_from_statement")
+            .when(rw::has_child("wildcard_import"))
+            .to("__wildcard_from_statement"),
+        // Decorators: move from decorated_definition to inner definition
+        rw::move_children(
+            "decorated_definition",
+            "decorator",
+            "__decorator",
+            rw::strip_at,
+        ),
+        // Super types: handled by custom fn because of call→function fallback
+        rw::custom(python_super_types),
+    ]
 }
 
 impl DslLanguage for PythonDsl {
@@ -169,7 +135,7 @@ impl DslLanguage for PythonDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_python(tree);
+        tree.apply_rewrites(&python_rewrites());
     }
 
     fn scopes() -> Vec<ScopeRule> {
