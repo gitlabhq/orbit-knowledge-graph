@@ -1,3 +1,21 @@
+## [0.82.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.81.0...v0.82.0) (2026-06-26)
+
+### Features
+
+* **indexer:** dispatch sdlc indexing on namespace enable ([10417d1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10417d16617606a2dcbfe07d1dfc47a9ceb7bc50)) by Jean-Gabriel Doyon
+* **ontology:** add reindex source metadata ([60edfdb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/60edfdb3c92f6883495c6fe793dd8517fb05a69f)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **indexer:** exclude non-top-level namespaces from migration completion gate ([01e9fb3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/01e9fb34b906a9e2404b5d6ebf9877133ee7f02a)) by michaelangeloio
+* **indexer:** scope coverage telemetry to top-level namespaces and log gate skips ([3ffac29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3ffac29ab26256a74fd6da1a685416cb7f29baec)) by Michael Angelo Rivera
+
+### Other
+
+* add data retention and deletion section to how-it-works ([3e2902e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e2902eb6756ef487619dc29934deb01ead1e3a9)) by Michael Angelo Rivera
+* **adr:** add orbit monetization engineering (ADR 007) ([63d2beb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/63d2bebda86be15df1e086f11563c7c5b0588805)) by Michael Angelo Rivera
+* fix orbit-query fence tags and add Definition.content example ([9f6efd1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f6efd1e9d2eb590195aa25de9ef41153cfc9ace)) by Michael Angelo Rivera
+
 ## [0.81.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.80.0...v0.81.0) (2026-06-26)
 
 ### Features
