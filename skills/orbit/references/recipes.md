@@ -115,7 +115,7 @@ project-scoped `iid`); look it up first with the
       },
       "columns": ["id", "status", "source", "sha", "ref", "created_at"]
     },
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -137,7 +137,7 @@ pipelines for this MR":
       },
       "columns": ["id", "status", "sha", "ref", "failure_reason", "duration", "created_at"]
     },
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -183,7 +183,7 @@ Pipeline node:
        "columns": ["id", "status", "sha", "created_at"]}
     ],
     "relationships": [{"type": "TRIGGERED", "from": "mr", "to": "p"}],
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -301,7 +301,7 @@ and `direction` (`ASC` or `DESC`):
     "relationships": [
       {"type": "AUTHORED", "from": "u", "to": "mr"}
     ],
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "order_by": "-mr.created_at",
     "limit": 10
   }
 }

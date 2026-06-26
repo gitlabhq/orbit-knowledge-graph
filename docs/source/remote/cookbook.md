@@ -444,7 +444,7 @@ Find all critical and high vulnerabilities:
   "relationships": [
     {"type": "IN_PROJECT", "from": "v", "to": "p"}
   ],
-  "order_by": {"node": "v", "property": "severity", "direction": "DESC"},
+  "order_by": "-v.severity",
   "limit": 50
 }
 ```

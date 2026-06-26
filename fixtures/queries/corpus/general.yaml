@@ -75,11 +75,7 @@ q2_datetime_range_filter_on_mr:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "merged_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.merged_at",
       "limit": 20
     }
 
@@ -244,11 +240,7 @@ q6_user_mrs_in_project_traversal:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "merged_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.merged_at",
       "limit": 10
     }
 
@@ -313,11 +305,7 @@ q8_token_match_on_mr_title:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.updated_at",
       "limit": 15
     }
 
@@ -352,11 +340,7 @@ q9_contains_on_mr_description:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.created_at",
       "limit": 10
     }
 
@@ -538,11 +522,7 @@ q13_all_tokens_on_workitem_title:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "wi",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-wi.updated_at",
       "limit": 10
     }
 
@@ -1072,11 +1052,7 @@ q25_mr_diff_project_traversal:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "merged_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.merged_at",
       "limit": 10
     }
 
@@ -1246,11 +1222,7 @@ q30_pipeline_job_ci_chain:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "pipe",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-pipe.created_at",
       "limit": 10
     }
 
@@ -1402,11 +1374,7 @@ q34_any_tokens_on_mr_description:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.updated_at",
       "limit": 10
     }
 
@@ -1653,11 +1621,7 @@ b1_incoming_reviewer_for_user:
           "to": "mr"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.updated_at",
       "limit": 10
     }
 
@@ -1780,11 +1744,7 @@ c3_mr_source_branch_contains:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.created_at",
       "limit": 10
     }
 
@@ -2431,11 +2391,7 @@ h3_pipeline_child_of_pipeline:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "parent",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-parent.created_at",
       "limit": 10
     }
 
@@ -2513,11 +2469,7 @@ h5_deployment_environment:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "dep",
-        "property": "id",
-        "direction": "DESC"
-      },
+      "order_by": "-dep.id",
       "limit": 10
     }
 

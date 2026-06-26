@@ -65,7 +65,7 @@ Put the request body in `/tmp/q.json`:
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "order_by": "-mr.created_at",
     "limit": 5
   }
 }

@@ -1453,7 +1453,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
                 "username": {"op": "in", "value": ["alice", "bob", "charlie", "diana"]}
             }
         },
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+        "order_by": "u.username",
         "limit": 100
     }"#;
 
@@ -1506,7 +1506,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
                 "visibility_level": {"op": "in", "value": ["public", "internal"]}
             }
         },
-        "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+        "order_by": "p.id",
         "limit": 50
     }"#;
 
@@ -2170,7 +2170,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
             "columns": ["username", "name", "state"],
             "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
         },
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+        "order_by": "u.username",
         "limit": 10
     }"#;
 
@@ -3809,7 +3809,7 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "order_by": "u.id",
             "limit": 10
         }"#,
     )
@@ -3842,7 +3842,7 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "order_by": "-u.id",
             "limit": 10
         }"#,
     )

@@ -1196,7 +1196,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                "order_by": {"node": "u", "property": "username", "direction": "ASC"}
+                "order_by": "u.username"
             }"#,
         );
 
@@ -1348,7 +1348,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "order_by": {"node": "missing", "property": "username", "direction": "ASC"}
+                "order_by": "missing.username"
             }"#,
             "undefined node \"missing\"",
         );
@@ -1357,7 +1357,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "order_by": {"node": "u", "property": "nonexistent", "direction": "ASC"}
+                "order_by": "u.nonexistent"
             }"#,
             "does not exist",
         );

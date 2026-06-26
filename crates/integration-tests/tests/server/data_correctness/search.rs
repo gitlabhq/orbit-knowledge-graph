@@ -6,7 +6,7 @@ pub(super) async fn search_returns_correct_user_properties(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state", "user_type"]},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "order_by": "u.id",
             "limit": 10
         }"#,
         &allow_all(),
@@ -62,7 +62,7 @@ pub(super) async fn search_returns_correct_group_full_path(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "full_path"]},
-            "order_by": {"node": "g", "property": "id", "direction": "ASC"},
+            "order_by": "g.id",
             "limit": 10
         }"#,
         &allow_all(),
@@ -88,7 +88,7 @@ pub(super) async fn search_returns_correct_project_full_path(ctx: &TestContext) 
         r#"{
             "query_type": "traversal",
             "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "full_path"]},
-            "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+            "order_by": "p.id",
             "limit": 10
         }"#,
         &allow_all(),
@@ -258,7 +258,7 @@ pub(super) async fn search_with_order_by_desc(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "order_by": "-u.id",
             "limit": 10
         }"#,
         &allow_all(),
@@ -438,7 +438,7 @@ pub(super) async fn search_limit_truncates_results(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "order_by": "u.id",
             "limit": 3
         }"#,
         &allow_all(),
@@ -476,7 +476,7 @@ pub(super) async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) 
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "node_ids": [1, 2, 3, 5],
                      "filters": {"state": "active"}},
-            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "order_by": "-u.id",
             "limit": 10
         }"#,
         &allow_all(),
@@ -503,7 +503,7 @@ pub(super) async fn search_filter_gte_on_datetime_returns_matching_rows(ctx: &Te
                          "state": {"op": "eq", "value": "merged"},
                          "merged_at": {"op": "gte", "value": "2024-06-01T00:00:00Z"}
                      }},
-            "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+            "order_by": "-mr.merged_at",
             "limit": 10
         }"#,
         &allow_all(),
@@ -533,7 +533,7 @@ pub(super) async fn search_filter_lte_on_datetime_returns_matching_rows(ctx: &Te
                          "state": {"op": "eq", "value": "merged"},
                          "merged_at": {"op": "lte", "value": "2024-07-01T00:00:00Z"}
                      }},
-            "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+            "order_by": "-mr.merged_at",
             "limit": 10
         }"#,
         &allow_all(),
@@ -596,7 +596,7 @@ pub(super) async fn search_filter_is_not_null_on_datetime_returns_merged_rows(ct
                      "filters": {
                          "merged_at": {"op": "is_not_null"}
                      }},
-            "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+            "order_by": "-mr.merged_at",
             "limit": 10
         }"#,
         &allow_all(),
@@ -661,7 +661,7 @@ pub(super) async fn search_multi_filter_date_window_multiple_results(ctx: &TestC
                              {"op": "lt", "value": "2024-07-01T00:00:00Z"}
                          ]
                      }},
-            "order_by": {"node": "mr", "property": "merged_at", "direction": "ASC"},
+            "order_by": "mr.merged_at",
             "limit": 10
         }"#,
         &allow_all(),
@@ -723,7 +723,7 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
                              {"op": "gte", "value": "2024-06-01T00:00:00Z"}
                          ]
                      }},
-            "order_by": {"node": "mr", "property": "merged_at", "direction": "ASC"},
+            "order_by": "mr.merged_at",
             "limit": 10
         }"#,
         &allow_all(),
@@ -827,7 +827,7 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
                          "state": "merged",
                          "diff": {"op": "starts_with", "value": "mock:"}
                      }},
-            "order_by": {"node": "mr", "property": "id", "direction": "ASC"},
+            "order_by": "mr.id",
             "limit": 10
         }"#,
         &allow_all(),

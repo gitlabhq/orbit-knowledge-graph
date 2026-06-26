@@ -221,7 +221,7 @@ pub(super) async fn traversal_with_order_by(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "order_by": "-u.id",
             "limit": 20
         }"#,
         &allow_all(),
@@ -503,7 +503,7 @@ pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "order_by": {"node": "mr", "property": "title", "direction": "ASC"},
+            "order_by": "mr.title",
             "limit": 20
         }"#,
         &allow_all(),
@@ -526,7 +526,7 @@ pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+            "order_by": "u.username",
             "limit": 20
         }"#,
         &allow_all(),
@@ -549,7 +549,7 @@ pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "order_by": {"node": "mr", "property": "title", "direction": "DESC"},
+            "order_by": "-mr.title",
             "limit": 20
         }"#,
         &allow_all(),

@@ -32,7 +32,7 @@ fn traversal_query() {
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25,
-        "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
+        "order_by": "-n.created_at"
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();

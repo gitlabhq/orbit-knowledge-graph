@@ -7,7 +7,7 @@ pub(super) async fn search_returns_correct_work_item_properties(ctx: &TestContex
             "query_type": "traversal",
             "node": {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "work_item_type", "confidential", "weight"]},
-            "order_by": {"node": "w", "property": "id", "direction": "ASC"},
+            "order_by": "w.id",
             "limit": 10
         }"#,
         &allow_all(),

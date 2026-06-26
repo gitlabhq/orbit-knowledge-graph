@@ -882,12 +882,42 @@ pub struct InputNeighbors {
     pub rel_types: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+// ─────────────────────────────────────────────────────────────────────────────
+// Ordering
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputOrderBy {
     pub node: String,
     pub property: String,
-    #[serde(default)]
     pub direction: OrderDirection,
+}
+
+impl<'de> Deserialize<'de> for InputOrderBy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let (direction, body) = match spec.strip_prefix('-') {
+            Some(rest) => (OrderDirection::Desc, rest),
+            None => (OrderDirection::Asc, spec.as_str()),
+        };
+
+        let (node, property) = body
+            .split_once('.')
+            .filter(|(n, p)| !n.is_empty() && !p.is_empty() && !p.contains('.'))
+            .ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
+                ))
+            })?;
+        Ok(InputOrderBy {
+            node: node.to_string(),
+            property: property.to_string(),
+            direction,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -913,6 +943,37 @@ pub fn parse_input(json: &str) -> Result<Input, serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn order_by(spec: &str) -> InputOrderBy {
+        serde_json::from_str(&format!("\"{spec}\"")).expect("order_by parses")
+    }
+
+    #[test]
+    fn order_by_descending_uses_leading_dash() {
+        assert_eq!(
+            order_by("-mr.merged_at"),
+            InputOrderBy {
+                node: "mr".into(),
+                property: "merged_at".into(),
+                direction: OrderDirection::Desc,
+            }
+        );
+    }
+
+    #[test]
+    fn order_by_without_dash_is_ascending() {
+        assert_eq!(order_by("u.username").direction, OrderDirection::Asc);
+    }
+
+    #[test]
+    fn order_by_requires_node_and_property() {
+        for malformed in ["merged_at", "-mr.", ".merged_at", "-", "a.b.c"] {
+            assert!(
+                serde_json::from_str::<InputOrderBy>(&format!("\"{malformed}\"")).is_err(),
+                "{malformed:?} should not parse"
+            );
+        }
+    }
 
     #[test]
     fn simple_traversal() {

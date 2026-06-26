@@ -167,7 +167,7 @@ Match nodes and relationships, return matching entities.
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
   "limit": 25,
-  "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"}
+  "order_by": "-mr.merged_at"
 }
 ```
 

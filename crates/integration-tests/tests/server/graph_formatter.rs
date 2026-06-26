@@ -1951,7 +1951,7 @@ async fn search_with_order_by(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "username", "direction": "DESC"},
+            "order_by": "-u.username",
             "limit": 10
         }"#,
         &allow_all(),

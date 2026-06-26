@@ -402,7 +402,7 @@ Find every pipeline that ran for one merge request. Always filter
     },
     "columns": ["id", "status", "source", "sha", "ref", "created_at"]
   },
-  "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+  "order_by": "-p.created_at",
   "limit": 100
 }
 ```
