@@ -196,7 +196,21 @@ impl DslLanguage for GoDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[rw::custom(rewrite_go), rw::custom(rewrite_go_imports)]);
+        tree.apply_rewrites(&[
+            rw::insert(
+                "type_spec",
+                field("type")
+                    .child_of_kind("field_declaration_list")
+                    .collect_field(
+                        treesitter_visit::Match::KindWithoutField("field_declaration", "name"),
+                        "type",
+                    )
+                    .strip_prefix("*"),
+                "__supertype",
+            )
+            .when(field_kind("type", &["struct_type"])),
+            rw::custom(rewrite_go_imports),
+        ]);
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
@@ -216,39 +230,6 @@ impl DslLanguage for GoDsl {
             constructor: &[("composite_literal", "type")],
             qualified_type_kinds: &[],
         })
-    }
-}
-
-fn rewrite_go(tree: &mut SyntaxTree) {
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
-
-    for ts in tree.nodes_of_kind("type_spec").collect::<Vec<_>>() {
-        if let Some(struct_type) = tree
-            .field(ts, "type")
-            .filter(|&t| tree.kind(t) == "struct_type")
-        {
-            for fdl in tree.children_of_kind(struct_type, "field_declaration_list") {
-                for fd in tree
-                    .children_of_kind(fdl, "field_declaration")
-                    .collect::<Vec<_>>()
-                {
-                    if tree.field(fd, "name").is_some() {
-                        continue;
-                    }
-                    if let Some(type_node) = tree.field(fd, "type") {
-                        let s = tree.text(type_node);
-                        let name = s.strip_prefix('*').unwrap_or(s);
-                        if !name.is_empty() {
-                            supertypes.push((ts, name.to_string()));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    for (ts, text) in supertypes {
-        tree.insert_child(ts, "__supertype", &text);
     }
 }
 

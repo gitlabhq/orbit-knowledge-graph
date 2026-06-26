@@ -144,6 +144,10 @@ pub fn field_text(field_name: &'static str, text: &'static str) -> Pred {
     exists(extract::field(field_name).where_(Match::Text(text)))
 }
 
+pub fn field_text_in(field_name: &'static str, texts: &'static [&'static str]) -> Pred {
+    exists(extract::field(field_name).where_(Match::AnyText(texts)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -428,6 +428,10 @@ pub enum Match<'a> {
     KindStartsWith(&'a str),
     /// Match a node whose text content is exactly this string.
     Text(&'a str),
+    /// Match a node whose text is any of these strings.
+    AnyText(&'a [&'a str]),
+    /// Match a node of this kind that has NO field with this name.
+    KindWithoutField(&'a str, &'a str),
 }
 
 impl Match<'_> {
@@ -443,6 +447,11 @@ impl Match<'_> {
             Match::KindEndsWith(s) => node.kind().as_ref().ends_with(s),
             Match::KindStartsWith(s) => node.kind().as_ref().starts_with(s),
             Match::Text(t) => node.text() == *t,
+            Match::AnyText(ts) => {
+                let text = node.text();
+                ts.iter().any(|t| text.as_ref() == *t)
+            }
+            Match::KindWithoutField(k, f) => node.kind().as_ref() == *k && node.field(f).is_none(),
         }
     }
 }

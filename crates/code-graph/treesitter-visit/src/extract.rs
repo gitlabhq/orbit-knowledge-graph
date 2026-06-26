@@ -50,6 +50,8 @@ pub enum Emit {
     Children(Match<'static>),
     /// Collect outermost descendants matching this criterion.
     ShallowDescendants(Match<'static>),
+    /// Collect children matching a criterion, then extract a field from each.
+    ChildrenField(Match<'static>, &'static str),
     /// A fixed constant string, ignoring the node.
     Const(&'static str),
 }
@@ -235,6 +237,12 @@ impl Extract {
         self
     }
 
+    /// Collect children matching a criterion, then extract a named field from each.
+    pub fn collect_field(mut self, m: Match<'static>, field_name: &'static str) -> Self {
+        self.emit = Emit::ChildrenField(m, field_name);
+        self
+    }
+
     /// Strip a prefix from emitted text.
     pub fn strip_prefix(mut self, prefix: &'static str) -> Self {
         self.transforms.push(TextTransform::StripPrefix(prefix));
@@ -370,7 +378,9 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
             }
             None
         }
-        Emit::Children(_) | Emit::ShallowDescendants(_) => emit_all(mode, node).into_iter().next(),
+        Emit::Children(_) | Emit::ShallowDescendants(_) | Emit::ChildrenField(..) => {
+            emit_all(mode, node).into_iter().next()
+        }
         Emit::Const(s) => Some(s.to_string()),
     }
 }
@@ -387,6 +397,11 @@ fn emit_all<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Vec<String> {
             collect_shallow_rec(node, m, &mut results);
             results
         }
+        Emit::ChildrenField(m, field_name) => node
+            .children()
+            .filter(|c| m.test(c))
+            .filter_map(|c| c.field(field_name).map(|f| f.text().to_string()))
+            .collect(),
         other => emit(other, node).into_iter().collect(),
     }
 }

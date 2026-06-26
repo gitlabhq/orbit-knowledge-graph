@@ -7,6 +7,7 @@ use crate::v2::dsl::types::{
 };
 use crate::v2::types::{BindingKind, DefKind, ImportBindingKind};
 use petgraph::graph::NodeIndex;
+use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
 use treesitter_visit::predicate::*;
@@ -276,42 +277,7 @@ fn ruby_lambda_assignment() -> Pred {
 
 use treesitter_visit::syntax_tree as rw;
 
-fn ruby_send_rewrite(tree: &mut SyntaxTree) {
-    let mut rewrites: Vec<(u32, String)> = Vec::new();
-    for call in tree.nodes_of_kind("call").collect::<Vec<_>>() {
-        let method = tree.field_text(call, "method").unwrap_or_default();
-        if !matches!(method, "send" | "public_send" | "__send__") {
-            continue;
-        }
-        let Some(args) = tree.field(call, "arguments") else {
-            continue;
-        };
-        for &arg in tree.children(args) {
-            let name = match tree.kind(arg) {
-                "simple_symbol" => tree
-                    .text(arg)
-                    .strip_prefix(':')
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string()),
-                "string" => tree
-                    .children_of_kind(arg, "string_content")
-                    .next()
-                    .map(|c| tree.text(c).to_string())
-                    .filter(|s| !s.is_empty()),
-                _ => None,
-            };
-            if let Some(name) = name {
-                if let Some(m) = tree.field(call, "method") {
-                    rewrites.push((m, name));
-                }
-                break;
-            }
-        }
-    }
-    for (id, text) in rewrites {
-        tree.set_text(id, &text);
-    }
-}
+const SEND_METHODS: &[&str] = &["send", "public_send", "__send__"];
 
 fn ruby_super_types(tree: &mut SyntaxTree) {
     fn strip_scope(s: &str) -> String {
@@ -472,13 +438,8 @@ fn method_is(name: &'static str) -> Pred {
     field_text("method", name)
 }
 
-fn method_in(names: &[&'static str]) -> Pred {
-    names
-        .iter()
-        .copied()
-        .map(method_is)
-        .reduce(|a, b| a.or(b))
-        .unwrap()
+fn method_in(names: &'static [&'static str]) -> Pred {
+    field_text_in("method", names)
 }
 
 fn ruby_rewrites() -> Vec<rw::Rule> {
@@ -528,7 +489,15 @@ fn ruby_rewrites() -> Vec<rw::Rule> {
         // alias → __method from name field
         rw::insert("alias", field("name"), "__method"),
         // send/public_send/__send__ → rewrite method text
-        rw::custom(ruby_send_rewrite),
+        rw::set_field_text(
+            "call",
+            "method",
+            field("arguments")
+                .nav(Child, AnyKind(&["simple_symbol", "string"]))
+                .try_child("string_content")
+                .strip_prefix(":"),
+        )
+        .when(field_text_in("method", SEND_METHODS)),
         // Super types (include/extend/prepend + superclass)
         rw::custom(ruby_super_types),
         // Imports

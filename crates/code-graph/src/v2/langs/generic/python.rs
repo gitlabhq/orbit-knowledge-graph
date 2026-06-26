@@ -55,34 +55,6 @@ fn python_super_types(tree: &mut SyntaxTree) {
     }
 }
 
-fn python_move_decorators(tree: &mut SyntaxTree) {
-    let mut inserts: Vec<(u32, String)> = Vec::new();
-    for dd in tree
-        .nodes_of_kind("decorated_definition")
-        .collect::<Vec<_>>()
-    {
-        let texts: Vec<String> = tree
-            .children_of_kind(dd, "decorator")
-            .map(|d| tree.text(d).trim_start_matches('@').trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        let def = tree
-            .children(dd)
-            .iter()
-            .copied()
-            .rev()
-            .find(|&c| tree.kind(c) != "decorator" && tree.kind(c) != "comment");
-        if let Some(d) = def {
-            for t in texts {
-                inserts.push((d, t));
-            }
-        }
-    }
-    for (d, t) in inserts {
-        tree.insert_child(d, "__decorator", &t);
-    }
-}
-
 fn python_rewrites() -> Vec<rw::Rule> {
     let m = in_scope("class_definition");
     let a = has_child_text("async");
@@ -105,7 +77,12 @@ fn python_rewrites() -> Vec<rw::Rule> {
             .when(has_child(&["aliased_import"])),
         rw::rename("import_from_statement", "__wildcard_from_statement")
             .when(has_child(&["wildcard_import"])),
-        rw::custom(python_move_decorators),
+        rw::move_children(
+            "decorated_definition",
+            "decorator",
+            "__decorator",
+            rw::strip_at,
+        ),
         // Super types: handled by custom fn because of call→function fallback
         rw::custom(python_super_types),
     ]

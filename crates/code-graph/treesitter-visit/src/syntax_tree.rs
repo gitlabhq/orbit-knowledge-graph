@@ -284,6 +284,43 @@ impl SyntaxTree {
                         }
                     }
                 }
+                Act::MoveChildren { source, target, tx } => {
+                    for id in ids {
+                        let vals: Vec<String> = self
+                            .children_of_kind(id, source)
+                            .map(|c| tx(self.text(c)))
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let dest = self
+                            .children(id)
+                            .iter()
+                            .copied()
+                            .rev()
+                            .find(|&c| self.kind(c) != *source && self.kind(c) != "comment");
+                        if let Some(d) = dest {
+                            for v in vals {
+                                inserts.push((d, target, v));
+                            }
+                        }
+                    }
+                }
+                Act::SetFieldText {
+                    field_name,
+                    extract,
+                } => {
+                    let root = crate::Root::doc(self.clone());
+                    for id in ids {
+                        let node = root.adopt(SyntaxNodeRef {
+                            tree: root.inner(),
+                            id,
+                        });
+                        if let Some(text) = extract.apply(&node) {
+                            if let Some(field_id) = self.field(id, field_name) {
+                                texts.push((field_id, text));
+                            }
+                        }
+                    }
+                }
                 Act::Custom(_) => unreachable!(),
             }
             for (id, kind) in renames {
@@ -315,6 +352,19 @@ pub enum Act {
     SetKind(&'static str),
     SetText(fn(&str) -> String),
     Insert(crate::extract::Extract, &'static str),
+    /// Move children of `source` kind (transformed) as virtual children of the
+    /// last non-source, non-comment child. For decorators.
+    MoveChildren {
+        source: &'static str,
+        target: &'static str,
+        tx: fn(&str) -> String,
+    },
+    /// Navigate to a field on the matched node and set its text using an Extract
+    /// applied to the same node. For Ruby send rewrite.
+    SetFieldText {
+        field_name: &'static str,
+        extract: crate::extract::Extract,
+    },
     Custom(fn(&mut SyntaxTree)),
 }
 
@@ -355,6 +405,29 @@ pub fn insert(
 pub fn set_text(kind: &'static str, tx: fn(&str) -> String) -> Rule {
     Rule::new(kind, Act::SetText(tx))
 }
+pub fn move_children(
+    parent: &'static str,
+    source: &'static str,
+    target: &'static str,
+    tx: fn(&str) -> String,
+) -> Rule {
+    Rule::new(parent, Act::MoveChildren { source, target, tx })
+}
+
+pub fn set_field_text(
+    kind: &'static str,
+    field_name: &'static str,
+    extract: crate::extract::Extract,
+) -> Rule {
+    Rule::new(
+        kind,
+        Act::SetFieldText {
+            field_name,
+            extract,
+        },
+    )
+}
+
 pub fn custom(f: fn(&mut SyntaxTree)) -> Rule {
     Rule::new("", Act::Custom(f))
 }
