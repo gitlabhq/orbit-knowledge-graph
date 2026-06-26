@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
@@ -10,8 +10,6 @@ use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolutionRules};
-use treesitter_visit::Axis::*;
-use treesitter_visit::Match::*;
 use treesitter_visit::Node;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
@@ -124,7 +122,23 @@ impl DslLanguage for GoDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![]
+        vec![
+            import("__blank_import")
+                .label("Import")
+                .path_from(child_of_kind("__import_path"))
+                .side_effect(),
+            import("__wildcard_go_import")
+                .label("Import")
+                .path_from(child_of_kind("__import_path"))
+                .always_wildcard(),
+            import("__aliased_go_import")
+                .label("Import")
+                .path_from(child_of_kind("__import_path"))
+                .alias_from(child_of_kind("__import_alias")),
+            import("__go_import")
+                .label("Import")
+                .path_from(child_of_kind("__import_path")),
+        ]
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -180,15 +194,9 @@ impl DslLanguage for GoDsl {
         vec![loop_rule("for_statement").body("body")]
     }
 
-    fn hooks() -> LanguageHooks {
-        LanguageHooks {
-            on_import: Some(go_extract_imports),
-            ..LanguageHooks::default()
-        }
-    }
-
     fn rewrite(tree: &mut SyntaxTree) {
         rewrite_go(tree);
+        rewrite_go_imports(tree);
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
@@ -244,68 +252,72 @@ fn rewrite_go(tree: &mut SyntaxTree) {
     }
 }
 
-fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-    if node.kind().as_ref() != "import_declaration" {
-        return false;
+fn rewrite_go_imports(tree: &mut SyntaxTree) {
+    struct GoImport {
+        spec: u32,
+        path: String,
+        kind: &'static str,
+        alias: Option<String>,
     }
 
-    for child in node.children() {
-        let kind = child.kind();
-        match kind.as_ref() {
-            "import_spec" => extract_single_import(&child, imports),
-            "import_spec_list" => {
-                for spec in child.children() {
-                    if spec.kind().as_ref() == "import_spec" {
-                        extract_single_import(&spec, imports);
-                    }
-                }
+    let mut imports: Vec<GoImport> = Vec::new();
+
+    for decl in tree.nodes_of_kind("import_declaration").collect::<Vec<_>>() {
+        let specs: Vec<_> = tree
+            .children_of_kind(decl, "import_spec")
+            .chain(
+                tree.children_of_kind(decl, "import_spec_list")
+                    .flat_map(|list| {
+                        tree.children_of_kind(list, "import_spec")
+                            .collect::<Vec<_>>()
+                    }),
+            )
+            .collect();
+
+        for spec in specs {
+            let path_node = tree
+                .children_of_kind(spec, "interpreted_string_literal")
+                .next();
+            let Some(pn) = path_node else { continue };
+            let import_path = tree.text(pn).trim_matches('"').to_string();
+            if import_path.is_empty() {
+                continue;
             }
-            _ => {}
+
+            let alias_kinds = ["package_identifier", "blank_identifier", "dot"];
+            let alias_node = tree.children(spec).iter().copied().find(|&c| {
+                let n = tree.n(c);
+                alias_kinds.iter().any(|&k| tree.kind(c) == k)
+                    && n.start_byte < tree.n(pn).start_byte
+            });
+            let alias_text = alias_node.map(|a| tree.text(a).to_string());
+
+            let (kind, alias) = match alias_text.as_deref() {
+                Some("_") => ("__blank_import", None),
+                Some(".") => ("__wildcard_go_import", None),
+                Some(a) => ("__aliased_go_import", Some(a.to_string())),
+                None => ("__go_import", None),
+            };
+
+            imports.push(GoImport {
+                spec,
+                path: import_path,
+                kind,
+                alias,
+            });
         }
     }
-    true
-}
 
-fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
-    let path_node = node.find(Child, Kind("interpreted_string_literal"));
-
-    let Some(path_node) = path_node else {
-        return;
-    };
-
-    let raw_path = path_node.text().to_string();
-    let import_path = raw_path.trim_matches('"').to_string();
-
-    let alias_node = node
-        .children_matching(AnyKind(&["package_identifier", "blank_identifier", "dot"]))
-        .find(|n| n.range().start < path_node.range().start);
-
-    let alias = alias_node.map(|n| n.text().to_string());
-    let pkg_name = alias
-        .clone()
-        .filter(|a| a != "_" && a != ".")
-        .or_else(|| import_path.rsplit('/').next().map(|s| s.to_string()));
-
-    let is_blank = alias.as_deref() == Some("_");
-    let is_dot = alias.as_deref() == Some(".");
-    let binding_kind = if is_blank {
-        ImportBindingKind::SideEffect
-    } else {
-        ImportBindingKind::Named
-    };
-
-    imports.push(CanonicalImport {
-        import_type: "Import",
-        binding_kind,
-        mode: ImportMode::Declarative,
-        path: import_path,
-        name: pkg_name,
-        alias: alias.filter(|_| !is_blank && !is_dot),
-        scope_fqn: None,
-        range: crate::v2::types::Range::empty(),
-        is_type_only: false,
-        wildcard: is_dot,
-    });
+    for imp in imports {
+        tree.set_kind(imp.spec, imp.kind);
+        tree.insert_child(imp.spec, "__import_path", &imp.path);
+        if let Some(pkg) = imp.path.rsplit('/').next() {
+            tree.insert_child(imp.spec, "__import_name", pkg);
+        }
+        if let Some(alias) = &imp.alias {
+            tree.insert_child(imp.spec, "__import_alias", alias);
+        }
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────

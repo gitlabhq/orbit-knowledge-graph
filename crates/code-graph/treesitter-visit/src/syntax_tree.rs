@@ -17,8 +17,8 @@ const NO_PARENT: u32 = u32::MAX;
 #[derive(Clone)]
 pub struct SyntaxNode {
     kind: SmolStr,
-    start_byte: u32,
-    end_byte: u32,
+    pub start_byte: u32,
+    pub end_byte: u32,
     parent: u32,
     children: SmallVec<[NodeId; 6]>,
     fields: SmallVec<[(&'static str, NodeId); 4]>,
@@ -99,7 +99,7 @@ impl SyntaxTree {
     // ── Read ────────────────────────────────────────────────────
 
     #[inline]
-    fn n(&self, id: NodeId) -> &SyntaxNode {
+    pub fn n(&self, id: NodeId) -> &SyntaxNode {
         &self.nodes[id as usize]
     }
     pub fn root_id(&self) -> NodeId {
