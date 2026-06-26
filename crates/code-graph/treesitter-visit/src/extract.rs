@@ -61,6 +61,12 @@ pub enum TextTransform {
     StripPrefix(&'static str),
     TrimStartChar(char),
     TrimMatches(&'static [char]),
+    /// Strip the first matching prefix from a list.
+    StripAnyPrefix(&'static [&'static str]),
+    /// Split on separator, take last segment.
+    SplitLast(&'static str),
+    /// Split on separator, take everything before the last segment.
+    SplitInit(&'static str),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -261,6 +267,25 @@ impl Extract {
         self
     }
 
+    /// Strip the first matching prefix from a list.
+    pub fn strip_any_prefix(mut self, prefixes: &'static [&'static str]) -> Self {
+        self.transforms
+            .push(TextTransform::StripAnyPrefix(prefixes));
+        self
+    }
+
+    /// Split on separator, keep the last segment.
+    pub fn split_last(mut self, sep: &'static str) -> Self {
+        self.transforms.push(TextTransform::SplitLast(sep));
+        self
+    }
+
+    /// Split on separator, keep everything before the last segment.
+    pub fn split_init(mut self, sep: &'static str) -> Self {
+        self.transforms.push(TextTransform::SplitInit(sep));
+        self
+    }
+
     // Composition
     pub fn inner(self, container: &'static str, target: &'static str) -> Self {
         self.try_child(container).try_descendant(target)
@@ -289,6 +314,26 @@ impl Extract {
                 }
                 TextTransform::TrimMatches(chars) => {
                     s = s.trim_matches(chars as &[char]).to_string();
+                }
+                TextTransform::StripAnyPrefix(prefixes) => {
+                    for p in *prefixes {
+                        if let Some(rest) = s.strip_prefix(p) {
+                            s = rest.trim().to_string();
+                            break;
+                        }
+                    }
+                }
+                TextTransform::SplitLast(sep) => {
+                    if let Some((_, last)) = s.rsplit_once(sep) {
+                        s = last.to_string();
+                    }
+                }
+                TextTransform::SplitInit(sep) => {
+                    if let Some((init, _)) = s.rsplit_once(sep) {
+                        s = init.to_string();
+                    } else {
+                        s = String::new();
+                    }
                 }
             }
         }

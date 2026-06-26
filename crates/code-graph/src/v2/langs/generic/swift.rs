@@ -39,30 +39,18 @@ fn swift_supertype_rule(kind: &'static str) -> rw::Rule {
     )
 }
 
-fn rewrite_swift_imports(tree: &mut SyntaxTree) {
-    let mut imports: Vec<(u32, String)> = Vec::new();
-
-    for imp in tree.nodes_of_kind("import_declaration").collect::<Vec<_>>() {
-        let raw = tree.text(imp);
-        let rest = raw.trim().strip_prefix("import").unwrap_or("").trim();
-        let path = SWIFT_IMPORT_KINDS
-            .iter()
-            .find_map(|kind| {
-                let after = rest.strip_prefix(kind)?;
-                after
-                    .starts_with(|c: char| c.is_whitespace())
-                    .then(|| after.trim())
-            })
-            .unwrap_or(rest);
-        if !path.is_empty() {
-            imports.push((imp, path.to_string()));
-        }
-    }
-
-    for (imp, path) in imports {
-        tree.insert_child(imp, "__import_path", &path);
-    }
-}
+const SWIFT_IMPORT_PREFIXES: &[&str] = &[
+    "import struct ",
+    "import class ",
+    "import enum ",
+    "import var ",
+    "import let ",
+    "import func ",
+    "import typealias ",
+    "import protocol ",
+    "import actor ",
+    "import ",
+];
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
@@ -206,7 +194,11 @@ impl DslLanguage for SwiftDsl {
         tree.apply_rewrites(&[
             swift_supertype_rule("class_declaration"),
             swift_supertype_rule("protocol_declaration"),
-            rw::custom(rewrite_swift_imports),
+            rw::insert(
+                "import_declaration",
+                text().strip_any_prefix(SWIFT_IMPORT_PREFIXES),
+                "__import_path",
+            ),
         ]);
     }
 

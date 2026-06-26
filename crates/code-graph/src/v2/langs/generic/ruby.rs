@@ -39,7 +39,9 @@ impl DslLanguage for RubyDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&ruby_rewrites());
+        let mut rules = ruby_rewrites();
+        rules.extend(ruby_import_rules());
+        tree.apply_rewrites(&rules);
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -344,81 +346,43 @@ fn ruby_super_types(tree: &mut SyntaxTree) {
     }
 }
 
-fn ruby_import_rewrite(tree: &mut SyntaxTree) {
-    fn strip_scope(s: &str) -> String {
-        s.strip_prefix("::").unwrap_or(s).to_string()
-    }
-    struct Imp {
-        call: u32,
-        kind: &'static str,
-        path: String,
-        name: Option<String>,
-    }
-    let mut out: Vec<Imp> = Vec::new();
-    for call in tree.nodes_of_kind("call").collect::<Vec<_>>() {
-        let m = tree
-            .field_text(call, "method")
-            .unwrap_or_default()
-            .to_string();
-        let Some(args) = tree.field(call, "arguments") else {
-            continue;
-        };
-        match m.as_str() {
-            "require" | "require_relative" => {
-                let path = tree
-                    .children_of_kind(args, "string")
-                    .next()
-                    .and_then(|s| tree.children_of_kind(s, "string_content").next())
-                    .map(|c| tree.text(c).to_string());
-                if let Some(p) = path.filter(|p| !p.is_empty()) {
-                    let k = if m == "require_relative" {
-                        "__require_relative"
-                    } else {
-                        "__require"
-                    };
-                    out.push(Imp {
-                        call,
-                        kind: k,
-                        path: p,
-                        name: None,
-                    });
-                }
-            }
-            "include" | "extend" | "prepend" => {
-                let k = match m.as_str() {
-                    "include" => "__include",
-                    "extend" => "__extend",
-                    _ => "__prepend",
-                };
-                for &arg in tree.children(args) {
-                    if matches!(tree.kind(arg), "constant" | "scope_resolution") {
-                        let fqn = strip_scope(tree.text(arg));
-                        if fqn.is_empty() {
-                            continue;
-                        }
-                        let (p, l) = fqn
-                            .rsplit_once("::")
-                            .map(|(p, l)| (p.to_string(), l.to_string()))
-                            .unwrap_or((String::new(), fqn));
-                        out.push(Imp {
-                            call,
-                            kind: k,
-                            path: p,
-                            name: Some(l),
-                        });
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    for imp in out {
-        tree.set_kind(imp.call, imp.kind);
-        tree.insert_child(imp.call, "__import_path", &imp.path);
-        if let Some(n) = &imp.name {
-            tree.insert_child(imp.call, "__import_name", n);
-        }
-    }
+fn ruby_import_rules() -> Vec<rw::Rule> {
+    let require_path = || {
+        field("arguments")
+            .child_of_kind("string")
+            .child_of_kind("string_content")
+    };
+    let mixin_args = || {
+        field("arguments")
+            .collect(AnyKind(&["constant", "scope_resolution"]))
+            .strip_prefix("::")
+    };
+
+    vec![
+        // require / require_relative
+        rw::insert("call", require_path(), "__import_path").when(method_is("require")),
+        rw::rename("call", "__require").when(method_is("require")),
+        rw::insert("call", require_path(), "__import_path").when(method_is("require_relative")),
+        rw::rename("call", "__require_relative").when(method_is("require_relative")),
+        // include
+        rw::insert("call", mixin_args().split_init("::"), "__import_path")
+            .when(method_is("include")),
+        rw::insert("call", mixin_args().split_last("::"), "__import_name")
+            .when(method_is("include")),
+        rw::rename("call", "__include").when(method_is("include")),
+        // extend
+        rw::insert("call", mixin_args().split_init("::"), "__import_path")
+            .when(method_is("extend")),
+        rw::insert("call", mixin_args().split_last("::"), "__import_name")
+            .when(method_is("extend")),
+        rw::rename("call", "__extend").when(method_is("extend")),
+        // prepend
+        rw::insert("call", mixin_args().split_init("::"), "__import_path")
+            .when(method_is("prepend")),
+        rw::insert("call", mixin_args().split_last("::"), "__import_name")
+            .when(method_is("prepend")),
+        rw::rename("call", "__prepend").when(method_is("prepend")),
+    ]
 }
 
 const ATTR_METHODS: &[&str] = &[
@@ -501,7 +465,6 @@ fn ruby_rewrites() -> Vec<rw::Rule> {
         // Super types (include/extend/prepend + superclass)
         rw::custom(ruby_super_types),
         // Imports
-        rw::custom(ruby_import_rewrite),
     ]
 }
 

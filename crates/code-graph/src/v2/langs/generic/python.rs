@@ -32,29 +32,6 @@ fn in_class_body() -> Pred {
     ))
 }
 
-fn python_super_types(tree: &mut SyntaxTree) {
-    let mut inserts: Vec<(u32, String)> = Vec::new();
-    for cls in tree.nodes_of_kind("class_definition").collect::<Vec<_>>() {
-        if let Some(sc) = tree.field(cls, "superclasses") {
-            for &child in tree.children(sc) {
-                let text = match tree.kind(child) {
-                    "call" => tree
-                        .field_text(child, "function")
-                        .unwrap_or(tree.text(child)),
-                    "identifier" | "attribute" => tree.text(child),
-                    _ => continue,
-                };
-                if !text.is_empty() {
-                    inserts.push((cls, text.to_string()));
-                }
-            }
-        }
-    }
-    for (cls, text) in inserts {
-        tree.insert_child(cls, "__supertype", &text);
-    }
-}
-
 fn python_rewrites() -> Vec<rw::Rule> {
     let m = in_scope("class_definition");
     let a = has_child_text("async");
@@ -84,7 +61,16 @@ fn python_rewrites() -> Vec<rw::Rule> {
             rw::strip_at,
         ),
         // Super types: handled by custom fn because of call→function fallback
-        rw::custom(python_super_types),
+        rw::insert(
+            "class_definition",
+            field("superclasses").collect(AnyKind(&["identifier", "attribute"])),
+            "__supertype",
+        ),
+        rw::insert(
+            "class_definition",
+            field("superclasses").collect_field(Kind("call"), "function"),
+            "__supertype",
+        ),
     ]
 }
 
