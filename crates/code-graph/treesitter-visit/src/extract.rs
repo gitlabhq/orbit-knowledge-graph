@@ -52,6 +52,9 @@ pub enum Emit {
     ShallowDescendants(Match<'static>),
     /// Collect children matching a criterion, then extract a field from each.
     ChildrenField(Match<'static>, &'static str),
+    /// For each child matching `outer`, collect THEIR children matching `inner`.
+    /// Two-level nested collection.
+    ChildrenNested(Match<'static>, Match<'static>),
     /// A fixed constant string, ignoring the node.
     Const(&'static str),
 }
@@ -249,6 +252,12 @@ impl Extract {
         self
     }
 
+    /// For each child matching `outer`, collect THEIR children matching `inner`.
+    pub fn collect_nested(mut self, outer: Match<'static>, inner: Match<'static>) -> Self {
+        self.emit = Emit::ChildrenNested(outer, inner);
+        self
+    }
+
     /// Strip a prefix from emitted text.
     pub fn strip_prefix(mut self, prefix: &'static str) -> Self {
         self.transforms.push(TextTransform::StripPrefix(prefix));
@@ -423,9 +432,10 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
             }
             None
         }
-        Emit::Children(_) | Emit::ShallowDescendants(_) | Emit::ChildrenField(..) => {
-            emit_all(mode, node).into_iter().next()
-        }
+        Emit::Children(_)
+        | Emit::ShallowDescendants(_)
+        | Emit::ChildrenField(..)
+        | Emit::ChildrenNested(..) => emit_all(mode, node).into_iter().next(),
         Emit::Const(s) => Some(s.to_string()),
     }
 }
@@ -447,6 +457,19 @@ fn emit_all<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Vec<String> {
             .filter(|c| m.test(c))
             .filter_map(|c| c.field(field_name).map(|f| f.text().to_string()))
             .collect(),
+        Emit::ChildrenNested(outer, inner) => {
+            let mut results = Vec::new();
+            for c in node.children() {
+                if outer.test(&c) {
+                    for gc in c.children() {
+                        if inner.test(&gc) {
+                            results.push(gc.text().to_string());
+                        }
+                    }
+                }
+            }
+            results
+        }
         other => emit(other, node).into_iter().collect(),
     }
 }
