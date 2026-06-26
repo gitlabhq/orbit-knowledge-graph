@@ -196,7 +196,9 @@ impl DslLanguage for GoDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[
+        let mut rules = go_import_rules();
+        rules.insert(
+            0,
             rw::insert(
                 "type_spec",
                 field("type")
@@ -209,8 +211,8 @@ impl DslLanguage for GoDsl {
                 "__supertype",
             )
             .when(field_kind("type", &["struct_type"])),
-            rw::custom(rewrite_go_imports),
-        ]);
+        );
+        tree.apply_rewrites(&rules);
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
@@ -233,72 +235,25 @@ impl DslLanguage for GoDsl {
     }
 }
 
-fn rewrite_go_imports(tree: &mut SyntaxTree) {
-    struct GoImport {
-        spec: u32,
-        path: String,
-        kind: &'static str,
-        alias: Option<String>,
-    }
+const QUOTE: &[char] = &['"'];
 
-    let mut imports: Vec<GoImport> = Vec::new();
-
-    for decl in tree.nodes_of_kind("import_declaration").collect::<Vec<_>>() {
-        let specs: Vec<_> = tree
-            .children_of_kind(decl, "import_spec")
-            .chain(
-                tree.children_of_kind(decl, "import_spec_list")
-                    .flat_map(|list| {
-                        tree.children_of_kind(list, "import_spec")
-                            .collect::<Vec<_>>()
-                    }),
-            )
-            .collect();
-
-        for spec in specs {
-            let path_node = tree
-                .children_of_kind(spec, "interpreted_string_literal")
-                .next();
-            let Some(pn) = path_node else { continue };
-            let import_path = tree.text(pn).trim_matches('"').to_string();
-            if import_path.is_empty() {
-                continue;
-            }
-
-            let alias_kinds = ["package_identifier", "blank_identifier", "dot"];
-            let alias_node = tree.children(spec).iter().copied().find(|&c| {
-                let n = tree.n(c);
-                alias_kinds.iter().any(|&k| tree.kind(c) == k)
-                    && n.start_byte < tree.n(pn).start_byte
-            });
-            let alias_text = alias_node.map(|a| tree.text(a).to_string());
-
-            let (kind, alias) = match alias_text.as_deref() {
-                Some("_") => ("__blank_import", None),
-                Some(".") => ("__wildcard_go_import", None),
-                Some(a) => ("__aliased_go_import", Some(a.to_string())),
-                None => ("__go_import", None),
-            };
-
-            imports.push(GoImport {
-                spec,
-                path: import_path,
-                kind,
-                alias,
-            });
-        }
-    }
-
-    for imp in imports {
-        tree.set_kind(imp.spec, imp.kind);
-        tree.insert_child(imp.spec, "__import_path", &imp.path);
-        if let Some(pkg) = imp.path.rsplit('/').next() {
-            tree.insert_child(imp.spec, "__import_name", pkg);
-        }
-        if let Some(alias) = &imp.alias {
-            tree.insert_child(imp.spec, "__import_alias", alias);
-        }
-    }
+fn go_import_rules() -> Vec<rw::Rule> {
+    let path = || child_of_kind("interpreted_string_literal").trim_matches(QUOTE);
+    vec![
+        // Extract path and name from ALL import_specs BEFORE renaming
+        rw::insert("import_spec", path(), "__import_path"),
+        rw::insert("import_spec", path().split_last("/"), "__import_name"),
+        // Alias: extract package_identifier text
+        rw::insert(
+            "import_spec",
+            child_of_kind("package_identifier"),
+            "__import_alias",
+        ),
+        // Classify by alias type
+        rw::rename("import_spec", "__blank_import").when(has_child(&["blank_identifier"])),
+        rw::rename("import_spec", "__wildcard_go_import").when(has_child(&["dot"])),
+        rw::rename("import_spec", "__aliased_go_import").when(has_child(&["package_identifier"])),
+    ]
 }
 
 // ── Resolution rules ────────────────────────────────────────────
