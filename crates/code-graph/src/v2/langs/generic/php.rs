@@ -28,28 +28,15 @@ const PHP_TYPE_NAME_KINDS: &[&str] = &["name", "qualified_name"];
 #[derive(Default)]
 pub struct PhpDsl;
 
-fn rewrite_php(tree: &mut SyntaxTree) {
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
-
-    let class_kinds = [
+fn php_trait_use_supertypes(tree: &mut SyntaxTree) {
+    let mut out: Vec<(u32, String)> = Vec::new();
+    for kind in [
         "class_declaration",
         "interface_declaration",
         "trait_declaration",
         "enum_declaration",
-    ];
-    for kind in class_kinds {
+    ] {
         for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
-            for &child in tree.children(cls) {
-                let k = tree.kind(child);
-                if k == "base_clause" || k == "class_interface_clause" {
-                    for &t in tree.children(child) {
-                        if PHP_TYPE_NAME_KINDS.contains(&tree.kind(t)) {
-                            supertypes
-                                .push((cls, tree.text(t).trim_start_matches('\\').to_string()));
-                        }
-                    }
-                }
-            }
             if let Some(body) = tree.field(cls, "body") {
                 for ud in tree
                     .children_of_kind(body, "use_declaration")
@@ -57,18 +44,45 @@ fn rewrite_php(tree: &mut SyntaxTree) {
                 {
                     for &t in tree.children(ud) {
                         if PHP_TYPE_NAME_KINDS.contains(&tree.kind(t)) {
-                            supertypes
-                                .push((cls, tree.text(t).trim_start_matches('\\').to_string()));
+                            out.push((cls, tree.text(t).trim_start_matches('\\').to_string()));
                         }
                     }
                 }
             }
         }
     }
-
-    for (cls, text) in supertypes {
+    for (cls, text) in out {
         tree.insert_child(cls, "__supertype", &text);
     }
+}
+
+fn php_supertype_rules() -> Vec<rw::Rule> {
+    use treesitter_visit::Match::AnyKind;
+    let tk = AnyKind(PHP_TYPE_NAME_KINDS);
+    let mut rules = Vec::new();
+    for kind in [
+        "class_declaration",
+        "interface_declaration",
+        "trait_declaration",
+        "enum_declaration",
+    ] {
+        rules.push(rw::insert(
+            kind,
+            child_of_kind("base_clause")
+                .collect(tk)
+                .trim_start_char('\\'),
+            "__supertype",
+        ));
+        rules.push(rw::insert(
+            kind,
+            child_of_kind("class_interface_clause")
+                .collect(tk)
+                .trim_start_char('\\'),
+            "__supertype",
+        ));
+    }
+    rules.push(rw::custom(php_trait_use_supertypes));
+    rules
 }
 
 impl DslLanguage for PhpDsl {
@@ -90,11 +104,10 @@ impl DslLanguage for PhpDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[
-            rw::custom(rewrite_php),
-            rw::custom(rewrite_php_refs),
-            rw::custom(rewrite_php_imports),
-        ]);
+        let mut rules = php_supertype_rules();
+        rules.push(rw::custom(rewrite_php_refs));
+        rules.push(rw::custom(rewrite_php_imports));
+        tree.apply_rewrites(&rules);
     }
 
     fn scopes() -> Vec<ScopeRule> {
