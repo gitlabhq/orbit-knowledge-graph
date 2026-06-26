@@ -19,7 +19,7 @@ const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
+use crate::input::{Input, QueryInput, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
@@ -42,7 +42,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     state {
-        pub json: String,
+        pub query: QueryInput,
         pub input: Input,
         pub query_plan: QueryPlan,
         pub node: Node,
@@ -55,7 +55,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     phases {
         validate {
             reads_env: [ontology]
-            mutates: [json, input]
+            mutates: [query, input]
         }
         normalize {
             reads_env: [ontology]
@@ -102,7 +102,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
     pipelines {
         clickhouse {
             env: [ontology, security_ctx]
-            state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
+            state: [query, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [validate, normalize, restrict, plan, lower, enforce, security, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
@@ -112,7 +112,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         validate_normalize {
             env: [ontology]
-            state: [json, input]
+            state: [query, input]
             phases: [validate, normalize]
         }
     }
@@ -123,16 +123,37 @@ compiler_pipeline_macros::define_compiler_ctx! {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let json = require(ctx.take_json(), "json")?;
-    let ontology = ctx.ontology();
-    let v = validate::Validator::new(ontology);
-    let value = v.check_json(&json)?;
-    v.check_ontology(&value)?;
-    let mut input: Input = serde_json::from_value(value)?;
+    let query = require(ctx.take_query(), "query")?;
+    let v = validate::Validator::new(ctx.ontology());
+
+    // Both surfaces converge on an `Input`; only the parse differs. JSON goes
+    // through JSON-schema + ontology-schema validation, Cypher through the
+    // lance-graph parser and AST lowering. From `check_references` onward the
+    // two are identical, so the reference checks and filter typing run once.
+    let mut input: Input = match query {
+        QueryInput::Json(json) => {
+            let value = v.check_json(&json)?;
+            v.check_ontology(&value)?;
+            serde_json::from_value(value)?
+        }
+        QueryInput::Cypher(cypher) => parse_cypher(&cypher, ctx.ontology())?,
+    };
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
     ctx.set_input(input);
     Ok(())
+}
+
+#[cfg(feature = "cypher")]
+fn parse_cypher(cypher: &str, ontology: &Ontology) -> Result<Input> {
+    crate::cypher::parse_to_input(cypher, ontology)
+}
+
+#[cfg(not(feature = "cypher"))]
+fn parse_cypher(_cypher: &str, _ontology: &Ontology) -> Result<Input> {
+    Err(QueryError::Cypher(
+        "cypher support is not compiled in; rebuild with `--features cypher`".into(),
+    ))
 }
 
 fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {

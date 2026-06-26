@@ -3,6 +3,11 @@ name = "compiler"
 version.workspace = true
 edition = "2024"
 
+[features]
+# Opt-in Cypher front-end (DSL v2 spike). Pulls in lance-graph (and its
+# DataFusion/Lance stack) only when enabled, so default builds stay lean.
+cypher = ["dep:lance-graph"]
+
 [dependencies]
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../../gkg-server-config" }
@@ -16,6 +21,7 @@ serde_json = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true }
+lance-graph = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

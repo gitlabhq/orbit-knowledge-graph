@@ -2222,6 +2222,7 @@ dependencies = [
  "gkg-server-config",
  "gkg-utils",
  "jsonschema",
+ "lance-graph",
  "ontology",
  "opentelemetry",
  "pretty_assertions",

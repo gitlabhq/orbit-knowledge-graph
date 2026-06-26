@@ -11,6 +11,37 @@ use std::collections::{HashMap, HashSet};
 // Top-level input
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Raw query source as it enters the pipeline, tagged by surface language.
+///
+/// The `validate` phase parses each variant into an [`Input`]; everything
+/// downstream is language-agnostic. `Cypher` is only producible when the
+/// `cypher` feature is enabled. A bare string converts to `Json`, so callers
+/// with a JSON query keep passing the string; selecting Cypher is the explicit
+/// `QueryInput::Cypher(..)` case.
+#[derive(Debug, Clone)]
+pub enum QueryInput {
+    Json(String),
+    Cypher(String),
+}
+
+impl From<String> for QueryInput {
+    fn from(json: String) -> Self {
+        QueryInput::Json(json)
+    }
+}
+
+impl From<&str> for QueryInput {
+    fn from(json: &str) -> Self {
+        QueryInput::Json(json.to_string())
+    }
+}
+
+impl From<&String> for QueryInput {
+    fn from(json: &String) -> Self {
+        QueryInput::Json(json.clone())
+    }
+}
+
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]

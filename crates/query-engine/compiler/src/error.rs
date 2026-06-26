@@ -12,6 +12,9 @@ pub enum QueryError {
     #[error("parse error: {0}")]
     Parse(#[from] serde_json::Error),
 
+    #[error("cypher error: {0}")]
+    Cypher(String),
+
     #[error("schema violation: {0}")]
     Validation(String),
 
@@ -62,6 +65,7 @@ impl QueryError {
         matches!(
             self,
             Self::Parse(_)
+                | Self::Cypher(_)
                 | Self::Validation(_)
                 | Self::ReferenceError(_)
                 | Self::PaginationError(_)
@@ -90,6 +94,7 @@ mod tests {
                 QueryError::Parse(serde_json::from_str::<()>("!").unwrap_err()),
                 true,
             ),
+            (QueryError::Cypher("bad".into()), true),
             (QueryError::Validation("bad".into()), true),
             (QueryError::ReferenceError("bad".into()), true),
             (QueryError::PaginationError("bad".into()), true),

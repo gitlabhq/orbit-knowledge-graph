@@ -34,6 +34,8 @@
 pub mod analytics;
 pub mod ast;
 pub mod constants;
+#[cfg(feature = "cypher")]
+pub mod cypher;
 pub mod error;
 pub mod input;
 pub mod metrics;
@@ -54,7 +56,7 @@ pub use constants::{
 pub use error::{QueryError, Result};
 pub use input::{
     ColumnSelection, DynamicColumnMode, EntityAuthConfig, FilterOp, Input, InputFilter, InputNode,
-    QueryType, parse_input,
+    QueryInput, QueryType, parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
@@ -97,25 +99,30 @@ use config::CompilerCtx as _;
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Compile a JSON query into a [`CompiledQueryContext`].
+/// Compile a query into a [`CompiledQueryContext`].
 ///
-/// The context contains the parameterized SQL, bind parameters, result context
-/// for redaction, hydration plan, and the validated input.
-///
-/// Runs the ClickHouse compilation pipeline. Edge-chain-first lowering
-/// produces flat edge-chain JOINs with inline dedup.
+/// `query` is the query source: a JSON DSL string (a bare `&str`/`String`
+/// converts to [`QueryInput::Json`]) or, with the `cypher` feature, a
+/// [`QueryInput::Cypher`]. Both surfaces share the same compilation pipeline
+/// and produce the same context (parameterized SQL, bind parameters, result
+/// context for redaction, hydration plan, and validated input).
 ///
 /// ```text
-/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// JSON   ─┐
+///         ├─ Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// Cypher ─┘
 /// ```
+///
+/// The two surfaces diverge only inside `Validate` (JSON-schema parse vs.
+/// lance-graph parse); everything after is shared.
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
-    json_input: &str,
+    query: impl Into<QueryInput>,
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), ctx.clone());
-    ctx.set_json(json_input.to_string());
+    ctx.set_query(query.into());
     config::run_clickhouse(&mut ctx)
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
@@ -132,7 +139,7 @@ pub fn compile(
 /// traversal_path prefix as [`SecurityContext`] scope metadata.
 pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
     let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
-    ctx.set_json(json_input.to_string());
+    ctx.set_query(QueryInput::Json(json_input.to_string()));
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {
