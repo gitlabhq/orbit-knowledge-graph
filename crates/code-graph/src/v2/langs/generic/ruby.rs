@@ -21,7 +21,6 @@ use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 /// `Class` instance. Shared between `SsaConfig` (binding analysis) and
 /// `ResolverHooks` (chain resolution) to ensure consistency.
 const CONSTRUCTOR_METHODS: &[&str] = &["new", "find", "find_by", "create", "first", "last"];
-use treesitter_visit::Node;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 #[derive(Default)]
@@ -43,14 +42,7 @@ impl DslLanguage for RubyDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let st_meta = || {
-            metadata().super_types(|n: &Node<'_, SyntaxTree>| {
-                n.children()
-                    .filter(|c| c.kind().as_ref() == "__supertype")
-                    .map(|c| c.text().to_string())
-                    .collect()
-            })
-        };
+        let st_meta = || metadata().supertypes();
         vec![
             scope("class", "Class")
                 .def_kind(DefKind::Class)

@@ -4,7 +4,6 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, child_of_kind, default_name, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree as rw;
@@ -49,58 +48,28 @@ impl DslLanguage for JavaDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        let tk = treesitter_visit::Match::AnyKind(JAVA_TYPE_KINDS);
-        tree.apply_rewrites(&[
-            // Supertypes from superclass/interfaces/extends_interfaces
-            rw::insert(
-                "class_declaration",
-                field("superclass").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "class_declaration",
-                field("interfaces").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "class_declaration",
-                child_of_kind("extends_interfaces").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "enum_declaration",
-                field("superclass").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "enum_declaration",
-                field("interfaces").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "record_declaration",
-                field("superclass").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "record_declaration",
-                field("interfaces").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "interface_declaration",
-                child_of_kind("extends_interfaces").collect_shallow(tk),
-                "__supertype",
-            ),
-            rw::insert(
-                "interface_declaration",
-                field("interfaces").collect_shallow(tk),
-                "__supertype",
-            ),
-            // Import classification
+        let tk = || treesitter_visit::Match::AnyKind(JAVA_TYPE_KINDS);
+        // (declaration kind, supertype source) pairs. `superclass`/`interfaces`
+        // are fields; `extends_interfaces` is a child node.
+        let supers = [
+            ("class_declaration", field("superclass")),
+            ("class_declaration", field("interfaces")),
+            ("class_declaration", child_of_kind("extends_interfaces")),
+            ("enum_declaration", field("superclass")),
+            ("enum_declaration", field("interfaces")),
+            ("record_declaration", field("superclass")),
+            ("record_declaration", field("interfaces")),
+            ("interface_declaration", child_of_kind("extends_interfaces")),
+            ("interface_declaration", field("interfaces")),
+        ];
+        let mut rules: Vec<rw::Rule> = supers
+            .into_iter()
+            .map(|(kind, src)| rw::insert(kind, src.collect_shallow(tk()), "__supertype"))
+            .collect();
+        rules.extend([
             rw::rename("import_declaration", "__static_import").when(has_child_text("static")),
             rw::rename("import_declaration", "__wildcard_import").when(has_child(&["asterisk"])),
-            // Record accessors: param names minus no-arg method names
+            // Record accessors: param names minus no-arg method names.
             rw::insert(
                 "record_declaration",
                 field("parameters").collect_field(Kind("formal_parameter"), "name"),
@@ -108,16 +77,11 @@ impl DslLanguage for JavaDsl {
             )
             .except(field("body").each(text().where_pred(no_arg_method()).field("name"))),
         ]);
+        tree.apply_rewrites(&rules);
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let collect_supertypes = |n: &Node<'_, SyntaxTree>| -> Vec<String> {
-            n.children()
-                .filter(|c| c.kind().as_ref() == "__supertype")
-                .map(|c| c.text().to_string())
-                .collect()
-        };
-        let class_meta = || metadata().super_types(collect_supertypes);
+        let class_meta = || metadata().supertypes();
 
         vec![
             scope("class_declaration", "Class")

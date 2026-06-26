@@ -10,7 +10,6 @@ use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolutionRules};
-use treesitter_visit::Node;
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
@@ -75,12 +74,7 @@ impl DslLanguage for GoDsl {
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
                 .when(field_kind("type", &["struct_type"]))
-                .metadata(metadata().super_types(|n: &Node<'_, SyntaxTree>| {
-                    n.children()
-                        .filter(|c| c.kind().as_ref() == "__supertype")
-                        .map(|c| c.text().to_string())
-                        .collect()
-                })),
+                .metadata(metadata().supertypes()),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),

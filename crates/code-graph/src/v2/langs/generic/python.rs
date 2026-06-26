@@ -1,10 +1,9 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::extractors::{decorator_children, metadata};
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{CanonicalImport, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, child_of_kind, field, field_chain, no_extract, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree::SyntaxTree;
@@ -99,23 +98,11 @@ impl DslLanguage for PythonDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let collect_supertypes = |n: &Node<'_, SyntaxTree>| -> Vec<String> {
-            n.children()
-                .filter(|c| c.kind().as_ref() == "__supertype")
-                .map(|c| c.text().to_string())
-                .collect()
-        };
-        let collect_decorators = |n: &Node<'_, SyntaxTree>| -> Vec<String> {
-            n.children()
-                .filter(|c| c.kind().as_ref() == "__decorator")
-                .map(|c| c.text().to_string())
-                .collect()
-        };
-        let class_meta = || metadata().super_types(collect_supertypes);
+        let class_meta = || metadata().supertypes();
         let func_meta = || {
             metadata()
                 .return_type(field("return_type"))
-                .decorators(collect_decorators)
+                .decorators(decorator_children)
         };
         let func = |kind, label| {
             scope(kind, label)

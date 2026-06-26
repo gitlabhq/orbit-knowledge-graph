@@ -4,7 +4,6 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::Node;
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, constant, default_name, text};
 use treesitter_visit::predicate::*;
@@ -53,14 +52,7 @@ impl DslLanguage for SwiftDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let st_meta = || {
-            metadata().super_types(|n: &Node<'_, SyntaxTree>| {
-                n.children()
-                    .filter(|c| c.kind().as_ref() == "__supertype")
-                    .map(|c| c.text().to_string())
-                    .collect()
-            })
-        };
+        let st_meta = || metadata().supertypes();
         vec![
             scope("class_declaration", "Class")
                 .def_kind(DefKind::Class)

@@ -4,7 +4,6 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree as rw;
@@ -77,14 +76,7 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || {
-            metadata().super_types(|n: &Node<'_, SyntaxTree>| {
-                n.children()
-                    .filter(|c| c.kind().as_ref() == "__supertype")
-                    .map(|c| c.text().to_string())
-                    .collect()
-            })
-        };
+        let class_meta = || metadata().supertypes();
 
         vec![
             scope("namespace_declaration", "Namespace").def_kind(DefKind::Other),

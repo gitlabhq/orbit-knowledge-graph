@@ -46,6 +46,13 @@ impl MetadataRule {
         self.super_types = Some(f);
         self
     }
+
+    /// Read supertypes from the `__supertype` virtual children that a rewrite
+    /// rule inserted. The common case for every language whose `rewrite()`
+    /// emits `__supertype` nodes.
+    pub fn supertypes(self) -> Self {
+        self.super_types(supertype_children)
+    }
     pub fn return_type(mut self, extract: Extract) -> Self {
         self.return_type = Some(extract);
         self
@@ -118,4 +125,22 @@ impl MetadataRule {
 
 pub fn metadata() -> MetadataRule {
     MetadataRule::new()
+}
+
+/// Text of every `__supertype` virtual child a rewrite rule inserted.
+pub fn supertype_children(node: &N<'_>) -> Vec<String> {
+    virtual_children(node, "__supertype")
+}
+
+/// Text of every `__decorator` virtual child a rewrite rule inserted.
+pub fn decorator_children(node: &N<'_>) -> Vec<String> {
+    virtual_children(node, "__decorator")
+}
+
+/// Text of every direct child of the given kind.
+pub fn virtual_children(node: &N<'_>, kind: &str) -> Vec<String> {
+    node.children()
+        .filter(|c| c.kind().as_ref() == kind)
+        .map(|c| c.text().to_string())
+        .collect()
 }

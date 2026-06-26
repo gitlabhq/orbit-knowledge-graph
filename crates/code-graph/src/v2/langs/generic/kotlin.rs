@@ -58,14 +58,7 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || {
-            metadata().super_types(|n| {
-                n.children()
-                    .filter(|c| c.kind().as_ref() == "__supertype")
-                    .map(|c| c.text().to_string())
-                    .collect()
-            })
-        };
+        let class_meta = || metadata().supertypes();
 
         vec![
             scope("class_declaration", "Class")
