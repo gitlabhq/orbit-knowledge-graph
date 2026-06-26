@@ -43,6 +43,7 @@ impl Position {
 
 /// Represents a parsed tree and owns the source string.
 #[derive(Clone)]
+#[repr(transparent)]
 pub struct Root<D: Doc> {
     pub(crate) doc: D,
 }

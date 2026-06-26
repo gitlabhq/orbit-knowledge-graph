@@ -56,9 +56,9 @@ fn python_super_types(tree: &mut SyntaxTree) {
 }
 
 fn python_rewrites() -> Vec<rw::Rule> {
-    let m = rw::in_scope("class_definition");
-    let a = rw::child_text("async");
-    let d = rw::parent_is("decorated_definition");
+    let m = in_scope("class_definition");
+    let a = has_child_text("async");
+    let d = parent_is("decorated_definition");
 
     vec![
         rw::rename("function_definition", "__decorated_async_method")
@@ -70,14 +70,13 @@ fn python_rewrites() -> Vec<rw::Rule> {
             .when(a.clone().and(d.clone())),
         rw::rename("function_definition", "__async_function").when(a),
         rw::rename("function_definition", "__decorated_function").when(d),
-        rw::rename("class_definition", "__decorated_class")
-            .when(rw::parent_is("decorated_definition")),
+        rw::rename("class_definition", "__decorated_class").when(parent_is("decorated_definition")),
         rw::rename("import_statement", "__wildcard_import_statement")
-            .when(rw::has_child("wildcard_import")),
+            .when(has_child(&["wildcard_import"])),
         rw::rename("import_statement", "__aliased_import_statement")
-            .when(rw::has_child("aliased_import")),
+            .when(has_child(&["aliased_import"])),
         rw::rename("import_from_statement", "__wildcard_from_statement")
-            .when(rw::has_child("wildcard_import")),
+            .when(has_child(&["wildcard_import"])),
         // Decorators: move from decorated_definition to inner definition
         rw::move_children(
             "decorated_definition",

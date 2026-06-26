@@ -126,6 +126,20 @@ pub fn has_named_prev_sibling() -> Pred {
     check_at(Axis::PrevSibling, Match::Named)
 }
 
+/// True when the grandparent is `kind`, or the grandparent is "block"
+/// whose parent is `kind`. Handles Python-style `class > block > def` nesting.
+pub fn in_scope(kind: &'static str) -> Pred {
+    grandparent_is(kind).or(exists(
+        Extract::one(Axis::Parent, Match::Any)
+            .nav(Axis::Parent, Match::Kind("block"))
+            .nav(Axis::Parent, Match::Kind(kind)),
+    ))
+}
+
+pub fn descendant_text(kind: &'static str, text: &'static str) -> Pred {
+    exists(Extract::one(Axis::Descendant, Match::Kind(kind)).where_(Match::Text(text)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

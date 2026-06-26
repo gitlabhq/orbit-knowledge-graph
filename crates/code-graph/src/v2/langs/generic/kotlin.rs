@@ -24,16 +24,15 @@ use treesitter_visit::syntax_tree as rw;
 
 fn kotlin_rewrites() -> Vec<rw::Rule> {
     vec![
-        rw::rename("class_declaration", "__enum_declaration")
-            .when(rw::has_child("enum_class_body")),
+        rw::rename("class_declaration", "__enum_declaration").when(has_child(&["enum_class_body"])),
         rw::rename("class_declaration", "__interface_declaration")
-            .when(rw::child_text("interface")),
+            .when(has_child_text("interface")),
         rw::rename("class_declaration", "__data_class_declaration")
-            .when(rw::descendant_text("class_modifier", "data")),
+            .when(descendant_text("class_modifier", "data")),
         rw::rename("class_declaration", "__value_class_declaration")
-            .when(rw::descendant_text("class_modifier", "value")),
+            .when(descendant_text("class_modifier", "value")),
         rw::rename("class_declaration", "__annotation_class_declaration")
-            .when(rw::descendant_text("class_modifier", "annotation")),
+            .when(descendant_text("class_modifier", "annotation")),
         rw::collect(
             "class_declaration",
             "delegation_specifiers",
@@ -41,9 +40,9 @@ fn kotlin_rewrites() -> Vec<rw::Rule> {
             "__supertype",
         )
         .shallow(),
-        rw::rename("import_header", "__wildcard_import").when(rw::has_child("wildcard_import")),
-        rw::rename("import_header", "__wildcard_import").when(rw::has_child("MULT")),
-        rw::rename("import_header", "__aliased_import").when(rw::has_child("import_alias")),
+        rw::rename("import_header", "__wildcard_import").when(has_child(&["wildcard_import"])),
+        rw::rename("import_header", "__wildcard_import").when(has_child(&["MULT"])),
+        rw::rename("import_header", "__aliased_import").when(has_child(&["import_alias"])),
     ]
 }
 

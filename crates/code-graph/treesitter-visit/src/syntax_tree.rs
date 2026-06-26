@@ -236,8 +236,19 @@ impl SyntaxTree {
             let mut texts: Vec<(NodeId, String)> = Vec::new();
 
             for id in ids {
-                if !rule.cond.test(self, id) {
-                    continue;
+                if let Some(pred) = &rule.cond {
+                    let ref_node = SyntaxNodeRef { tree: self, id };
+                    // Construct a temporary Root to satisfy Node<D> lifetime.
+                    // Safety: we only read through the node during pred.test;
+                    // no mutations happen until after this loop.
+                    let root = unsafe {
+                        &*(std::ptr::from_ref(self) as *const SyntaxTree
+                            as *const crate::Root<SyntaxTree>)
+                    };
+                    let node = root.adopt(ref_node);
+                    if !pred.test(&node) {
+                        continue;
+                    }
                 }
                 match &rule.act {
                     Act::SetKind(k) => renames.push((id, k)),
@@ -376,41 +387,8 @@ impl SyntaxTree {
 #[derive(Clone)]
 pub struct Rule {
     pub kind: &'static str,
-    pub cond: Cond,
+    pub cond: Option<crate::predicate::Pred>,
     pub act: Act,
-}
-
-#[derive(Clone)]
-pub enum Cond {
-    Any,
-    HasChild(&'static str),
-    ChildText(&'static str),
-    DescText(&'static str, &'static str),
-    ParentIs(&'static str),
-    InScope(&'static str),
-    And(Box<Cond>, Box<Cond>),
-    FieldIs(&'static str, &'static str),
-}
-
-impl Cond {
-    fn test(&self, t: &SyntaxTree, id: NodeId) -> bool {
-        match self {
-            Self::Any => true,
-            Self::HasChild(k) => t.has_child_of_kind(id, k),
-            Self::ChildText(s) => t.has_child_text(id, s),
-            Self::DescText(k, s) => t.descendant_text(id, k, s),
-            Self::ParentIs(k) => t.parent(id).is_some_and(|p| t.kind(p) == *k),
-            Self::InScope(k) => t.parent(id).and_then(|p| t.parent(p)).is_some_and(|gp| {
-                t.kind(gp) == *k
-                    || t.kind(gp) == "block" && t.parent(gp).is_some_and(|ggp| t.kind(ggp) == *k)
-            }),
-            Self::And(a, b) => a.test(t, id) && b.test(t, id),
-            Self::FieldIs(f, k) => t.field(id, f).is_some_and(|c| t.kind(c) == *k),
-        }
-    }
-    pub fn and(self, other: Cond) -> Cond {
-        Cond::And(Box::new(self), Box::new(other))
-    }
 }
 
 #[derive(Clone)]
@@ -440,8 +418,8 @@ pub enum Act {
 }
 
 impl Rule {
-    pub fn when(mut self, c: Cond) -> Self {
-        self.cond = c;
+    pub fn when(mut self, c: crate::predicate::Pred) -> Self {
+        self.cond = Some(c);
         self
     }
     pub fn shallow(mut self) -> Self {
@@ -487,7 +465,7 @@ impl Rule {
 pub fn rename(source: &'static str, target: &'static str) -> Rule {
     Rule {
         kind: source,
-        cond: Cond::Any,
+        cond: None,
         act: Act::SetKind(target),
     }
 }
@@ -499,7 +477,7 @@ pub fn collect(
 ) -> Rule {
     Rule {
         kind: parent,
-        cond: Cond::Any,
+        cond: None,
         act: Act::Collect {
             field,
             kinds,
@@ -519,7 +497,7 @@ pub fn collect_self(
 pub fn expand(methods: &'static [&'static str], target: &'static str) -> Rule {
     Rule {
         kind: "call",
-        cond: Cond::Any,
+        cond: None,
         act: Act::Expand {
             methods,
             target,
@@ -537,44 +515,27 @@ pub fn move_children(
 ) -> Rule {
     Rule {
         kind: parent,
-        cond: Cond::Any,
+        cond: None,
         act: Act::Move { source, target, tx },
     }
 }
 pub fn set_text(kind: &'static str, tx: fn(&str) -> String) -> Rule {
     Rule {
         kind,
-        cond: Cond::Any,
+        cond: None,
         act: Act::SetText(tx),
     }
 }
 pub fn custom(f: fn(&mut SyntaxTree)) -> Rule {
     Rule {
         kind: "",
-        cond: Cond::Any,
+        cond: None,
         act: Act::Custom(f),
     }
 }
 
-// Conditions
-pub fn has_child(kind: &'static str) -> Cond {
-    Cond::HasChild(kind)
-}
-pub fn child_text(text: &'static str) -> Cond {
-    Cond::ChildText(text)
-}
-pub fn descendant_text(kind: &'static str, text: &'static str) -> Cond {
-    Cond::DescText(kind, text)
-}
-pub fn parent_is(kind: &'static str) -> Cond {
-    Cond::ParentIs(kind)
-}
-pub fn in_scope(kind: &'static str) -> Cond {
-    Cond::InScope(kind)
-}
-pub fn field_is(field: &'static str, kind: &'static str) -> Cond {
-    Cond::FieldIs(field, kind)
-}
+// Re-export predicate constructors for rewrite conditions.
+// Use treesitter_visit::predicate::{has_child, parent_is, ...} directly.
 
 // Transforms
 pub fn identity(s: &str) -> String {
