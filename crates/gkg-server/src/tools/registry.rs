@@ -125,14 +125,26 @@ impl ToolRegistry {
         // depend on it keep working. The new `get_query_dsl` tool exposes
         // the same grammar through a dedicated call; a follow-up MR will
         // strip the inline schema once the new tool has been adopted.
+        //
+        // The inline grammar below describes query STRUCTURE only. It does
+        // not contain entity, property, or relationship NAMES, so the
+        // description must steer the agent to get_graph_schema for those —
+        // otherwise the model treats the embedded grammar as the whole
+        // schema and guesses names it never saw (see gitlab-org/orbit/knowledge-graph#558).
         let base_description = "Execute graph queries to find nodes, traverse relationships, \
                                 explore neighborhoods, find paths, or aggregate data. \
-                                Use get_query_dsl for the query grammar. \
-                                Use get_graph_schema to discover available entity types and relationships.";
+                                The Query DSL Schema below defines query STRUCTURE ONLY (the shape \
+                                of filters, columns, group_by, relationships) — it does NOT list \
+                                valid entity, property, or relationship NAMES. \
+                                Before filtering, selecting columns, grouping, or traversing, you \
+                                MUST call get_graph_schema (with expand_nodes for the entity types \
+                                you need) to discover the exact node, property, and edge names; do \
+                                not guess them from the grammar. Use get_query_dsl if you need the \
+                                grammar on its own.";
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!(
-                "{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
+                "{}\n\nQuery DSL Schema (structure only — names come from get_graph_schema):\n<toon>\n{}\n</toon>",
                 base_description, schema
             ),
             Err(_) => base_description.to_string(),

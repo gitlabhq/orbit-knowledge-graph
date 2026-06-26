@@ -147,6 +147,41 @@ impl Default for Ontology {
     }
 }
 
+/// Maximum number of field names to enumerate in a "field does not exist"
+/// error before truncating to a count. Keeps the message actionable without
+/// dumping a node's full ~45-field list onto one line.
+const MAX_LISTED_FIELDS: usize = 10;
+
+/// Build the "Valid fields: …" suffix for a node, listing reserved columns
+/// followed by the node's own field names, capped at [`MAX_LISTED_FIELDS`].
+fn describe_valid_fields(node: &NodeEntity) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let names: Vec<&str> = NODE_RESERVED_COLUMNS
+        .iter()
+        .copied()
+        .chain(node.fields.iter().map(|f| f.name.as_str()))
+        .filter(|name| seen.insert(*name))
+        .collect();
+
+    let total = names.len();
+    let shown = names
+        .iter()
+        .take(MAX_LISTED_FIELDS)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if total > MAX_LISTED_FIELDS {
+        format!(
+            "Valid fields include: {shown} (and {} more — call get_graph_schema \
+             with expand_nodes for the full list)",
+            total - MAX_LISTED_FIELDS,
+        )
+    } else {
+        format!("Valid fields: {shown}")
+    }
+}
+
 impl Ontology {
     #[must_use]
     pub fn new() -> Self {
@@ -1410,7 +1445,8 @@ impl Ontology {
         }
 
         Err(OntologyError::Validation(format!(
-            "field \"{field_name}\" does not exist on node type \"{node_name}\""
+            "field \"{field_name}\" does not exist on node type \"{node_name}\". {}",
+            describe_valid_fields(node)
         )))
     }
 
@@ -1779,10 +1815,32 @@ mod tests {
         assert!(err.to_string().contains("unknown node type"));
 
         let err = ontology.validate_field("User", "nonexistent").unwrap_err();
-        assert!(err.to_string().contains("does not exist"));
+        let msg = err.to_string();
+        assert!(msg.contains("does not exist"), "got: {msg}");
+        assert!(msg.contains("Valid fields: id, username"), "got: {msg}");
 
         let err = Ontology::new().validate_field("", "field").unwrap_err();
         assert!(err.to_string().contains("without an entity type"));
+    }
+
+    #[test]
+    fn validate_field_truncates_long_field_lists() {
+        let fields: Vec<(String, DataType)> = (0..20)
+            .map(|i| (format!("field_{i}"), DataType::Int))
+            .collect();
+        let ontology = Ontology::new()
+            .with_nodes(["Wide"])
+            .with_fields("Wide", fields);
+
+        let msg = ontology
+            .validate_field("Wide", "missing")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("Valid fields include:"), "got: {msg}");
+        assert!(msg.contains("more"), "got: {msg}");
+        assert!(msg.contains("get_graph_schema"), "got: {msg}");
+        // Reserved "id" must not be duplicated even when a field is also named differently.
+        assert_eq!(msg.matches("field_0").count(), 1, "got: {msg}");
     }
 
     #[test]

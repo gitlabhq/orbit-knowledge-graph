@@ -35,7 +35,7 @@ fn collect_schema_errors(
 ) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
-        .map(|e| sanitize_schema_error(&format!("{} at {}", e, e.instance_path())))
+        .map(|e| format_schema_error(&e))
         .collect();
 
     if errors.is_empty() {
@@ -45,14 +45,101 @@ fn collect_schema_errors(
     }
 }
 
-/// Strip enumerated valid values from jsonschema enum-rejection messages.
-/// Matches `is not one of ["quoted","values",...]` — requires at least one
-/// quoted element to avoid false positives on non-enum bracket content.
-fn sanitize_schema_error(msg: &str) -> String {
-    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r#"is not one of \["[^"]*".*?\]"#).expect("valid regex")
-    });
-    RE.replace_all(msg, "is not an allowed value").to_string()
+/// Maximum number of enum candidates to enumerate in an error message before
+/// truncating to a count. Keeps messages actionable without dumping a 45-entry
+/// allowlist into a single line; the full list is available via the schema.
+const MAX_ENUM_CANDIDATES: usize = 10;
+
+/// Render a JSON Schema validation error into an actionable message.
+///
+/// jsonschema's own `Display` truncates enum rejections to three candidates
+/// (`"a", "b" or N other candidates`), which leaves an agent guessing the
+/// valid values. We instead read the structured [`jsonschema::error::ValidationErrorKind`]
+/// so we can list the candidates (capped at [`MAX_ENUM_CANDIDATES`]) and, for
+/// `group_by` shape rejections, append the expected object shapes.
+fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
+    use jsonschema::error::ValidationErrorKind;
+
+    let path = error.instance_path();
+
+    match error.kind() {
+        ValidationErrorKind::Enum { options } => {
+            let candidates = options
+                .as_array()
+                .map(|opts| format_candidates(opts))
+                .unwrap_or_default();
+            format!(
+                "{} is not one of the allowed values{} at {path}",
+                error.instance(),
+                candidates,
+            )
+        }
+        // `propertyNames` rejections (e.g. an unknown filter key) wrap the
+        // inner enum error whose `instance()` is the offending key. Surface
+        // the inner enrichment but keep the outer path (`/node/filters`).
+        ValidationErrorKind::PropertyNames { error: inner } => {
+            let inner_msg = format_schema_error(inner);
+            let stripped = inner_msg
+                .rsplit_once(" at ")
+                .map_or(inner_msg.as_str(), |(head, _)| head);
+            format!("{stripped} at {path}")
+        }
+        ValidationErrorKind::OneOfNotValid { .. } if is_group_by_path(path) => {
+            format!(
+                "{} is not a valid group_by entry at {path}. \
+                 Each group_by entry must be an object with a \"kind\" field. \
+                 Expected shapes: by property \
+                 [{{\"kind\": \"property\", \"node\": \"<node-id>\", \"property\": \"<property>\"}}], \
+                 or by node [{{\"kind\": \"node\", \"node\": \"<node-id>\"}}]",
+                error.instance(),
+            )
+        }
+        _ => format!("{error} at {path}"),
+    }
+}
+
+/// Format an enum candidate list, capping at [`MAX_ENUM_CANDIDATES`] and
+/// appending a count plus a pointer to `get_graph_schema` when truncated.
+fn format_candidates(options: &[serde_json::Value]) -> String {
+    if options.is_empty() {
+        return String::new();
+    }
+
+    let mut seen = HashSet::new();
+    let unique: Vec<String> = options
+        .iter()
+        .map(render_candidate)
+        .filter(|c| seen.insert(c.clone()))
+        .collect();
+
+    let total = unique.len();
+    let shown: Vec<String> = unique.into_iter().take(MAX_ENUM_CANDIDATES).collect();
+
+    if total > MAX_ENUM_CANDIDATES {
+        format!(
+            ". Valid values include: {} (and {} more — call get_graph_schema for the full list)",
+            shown.join(", "),
+            total - MAX_ENUM_CANDIDATES,
+        )
+    } else {
+        format!(". Valid values: {}", shown.join(", "))
+    }
+}
+
+/// Render a single enum candidate. Strings are emitted without surrounding JSON
+/// quotes so the list reads as `id, iid, title` rather than `"id", "iid"`.
+fn render_candidate(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Whether a JSON pointer points at a `group_by` array element (`/group_by/N`).
+fn is_group_by_path(path: &jsonschema::paths::Location) -> bool {
+    let s = path.to_string();
+    s.strip_prefix("/group_by/")
+        .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit()) && !rest.is_empty())
 }
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
@@ -1058,6 +1145,24 @@ mod tests {
     use super::*;
     use crate::input::parse_input;
     use ontology::{DataType, FieldSource, VirtualSource};
+
+    #[test]
+    fn enum_candidates_are_capped_and_deduplicated() {
+        let options: Vec<serde_json::Value> = ["id", "id", "iid", "title"]
+            .iter()
+            .map(|s| serde_json::Value::String((*s).to_string()))
+            .collect();
+        let rendered = format_candidates(&options);
+        assert_eq!(rendered, ". Valid values: id, iid, title", "{rendered}");
+
+        let many: Vec<serde_json::Value> = (0..25)
+            .map(|i| serde_json::Value::String(format!("c{i}")))
+            .collect();
+        let rendered = format_candidates(&many);
+        assert!(rendered.contains("Valid values include:"), "{rendered}");
+        assert!(rendered.contains("and 15 more"), "{rendered}");
+        assert!(rendered.contains("get_graph_schema"), "{rendered}");
+    }
 
     fn test_ontology() -> Ontology {
         Ontology::new()
