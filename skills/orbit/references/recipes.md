@@ -287,8 +287,8 @@ one relationship:
 
 ## `order_by` — sort traversal results
 
-Add `order_by` to any traversal. Fields are `node` (the node `id`), `property`,
-and `direction` (`ASC` or `DESC`):
+Add `order_by` to any traversal. It is a string, `"node.property"` for ascending
+or `"-node.property"` (leading `-`) for descending, where `node` is the node `id`:
 
 ```json orbit-query
 {
