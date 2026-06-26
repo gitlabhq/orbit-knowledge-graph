@@ -272,7 +272,7 @@ Always request them explicitly in `columns`. They are excluded from
 Replace the `path` filter value with a file path that exists in an indexed project.
 Use `limit: 1` when fetching full file content to avoid large responses.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -292,7 +292,7 @@ Use `limit: 1` when fetching full file content to avoid large responses.
 The `content` field returns the raw source text of just that definition,
 not the full file.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {

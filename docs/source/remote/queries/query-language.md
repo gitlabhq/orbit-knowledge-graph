@@ -331,6 +331,26 @@ Fetch source file content:
 }
 ```
 
+Fetch the source text of a specific function or class definition. The `content`
+column returns the raw source text of just that definition, not the full file.
+Use `fqn` (fully-qualified name) for an exact match, or `name` with `contains`
+for a broader search:
+
+```json orbit-query
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "d",
+    "entity": "Definition",
+    "filters": {
+      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+    },
+    "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"]
+  },
+  "limit": 5
+}
+```
+
 Find merged merge requests in a project:
 
 ```json orbit-query
