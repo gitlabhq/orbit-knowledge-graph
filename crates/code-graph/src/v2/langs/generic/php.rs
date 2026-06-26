@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::Node;
@@ -84,14 +84,14 @@ impl DslLanguage for PhpDsl {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["attribute_list"],
             on_scope: Some(php_on_scope),
-            on_import: Some(php_extract_use),
-            ref_name_rewrite: Some(php_rewrite_ref_name),
             ..LanguageHooks::default()
         }
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
         rewrite_php(tree);
+        rewrite_php_refs(tree);
+        rewrite_php_imports(tree);
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -190,8 +190,18 @@ impl DslLanguage for PhpDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        // Handled entirely by the `php_extract_use` hook.
-        vec![]
+        use treesitter_visit::extract::child_of_kind;
+        vec![
+            import("__php_aliased_use")
+                .label("AliasedImport")
+                .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name"))
+                .alias_from(child_of_kind("__import_alias")),
+            import("__php_use")
+                .label("Import")
+                .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name")),
+        ]
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -374,118 +384,146 @@ fn php_on_scope(
     false
 }
 
-/// Rewrite a reference name: strip the leading `\` of an absolute name, and resolve
-/// `new self/static/parent` and `self/static/parent::class` to the enclosing concrete type.
-fn php_rewrite_ref_name(node: &N<'_>, name: &str) -> Option<String> {
-    if let Some(stripped) = name.strip_prefix('\\') {
-        return Some(stripped.to_string());
-    }
-    if !matches!(name, "self" | "static" | "parent") {
-        return None;
-    }
-    if !matches!(
-        node.kind().as_ref(),
-        "object_creation_expression" | "class_constant_access_expression"
-    ) {
-        return None;
-    }
-    // Walk up to the enclosing class/enum. Traits/interfaces are skipped: `new self`
-    // there is ambiguous (the resolver has no concrete type to anchor to).
-    let mut cur = node.parent();
-    while let Some(p) = cur {
-        match p.kind().as_ref() {
-            "class_declaration" => {
-                if name == "parent" {
-                    let base = p.children().find(|c| c.kind().as_ref() == "base_clause")?;
-                    let sup = base
-                        .children()
-                        .find(|c| matches!(c.kind().as_ref(), "name" | "qualified_name"))?;
-                    return Some(sup.text().trim_start_matches('\\').to_string());
-                }
-                return p.field("name").map(|n| n.text().to_string());
+fn rewrite_php_refs(tree: &mut SyntaxTree) {
+    let mut rewrites: Vec<(u32, String)> = Vec::new();
+
+    let ref_contexts = [
+        "object_creation_expression",
+        "class_constant_access_expression",
+    ];
+    for ctx_kind in ref_contexts {
+        for node in tree.nodes_of_kind(ctx_kind).collect::<Vec<_>>() {
+            let first_child = tree.children(node).first().copied();
+            let Some(fc) = first_child else { continue };
+            let text = tree.text(fc);
+            if !matches!(text, "self" | "static" | "parent") {
+                continue;
             }
-            // Enums cannot extend; `new parent` inside one is unresolvable by design.
+            let resolved = find_enclosing_class_name(tree, node, text);
+            if let Some(name) = resolved {
+                rewrites.push((fc, name));
+            }
+        }
+    }
+
+    // Strip leading `\` from qualified_name nodes
+    for qn in tree.nodes_of_kind("qualified_name").collect::<Vec<_>>() {
+        let text = tree.text(qn);
+        if let Some(stripped) = text.strip_prefix('\\') {
+            if !stripped.is_empty() {
+                rewrites.push((qn, stripped.to_string()));
+            }
+        }
+    }
+
+    for (id, text) in rewrites {
+        tree.set_text(id, &text);
+    }
+}
+
+fn find_enclosing_class_name(tree: &SyntaxTree, start: u32, keyword: &str) -> Option<String> {
+    let mut cur = tree.parent(start);
+    while let Some(p) = cur {
+        match tree.kind(p) {
+            "class_declaration" => {
+                if keyword == "parent" {
+                    let base = tree.children_of_kind(p, "base_clause").next()?;
+                    let sup = tree
+                        .children(base)
+                        .iter()
+                        .copied()
+                        .find(|&c| matches!(tree.kind(c), "name" | "qualified_name"))?;
+                    return Some(tree.text(sup).trim_start_matches('\\').to_string());
+                }
+                return tree.field_text(p, "name").map(|s| s.to_string());
+            }
             "enum_declaration" => {
-                return (name != "parent")
-                    .then(|| p.field("name").map(|n| n.text().to_string()))
+                return (keyword != "parent")
+                    .then(|| tree.field_text(p, "name").map(|s| s.to_string()))
                     .flatten();
             }
             _ => {}
         }
-        cur = p.parent();
+        cur = tree.parent(p);
     }
     None
 }
 
-/// Extract `use` imports: single, aliased, grouped, and `use function`/`use const`.
-fn php_extract_use(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-    if node.kind().as_ref() != "namespace_use_declaration" {
-        return false;
+fn rewrite_php_imports(tree: &mut SyntaxTree) {
+    struct PhpImport {
+        decl: u32,
+        path: String,
+        name: String,
+        alias: Option<String>,
     }
 
-    if let Some(group) = node
-        .children()
-        .find(|c| c.kind().as_ref() == "namespace_use_group")
+    let mut imports: Vec<PhpImport> = Vec::new();
+
+    for decl in tree
+        .nodes_of_kind("namespace_use_declaration")
+        .collect::<Vec<_>>()
     {
-        let prefix = node
-            .children()
-            .find(|c| c.kind().as_ref() == "namespace_name")
-            .map(|n| n.text().to_string());
-        for clause in group
-            .children()
-            .filter(|c| c.kind().as_ref() == "namespace_use_clause")
-        {
-            push_use_clause(&clause, prefix.as_deref(), imports);
-        }
-        return true;
-    }
+        let group = tree.children_of_kind(decl, "namespace_use_group").next();
+        let prefix = tree
+            .children_of_kind(decl, "namespace_name")
+            .next()
+            .map(|n| tree.text(n).to_string());
 
-    for clause in node
-        .children()
-        .filter(|c| c.kind().as_ref() == "namespace_use_clause")
-    {
-        push_use_clause(&clause, None, imports);
-    }
-    true
-}
-
-fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec<CanonicalImport>) {
-    let Some(target) = clause
-        .children()
-        .find(|c| matches!(c.kind().as_ref(), "qualified_name" | "name"))
-    else {
-        return;
-    };
-
-    let mut full = target.text().to_string();
-    if let Some(prefix) = group_prefix {
-        full = format!("{prefix}\\{full}");
-    }
-    let full = full.trim_start_matches('\\').to_string();
-    let alias = clause.field("alias").map(|a| a.text().to_string());
-
-    // Split into namespace prefix + symbol so the engine rejoins the full FQN.
-    let (path, name) = match full.rsplit_once('\\') {
-        Some((p, n)) => (p.to_string(), n.to_string()),
-        None => (String::new(), full),
-    };
-
-    imports.push(CanonicalImport {
-        import_type: if alias.is_some() {
-            "AliasedImport"
+        let clauses: Vec<_> = if let Some(g) = group {
+            tree.children_of_kind(g, "namespace_use_clause").collect()
         } else {
-            "Import"
-        },
-        binding_kind: ImportBindingKind::Named,
-        mode: ImportMode::Declarative,
-        path,
-        name: Some(name),
-        alias,
-        scope_fqn: None,
-        range: crate::v2::types::Range::empty(),
-        is_type_only: false,
-        wildcard: false,
-    });
+            tree.children_of_kind(decl, "namespace_use_clause")
+                .collect()
+        };
+
+        for clause in clauses {
+            let target = tree
+                .children(clause)
+                .iter()
+                .copied()
+                .find(|&c| matches!(tree.kind(c), "qualified_name" | "name"));
+            let Some(t) = target else { continue };
+
+            let mut full = tree.text(t).to_string();
+            if let Some(ref pfx) = prefix {
+                full = format!("{pfx}\\{full}");
+            }
+            let full = full.trim_start_matches('\\').to_string();
+            let alias = tree
+                .field(clause, "alias")
+                .map(|a| tree.text(a).to_string());
+
+            let (path, name) = match full.rsplit_once('\\') {
+                Some((p, n)) => (p.to_string(), n.to_string()),
+                None => (String::new(), full),
+            };
+
+            imports.push(PhpImport {
+                decl,
+                path,
+                name,
+                alias,
+            });
+        }
+    }
+
+    for (i, imp) in imports.iter().enumerate() {
+        let kind = if imp.alias.is_some() {
+            "__php_aliased_use"
+        } else {
+            "__php_use"
+        };
+        // For the first import from this decl, rename the node. For subsequent ones
+        // from grouped imports, insert siblings.
+        if i == 0 || imports.get(i.wrapping_sub(1)).map(|p| p.decl) != Some(imp.decl) {
+            tree.set_kind(imp.decl, kind);
+        }
+        tree.insert_child(imp.decl, "__import_path", &imp.path);
+        tree.insert_child(imp.decl, "__import_name", &imp.name);
+        if let Some(alias) = &imp.alias {
+            tree.insert_child(imp.decl, "__import_alias", alias);
+        }
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────

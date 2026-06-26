@@ -2,12 +2,11 @@ use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, FieldAccessEntry, ImportRule,
-    LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
-    scope, scopes,
+    LoopRule, ReferenceRule, ScopeRule, binding, branch, import, loop_rule, reference, scope,
+    scopes,
 };
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, DefKind, ImportBindingKind};
 use petgraph::graph::NodeIndex;
-use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
 use treesitter_visit::predicate::*;
@@ -158,14 +157,29 @@ impl DslLanguage for RubyDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![]
-    }
-
-    fn hooks() -> LanguageHooks {
-        LanguageHooks {
-            on_import: Some(ruby_extract_imports),
-            ..LanguageHooks::default()
-        }
+        use treesitter_visit::extract::child_of_kind;
+        vec![
+            import("__require")
+                .label("Require")
+                .path_from(child_of_kind("__import_path"))
+                .side_effect(),
+            import("__require_relative")
+                .label("RequireRelative")
+                .path_from(child_of_kind("__import_path"))
+                .side_effect(),
+            import("__include")
+                .label("Include")
+                .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name")),
+            import("__extend")
+                .label("Extend")
+                .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name")),
+            import("__prepend")
+                .label("Prepend")
+                .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name")),
+        ]
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -462,88 +476,89 @@ fn rewrite_ruby_supertypes(tree: &mut SyntaxTree) {
     }
 }
 
+fn rewrite_ruby_imports(tree: &mut SyntaxTree) {
+    struct RubyImport {
+        call: u32,
+        kind: &'static str,
+        path: String,
+        name: Option<String>,
+    }
+
+    let mut imports: Vec<RubyImport> = Vec::new();
+
+    for call in tree.nodes_of_kind("call").collect::<Vec<_>>() {
+        let method = tree
+            .field_text(call, "method")
+            .unwrap_or_default()
+            .to_string();
+        let args = match tree.field(call, "arguments") {
+            Some(a) => a,
+            None => continue,
+        };
+        match method.as_str() {
+            "require" | "require_relative" => {
+                let path = tree
+                    .children_of_kind(args, "string")
+                    .next()
+                    .and_then(|s| tree.children_of_kind(s, "string_content").next())
+                    .map(|c| tree.text(c).to_string());
+                if let Some(path) = path.filter(|p| !p.is_empty()) {
+                    let kind = if method == "require_relative" {
+                        "__require_relative"
+                    } else {
+                        "__require"
+                    };
+                    imports.push(RubyImport {
+                        call,
+                        kind,
+                        path,
+                        name: None,
+                    });
+                }
+            }
+            "include" | "extend" | "prepend" => {
+                let kind = match method.as_str() {
+                    "include" => "__include",
+                    "extend" => "__extend",
+                    _ => "__prepend",
+                };
+                for &arg in tree.children(args) {
+                    let k = tree.kind(arg);
+                    if k == "constant" || k == "scope_resolution" {
+                        let fqn = strip_leading_scope(tree.text(arg));
+                        if fqn.is_empty() {
+                            continue;
+                        }
+                        let (path, leaf) = match fqn.rsplit_once("::") {
+                            Some((p, l)) => (p.to_string(), l.to_string()),
+                            None => (String::new(), fqn),
+                        };
+                        imports.push(RubyImport {
+                            call,
+                            kind,
+                            path,
+                            name: Some(leaf),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for imp in imports {
+        tree.set_kind(imp.call, imp.kind);
+        tree.insert_child(imp.call, "__import_path", &imp.path);
+        if let Some(name) = &imp.name {
+            tree.insert_child(imp.call, "__import_name", name);
+        }
+    }
+}
+
 fn rewrite_ruby(tree: &mut SyntaxTree) {
     rewrite_ruby_synthetics(tree);
     rewrite_ruby_supertypes(tree);
-}
-
-fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-    if node.kind().as_ref() != "call" {
-        return false;
-    }
-    let Some(method) = node.field("method").map(|m| m.text().to_string()) else {
-        return false;
-    };
-    match method.as_str() {
-        "require" | "require_relative" => {
-            let Some(args) = node.field("arguments") else {
-                return true;
-            };
-            let path = args
-                .find(Child, Kind("string"))
-                .and_then(|s| s.find(Child, Kind("string_content")))
-                .map(|c| c.text().to_string());
-            if let Some(path) = path {
-                imports.push(CanonicalImport {
-                    import_type: if method == "require_relative" {
-                        "RequireRelative"
-                    } else {
-                        "Require"
-                    },
-                    binding_kind: ImportBindingKind::SideEffect,
-                    mode: ImportMode::Runtime,
-                    path,
-                    name: None,
-                    alias: None,
-                    scope_fqn: None,
-                    range: crate::v2::types::Range::empty(),
-                    is_type_only: false,
-                    wildcard: false,
-                });
-            }
-            true
-        }
-        "include" | "extend" | "prepend" => {
-            let Some(args) = node.field("arguments") else {
-                return true;
-            };
-            let import_type = match method.as_str() {
-                "include" => "Include",
-                "extend" => "Extend",
-                _ => "Prepend",
-            };
-            for arg in args.children() {
-                if !matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
-                    continue;
-                }
-                push_named_import(imports, import_type, strip_leading_scope(&arg.text()));
-            }
-            true
-        }
-        _ => false,
-    }
-}
-
-fn push_named_import(imports: &mut Vec<CanonicalImport>, import_type: &'static str, fqn: String) {
-    if fqn.is_empty() {
-        return;
-    }
-    let (path, leaf) = fqn
-        .rsplit_once("::")
-        .map(|(p, l)| (p.to_string(), l.to_string()))
-        .unwrap_or((String::new(), fqn));
-    imports.push(CanonicalImport {
-        import_type,
-        binding_kind: ImportBindingKind::Named,
-        mode: ImportMode::Declarative,
-        path,
-        name: Some(leaf),
-        alias: None,
-        scope_fqn: None,
-        range: crate::v2::types::Range::empty(),
-        is_type_only: false,
-        wildcard: false,
-    });
+    rewrite_ruby_imports(tree);
 }
 
 fn ruby_imported_symbol_candidates(

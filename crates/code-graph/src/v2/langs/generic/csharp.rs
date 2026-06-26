@@ -1,11 +1,11 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::Node;
-use treesitter_visit::extract::{Extract, field, text};
+use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
@@ -75,13 +75,13 @@ impl DslLanguage for CSharpDsl {
         LanguageHooks {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["attribute_list"],
-            on_import: Some(csharp_extract_alias_using),
             ..LanguageHooks::default()
         }
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
         rewrite_csharp(tree);
+        rewrite_csharp_aliased_using(tree);
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -167,8 +167,11 @@ impl DslLanguage for CSharpDsl {
                 .label("StaticImport")
                 .path_from(using_path())
                 .always_wildcard(),
-            // Aliased using is handled by on_import hook (csharp_extract_alias_using).
-            // The rewrite renamed it to __aliased_using so it won't match using_directive.
+            import("__aliased_using")
+                .label("AliasedImport")
+                .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name"))
+                .alias_from(field("name")),
             import("using_directive")
                 .label("WildcardImport")
                 .path_from(using_path())
@@ -292,48 +295,45 @@ impl DslLanguage for CSharpDsl {
     }
 }
 
-fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-    if node.kind().as_ref() != "using_directive" {
-        return false;
+fn rewrite_csharp_aliased_using(tree: &mut SyntaxTree) {
+    let target_kinds = [
+        "qualified_name",
+        "identifier",
+        "generic_name",
+        "alias_qualified_name",
+    ];
+    let mut inserts: Vec<(u32, String, String)> = Vec::new();
+
+    for ud in tree.nodes_of_kind("__aliased_using").collect::<Vec<_>>() {
+        let Some(alias_node) = tree.field(ud, "name") else {
+            continue;
+        };
+        let alias_end = tree.n(alias_node).end_byte;
+
+        let target = tree
+            .children(ud)
+            .iter()
+            .copied()
+            .find(|&c| target_kinds.contains(&tree.kind(c)) && tree.n(c).start_byte > alias_end)
+            .map(|c| tree.text(c).to_string());
+
+        let Some(path) = target else { continue };
+        let name = path
+            .rsplit('.')
+            .next()
+            .map(|seg| {
+                let seg = seg.rsplit("::").next().unwrap_or(seg);
+                seg.split('<').next().unwrap_or(seg).to_string()
+            })
+            .unwrap_or_default();
+
+        inserts.push((ud, path, name));
     }
 
-    let Some(alias_node) = node.field("name") else {
-        return false;
-    };
-    let alias = alias_node.text().to_string();
-    let target = node
-        .children_matching(AnyKind(&[
-            "qualified_name",
-            "identifier",
-            "generic_name",
-            "alias_qualified_name",
-        ]))
-        .find(|child| child.range().start > alias_node.range().end)
-        .map(|child| child.text().to_string());
-
-    let Some(path) = target else {
-        return true;
-    };
-
-    let name = path.rsplit('.').next().map(|seg| {
-        let seg = seg.rsplit("::").next().unwrap_or(seg);
-        seg.split('<').next().unwrap_or(seg).to_string()
-    });
-
-    imports.push(CanonicalImport {
-        import_type: "AliasedImport",
-        binding_kind: ImportBindingKind::Named,
-        mode: ImportMode::Declarative,
-        path,
-        name,
-        alias: Some(alias),
-        scope_fqn: None,
-        range: crate::v2::types::Range::empty(),
-        is_type_only: false,
-        wildcard: false,
-    });
-
-    true
+    for (ud, path, name) in inserts {
+        tree.insert_child(ud, "__import_path", &path);
+        tree.insert_child(ud, "__import_name", &name);
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────
