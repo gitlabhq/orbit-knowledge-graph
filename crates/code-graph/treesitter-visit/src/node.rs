@@ -435,6 +435,8 @@ pub enum Match<'a> {
     /// Match a node of this kind where a field exists but has no children
     /// matching any of these kinds (i.e., "field is empty of these kinds").
     KindWhereFieldLacks(&'a str, &'a str, &'a [&'a str]),
+    /// Match a node of this kind where a field's text matches one of these values.
+    KindWithFieldText(&'a str, &'a str, &'a [&'a str]),
 }
 
 impl Match<'_> {
@@ -455,6 +457,12 @@ impl Match<'_> {
                 ts.iter().any(|t| text.as_ref() == *t)
             }
             Match::KindWithoutField(k, f) => node.kind().as_ref() == *k && node.field(f).is_none(),
+            Match::KindWithFieldText(k, f, texts) => {
+                node.kind().as_ref() == *k
+                    && node
+                        .field(f)
+                        .is_some_and(|fld| texts.iter().any(|t| fld.text().as_ref() == *t))
+            }
             Match::KindWhereFieldLacks(k, f, child_kinds) => {
                 node.kind().as_ref() == *k
                     && node.field(f).is_none_or(|field_node| {
