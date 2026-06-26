@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`); prefer Orbit when the question spans relationships, cross-entity joins, or multi-entity aggregation.
-version: 0.14.4
+version: 0.14.5
 license: MIT
 metadata:
   audience: developers
@@ -48,8 +48,27 @@ When editing Orbit docs or skills, fence executable query JSON as
 ## Running a query
 
 Write the request body to a file and pass it to `glab orbit remote query`.
-Default output is `llm` (compact, agent-friendly); pass `--format raw` to pipe
-into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
+Default output is `llm` (compact, agent-friendly); pass `--response-format raw`
+to pipe into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
+
+When piping raw output to `jq`, rows are nested under `.result.nodes[]` and each
+row's entity type is discriminated by its `.type` field (not `.entity` or
+`.node_type`). Example:
+
+```shell
+glab orbit remote query --response-format raw /tmp/q.json \
+  | jq -r '.result.nodes[] | select(.type=="MergeRequest") | .iid'
+```
+
+The raw response shape looks like:
+
+```json
+{"result":{"format_version":"2.1.0","query_type":"traversal","nodes":[
+  {"type":"Project","id":"278964",...},
+  {"type":"MergeRequest","id":"478166936","iid":"233344","title":"..."},
+  {"type":"MergeRequestDiffFile",...}
+]}}
+```
 
 Put the request body in `/tmp/q.json`:
 

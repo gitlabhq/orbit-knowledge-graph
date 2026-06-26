@@ -3,7 +3,7 @@
 
 These cover the partition / hop-bound logic without touching the network: the
 helpers are exercised against canned `nodes`/`edges` payloads shaped like a
-`glab orbit remote query --format raw` (graph) response.
+`glab orbit remote query --response-format raw` (graph) response.
 
 Run with: python3 -m unittest skills.orbit.scripts.test_remote_repo_map
       or:  python3 skills/orbit/scripts/test_remote_repo_map.py

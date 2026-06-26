@@ -2,7 +2,7 @@
 
 Paste-ready request bodies for each `query_type`. All examples omit
 `response_format`; the CLI defaults to `llm` (compact, agent-friendly). Pass
-`--format raw` when piping into `jq`.
+`--response-format raw` when piping into `jq`.
 
 Every recipe assumes `glab auth login` has succeeded and the
 `knowledge_graph` feature flag is on for your user. See
@@ -15,7 +15,15 @@ glab orbit remote query /tmp/q.json
 # or:
 cat /tmp/q.json | glab orbit remote query -
 # or, for jq pipelines:
-glab orbit remote query --format raw /tmp/q.json | jq '.'
+glab orbit remote query --response-format raw /tmp/q.json | jq '.'
+```
+
+Raw output is a single JSON object; rows live under `.result.nodes[]` and each
+row's entity type is in its `.type` field (not `.entity` or `.node_type`):
+
+```shell
+glab orbit remote query --response-format raw /tmp/q.json \
+  | jq -r '.result.nodes[] | select(.type=="MergeRequest") | .iid'
 ```
 
 For the full field reference see [`query_language.md`](query_language.md).
