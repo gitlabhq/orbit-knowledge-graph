@@ -450,6 +450,7 @@ impl LanguageSpec {
 
         let range = canonical_range(&node_to_range(node));
         let label = rule.resolve_label(node);
+        let mode = rule.mode;
 
         if let Some(child_kinds) = rule.multi_child_kinds {
             let raw_path = rule.extract().apply(node).unwrap_or_default();
@@ -474,16 +475,18 @@ impl LanguageSpec {
                         } else {
                             (base_path.clone(), Some(name))
                         };
-                        let binding_kind = if !path.is_empty() {
-                            ImportBindingKind::Named
-                        } else {
-                            infer_import_binding_kind(name.as_deref(), alias.as_deref(), false)
-                        };
+                        let binding_kind = rule.override_binding_kind.unwrap_or_else(|| {
+                            if !path.is_empty() {
+                                ImportBindingKind::Named
+                            } else {
+                                infer_import_binding_kind(name.as_deref(), alias.as_deref(), false)
+                            }
+                        });
                         imports.push(CanonicalImport {
                             import_type: label,
                             path,
                             binding_kind,
-                            mode: ImportMode::Declarative,
+                            mode,
                             name,
                             alias,
                             scope_fqn: None,
@@ -502,15 +505,17 @@ impl LanguageSpec {
                     } else {
                         (base_path.clone(), Some(child_text))
                     };
-                    let binding_kind = if !path.is_empty() {
-                        ImportBindingKind::Named
-                    } else {
-                        infer_import_binding_kind(name.as_deref(), None, false)
-                    };
+                    let binding_kind = rule.override_binding_kind.unwrap_or_else(|| {
+                        if !path.is_empty() {
+                            ImportBindingKind::Named
+                        } else {
+                            infer_import_binding_kind(name.as_deref(), None, false)
+                        }
+                    });
                     imports.push(CanonicalImport {
                         import_type: label,
                         binding_kind,
-                        mode: ImportMode::Declarative,
+                        mode,
                         path,
                         name,
                         alias: None,
@@ -554,12 +559,14 @@ impl LanguageSpec {
             let is_wildcard_import =
                 has_wildcard_child || (rule.always_wildcard && alias.is_none());
 
+            let mode = rule.mode;
             if is_wildcard_import {
-                // Wildcard import: path is the full extracted name, no split needed.
                 imports.push(CanonicalImport {
                     import_type: label,
-                    binding_kind: ImportBindingKind::Named,
-                    mode: ImportMode::Declarative,
+                    binding_kind: rule
+                        .override_binding_kind
+                        .unwrap_or(ImportBindingKind::Named),
+                    mode,
                     path: full_path,
                     name: None,
                     alias: None,
@@ -575,12 +582,13 @@ impl LanguageSpec {
                     (full_path, rule.extract_symbol(node))
                 };
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
-                let binding_kind =
-                    infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
+                let binding_kind = rule.override_binding_kind.unwrap_or_else(|| {
+                    infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard)
+                });
                 imports.push(CanonicalImport {
                     import_type: label,
                     binding_kind,
-                    mode: ImportMode::Declarative,
+                    mode,
                     path,
                     name,
                     alias,

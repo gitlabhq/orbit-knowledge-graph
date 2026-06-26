@@ -1,19 +1,36 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
-use treesitter_visit::Node;
+use crate::v2::types::DefKind;
 use treesitter_visit::extract::field;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{ReceiverMode, ResolutionRules};
 use crate::v2::linker::{HasRules, ResolveSettings};
 
-type N<'a> = Node<'a, SyntaxTree>;
-
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct BashDsl;
+
+fn rewrite_bash(tree: &mut SyntaxTree) {
+    let mut imports: Vec<(u32, String)> = Vec::new();
+
+    for cmd in tree.nodes_of_kind("command").collect::<Vec<_>>() {
+        let name = tree.field_text(cmd, "name").unwrap_or_default();
+        if name != "source" && name != "." {
+            continue;
+        }
+        if let Some(arg) = tree.field(cmd, "argument") {
+            let path = tree.text(arg).trim_matches(|c: char| c == '"' || c == '\'');
+            if !path.is_empty() {
+                imports.push((cmd, path.to_string()));
+            }
+        }
+    }
+
+    for (cmd, path) in imports {
+        tree.set_kind(cmd, "__source_import");
+        tree.insert_child(cmd, "__import_path", &path);
+    }
+}
 
 impl DslLanguage for BashDsl {
     fn name() -> &'static str {
@@ -24,11 +41,8 @@ impl DslLanguage for BashDsl {
         Language::Bash
     }
 
-    fn hooks() -> LanguageHooks {
-        LanguageHooks {
-            on_import: Some(bash_extract_imports),
-            ..LanguageHooks::default()
-        }
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_bash(tree);
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -39,6 +53,15 @@ impl DslLanguage for BashDsl {
         ]
     }
 
+    fn imports() -> Vec<ImportRule> {
+        vec![
+            import("__source_import")
+                .label("Source")
+                .path_from(treesitter_visit::extract::child_of_kind("__import_path"))
+                .side_effect(),
+        ]
+    }
+
     fn file_scope() -> bool {
         true
     }
@@ -46,40 +69,6 @@ impl DslLanguage for BashDsl {
     fn ssa_config() -> types::SsaConfig {
         types::SsaConfig::default()
     }
-}
-
-fn bash_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-    if node.kind().as_ref() != "command" {
-        return false;
-    }
-    let Some(command) = node.field("name") else {
-        return false;
-    };
-    if command.text().as_ref() != "source" && command.text().as_ref() != "." {
-        return false;
-    }
-    let path = node
-        .field("argument")
-        .map(|arg| strip_quotes(arg.text().as_ref()).to_string());
-    if let Some(path) = path.filter(|p| !p.is_empty()) {
-        imports.push(CanonicalImport {
-            import_type: "Source",
-            binding_kind: ImportBindingKind::SideEffect,
-            mode: ImportMode::Runtime,
-            path,
-            name: None,
-            alias: None,
-            scope_fqn: None,
-            range: crate::v2::types::Range::empty(),
-            is_type_only: false,
-            wildcard: false,
-        });
-    }
-    true
-}
-
-fn strip_quotes(s: &str) -> &str {
-    s.trim_matches(|c| c == '"' || c == '\'')
 }
 
 // ── Resolution rules ────────────────────────────────────────────

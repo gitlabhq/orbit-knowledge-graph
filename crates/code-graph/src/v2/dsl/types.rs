@@ -300,6 +300,10 @@ pub struct ImportRule {
     /// If set, split a scoped name at this separator into (path, name).
     /// e.g. `"."` splits `java.util.List` → path=`java.util`, name=`List`.
     pub(crate) split_last: Option<&'static str>,
+    /// Override the binding kind (default: inferred from name/alias/wildcard).
+    pub(crate) override_binding_kind: Option<crate::v2::types::ImportBindingKind>,
+    /// Override the import mode (default: Declarative).
+    pub(crate) mode: crate::v2::types::ImportMode,
 }
 
 impl Rule for ImportRule {
@@ -380,6 +384,12 @@ impl ImportRule {
         self
     }
 
+    pub fn side_effect(mut self) -> Self {
+        self.override_binding_kind = Some(crate::v2::types::ImportBindingKind::SideEffect);
+        self.mode = crate::v2::types::ImportMode::Runtime;
+        self
+    }
+
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         self.classify.map_or(self.label, |f| f(node))
     }
@@ -421,6 +431,8 @@ pub fn import(kind: &'static str) -> ImportRule {
         wildcard_symbol: "*",
         always_wildcard: false,
         split_last: None,
+        override_binding_kind: None,
+        mode: crate::v2::types::ImportMode::Declarative,
     }
 }
 
