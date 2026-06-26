@@ -6225,6 +6225,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "siphon-proto",
  "sqlparser 0.62.0",
  "tar",
  "tempfile",

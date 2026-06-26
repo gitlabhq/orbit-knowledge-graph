@@ -42,6 +42,7 @@ rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+siphon-proto = { workspace = true }
 regex = { workspace = true }
 tar = { workspace = true }
 testcontainers = { workspace = true }

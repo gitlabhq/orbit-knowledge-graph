@@ -127,10 +127,7 @@ etl:
       traversal_path:
         dictionary: namespace_traversal_paths_dict
         key_column: namespace_id
-    - table: siphon_routes
-      traversal_path:
-        dictionary: namespace_traversal_paths_dict
-        key_column: source_id
+    - siphon_routes
   edges:
     owner_id:
       to: User
