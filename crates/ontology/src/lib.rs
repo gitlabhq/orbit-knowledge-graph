@@ -18,6 +18,7 @@
 
 pub mod constants;
 mod entities;
+pub mod errors;
 pub mod etl;
 pub mod introspection;
 mod json_schema;
@@ -147,40 +148,7 @@ impl Default for Ontology {
     }
 }
 
-/// Maximum number of field names to enumerate in a "field does not exist"
-/// error before truncating to a count. Keeps the message actionable without
-/// dumping a node's full ~45-field list onto one line.
-const MAX_LISTED_FIELDS: usize = 10;
-
-/// Build the "Valid fields: …" suffix for a node, listing reserved columns
-/// followed by the node's own field names, capped at [`MAX_LISTED_FIELDS`].
-fn describe_valid_fields(node: &NodeEntity) -> String {
-    let mut seen = std::collections::HashSet::new();
-    let names: Vec<&str> = NODE_RESERVED_COLUMNS
-        .iter()
-        .copied()
-        .chain(node.fields.iter().map(|f| f.name.as_str()))
-        .filter(|name| seen.insert(*name))
-        .collect();
-
-    let total = names.len();
-    let shown = names
-        .iter()
-        .take(MAX_LISTED_FIELDS)
-        .copied()
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    if total > MAX_LISTED_FIELDS {
-        format!(
-            "Valid fields include: {shown} (and {} more — call get_graph_schema \
-             with expand_nodes for the full list)",
-            total - MAX_LISTED_FIELDS,
-        )
-    } else {
-        format!("Valid fields: {shown}")
-    }
-}
+use errors::describe_valid_fields;
 
 impl Ontology {
     #[must_use]

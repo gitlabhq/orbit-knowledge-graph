@@ -121,27 +121,16 @@ impl ToolRegistry {
     }
 
     pub(super) fn query_graph() -> ToolDefinition {
-        // Keep the inline TOON for now so existing MCP clients that already
-        // depend on it keep working. The new `get_query_dsl` tool exposes
-        // the same grammar through a dedicated call; a follow-up MR will
-        // strip the inline schema once the new tool has been adopted.
-        //
-        // The inline grammar below describes query STRUCTURE only. It does
-        // not contain entity, property, or relationship NAMES, so the
-        // description must steer the agent to get_graph_schema for those —
-        // otherwise the model treats the embedded grammar as the whole
-        // schema and guesses names it never saw (see gitlab-org/orbit/knowledge-graph#558).
-        let base_description = "Execute graph queries to find nodes, traverse relationships, \
-                                explore neighborhoods, find paths, or aggregate data. \
-                                The DSL schema below is STRUCTURE ONLY — it contains no entity, \
-                                property, or relationship names. You MUST call get_graph_schema \
-                                to discover valid names; do not guess them from the grammar.";
+        // Inline TOON kept for back-compat (one release cycle); a follow-up
+        // strips it once `get_query_dsl` adoption is verified.
+        let base_description = "Execute graph queries. \
+                                The DSL below is STRUCTURE ONLY — you MUST call \
+                                get_graph_schema (with expand_nodes) to discover valid \
+                                node/property/edge names. Use get_query_dsl for the \
+                                full grammar reference.";
 
         let description = match condensed_query_schema() {
-            Ok(schema) => format!(
-                "{}\n\nQuery DSL Schema (structure only — names come from get_graph_schema):\n<toon>\n{}\n</toon>",
-                base_description, schema
-            ),
+            Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
             Err(_) => base_description.to_string(),
         };
 

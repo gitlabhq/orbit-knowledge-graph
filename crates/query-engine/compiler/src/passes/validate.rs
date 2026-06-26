@@ -16,6 +16,8 @@ use crate::input::{
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
 
+use super::errors::format_schema_error;
+
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
@@ -43,170 +45,6 @@ fn collect_schema_errors(
     } else {
         Err(QueryError::Validation(errors.join("; ")))
     }
-}
-
-/// Maximum number of enum candidates to enumerate in an error message before
-/// truncating to a count. Keeps messages actionable without dumping a 45-entry
-/// allowlist into a single line; the full list is available via the schema.
-const MAX_ENUM_CANDIDATES: usize = 10;
-
-/// Render a JSON Schema validation error into an actionable message.
-///
-/// jsonschema's own `Display` truncates enum rejections to three candidates
-/// (`"a", "b" or N other candidates`) and renders `oneOf` rejections as an
-/// opaque "not valid under any of the schemas listed in the 'oneOf' keyword",
-/// both of which leave an agent guessing the valid values. We instead read the
-/// structured [`jsonschema::error::ValidationErrorKind`] so we can:
-/// - list enum candidates (capped at [`MAX_ENUM_CANDIDATES`]);
-/// - unwrap a `oneOf` rejection to the enum inside its branches (columns,
-///   relationship types, filter operators all validate via a `oneOf` whose
-///   branches carry the real allowlist);
-/// - append the expected object shapes for a `group_by` rejection.
-fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
-    use jsonschema::error::ValidationErrorKind;
-
-    let path = error.instance_path();
-
-    match error.kind() {
-        ValidationErrorKind::Enum { options } => {
-            format_enum_rejection(&error.instance().to_string(), options, &path.to_string())
-        }
-        // `propertyNames` rejections (e.g. an unknown filter key) wrap the
-        // inner enum error whose `instance()` is the offending key. Read the
-        // inner enum structurally and rebuild against the outer path
-        // (`/node/filters`); only the inner's own deeper path is dropped, never
-        // the candidate text, so there's no `" at "` parsing invariant.
-        ValidationErrorKind::PropertyNames { error: inner } => {
-            match inner.kind() {
-                ValidationErrorKind::Enum { options } => {
-                    format_enum_rejection(&inner.instance().to_string(), options, &path.to_string())
-                }
-                // propertyNames only ever wraps an enum here (the schema validates
-                // keys against `{enum: filterable_fields}`), but guard the shape
-                // explicitly rather than assume it. The inner Display already
-                // carries its own accurate path, so emit it directly.
-                _ => format!("{inner} at {}", inner.instance_path()),
-            }
-        }
-        // `group_by` entries validate via a `oneOf` over object shapes (no inner
-        // enum), so the actionable hint is the expected shape, not a candidate list.
-        ValidationErrorKind::OneOfNotValid { .. } if is_group_by_path(path) => {
-            format!(
-                "{} is not a valid group_by entry at {path}. \
-                 Each group_by entry must be an object with a \"kind\" field. \
-                 Expected shapes: by property \
-                 [{{\"kind\": \"property\", \"node\": \"<node-id>\", \"property\": \"<property>\"}}], \
-                 or by node [{{\"kind\": \"node\", \"node\": \"<node-id>\"}}]",
-                error.instance(),
-            )
-        }
-        // Columns, relationship/edge types, and filter operators all reject via
-        // a `oneOf` whose branches carry the allowlist as an enum. Unwrap to that
-        // enum and list the candidates instead of the opaque oneOf message.
-        ValidationErrorKind::OneOfNotValid { context } => match find_inner_enum_options(context) {
-            Some(options) => {
-                format_enum_rejection(&error.instance().to_string(), options, &path.to_string())
-            }
-            None => format!("{error} at {path}"),
-        },
-        _ => format!("{error} at {path}"),
-    }
-}
-
-/// Build the enriched "not one of the allowed values" message for an enum
-/// rejection, listing candidates (capped, deduplicated) at the given path.
-fn format_enum_rejection(instance: &str, options: &serde_json::Value, path: &str) -> String {
-    let candidates = options
-        .as_array()
-        .map(|opts| format_candidates(opts))
-        .unwrap_or_default();
-    format!("{instance} is not an allowed value{candidates} at {path}")
-}
-
-/// Walk a `oneOf` rejection's branch errors (depth-first, including nested
-/// `oneOf`/`anyOf`) and return the first enum's `options`. Filter operators
-/// nest a `oneOf` inside the property-filter `oneOf`, so the search must recurse.
-///
-/// Returns the *first* enum found depth-first. Every `oneOf` the ontology
-/// derives today (`columns`, relationship `type`, filter `op`) carries exactly
-/// one allowlist enum, so "first" is unambiguous. If a future schema branch ever
-/// carried multiple distinct enums, the first would win and could surface a
-/// partial candidate set — revisit this if that shape appears.
-fn find_inner_enum_options<'a>(
-    context: &'a [Vec<jsonschema::ValidationError<'a>>],
-) -> Option<&'a serde_json::Value> {
-    use jsonschema::error::ValidationErrorKind;
-
-    for branch in context {
-        for err in branch {
-            match err.kind() {
-                ValidationErrorKind::Enum { options } => return Some(options),
-                ValidationErrorKind::OneOfNotValid { context: inner }
-                | ValidationErrorKind::AnyOf { context: inner } => {
-                    if let Some(found) = find_inner_enum_options(inner) {
-                        return Some(found);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    None
-}
-
-/// Format an enum candidate list, capping at [`MAX_ENUM_CANDIDATES`] and
-/// appending a count plus a pointer to `get_graph_schema` when truncated.
-fn format_candidates(options: &[serde_json::Value]) -> String {
-    if options.is_empty() {
-        return String::new();
-    }
-
-    let mut seen = HashSet::new();
-    let unique: Vec<String> = options
-        .iter()
-        .map(render_candidate)
-        .filter(|c| seen.insert(c.clone()))
-        .collect();
-
-    let total = unique.len();
-    let shown: Vec<String> = unique.into_iter().take(MAX_ENUM_CANDIDATES).collect();
-
-    if total > MAX_ENUM_CANDIDATES {
-        format!(
-            ". Valid values include: {} (and {} more — call get_graph_schema for the full list)",
-            shown.join(", "),
-            total - MAX_ENUM_CANDIDATES,
-        )
-    } else {
-        format!(". Valid values: {}", shown.join(", "))
-    }
-}
-
-/// Render a single enum candidate. Strings are emitted without surrounding JSON
-/// quotes so the list reads as `id, iid, title` rather than `"id", "iid"`.
-fn render_candidate(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
-/// Whether a JSON pointer points at a `group_by` array element (`/group_by/N`).
-///
-/// Uses the structured segment iterator rather than matching the `Location`
-/// `Display` string, so a future change to jsonschema's pointer serialization
-/// can't silently make this fall through to the opaque default arm.
-fn is_group_by_path(path: &jsonschema::paths::Location) -> bool {
-    use jsonschema::paths::LocationSegment;
-    let mut segments = path.into_iter();
-    matches!(
-        (segments.next(), segments.next(), segments.next()),
-        (
-            Some(LocationSegment::Property(key)),
-            Some(LocationSegment::Index(_)),
-            None,
-        ) if key.as_ref() == "group_by"
-    )
 }
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
@@ -391,8 +229,7 @@ impl<'a> Validator<'a> {
                 input.relationships.len()
             )));
         }
-        // A single node with no relationships is a search (one table scan); only
-        // multi-node traversals must satisfy the n-1 relationship rule.
+        // Multi-node traversal requires exactly n-1 relationships (1 node + 0 rels is a search).
         if input.query_type == QueryType::Traversal
             && !input.nodes.is_empty()
             && !(input.nodes.len() == 1 && input.relationships.is_empty())
@@ -417,10 +254,8 @@ impl<'a> Validator<'a> {
             )));
         }
         for rel in &input.relationships {
-            // direction: "both" generates OR join conditions that defeat
-            // ClickHouse index and projection usage. The JSON schema also
-            // rejects this for aggregation, but this guard covers code paths
-            // that bypass schema validation (CLI, internal tests, gRPC).
+            // "both" generates OR joins that defeat CH index usage; schema also rejects it,
+            // but this guard covers code paths that bypass schema validation.
             if rel.direction == crate::input::Direction::Both
                 && input.query_type == QueryType::Aggregation
             {
@@ -569,8 +404,6 @@ impl<'a> Validator<'a> {
         }
 
         for (i, rel) in input.relationships.iter().enumerate() {
-            // Validate filters against this relationship's physical edge table,
-            // not the union across all edge tables.
             let edge_table = rel
                 .types
                 .first()
@@ -717,8 +550,7 @@ impl<'a> Validator<'a> {
             return Ok(());
         };
 
-        // traversal_path is exempt: short paths like "1/" are valid hierarchical
-        // scopes, no broader than SecurityPass's required predicate.
+        // traversal_path is exempt: short paths like "1/" are valid hierarchical scopes.
         if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
@@ -780,7 +612,6 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // Neighbors without selectivity on the center node scans all edges.
             QueryType::Neighbors => {
                 if let Some(ref nb) = input.neighbors {
                     let node = input.nodes.iter().find(|n| n.id == nb.node);
@@ -793,8 +624,6 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-
-            // Traversal/aggregation without selectivity scans entire edge tables.
             QueryType::Traversal | QueryType::Aggregation
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
@@ -1212,68 +1041,6 @@ mod tests {
     use super::*;
     use crate::input::parse_input;
     use ontology::{DataType, FieldSource, VirtualSource};
-
-    #[test]
-    fn enum_candidates_are_capped_and_deduplicated() {
-        let options: Vec<serde_json::Value> = ["id", "id", "iid", "title"]
-            .iter()
-            .map(|s| serde_json::Value::String((*s).to_string()))
-            .collect();
-        let rendered = format_candidates(&options);
-        assert_eq!(rendered, ". Valid values: id, iid, title", "{rendered}");
-
-        let many: Vec<serde_json::Value> = (0..25)
-            .map(|i| serde_json::Value::String(format!("c{i}")))
-            .collect();
-        let rendered = format_candidates(&many);
-        assert!(rendered.contains("Valid values include:"), "{rendered}");
-        assert!(rendered.contains("and 15 more"), "{rendered}");
-        assert!(rendered.contains("get_graph_schema"), "{rendered}");
-    }
-
-    #[test]
-    fn group_by_path_matches_only_group_by_array_elements() {
-        use jsonschema::paths::{Location, LocationSegment};
-        use std::borrow::Cow;
-
-        let prop = |s: &'static str| LocationSegment::Property(Cow::Borrowed(s));
-        let idx = LocationSegment::Index;
-
-        let mk = |segs: Vec<LocationSegment<'static>>| segs.into_iter().collect::<Location>();
-
-        assert!(is_group_by_path(&mk(vec![prop("group_by"), idx(0)])));
-        assert!(is_group_by_path(&mk(vec![prop("group_by"), idx(12)])));
-
-        assert!(!is_group_by_path(&mk(vec![prop("group_by")])));
-        assert!(!is_group_by_path(&mk(vec![
-            prop("group_by"),
-            idx(0),
-            prop("kind")
-        ])));
-        assert!(!is_group_by_path(&mk(vec![prop("node"), prop("filters")])));
-        assert!(!is_group_by_path(&mk(vec![prop("group_by_extra"), idx(0)])));
-    }
-
-    #[test]
-    fn one_of_rejection_unwraps_to_inner_enum() {
-        // Mirrors how columns/relationship-type/operator validate: a oneOf whose
-        // branches carry the allowlist as a (possibly nested) enum.
-        let schema = serde_json::json!({
-            "oneOf": [
-                { "const": "*" },
-                { "oneOf": [ { "enum": ["alpha", "beta", "gamma"] } ] }
-            ]
-        });
-        let validator = jsonschema::validator_for(&schema).expect("valid schema");
-        let value = serde_json::json!("delta");
-        let err = validator
-            .iter_errors(&value)
-            .next()
-            .expect("delta must be rejected");
-        let msg = format_schema_error(&err);
-        assert!(msg.contains("is not an allowed value"), "{msg}");
-        assert!(msg.contains("alpha, beta, gamma"), "{msg}");
-    }
 
     fn test_ontology() -> Ontology {
         Ontology::new()
@@ -2309,7 +2076,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // Wide id_range on endpoint exceeds MAX_PATH_ANCHOR_RANGE (500).
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2357,7 +2123,6 @@ mod tests {
             }"#,
             "requires rel_types",
         );
-        // Pinned endpoints still reject without rel_types: hub nodes fan out.
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2527,7 +2292,6 @@ mod tests {
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
-        // span 100 is within MAX_PATH_ANCHOR_RANGE (500).
         assert_ok(
             r#"{
                 "query_type": "path_finding",
@@ -2539,7 +2303,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // span 1000 exceeds MAX_PATH_ANCHOR_RANGE (500).
         assert_rejects(
             r#"{
                 "query_type": "path_finding",

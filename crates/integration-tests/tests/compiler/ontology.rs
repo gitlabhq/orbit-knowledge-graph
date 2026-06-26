@@ -170,6 +170,29 @@ fn malformed_group_by_entry_shows_expected_shapes() {
 }
 
 #[test]
+fn bare_string_group_by_entry_shows_expected_shapes() {
+    let err = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "group_by": ["name"],
+            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("/group_by/0"), "got: {msg}");
+    assert!(msg.contains("\"kind\""), "got: {msg}");
+    assert!(
+        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
+        "got: {msg}"
+    );
+}
+
+#[test]
 fn invalid_column_lists_valid_candidates() {
     let err = compile(
         r#"{
