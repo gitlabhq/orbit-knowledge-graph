@@ -224,32 +224,34 @@ impl SyntaxTree {
 
     // ── Declarative rewrites ──────────────────────────────────────
 
+    fn matching_ids(&self, kind: &str, pred: Option<&crate::predicate::Pred>) -> Vec<NodeId> {
+        let pred = match pred {
+            None => return self.nodes_of_kind(kind).collect(),
+            Some(p) => p,
+        };
+        let root = crate::Root::doc(self.clone());
+        self.nodes_of_kind(kind)
+            .filter(|&id| {
+                pred.test(&root.adopt(SyntaxNodeRef {
+                    tree: root.inner(),
+                    id,
+                }))
+            })
+            .collect()
+    }
+
     pub fn apply_rewrites(&mut self, rules: &[Rule]) {
         for rule in rules {
             if let Act::Custom(f) = &rule.act {
                 f(self);
                 continue;
             }
-            let ids: Vec<_> = self.nodes_of_kind(rule.kind).collect();
+            let ids = self.matching_ids(rule.kind, rule.cond.as_ref());
             let mut inserts: Vec<(NodeId, &str, String)> = Vec::new();
             let mut renames: Vec<(NodeId, &str)> = Vec::new();
             let mut texts: Vec<(NodeId, String)> = Vec::new();
 
             for id in ids {
-                if let Some(pred) = &rule.cond {
-                    let ref_node = SyntaxNodeRef { tree: self, id };
-                    // Construct a temporary Root to satisfy Node<D> lifetime.
-                    // Safety: we only read through the node during pred.test;
-                    // no mutations happen until after this loop.
-                    let root = unsafe {
-                        &*(std::ptr::from_ref(self) as *const SyntaxTree
-                            as *const crate::Root<SyntaxTree>)
-                    };
-                    let node = root.adopt(ref_node);
-                    if !pred.test(&node) {
-                        continue;
-                    }
-                }
                 match &rule.act {
                     Act::SetKind(k) => renames.push((id, k)),
                     Act::Collect {
