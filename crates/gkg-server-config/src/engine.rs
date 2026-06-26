@@ -271,14 +271,6 @@ fn default_code_indexing_write_slice_rows() -> usize {
     500_000
 }
 
-fn default_code_indexing_write_max_concurrent_writes() -> usize {
-    8
-}
-
-fn default_code_indexing_aggregator_enabled() -> bool {
-    false
-}
-
 fn default_code_indexing_aggregator_max_buffer_age_secs() -> u64 {
     60
 }
@@ -344,27 +336,18 @@ pub struct CodeIndexingPipelineConfig {
     /// Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.
     #[serde(default = "default_code_indexing_write_slice_rows")]
     pub write_slice_rows: usize,
-    /// Concurrent in-flight inserts from the streaming sink. Defaults to 8.
-    #[serde(default = "default_code_indexing_write_max_concurrent_writes")]
-    pub write_max_concurrent_writes: usize,
-    /// Coalesce small backfill projects into a shared process-wide write buffer so
-    /// many tiny repos flush as one ~`write_slice_rows` part per table instead of
-    /// one part each. Backfill/campaign path only. Defaults to false.
-    #[serde(default = "default_code_indexing_aggregator_enabled")]
-    pub aggregator_enabled: bool,
-    /// Force-flush the shared write buffer after this many seconds even if no table
-    /// reached `write_slice_rows`, so a trickle of small repos still lands with
-    /// bounded latency. Must stay below `nats.ack_wait_secs`. Defaults to 60.
+    /// Flush the shared write coalescer after this many seconds even if no table reached
+    /// `write_slice_rows`, so a trickle of small repos still lands with bounded latency. Must
+    /// stay below `nats.ack_wait_secs`. Defaults to 60.
     #[serde(default = "default_code_indexing_aggregator_max_buffer_age_secs")]
     pub aggregator_max_buffer_age_secs: u64,
-    /// While a buffered project waits for its flush, the handler heartbeats the NATS
-    /// lease and renews its per-project lock on this interval. Must stay below
-    /// `nats.ack_wait_secs`. Defaults to 90.
+    /// While a project waits for its flush, the handler heartbeats the NATS lease and renews
+    /// its per-project lock on this interval. Must stay below `nats.ack_wait_secs`. Defaults
+    /// to 90.
     #[serde(default = "default_code_indexing_aggregator_heartbeat_secs")]
     pub aggregator_heartbeat_secs: u64,
-    /// Post-filter file-count cutoff: a repository with at most this many indexed
-    /// files is "small" (buffered, small lane); above it is "big" (solo flush, big
-    /// lane). Defaults to 650.
+    /// Post-filter file-count cutoff: a repository with at most this many indexed files runs
+    /// on the wide small lane, above it on the reserved big lane. Defaults to 650.
     #[serde(default = "default_code_indexing_small_repo_max_files")]
     pub small_repo_max_files: usize,
     /// Concurrent indexing+write slots for small repositories. Defaults to 6.
@@ -393,8 +376,6 @@ impl Default for CodeIndexingPipelineConfig {
             fetch_concurrency: default_fetch_concurrency(),
             write_channel_capacity: default_code_indexing_write_channel_capacity(),
             write_slice_rows: default_code_indexing_write_slice_rows(),
-            write_max_concurrent_writes: default_code_indexing_write_max_concurrent_writes(),
-            aggregator_enabled: default_code_indexing_aggregator_enabled(),
             aggregator_max_buffer_age_secs: default_code_indexing_aggregator_max_buffer_age_secs(),
             aggregator_heartbeat_secs: default_code_indexing_aggregator_heartbeat_secs(),
             small_repo_max_files: default_code_indexing_small_repo_max_files(),
@@ -410,15 +391,8 @@ impl CodeIndexingPipelineConfig {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
     }
 
-    /// Buffer age that drives the shared coalescer. When the aggregator is disabled each
-    /// project flushes near-immediately (effectively per-project parts, the pre-aggregation
-    /// behavior); when enabled, small projects coalesce for up to the configured window.
-    pub fn effective_buffer_age(&self) -> Duration {
-        if self.aggregator_enabled {
-            Duration::from_secs(self.aggregator_max_buffer_age_secs.max(1))
-        } else {
-            Duration::from_millis(1)
-        }
+    pub fn aggregator_max_buffer_age(&self) -> Duration {
+        Duration::from_secs(self.aggregator_max_buffer_age_secs.max(1))
     }
 
     pub fn aggregator_heartbeat(&self) -> Duration {

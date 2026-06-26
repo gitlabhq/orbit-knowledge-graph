@@ -288,7 +288,7 @@ Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
 The edge tables (`gl_code_edge`, `gl_edge`) are unpartitioned `ReplacingMergeTree`s, so every project's inserts share one part budget. During a full reindex the long tail of tiny repositories (most projects emit fewer than 500 edges) would otherwise produce one small part per table per project, outrunning ClickHouse merges until part-count backpressure throttles inserts.
 
-To avoid this, all code jobs stream their edges into one process-wide write coalescer (`CodeWriteAggregator`) under a per-project sequence number. A table flushes when it reaches `write_slice_rows` (default 500k) or after the buffer age elapses, so the long tail coalesces into well-sized parts while big repositories (which cross the row cap on their own) still flush promptly. The feature is gated by `aggregator_enabled`: when off, the buffer age is effectively zero so each project flushes on its own, matching the pre-aggregation behavior; when on, small projects coalesce for up to `aggregator_max_buffer_age_secs` (default 60).
+To avoid this, all code jobs stream their edges into one process-wide write coalescer (`CodeWriteAggregator`) under a per-project sequence number. A table flushes when it reaches `write_slice_rows` (default 500k) or after `aggregator_max_buffer_age_secs` (default 60), so the long tail coalesces into well-sized parts while big repositories (which cross the row cap on their own) still flush promptly.
 
 Concurrency is split into two lanes by post-filter file count: a wide lane (`small_indexing_slots`, default 6) for the small-repo tail and a reserved lane (`big_indexing_slots`, default 2) so a flood of small repositories cannot starve monorepos.
 

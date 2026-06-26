@@ -84,7 +84,7 @@ impl CodeIndexingDeps {
             writer,
             pipeline_config.write_channel_capacity,
             pipeline_config.write_slice_rows,
-            pipeline_config.effective_buffer_age(),
+            pipeline_config.aggregator_max_buffer_age(),
         );
 
         let pipeline = Arc::new(CodeIndexingPipeline::new(
@@ -135,7 +135,7 @@ impl CodeIndexingDeps {
             writer,
             config.write_channel_capacity,
             config.write_slice_rows,
-            config.effective_buffer_age(),
+            config.aggregator_max_buffer_age(),
         );
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,

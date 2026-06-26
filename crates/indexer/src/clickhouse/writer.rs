@@ -217,7 +217,7 @@ fn publish_watermark(
     });
 }
 
-/// Process-wide write coalescer shared by every backfill code-indexing job.
+/// Process-wide write coalescer shared by every code-indexing job.
 ///
 /// Each project takes a monotonic seq from [`begin_project`], streams its batches in with
 /// that seq, then waits on [`subscribe`] until the flush watermark reaches the seq before
