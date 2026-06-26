@@ -42,41 +42,12 @@ fn collect_type_children(
     }
 }
 
-fn java_record_accessors(tree: &mut SyntaxTree) {
-    let mut accessors: Vec<(u32, String)> = Vec::new();
-    for record in tree.nodes_of_kind("record_declaration").collect::<Vec<_>>() {
-        let overrides: Vec<String> = tree
-            .field(record, "body")
-            .map(|body| {
-                tree.children_of_kind(body, "method_declaration")
-                    .filter(|&m| {
-                        tree.field(m, "parameters").is_none_or(|p| {
-                            !tree.children(p).iter().any(|&c| {
-                                matches!(tree.kind(c), "formal_parameter" | "spread_parameter")
-                            })
-                        })
-                    })
-                    .filter_map(|m| tree.field_text(m, "name").map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        if let Some(params) = tree.field(record, "parameters") {
-            for p in tree
-                .children_of_kind(params, "formal_parameter")
-                .collect::<Vec<_>>()
-            {
-                if let Some(name) = tree.field_text(p, "name") {
-                    if !overrides.contains(&name.to_string()) {
-                        accessors.push((record, name.to_string()));
-                    }
-                }
-            }
-        }
-    }
-    for (record, name) in accessors {
-        tree.insert_child(record, "__accessor", &name);
-    }
-}
+const NO_ARG_METHOD: treesitter_visit::Match<'static> =
+    treesitter_visit::Match::KindWhereFieldLacks(
+        "method_declaration",
+        "parameters",
+        &["formal_parameter", "spread_parameter"],
+    );
 
 impl DslLanguage for JavaDsl {
     fn name() -> &'static str {
@@ -147,8 +118,13 @@ impl DslLanguage for JavaDsl {
             // Import classification
             rw::rename("import_declaration", "__static_import").when(has_child_text("static")),
             rw::rename("import_declaration", "__wildcard_import").when(has_child(&["asterisk"])),
-            // Record accessors (cross-child override check)
-            rw::custom(java_record_accessors),
+            // Record accessors: param names minus no-arg method names
+            rw::insert_diff(
+                "record_declaration",
+                field("parameters").collect_field(Kind("formal_parameter"), "name"),
+                field("body").collect_field(NO_ARG_METHOD, "name"),
+                "__accessor",
+            ),
         ]);
     }
 
