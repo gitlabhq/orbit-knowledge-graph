@@ -7,6 +7,7 @@ use treesitter_visit::Match::*;
 use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::*;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{
@@ -80,8 +81,10 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_csharp(tree);
-        rewrite_csharp_aliased_using(tree);
+        tree.apply_rewrites(&[
+            rw::custom(rewrite_csharp),
+            rw::custom(rewrite_csharp_aliased_using),
+        ]);
     }
 
     fn scopes() -> Vec<ScopeRule> {

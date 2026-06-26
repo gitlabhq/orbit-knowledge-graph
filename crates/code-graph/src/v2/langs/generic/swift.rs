@@ -8,6 +8,7 @@ use treesitter_visit::Node;
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, constant, default_name, text};
 use treesitter_visit::predicate::*;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::HasRules;
@@ -228,8 +229,7 @@ impl DslLanguage for SwiftDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_swift(tree);
-        rewrite_swift_imports(tree);
+        tree.apply_rewrites(&[rw::custom(rewrite_swift), rw::custom(rewrite_swift_imports)]);
     }
 
     fn hooks() -> types::LanguageHooks {

@@ -2,6 +2,7 @@ use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::extract::field;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{ReceiverMode, ResolutionRules};
@@ -42,7 +43,7 @@ impl DslLanguage for BashDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_bash(tree);
+        tree.apply_rewrites(&[rw::custom(rewrite_bash)]);
     }
 
     fn scopes() -> Vec<ScopeRule> {

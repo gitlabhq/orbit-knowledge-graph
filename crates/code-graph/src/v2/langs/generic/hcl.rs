@@ -11,6 +11,7 @@ use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::Axis;
 use treesitter_visit::Match;
 use treesitter_visit::Node;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 type N<'a> = Node<'a, SyntaxTree>;
@@ -134,7 +135,7 @@ impl DslLanguage for HclDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_hcl(tree);
+        tree.apply_rewrites(&[rw::custom(rewrite_hcl)]);
     }
 
     fn hooks() -> LanguageHooks {

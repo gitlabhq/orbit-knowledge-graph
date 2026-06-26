@@ -7,6 +7,7 @@ use treesitter_visit::Match::*;
 use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, default_name, field, text};
 use treesitter_visit::predicate::*;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{
@@ -140,7 +141,7 @@ impl DslLanguage for JavaDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_java(tree);
+        tree.apply_rewrites(&[rw::custom(rewrite_java)]); // TODO: decompose into declarative rules
     }
 
     fn scopes() -> Vec<ScopeRule> {

@@ -11,6 +11,7 @@ use crate::v2::linker::rules::{
 };
 use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::Node;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 type N<'a> = Node<'a, SyntaxTree>;
@@ -195,8 +196,7 @@ impl DslLanguage for GoDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_go(tree);
-        rewrite_go_imports(tree);
+        tree.apply_rewrites(&[rw::custom(rewrite_go), rw::custom(rewrite_go_imports)]);
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {

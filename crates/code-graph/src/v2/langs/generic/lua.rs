@@ -4,6 +4,7 @@ use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Node;
 use treesitter_visit::extract::{child_of_kind, field};
 use treesitter_visit::predicate::*;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::HasRules;
@@ -80,7 +81,7 @@ impl DslLanguage for LuaDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_lua(tree);
+        tree.apply_rewrites(&[rw::custom(rewrite_lua)]);
     }
 
     fn chain_config() -> Option<ChainConfig> {

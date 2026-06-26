@@ -7,6 +7,7 @@ use treesitter_visit::Match::*;
 use treesitter_visit::Node;
 use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
 use treesitter_visit::predicate::has_child_text;
+use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{
@@ -89,9 +90,11 @@ impl DslLanguage for PhpDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        rewrite_php(tree);
-        rewrite_php_refs(tree);
-        rewrite_php_imports(tree);
+        tree.apply_rewrites(&[
+            rw::custom(rewrite_php),
+            rw::custom(rewrite_php_refs),
+            rw::custom(rewrite_php_imports),
+        ]);
     }
 
     fn scopes() -> Vec<ScopeRule> {
