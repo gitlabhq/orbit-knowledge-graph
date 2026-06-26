@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::Node;
@@ -64,47 +64,29 @@ fn rewrite_swift(tree: &mut SyntaxTree) {
     }
 }
 
-fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-    if node.kind().as_ref() != "import_declaration" {
-        return false;
+fn rewrite_swift_imports(tree: &mut SyntaxTree) {
+    let mut imports: Vec<(u32, String)> = Vec::new();
+
+    for imp in tree.nodes_of_kind("import_declaration").collect::<Vec<_>>() {
+        let raw = tree.text(imp);
+        let rest = raw.trim().strip_prefix("import").unwrap_or("").trim();
+        let path = SWIFT_IMPORT_KINDS
+            .iter()
+            .find_map(|kind| {
+                let after = rest.strip_prefix(kind)?;
+                after
+                    .starts_with(|c: char| c.is_whitespace())
+                    .then(|| after.trim())
+            })
+            .unwrap_or(rest);
+        if !path.is_empty() {
+            imports.push((imp, path.to_string()));
+        }
     }
 
-    let raw = node.text().to_string();
-    let rest = raw.trim().strip_prefix("import").unwrap_or("").trim();
-
-    // Strip optional import-kind qualifier (e.g. "import struct UIKit.UIColor")
-    let path = SWIFT_IMPORT_KINDS
-        .iter()
-        .find_map(|kind| {
-            let after = rest.strip_prefix(kind)?;
-            if after.starts_with(|c: char| c.is_whitespace()) {
-                Some(after.trim())
-            } else {
-                None
-            }
-        })
-        .unwrap_or(rest)
-        .to_string();
-
-    if path.is_empty() {
-        return false;
+    for (imp, path) in imports {
+        tree.insert_child(imp, "__import_path", &path);
     }
-
-    let name = path.rsplit('.').next().unwrap_or(&path).to_string();
-
-    imports.push(CanonicalImport {
-        import_type: "Import",
-        binding_kind: ImportBindingKind::Named,
-        mode: ImportMode::Declarative,
-        path,
-        name: Some(name),
-        alias: None,
-        scope_fqn: None,
-        range: crate::v2::types::Range::empty(),
-        is_type_only: false,
-        wildcard: false,
-    });
-    true
 }
 
 // ── DSL parser spec ─────────────────────────────────────────────
@@ -209,7 +191,12 @@ impl DslLanguage for SwiftDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![]
+        vec![
+            import("import_declaration")
+                .label("Import")
+                .path_from(child_of_kind("__import_path"))
+                .split_last("."),
+        ]
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -242,11 +229,11 @@ impl DslLanguage for SwiftDsl {
 
     fn rewrite(tree: &mut SyntaxTree) {
         rewrite_swift(tree);
+        rewrite_swift_imports(tree);
     }
 
     fn hooks() -> types::LanguageHooks {
         types::LanguageHooks {
-            on_import: Some(swift_extract_imports),
             return_kinds: &["return_statement"],
             ..Default::default()
         }
