@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -24,11 +24,20 @@ pub struct MockNatsServices {
     published: Arc<Mutex<Vec<(Subscription, Envelope)>>>,
     pending_messages: Arc<Mutex<Vec<Envelope>>>,
     kv: MockKvServices,
+    fail_publish: Arc<AtomicBool>,
 }
 
 impl MockNatsServices {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A mock whose `publish` always returns `NatsError::Publish`, for testing
+    /// callers' error handling.
+    pub fn failing() -> Self {
+        let mock = Self::default();
+        mock.fail_publish.store(true, Ordering::Relaxed);
+        mock
     }
 
     pub fn get_published(&self) -> Vec<(Subscription, Envelope)> {
@@ -55,6 +64,9 @@ impl NatsServices for MockNatsServices {
         subscription: &Subscription,
         envelope: &Envelope,
     ) -> Result<(), NatsError> {
+        if self.fail_publish.load(Ordering::Relaxed) {
+            return Err(NatsError::Publish("mock publish failure".to_string()));
+        }
         self.published
             .lock()
             .push((subscription.clone(), envelope.clone()));

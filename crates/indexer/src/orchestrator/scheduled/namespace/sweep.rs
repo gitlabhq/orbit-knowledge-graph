@@ -7,10 +7,10 @@ use clickhouse_client::FromArrowColumn;
 use tracing::info;
 
 use super::DispatchNamespace;
-use super::publisher::{NamespacePublisher, NamespaceRequestPublisher};
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
+use crate::orchestrator::dispatch::NamespaceIndexingDispatch;
 use crate::orchestrator::scheduled::ScheduledTaskMetrics;
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 use gkg_server_config::{NamespaceSweepConfig, ScheduleConfiguration};
@@ -71,7 +71,8 @@ impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
 /// ticks. NATS publish-dedup keeps it from duplicating in-flight requests.
 pub struct NamespaceSweepDispatcher {
     reader: Arc<dyn EnabledNamespaceReader>,
-    publisher: Arc<dyn NamespacePublisher>,
+    publisher: NamespaceIndexingDispatch,
+    campaign: Arc<CampaignState>,
     metrics: ScheduledTaskMetrics,
     config: NamespaceSweepConfig,
 }
@@ -86,22 +87,24 @@ impl NamespaceSweepDispatcher {
     ) -> Self {
         Self {
             reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake)),
-            publisher: Arc::new(NamespaceRequestPublisher::new(nats, campaign)),
+            publisher: NamespaceIndexingDispatch::new(nats),
+            campaign,
             metrics,
             config,
         }
     }
 
     #[cfg(test)]
-    fn with_reader_and_publisher(
+    fn with_reader(
         reader: Arc<dyn EnabledNamespaceReader>,
-        publisher: Arc<dyn NamespacePublisher>,
+        nats: Arc<dyn NatsServices>,
         metrics: ScheduledTaskMetrics,
         config: NamespaceSweepConfig,
     ) -> Self {
         Self {
             reader,
-            publisher,
+            publisher: NamespaceIndexingDispatch::new(nats),
+            campaign: Arc::new(CampaignState::new()),
             metrics,
             config,
         }
@@ -137,23 +140,28 @@ impl NamespaceSweepDispatcher {
         self.metrics
             .record_query_duration("enabled_namespaces", query_start.elapsed().as_secs_f64());
 
-        let report = self
+        let enabled_count = namespaces.len();
+        let pairs: Vec<(i64, String)> = namespaces
+            .into_iter()
+            .map(DispatchNamespace::into_pair)
+            .collect();
+        let outcome = self
             .publisher
-            .publish(&namespaces, Utc::now())
+            .dispatch_for_namespaces(&pairs, Utc::now(), self.campaign.current())
             .await
             .inspect_err(|_| {
                 self.metrics.record_error(self.name(), "publish");
             })?;
 
         self.metrics
-            .record_requests_published(self.name(), report.dispatched);
+            .record_requests_published(self.name(), outcome.dispatched);
         self.metrics
-            .record_requests_skipped(self.name(), report.skipped);
+            .record_requests_skipped(self.name(), outcome.skipped);
 
         info!(
-            dispatched = report.dispatched,
-            skipped = report.skipped,
-            enabled_namespaces = namespaces.len(),
+            dispatched = outcome.dispatched,
+            skipped = outcome.skipped,
+            enabled_namespaces = enabled_count,
             "swept enabled namespace indexing requests"
         );
 
@@ -164,9 +172,7 @@ impl NamespaceSweepDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestrator::scheduled::namespace::publisher::PublishReport;
-    use chrono::{DateTime, Utc};
-    use std::sync::Mutex;
+    use crate::testkit::mocks::MockNatsServices;
 
     struct StubReader {
         result: Result<Vec<DispatchNamespace>, &'static str>,
@@ -179,30 +185,10 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
-    struct RecordingPublisher {
-        published: Mutex<Vec<usize>>,
-    }
-
-    #[async_trait]
-    impl NamespacePublisher for RecordingPublisher {
-        async fn publish(
-            &self,
-            namespaces: &[DispatchNamespace],
-            _watermark: DateTime<Utc>,
-        ) -> Result<PublishReport, TaskError> {
-            self.published.lock().unwrap().push(namespaces.len());
-            Ok(PublishReport {
-                dispatched: namespaces.len() as u64,
-                skipped: 0,
-            })
-        }
-    }
-
     #[tokio::test]
     async fn sweep_publishes_every_enabled_namespace() {
-        let publisher = Arc::new(RecordingPublisher::default());
-        let sweep = NamespaceSweepDispatcher::with_reader_and_publisher(
+        let nats = Arc::new(MockNatsServices::new());
+        let sweep = NamespaceSweepDispatcher::with_reader(
             Arc::new(StubReader {
                 result: Ok(vec![
                     DispatchNamespace {
@@ -215,23 +201,23 @@ mod tests {
                     },
                 ]),
             }),
-            publisher.clone(),
+            nats.clone(),
             ScheduledTaskMetrics::new(),
             NamespaceSweepConfig::default(),
         );
 
         sweep.sweep_inner().await.unwrap();
 
-        assert_eq!(*publisher.published.lock().unwrap(), vec![2]);
+        assert_eq!(nats.get_published().len(), 2);
     }
 
     #[tokio::test]
     async fn sweep_surfaces_query_errors() {
-        let sweep = NamespaceSweepDispatcher::with_reader_and_publisher(
+        let sweep = NamespaceSweepDispatcher::with_reader(
             Arc::new(StubReader {
                 result: Err("query failed"),
             }),
-            Arc::new(RecordingPublisher::default()),
+            Arc::new(MockNatsServices::new()),
             ScheduledTaskMetrics::new(),
             NamespaceSweepConfig::default(),
         );

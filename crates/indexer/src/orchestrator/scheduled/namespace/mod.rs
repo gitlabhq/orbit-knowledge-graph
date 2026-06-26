@@ -1,5 +1,4 @@
 mod change_detection;
-mod publisher;
 mod sweep;
 
 use std::sync::Arc;
@@ -10,13 +9,13 @@ use chrono::{DateTime, Utc};
 use tracing::{debug, info};
 
 use change_detection::{DatalakeChangeDetector, NamespaceChangeDetector};
-use publisher::{NamespacePublisher, NamespaceRequestPublisher};
 
 use crate::campaign::CampaignState;
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::durability::WriteDurability;
 use crate::nats::NatsServices;
+use crate::orchestrator::dispatch::NamespaceIndexingDispatch;
 use crate::orchestrator::scheduled::ScheduledTaskMetrics;
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
@@ -29,11 +28,18 @@ pub(super) struct DispatchNamespace {
     pub traversal_path: String,
 }
 
+impl DispatchNamespace {
+    fn into_pair(self) -> (i64, String) {
+        (self.namespace_id, self.traversal_path)
+    }
+}
+
 const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
 
 pub struct NamespaceDispatcher {
     detector: Arc<dyn NamespaceChangeDetector>,
-    publisher: Arc<dyn NamespacePublisher>,
+    publisher: NamespaceIndexingDispatch,
+    campaign: Arc<CampaignState>,
     checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: ScheduledTaskMetrics,
     config: NamespaceDispatcherConfig,
@@ -51,7 +57,8 @@ impl NamespaceDispatcher {
     ) -> Self {
         Self {
             detector: Arc::new(DatalakeChangeDetector::new(datalake, ontology)),
-            publisher: Arc::new(NamespaceRequestPublisher::new(nats, campaign)),
+            publisher: NamespaceIndexingDispatch::new(nats),
+            campaign,
             checkpoint_store,
             metrics,
             config,
@@ -59,16 +66,17 @@ impl NamespaceDispatcher {
     }
 
     #[cfg(test)]
-    fn with_detector_and_publisher(
+    fn with_detector(
         detector: Arc<dyn NamespaceChangeDetector>,
-        publisher: Arc<dyn NamespacePublisher>,
+        nats: Arc<dyn NatsServices>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: ScheduledTaskMetrics,
         config: NamespaceDispatcherConfig,
     ) -> Self {
         Self {
             detector,
-            publisher,
+            publisher: NamespaceIndexingDispatch::new(nats),
+            campaign: Arc::new(CampaignState::new()),
             checkpoint_store,
             metrics,
             config,
@@ -119,9 +127,14 @@ impl NamespaceDispatcher {
             "found changed enabled root namespaces"
         );
 
-        let report = self
+        let changed_count = namespaces.len();
+        let pairs: Vec<(i64, String)> = namespaces
+            .into_iter()
+            .map(DispatchNamespace::into_pair)
+            .collect();
+        let outcome = self
             .publisher
-            .publish(&namespaces, upper)
+            .dispatch_for_namespaces(&pairs, upper, self.campaign.current())
             .await
             .inspect_err(|_| {
                 self.metrics.record_error(self.name(), "publish");
@@ -130,14 +143,14 @@ impl NamespaceDispatcher {
         self.save_checkpoint(&upper).await?;
 
         self.metrics
-            .record_requests_published(self.name(), report.dispatched);
+            .record_requests_published(self.name(), outcome.dispatched);
         self.metrics
-            .record_requests_skipped(self.name(), report.skipped);
+            .record_requests_skipped(self.name(), outcome.skipped);
 
         info!(
-            dispatched = report.dispatched,
-            skipped = report.skipped,
-            changed_namespaces = namespaces.len(),
+            dispatched = outcome.dispatched,
+            skipped = outcome.skipped,
+            changed_namespaces = changed_count,
             "dispatched changed namespace indexing requests"
         );
 
@@ -166,7 +179,7 @@ impl NamespaceDispatcher {
 mod tests {
     use super::*;
     use crate::checkpoint::{Checkpoint, CheckpointError};
-    use crate::orchestrator::scheduled::namespace::publisher::PublishReport;
+    use crate::testkit::mocks::MockNatsServices;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -236,33 +249,25 @@ mod tests {
         }
     }
 
-    struct StubPublisher {
-        result: Result<PublishReport, &'static str>,
-    }
-
-    #[async_trait]
-    impl NamespacePublisher for StubPublisher {
-        async fn publish(
-            &self,
-            _namespaces: &[DispatchNamespace],
-            _watermark: DateTime<Utc>,
-        ) -> Result<PublishReport, TaskError> {
-            self.result.map_err(TaskError::new)
-        }
-    }
-
     fn dispatcher_with(
         detector: StubDetector,
-        publisher: StubPublisher,
+        nats: Arc<MockNatsServices>,
         checkpoint_store: Arc<StubCheckpointStore>,
     ) -> NamespaceDispatcher {
-        NamespaceDispatcher::with_detector_and_publisher(
+        NamespaceDispatcher::with_detector(
             Arc::new(detector),
-            Arc::new(publisher),
+            nats,
             checkpoint_store,
             ScheduledTaskMetrics::new(),
             NamespaceDispatcherConfig::default(),
         )
+    }
+
+    fn one_namespace() -> Vec<DispatchNamespace> {
+        vec![DispatchNamespace {
+            namespace_id: 9,
+            traversal_path: "1/9/".to_string(),
+        }]
     }
 
     #[tokio::test]
@@ -270,17 +275,9 @@ mod tests {
         let checkpoint_store = Arc::new(StubCheckpointStore::default());
         let dispatcher = dispatcher_with(
             StubDetector {
-                result: Ok(vec![DispatchNamespace {
-                    namespace_id: 9,
-                    traversal_path: "1/9/".to_string(),
-                }]),
+                result: Ok(one_namespace()),
             },
-            StubPublisher {
-                result: Ok(PublishReport {
-                    dispatched: 1,
-                    skipped: 0,
-                }),
-            },
+            Arc::new(MockNatsServices::new()),
             checkpoint_store.clone(),
         );
 
@@ -296,9 +293,7 @@ mod tests {
             StubDetector {
                 result: Err("query failed"),
             },
-            StubPublisher {
-                result: Ok(PublishReport::default()),
-            },
+            Arc::new(MockNatsServices::new()),
             checkpoint_store.clone(),
         );
 
@@ -313,20 +308,15 @@ mod tests {
         let checkpoint_store = Arc::new(StubCheckpointStore::default());
         let dispatcher = dispatcher_with(
             StubDetector {
-                result: Ok(vec![DispatchNamespace {
-                    namespace_id: 9,
-                    traversal_path: "1/9/".to_string(),
-                }]),
+                result: Ok(one_namespace()),
             },
-            StubPublisher {
-                result: Err("publish failed"),
-            },
+            Arc::new(MockNatsServices::failing()),
             checkpoint_store.clone(),
         );
 
         let err = dispatcher.dispatch_inner().await.unwrap_err();
 
-        assert!(err.to_string().contains("publish failed"));
+        assert!(err.to_string().contains("mock publish failure"));
         assert!(checkpoint_store.saved().is_empty());
     }
 }
