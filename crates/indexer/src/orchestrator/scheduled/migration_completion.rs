@@ -55,13 +55,15 @@ SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
 
-/// Count enabled namespaces from the datalake.
+/// Count enabled top-level namespaces from the datalake. A non-top-level
+/// path (3+ segments, e.g. a namespace later moved under a parent) is never
+/// dispatched for indexing, so it must not inflate this gate's denominator.
 static COUNT_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
         "SELECT count(DISTINCT root_namespace_id) AS ns_count \
          FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {del} = false"
+         WHERE {del} = false AND match(traversal_path, '^[0-9]+/[0-9]+/$')"
     )
 });
 
@@ -702,6 +704,11 @@ mod tests {
     #[test]
     fn count_enabled_namespaces_query_filters_deleted() {
         assert!(COUNT_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
+    }
+
+    #[test]
+    fn count_enabled_namespaces_query_excludes_subgroup_paths() {
+        assert!(COUNT_ENABLED_NAMESPACES.contains("match(traversal_path, '^[0-9]+/[0-9]+/$')"));
     }
 
     #[test]
