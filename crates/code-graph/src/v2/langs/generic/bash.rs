@@ -2,6 +2,7 @@ use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::extract::field;
+use treesitter_visit::predicate::field_text;
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
@@ -11,26 +12,10 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 #[derive(Default)]
 pub struct BashDsl;
 
-fn rewrite_bash(tree: &mut SyntaxTree) {
-    let mut imports: Vec<(u32, String)> = Vec::new();
+const QUOTE_CHARS: &[char] = &['"', '\''];
 
-    for cmd in tree.nodes_of_kind("command").collect::<Vec<_>>() {
-        let name = tree.field_text(cmd, "name").unwrap_or_default();
-        if name != "source" && name != "." {
-            continue;
-        }
-        if let Some(arg) = tree.field(cmd, "argument") {
-            let path = tree.text(arg).trim_matches(|c: char| c == '"' || c == '\'');
-            if !path.is_empty() {
-                imports.push((cmd, path.to_string()));
-            }
-        }
-    }
-
-    for (cmd, path) in imports {
-        tree.set_kind(cmd, "__source_import");
-        tree.insert_child(cmd, "__import_path", &path);
-    }
+fn is_source_cmd() -> treesitter_visit::predicate::Pred {
+    field_text("name", "source").or(field_text("name", "."))
 }
 
 impl DslLanguage for BashDsl {
@@ -43,7 +28,15 @@ impl DslLanguage for BashDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[rw::custom(rewrite_bash)]);
+        tree.apply_rewrites(&[
+            rw::insert(
+                "command",
+                field("argument").trim_matches(QUOTE_CHARS),
+                "__import_path",
+            )
+            .when(is_source_cmd()),
+            rw::rename("command", "__source_import").when(is_source_cmd()),
+        ]);
     }
 
     fn scopes() -> Vec<ScopeRule> {

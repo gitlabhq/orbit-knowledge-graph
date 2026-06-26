@@ -5,7 +5,7 @@ use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::Node;
-use treesitter_visit::extract::{Extract, default_name, field, text};
+use treesitter_visit::extract::{Extract, child_of_kind, default_name, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
@@ -42,35 +42,8 @@ fn collect_type_children(
     }
 }
 
-fn rewrite_java(tree: &mut SyntaxTree) {
-    let mut renames: Vec<(u32, &str)> = Vec::new();
-    let mut supertypes: Vec<(u32, String)> = Vec::new();
+fn java_record_accessors(tree: &mut SyntaxTree) {
     let mut accessors: Vec<(u32, String)> = Vec::new();
-
-    let class_kinds = [
-        "class_declaration",
-        "enum_declaration",
-        "record_declaration",
-        "interface_declaration",
-    ];
-    for kind in class_kinds {
-        for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
-            if let Some(sc) = tree.field(cls, "superclass") {
-                collect_type_children(tree, sc, &mut supertypes, cls);
-            }
-            if let Some(ifaces) = tree.field(cls, "interfaces") {
-                collect_type_children(tree, ifaces, &mut supertypes, cls);
-            }
-            for &child in tree.children(cls) {
-                if tree.kind(child) == "extends_interfaces" {
-                    collect_type_children(tree, child, &mut supertypes, cls);
-                }
-            }
-        }
-    }
-
-    // Record accessors: inject __accessor for each formal_parameter not
-    // overridden by an explicit no-arg method in the body
     for record in tree.nodes_of_kind("record_declaration").collect::<Vec<_>>() {
         let overrides: Vec<String> = tree
             .field(record, "body")
@@ -79,8 +52,7 @@ fn rewrite_java(tree: &mut SyntaxTree) {
                     .filter(|&m| {
                         tree.field(m, "parameters").is_none_or(|p| {
                             !tree.children(p).iter().any(|&c| {
-                                let k = tree.kind(c);
-                                k == "formal_parameter" || k == "spread_parameter"
+                                matches!(tree.kind(c), "formal_parameter" | "spread_parameter")
                             })
                         })
                     })
@@ -88,7 +60,6 @@ fn rewrite_java(tree: &mut SyntaxTree) {
                     .collect()
             })
             .unwrap_or_default();
-
         if let Some(params) = tree.field(record, "parameters") {
             for p in tree
                 .children_of_kind(params, "formal_parameter")
@@ -101,22 +72,6 @@ fn rewrite_java(tree: &mut SyntaxTree) {
                 }
             }
         }
-    }
-
-    // Import classification
-    for imp in tree.nodes_of_kind("import_declaration").collect::<Vec<_>>() {
-        if tree.has_child_text(imp, "static") {
-            renames.push((imp, "__static_import"));
-        } else if tree.has_child_of_kind(imp, "asterisk") {
-            renames.push((imp, "__wildcard_import"));
-        }
-    }
-
-    for (id, kind) in renames {
-        tree.set_kind(id, kind);
-    }
-    for (cls, text) in supertypes {
-        tree.insert_child(cls, "__supertype", &text);
     }
     for (record, name) in accessors {
         tree.insert_child(record, "__accessor", &name);
@@ -141,7 +96,60 @@ impl DslLanguage for JavaDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[rw::custom(rewrite_java)]); // TODO: decompose into declarative rules
+        let tk = treesitter_visit::Match::AnyKind(JAVA_TYPE_KINDS);
+        tree.apply_rewrites(&[
+            // Supertypes from superclass/interfaces/extends_interfaces
+            rw::insert(
+                "class_declaration",
+                field("superclass").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "class_declaration",
+                field("interfaces").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "class_declaration",
+                child_of_kind("extends_interfaces").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "enum_declaration",
+                field("superclass").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "enum_declaration",
+                field("interfaces").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "record_declaration",
+                field("superclass").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "record_declaration",
+                field("interfaces").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "interface_declaration",
+                child_of_kind("extends_interfaces").collect_shallow(tk),
+                "__supertype",
+            ),
+            rw::insert(
+                "interface_declaration",
+                field("interfaces").collect_shallow(tk),
+                "__supertype",
+            ),
+            // Import classification
+            rw::rename("import_declaration", "__static_import").when(has_child_text("static")),
+            rw::rename("import_declaration", "__wildcard_import").when(has_child(&["asterisk"])),
+            // Record accessors (cross-child override check)
+            rw::custom(java_record_accessors),
+        ]);
     }
 
     fn scopes() -> Vec<ScopeRule> {

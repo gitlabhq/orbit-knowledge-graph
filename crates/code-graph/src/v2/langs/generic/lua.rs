@@ -81,7 +81,17 @@ impl DslLanguage for LuaDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[rw::custom(rewrite_lua)]);
+        tree.apply_rewrites(&[
+            rw::insert(
+                "function_call",
+                field("arguments")
+                    .try_child("string")
+                    .try_child("string_content"),
+                "__import_path",
+            )
+            .when(is_require()),
+            rw::rename("function_call", "__require").when(is_require()),
+        ]);
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -148,39 +158,8 @@ impl DslLanguage for LuaDsl {
     }
 }
 
-fn extract_string_content(tree: &SyntaxTree, node: u32) -> Option<String> {
-    let raw = tree.text(node);
-    let trimmed = raw.trim_matches(|c: char| c == '"' || c == '\'');
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
-fn rewrite_lua(tree: &mut SyntaxTree) {
-    let mut rewrites: Vec<(u32, String)> = Vec::new();
-
-    for call in tree.nodes_of_kind("function_call").collect::<Vec<_>>() {
-        let name = tree.field(call, "name");
-        if name.is_none_or(|n| tree.kind(n) != "identifier" || tree.text(n) != "require") {
-            continue;
-        }
-        let Some(args) = tree.field(call, "arguments") else {
-            continue;
-        };
-        // `require "mod"` → args is a string node directly
-        // `require("mod")` → args contains a string child
-        let string_node = if tree.kind(args) == "string" {
-            Some(args)
-        } else {
-            tree.children_of_kind(args, "string").next()
-        };
-        if let Some(s) = string_node.and_then(|s| extract_string_content(tree, s)) {
-            rewrites.push((call, s));
-        }
-    }
-
-    for (call, path) in rewrites {
-        tree.set_kind(call, "__require");
-        tree.insert_child(call, "__import_path", &path);
-    }
+fn is_require() -> Pred {
+    field_text("name", "require")
 }
 
 // ── Resolution rules ────────────────────────────────────────────

@@ -58,6 +58,7 @@ pub enum Emit {
 pub enum TextTransform {
     StripPrefix(&'static str),
     TrimStartChar(char),
+    TrimMatches(&'static [char]),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -246,6 +247,12 @@ impl Extract {
         self
     }
 
+    /// Trim matching characters from both ends.
+    pub fn trim_matches(mut self, chars: &'static [char]) -> Self {
+        self.transforms.push(TextTransform::TrimMatches(chars));
+        self
+    }
+
     // Composition
     pub fn inner(self, container: &'static str, target: &'static str) -> Self {
         self.try_child(container).try_descendant(target)
@@ -271,6 +278,9 @@ impl Extract {
                 }
                 TextTransform::TrimStartChar(ch) => {
                     s = s.trim_start_matches(*ch).to_string();
+                }
+                TextTransform::TrimMatches(chars) => {
+                    s = s.trim_matches(chars as &[char]).to_string();
                 }
             }
         }
