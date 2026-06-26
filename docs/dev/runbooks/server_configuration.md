@@ -215,6 +215,12 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
+`schedule.tasks.namespace.max_lookback_secs` defaults to `30`. When the namespace
+change dispatcher has no checkpoint, it starts from that bounded lookback instead of
+querying from the Unix epoch. The hourly namespace sweep is the recovery path for
+enabled namespaces with older changes, because it re-dispatches every enabled
+namespace regardless of recent Siphon activity.
+
 ### Code dispatch task settings
 
 | Config path | Default | Description |

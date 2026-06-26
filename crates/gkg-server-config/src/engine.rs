@@ -386,6 +386,15 @@ pub struct GlobalDispatcherConfig {
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+
+    #[serde(default = "NamespaceDispatcherConfig::default_max_lookback_secs")]
+    pub max_lookback_secs: u64,
+}
+
+impl NamespaceDispatcherConfig {
+    fn default_max_lookback_secs() -> u64 {
+        30
+    }
 }
 
 impl Default for NamespaceDispatcherConfig {
@@ -394,6 +403,7 @@ impl Default for NamespaceDispatcherConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("*/30 * * * * *".into()),
             },
+            max_lookback_secs: Self::default_max_lookback_secs(),
         }
     }
 }
