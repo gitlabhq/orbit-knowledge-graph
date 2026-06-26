@@ -48,21 +48,27 @@ When editing Orbit docs or skills, fence executable query JSON as
 ## Running a query
 
 Write the request body to a file and pass it to `glab orbit remote query`.
-Default output is `llm` (compact, agent-friendly); pass `--response-format raw`
-to pipe into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
+Default output is `llm` (compact, agent-friendly); pass `--format raw` to pipe
+into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
+
+> **Flag compatibility:** `glab` 1.105.0 renamed `--format` to
+> `--response-format`. On 1.105.0+ both forms work (`--format` is
+> deprecated but accepted); on older `glab` only `--format` is
+> recognised. Examples in this skill use `--format` for broadest
+> compatibility.
 
 When piping raw output to `jq`, rows are nested under `.result.nodes[]` and each
 row's entity type is discriminated by its `.type` field (not `.entity` or
 `.node_type`). Example:
 
 ```shell
-glab orbit remote query --response-format raw /tmp/q.json \
+glab orbit remote query --format raw /tmp/q.json \
   | jq -r '.result.nodes[] | select(.type=="MergeRequest") | .iid'
 ```
 
 The raw response shape looks like:
 
-```json
+```text
 {"result":{"format_version":"2.1.0","query_type":"traversal","nodes":[
   {"type":"Project","id":"278964",...},
   {"type":"MergeRequest","id":"478166936","iid":"233344","title":"..."},

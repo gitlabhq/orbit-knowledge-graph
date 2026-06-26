@@ -46,7 +46,9 @@ def _query(body: dict) -> dict:
         tmp = f.name
     try:
         cp = subprocess.run(
-            ["glab", "orbit", "remote", "query", "--response-format", "raw", tmp],
+            # --format is renamed to --response-format in glab >= 1.105.0;
+            # keep --format for back-compat with older glab clients.
+            ["glab", "orbit", "remote", "query", "--format", "raw", tmp],
             capture_output=True, text=True,
             timeout=QUERY_TIMEOUT_SECONDS,
         )

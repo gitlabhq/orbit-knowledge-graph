@@ -14,8 +14,8 @@ Common errors when using `glab orbit remote`, organised by exit code. See
 | `4`  | 403  | Access denied (no Knowledge Graph enabled namespaces).       |
 | `5`  | 429  | Rate limited.                                                |
 
-`glab orbit remote query --response-format raw` is the easiest way to surface
-the full JSON error payload when the exit code alone is not enough.
+`glab orbit remote query --format raw` is the easiest way to surface the full
+JSON error payload when the exit code alone is not enough.
 
 ## Exit `2` — feature flag is off, or wrong subcommand
 
@@ -68,7 +68,7 @@ The most common causes:
 - Unreachable hostname (check `glab auth status`).
 - Network or TLS failure.
 
-Re-run with `--response-format raw` and inspect stderr for details.
+Re-run with `--format raw` and inspect stderr for details.
 
 ## Empty result body
 
@@ -93,7 +93,7 @@ Put the request body in `/tmp/q-min.json`:
 ```
 
 ```shell
-glab orbit remote query --response-format raw /tmp/q-min.json
+glab orbit remote query --format raw /tmp/q-min.json
 ```
 
 If this returns a result, the connection works and your other query likely
