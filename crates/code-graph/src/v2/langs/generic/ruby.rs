@@ -38,14 +38,26 @@ impl DslLanguage for RubyDsl {
         Language::Ruby
     }
 
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_ruby(tree);
+    }
+
     fn scopes() -> Vec<ScopeRule> {
+        let st_meta = || {
+            metadata().super_types(|n: &Node<'_, SyntaxTree>| {
+                n.children()
+                    .filter(|c| c.kind().as_ref() == "__supertype")
+                    .map(|c| c.text().to_string())
+                    .collect()
+            })
+        };
         vec![
             scope("class", "Class")
                 .def_kind(DefKind::Class)
-                .metadata(metadata().super_types(ruby_super_types)),
+                .metadata(st_meta()),
             scope("module", "Module")
                 .def_kind(DefKind::Class)
-                .metadata(metadata().super_types(ruby_super_types)),
+                .metadata(st_meta()),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
             // class << self: transparent scope, methods inside are
@@ -82,6 +94,16 @@ impl DslLanguage for RubyDsl {
                 .def_kind(DefKind::Lambda)
                 .when(ruby_lambda_assignment())
                 .name_from(field("left"))
+                .no_scope(),
+            // Synthetic nodes injected by rewrite_ruby
+            scope("__property", "Attribute")
+                .def_kind(DefKind::Property)
+                .no_scope(),
+            scope("__method", "Method")
+                .def_kind(DefKind::Method)
+                .no_scope(),
+            scope("__static_method", "StaticMethod")
+                .def_kind(DefKind::Method)
                 .no_scope(),
         ]
     }
@@ -141,9 +163,7 @@ impl DslLanguage for RubyDsl {
 
     fn hooks() -> LanguageHooks {
         LanguageHooks {
-            on_scope: Some(ruby_extract_attr_methods),
             on_import: Some(ruby_extract_imports),
-            ref_name_rewrite: Some(ruby_rewrite_send),
             ..LanguageHooks::default()
         }
     }
@@ -240,317 +260,211 @@ fn ruby_lambda_assignment() -> Pred {
         .or(proc_new)
 }
 
-/// Extract synthetic definitions from attr_accessor/attr_reader/attr_writer
-/// and alias declarations.
-fn ruby_extract_attr_methods(
-    node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-    scope_stack: &[std::sync::Arc<str>],
-    sep: &'static str,
-) -> bool {
-    let nk = node.kind();
-    let nk_ref = nk.as_ref();
-
-    // alias new_name old_name → synthetic method def for new_name
-    if nk_ref == "alias" {
-        if let Some(name_node) = node.field("name") {
-            let name = name_node.text().to_string();
-            if !name.is_empty() {
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Method",
-                    kind: DefKind::Method,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
-            }
-        }
-        return true;
-    }
-
-    if nk_ref != "call" {
-        return false;
-    }
-    let method = node
-        .field("method")
-        .map(|m| m.text().to_string())
-        .unwrap_or_default();
-
-    let Some(args) = node.field("arguments") else {
-        return RUBY_DSL_METHODS.contains(&method.as_str());
-    };
-
-    // Helper: extract a method name from a simple_symbol node.
-    // `:foo` → `"foo"`. Returns None for non-symbol nodes.
-    let symbol_name = |node: &N<'_>| -> Option<String> {
-        if node.kind().as_ref() != "simple_symbol" {
-            return None;
-        }
-        let text = node.text();
-        let name = text.strip_prefix(':')?;
-        (!name.is_empty()).then(|| name.to_string())
-    };
-
-    // Helper: extract a method name from a simple_symbol OR string node.
-    // `:foo` → `"foo"`, `"foo"` → `"foo"`. Returns None for anything else.
-    let literal_name = |node: &N<'_>| -> Option<String> {
-        match node.kind().as_ref() {
-            "simple_symbol" => {
-                let text = node.text();
-                text.strip_prefix(':')
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-            }
-            "string" => node
-                .children()
-                .find(|c| c.kind().as_ref() == "string_content")
-                .map(|c| c.text().to_string())
-                .filter(|s| !s.is_empty()),
-            _ => None,
-        }
-    };
-
-    // Helper: push a synthetic def for each symbol arg (skips non-symbol children like pairs)
-    let push_symbol_defs = |args: &N<'_>,
-                            defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-                            def_type: &'static str,
-                            kind: DefKind| {
-        for arg in args.children() {
-            let Some(name) = symbol_name(&arg) else {
-                continue;
-            };
-            let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-            defs.push(crate::v2::types::CanonicalDefinition {
-                definition_type: def_type,
-                kind,
-                name,
-                fqn,
-                range: crate::v2::types::Range::empty(),
-                is_top_level: false,
-                metadata: None,
-            });
-        }
-    };
-
-    // Helper: push one synthetic def from the first symbol arg
-    let push_first_symbol = |args: &N<'_>,
-                             defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-                             def_type: &'static str,
-                             kind: DefKind| {
-        for arg in args.children() {
-            let Some(name) = symbol_name(&arg) else {
-                continue;
-            };
-            let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-            defs.push(crate::v2::types::CanonicalDefinition {
-                definition_type: def_type,
-                kind,
-                name,
-                fqn,
-                range: crate::v2::types::Range::empty(),
-                is_top_level: false,
-                metadata: None,
-            });
-            break;
-        }
-    };
-
-    match method.as_str() {
-        "attr_accessor" | "attr_reader" | "attr_writer" => {
-            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
-            true
-        }
-        "class_attribute" | "mattr_accessor" | "cattr_accessor" | "mattr_reader"
-        | "mattr_writer" | "cattr_reader" | "cattr_writer" => {
-            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
-            true
-        }
-        "delegate" => {
-            push_symbol_defs(&args, defs, "Method", DefKind::Method);
-            true
-        }
-        "def_delegators" | "def_delegator" => {
-            let mut skip_first = true;
-            for arg in args.children() {
-                let Some(name) = symbol_name(&arg) else {
-                    continue;
-                };
-                if skip_first {
-                    skip_first = false;
-                    continue;
-                }
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Method",
-                    kind: DefKind::Method,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
-            }
-            true
-        }
-        "define_method" => {
-            for arg in args.children() {
-                let Some(name) = literal_name(&arg) else {
-                    continue;
-                };
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Method",
-                    kind: DefKind::Method,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
-                break;
-            }
-            true
-        }
-        "scope" => {
-            push_first_symbol(&args, defs, "StaticMethod", DefKind::Method);
-            true
-        }
-        "has_many" | "belongs_to" | "has_one" | "has_and_belongs_to_many" => {
-            push_first_symbol(&args, defs, "Method", DefKind::Method);
-            true
-        }
-        // Callbacks: not handled here. Symbol args are refs, not defs.
-        "before_action" | "after_action" | "around_action" | "before_filter" | "after_filter"
-        | "around_filter" | "before_validation" | "after_validation" | "after_create"
-        | "after_save" | "before_save" | "before_create" | "after_update" | "before_update"
-        | "after_destroy" | "before_destroy" | "after_commit" | "after_rollback" => false,
-        _ => false,
-    }
-}
-
-/// DSL methods recognized by the on_scope hook. Used for early-return
-/// when the call has no arguments.
-const RUBY_DSL_METHODS: &[&str] = &[
-    "attr_accessor",
-    "attr_reader",
-    "attr_writer",
-    "class_attribute",
-    "mattr_accessor",
-    "cattr_accessor",
-    "mattr_reader",
-    "mattr_writer",
-    "cattr_reader",
-    "cattr_writer",
-    "delegate",
-    "def_delegators",
-    "def_delegator",
-    "define_method",
-    "scope",
-    "has_many",
-    "belongs_to",
-    "has_one",
-    "has_and_belongs_to_many",
-];
-
-/// Rewrite `obj.send(:foo, ...)` / `obj.public_send(:foo, ...)` to resolve
-/// as `obj.foo(...)`. Only rewrites when the first argument is a literal
-/// symbol or string.
-fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
-    if name != "send" && name != "public_send" && name != "__send__" {
+fn symbol_name(tree: &SyntaxTree, id: u32) -> Option<String> {
+    if tree.kind(id) != "simple_symbol" {
         return None;
     }
-    let args = node.field("arguments")?;
-    for arg in args.children() {
-        let k = arg.kind();
-        match k.as_ref() {
-            "simple_symbol" => return arg.text().strip_prefix(':').map(|s| s.to_string()),
-            "string" => {
-                return arg
-                    .children()
-                    .find(|c| c.kind().as_ref() == "string_content")
-                    .map(|c| c.text().to_string())
-                    .filter(|s| !s.is_empty());
-            }
-            _ => continue,
-        }
-    }
-    None
+    tree.text(id)
+        .strip_prefix(':')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
-fn strip_leading_scope(name: &str) -> String {
-    name.strip_prefix("::").unwrap_or(name).to_string()
-}
-
-/// Extract super types: superclass + include/extend calls in the class body.
-fn collect_include_args(call: &N<'_>, types: &mut Vec<String>) {
-    if let Some(args) = call.field("arguments") {
-        for arg in args.children() {
-            let kind = arg.kind();
-            if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
-                types.push(strip_leading_scope(&arg.text()));
-            }
-        }
+fn literal_name(tree: &SyntaxTree, id: u32) -> Option<String> {
+    match tree.kind(id) {
+        "simple_symbol" => symbol_name(tree, id),
+        "string" => tree
+            .children_of_kind(id, "string_content")
+            .next()
+            .map(|c| tree.text(c).to_string())
+            .filter(|s| !s.is_empty()),
+        _ => None,
     }
 }
 
-fn ruby_super_types(node: &N<'_>) -> Vec<String> {
-    let mut types = Vec::new();
+fn rewrite_ruby_synthetics(tree: &mut SyntaxTree) {
+    let mut inserts: Vec<(u32, &str, String)> = Vec::new();
+    let mut send_rewrites: Vec<(u32, String)> = Vec::new();
 
-    // Direct superclass: class Dog < Animal
-    // The "superclass" field wraps the type in a `superclass` node
-    // that includes the `<` token. Extract the inner constant or
-    // scope_resolution child directly.
-    if let Some(s) = node.field("superclass")
-        && let Some(type_node) = s.children().find(|c| {
-            let k = c.kind();
-            k.as_ref() == "constant" || k.as_ref() == "scope_resolution"
-        })
+    // alias → __method
+    for alias in tree.nodes_of_kind("alias").collect::<Vec<_>>() {
+        if let Some(name) = tree.field(alias, "name") {
+            let text = tree.text(name);
+            if !text.is_empty() {
+                inserts.push((alias, "__method", text.to_string()));
+            }
+        }
+    }
+
+    for call in tree.nodes_of_kind("call").collect::<Vec<_>>() {
+        let method = tree
+            .field_text(call, "method")
+            .unwrap_or_default()
+            .to_string();
+        let args = match tree.field(call, "arguments") {
+            Some(a) => a,
+            None => continue,
+        };
+
+        match method.as_str() {
+            "attr_accessor" | "attr_reader" | "attr_writer" | "class_attribute"
+            | "mattr_accessor" | "cattr_accessor" | "mattr_reader" | "mattr_writer"
+            | "cattr_reader" | "cattr_writer" => {
+                for &arg in tree.children(args) {
+                    if let Some(name) = symbol_name(tree, arg) {
+                        inserts.push((call, "__property", name));
+                    }
+                }
+            }
+            "delegate" => {
+                for &arg in tree.children(args) {
+                    if let Some(name) = symbol_name(tree, arg) {
+                        inserts.push((call, "__method", name));
+                    }
+                }
+            }
+            "def_delegators" | "def_delegator" => {
+                let mut skip = true;
+                for &arg in tree.children(args) {
+                    if let Some(name) = symbol_name(tree, arg) {
+                        if skip {
+                            skip = false;
+                            continue;
+                        }
+                        inserts.push((call, "__method", name));
+                    }
+                }
+            }
+            "define_method" => {
+                for &arg in tree.children(args) {
+                    if let Some(name) = literal_name(tree, arg) {
+                        inserts.push((call, "__method", name));
+                        break;
+                    }
+                }
+            }
+            "scope" => {
+                for &arg in tree.children(args) {
+                    if let Some(name) = symbol_name(tree, arg) {
+                        inserts.push((call, "__static_method", name));
+                        break;
+                    }
+                }
+            }
+            "has_many" | "belongs_to" | "has_one" | "has_and_belongs_to_many" => {
+                for &arg in tree.children(args) {
+                    if let Some(name) = symbol_name(tree, arg) {
+                        inserts.push((call, "__method", name));
+                        break;
+                    }
+                }
+            }
+            // send/public_send/__send__: rewrite the method text
+            "send" | "public_send" | "__send__" => {
+                for &arg in tree.children(args) {
+                    if let Some(name) = literal_name(tree, arg) {
+                        if let Some(method_node) = tree.field(call, "method") {
+                            send_rewrites.push((method_node, name));
+                        }
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (parent, kind, text) in inserts {
+        tree.insert_child(parent, kind, &text);
+    }
+    for (id, text) in send_rewrites {
+        tree.set_text(id, &text);
+    }
+}
+
+fn strip_leading_scope(s: &str) -> String {
+    s.strip_prefix("::").unwrap_or(s).to_string()
+}
+
+const INCLUDE_METHODS: &[&str] = &["include", "extend", "prepend"];
+
+fn collect_include_supertypes(
+    tree: &SyntaxTree,
+    call: u32,
+    out: &mut Vec<(u32, String)>,
+    target: u32,
+) {
+    if let Some(args) = tree.field(call, "arguments") {
+        for &arg in tree.children(args) {
+            let k = tree.kind(arg);
+            if k == "constant" || k == "scope_resolution" {
+                let name = strip_leading_scope(tree.text(arg));
+                if !name.is_empty() {
+                    out.push((target, name));
+                }
+            }
+        }
+    }
+}
+
+fn rewrite_ruby_supertypes(tree: &mut SyntaxTree) {
+    let mut supertypes: Vec<(u32, String)> = Vec::new();
+
+    for cls in tree
+        .nodes_of_kind("class")
+        .chain(tree.nodes_of_kind("module"))
+        .collect::<Vec<_>>()
     {
-        let name = strip_leading_scope(&type_node.text());
-        if !name.is_empty() {
-            types.push(name);
-        }
-    }
-
-    // include/extend in body: include Foo, extend Bar
-    if let Some(body) = node.field("body") {
-        for child in body.children() {
-            if child.kind().as_ref() != "call" {
-                continue;
+        // Direct superclass
+        if let Some(sc) = tree.field(cls, "superclass") {
+            for &child in tree.children(sc) {
+                let k = tree.kind(child);
+                if k == "constant" || k == "scope_resolution" {
+                    let name = strip_leading_scope(tree.text(child));
+                    if !name.is_empty() {
+                        supertypes.push((cls, name));
+                    }
+                }
             }
-            let method_name = child
-                .field("method")
-                .map(|m| m.text().to_string())
-                .unwrap_or_default();
-            match method_name.as_str() {
-                "include" | "extend" | "prepend" => collect_include_args(&child, &mut types),
-                "included" | "prepended" => {
-                    if let Some(block) = child.field("block")
-                        && let Some(block_body) = block.field("body")
-                    {
-                        for inner in block_body.children() {
-                            if inner.kind().as_ref() != "call" {
-                                continue;
-                            }
-                            let m = inner
-                                .field("method")
-                                .map(|m| m.text().to_string())
-                                .unwrap_or_default();
-                            if matches!(m.as_str(), "include" | "extend" | "prepend") {
-                                collect_include_args(&inner, &mut types);
+        }
+        // include/extend/prepend in body
+        if let Some(body) = tree.field(cls, "body") {
+            for call in tree.children_of_kind(body, "call").collect::<Vec<_>>() {
+                let method = tree
+                    .field_text(call, "method")
+                    .unwrap_or_default()
+                    .to_string();
+                if INCLUDE_METHODS.contains(&method.as_str()) {
+                    collect_include_supertypes(tree, call, &mut supertypes, cls);
+                } else if method == "included" || method == "prepended" {
+                    // Walk into do-block body for nested include/extend/prepend
+                    let block_body = tree
+                        .field(call, "block")
+                        .and_then(|b| tree.field(b, "body"));
+                    if let Some(bb) = block_body {
+                        for inner in tree.children_of_kind(bb, "call").collect::<Vec<_>>() {
+                            let m = tree
+                                .field_text(inner, "method")
+                                .unwrap_or_default()
+                                .to_string();
+                            if INCLUDE_METHODS.contains(&m.as_str()) {
+                                collect_include_supertypes(tree, inner, &mut supertypes, cls);
                             }
                         }
                     }
                 }
-                _ => {}
             }
         }
     }
 
-    types
+    for (cls, text) in supertypes {
+        tree.insert_child(cls, "__supertype", &text);
+    }
+}
+
+fn rewrite_ruby(tree: &mut SyntaxTree) {
+    rewrite_ruby_synthetics(tree);
+    rewrite_ruby_supertypes(tree);
 }
 
 fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
