@@ -54,12 +54,12 @@ fn python_rewrites() -> Vec<rw::Rule> {
             .when(has_child(&["aliased_import"])),
         rw::rename("import_from_statement", "__wildcard_from_statement")
             .when(has_child(&["wildcard_import"])),
-        rw::move_children(
+        rw::insert(
             "decorated_definition",
-            "decorator",
+            text().collect(Kind("decorator")).strip_prefix("@"),
             "__decorator",
-            rw::strip_at,
-        ),
+        )
+        .onto(no_extract().nth(Child, Named, -1)),
         // Super types: handled by custom fn because of call→function fallback
         rw::insert(
             "class_definition",

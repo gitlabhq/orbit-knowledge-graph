@@ -21,8 +21,6 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 #[derive(Default)]
 pub struct CSharpDsl;
 
-type N<'a> = Node<'a, SyntaxTree>;
-
 const CSHARP_BASE_KINDS: &[&str] = &["identifier", "qualified_name", "generic_name"];
 
 fn csharp_rules() -> Vec<rw::Rule> {

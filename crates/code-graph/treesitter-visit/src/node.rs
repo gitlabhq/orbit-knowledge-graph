@@ -417,7 +417,11 @@ pub enum Axis<'a> {
     NextSibling,
 }
 
-/// What to match on a node during traversal.
+/// A purely structural test on a single node (kind, named-ness, or exact text).
+///
+/// Compound conditions (field text, missing fields, boolean logic) belong in
+/// [`crate::predicate::Pred`], not here. Keeping `Match` structural means there
+/// is one place to compose richer conditions instead of growing fused variants.
 #[derive(Clone, Copy)]
 pub enum Match<'a> {
     Kind(&'a str),
@@ -428,15 +432,6 @@ pub enum Match<'a> {
     KindStartsWith(&'a str),
     /// Match a node whose text content is exactly this string.
     Text(&'a str),
-    /// Match a node whose text is any of these strings.
-    AnyText(&'a [&'a str]),
-    /// Match a node of this kind that has NO field with this name.
-    KindWithoutField(&'a str, &'a str),
-    /// Match a node of this kind where a field exists but has no children
-    /// matching any of these kinds (i.e., "field is empty of these kinds").
-    KindWhereFieldLacks(&'a str, &'a str, &'a [&'a str]),
-    /// Match a node of this kind where a field's text matches one of these values.
-    KindWithFieldText(&'a str, &'a str, &'a [&'a str]),
 }
 
 impl Match<'_> {
@@ -452,25 +447,6 @@ impl Match<'_> {
             Match::KindEndsWith(s) => node.kind().as_ref().ends_with(s),
             Match::KindStartsWith(s) => node.kind().as_ref().starts_with(s),
             Match::Text(t) => node.text() == *t,
-            Match::AnyText(ts) => {
-                let text = node.text();
-                ts.iter().any(|t| text.as_ref() == *t)
-            }
-            Match::KindWithoutField(k, f) => node.kind().as_ref() == *k && node.field(f).is_none(),
-            Match::KindWithFieldText(k, f, texts) => {
-                node.kind().as_ref() == *k
-                    && node
-                        .field(f)
-                        .is_some_and(|fld| texts.iter().any(|t| fld.text().as_ref() == *t))
-            }
-            Match::KindWhereFieldLacks(k, f, child_kinds) => {
-                node.kind().as_ref() == *k
-                    && node.field(f).is_none_or(|field_node| {
-                        !field_node
-                            .children()
-                            .any(|c| child_kinds.iter().any(|ck| c.kind().as_ref() == *ck))
-                    })
-            }
         }
     }
 }

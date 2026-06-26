@@ -67,6 +67,11 @@ pub fn has_name() -> Pred {
     exists(extract::field("name"))
 }
 
+/// True when the node's own kind equals `kind`.
+pub fn is_kind(kind: &'static str) -> Pred {
+    check(Match::Kind(kind))
+}
+
 pub fn parent_is(kind: &'static str) -> Pred {
     check_at(Axis::Parent, Match::Kind(kind))
 }
@@ -144,8 +149,24 @@ pub fn field_text(field_name: &'static str, text: &'static str) -> Pred {
     exists(extract::field(field_name).where_(Match::Text(text)))
 }
 
+/// True when the named field's text equals any of `texts`.
 pub fn field_text_in(field_name: &'static str, texts: &'static [&'static str]) -> Pred {
-    exists(extract::field(field_name).where_(Match::AnyText(texts)))
+    texts
+        .iter()
+        .map(|&t| field_text(field_name, t))
+        .reduce(Pred::or)
+        .unwrap_or_else(|| exists(extract::field("\0"))) // empty list: never matches
+}
+
+/// True when the node has no field with this name.
+pub fn lacks_field(field_name: &'static str) -> Pred {
+    !exists(extract::field(field_name))
+}
+
+/// True when the named field exists but contains no child of any of `kinds`
+/// (i.e. the field is "empty" of those kinds). Also true when the field is absent.
+pub fn field_lacks_children(field_name: &'static str, kinds: &'static [&'static str]) -> Pred {
+    !exists(extract::field(field_name).nav(Axis::Child, Match::AnyKind(kinds)))
 }
 
 #[cfg(test)]

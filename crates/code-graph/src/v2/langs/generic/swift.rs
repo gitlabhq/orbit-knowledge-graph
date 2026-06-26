@@ -17,20 +17,6 @@ use crate::v2::linker::rules::{
     ResolverHooks,
 };
 
-type N<'a> = Node<'a, SyntaxTree>;
-
-const SWIFT_IMPORT_KINDS: &[&str] = &[
-    "struct",
-    "class",
-    "enum",
-    "var",
-    "let",
-    "func",
-    "typealias",
-    "protocol",
-    "actor",
-];
-
 fn swift_supertype_rule(kind: &'static str) -> rw::Rule {
     rw::insert(
         kind,

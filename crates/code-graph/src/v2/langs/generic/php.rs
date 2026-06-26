@@ -90,7 +90,9 @@ impl DslLanguage for PhpDsl {
 
     fn rewrite(tree: &mut SyntaxTree) {
         let mut rules = php_supertype_rules();
-        rules.push(rw::custom(rewrite_php_refs));
+        // Strip leading `\` from fully-qualified names.
+        rules.push(rw::set_text("qualified_name", text().strip_prefix("\\")));
+        rules.push(rw::custom(rewrite_php_self_static_parent));
         rules.push(rw::custom(rewrite_php_imports));
         tree.apply_rewrites(&rules);
     }
@@ -385,38 +387,29 @@ fn php_on_scope(
     false
 }
 
-fn rewrite_php_refs(tree: &mut SyntaxTree) {
+/// Resolve `self`/`static`/`parent` keywords to the enclosing class name.
+/// Needs an ancestor walk with a `parent` → base-clause special case, so it
+/// stays imperative.
+fn rewrite_php_self_static_parent(tree: &mut SyntaxTree) {
     let mut rewrites: Vec<(u32, String)> = Vec::new();
-
     let ref_contexts = [
         "object_creation_expression",
         "class_constant_access_expression",
     ];
     for ctx_kind in ref_contexts {
         for node in tree.nodes_of_kind(ctx_kind).collect::<Vec<_>>() {
-            let first_child = tree.children(node).first().copied();
-            let Some(fc) = first_child else { continue };
+            let Some(fc) = tree.children(node).first().copied() else {
+                continue;
+            };
             let text = tree.text(fc);
             if !matches!(text, "self" | "static" | "parent") {
                 continue;
             }
-            let resolved = find_enclosing_class_name(tree, node, text);
-            if let Some(name) = resolved {
+            if let Some(name) = find_enclosing_class_name(tree, node, text) {
                 rewrites.push((fc, name));
             }
         }
     }
-
-    // Strip leading `\` from qualified_name nodes
-    for qn in tree.nodes_of_kind("qualified_name").collect::<Vec<_>>() {
-        let text = tree.text(qn);
-        if let Some(stripped) = text.strip_prefix('\\') {
-            if !stripped.is_empty() {
-                rewrites.push((qn, stripped.to_string()));
-            }
-        }
-    }
-
     for (id, text) in rewrites {
         tree.set_text(id, &text);
     }

@@ -3,7 +3,7 @@
 //! Built from a tree-sitter parse, mutated by rewrite passes, then walked
 //! through the standard [`Doc`]/[`SgNode`] traits.
 
-use crate::node::Position;
+use crate::node::{Node, Position};
 use crate::source::{Doc, SgNode};
 use crate::{KindId, SupportLang};
 use smallvec::SmallVec;
@@ -252,98 +252,37 @@ impl SyntaxTree {
             let mut texts: Vec<(NodeId, String)> = Vec::new();
 
             match &rule.act {
-                Act::SetKind(k) => {
-                    for id in ids {
-                        renames.push((id, k));
-                    }
-                }
-                Act::SetText(tx) => {
-                    for id in ids {
-                        let t = tx(self.text(id));
-                        if t != self.text(id) && !t.is_empty() {
-                            texts.push((id, t));
-                        }
-                    }
-                }
+                Act::SetKind(k) => renames.extend(ids.into_iter().map(|id| (id, *k))),
                 Act::Insert(extract, target) => {
                     let root = crate::Root::doc(self.clone());
                     for id in ids {
-                        let node = root.adopt(SyntaxNodeRef {
-                            tree: root.inner(),
-                            id,
-                        });
-                        let mut results = extract.apply_all(&node);
-                        if rule.skip > 0 {
-                            results = results.into_iter().skip(rule.skip).collect();
-                        }
-                        if rule.limit > 0 {
-                            results.truncate(rule.limit);
-                        }
-                        for text in results {
-                            inserts.push((id, target, text));
-                        }
-                    }
-                }
-                Act::MoveChildren { source, target, tx } => {
-                    for id in ids {
-                        let vals: Vec<String> = self
-                            .children_of_kind(id, source)
-                            .map(|c| tx(self.text(c)))
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        let dest = self
-                            .children(id)
-                            .iter()
-                            .copied()
-                            .rev()
-                            .find(|&c| self.kind(c) != *source && self.kind(c) != "comment");
-                        if let Some(d) = dest {
-                            for v in vals {
-                                inserts.push((d, target, v));
-                            }
-                        }
-                    }
-                }
-                Act::SetFieldText {
-                    field_name,
-                    extract,
-                } => {
-                    let root = crate::Root::doc(self.clone());
-                    for id in ids {
-                        let node = root.adopt(SyntaxNodeRef {
-                            tree: root.inner(),
-                            id,
-                        });
-                        if let Some(text) = extract.apply(&node) {
-                            if let Some(field_id) = self.field(id, field_name) {
-                                texts.push((field_id, text));
-                            }
-                        }
-                    }
-                }
-                Act::InsertDiff {
-                    source,
-                    exclude,
-                    target,
-                } => {
-                    let root = crate::Root::doc(self.clone());
-                    for id in ids {
-                        let node = root.adopt(SyntaxNodeRef {
-                            tree: root.inner(),
-                            id,
-                        });
-                        let excludes: Vec<String> = exclude.apply_all(&node);
-                        let mut results: Vec<String> = source.apply_all(&node);
-                        if rule.skip > 0 {
-                            results = results.into_iter().skip(rule.skip).collect();
-                        }
-                        if rule.limit > 0 {
-                            results.truncate(rule.limit);
-                        }
+                        let node = self.adopt_in(&root, id);
+                        let results = rule.window(extract.apply_all(&node));
+                        let excludes = rule
+                            .exclude
+                            .as_ref()
+                            .map(|e| e.apply_all(&node))
+                            .unwrap_or_default();
+                        let dest = rule.target(&node).unwrap_or(id);
                         for text in results {
                             if !excludes.contains(&text) {
-                                inserts.push((id, target, text));
+                                inserts.push((dest, target, text));
                             }
+                        }
+                    }
+                }
+                Act::SetText(extract) => {
+                    let root = crate::Root::doc(self.clone());
+                    for id in ids {
+                        let node = self.adopt_in(&root, id);
+                        let Some(dest) = rule.target(&node).or(Some(id)) else {
+                            continue;
+                        };
+                        if let Some(t) = extract.apply(&node)
+                            && t != self.text(dest)
+                            && !t.is_empty()
+                        {
+                            texts.push((dest, t));
                         }
                     }
                 }
@@ -360,6 +299,34 @@ impl SyntaxTree {
             }
         }
     }
+
+    fn adopt_in<'r>(&self, root: &'r crate::Root<SyntaxTree>, id: NodeId) -> Node<'r, SyntaxTree> {
+        root.adopt(SyntaxNodeRef {
+            tree: root.inner(),
+            id,
+        })
+    }
+}
+
+impl Rule {
+    /// Apply skip/limit windowing to an extract's results.
+    fn window(&self, results: Vec<String>) -> Vec<String> {
+        let mut r = if self.skip > 0 {
+            results.into_iter().skip(self.skip).collect()
+        } else {
+            results
+        };
+        if self.limit > 0 {
+            r.truncate(self.limit);
+        }
+        r
+    }
+
+    /// Resolve the relocated target node id via `into`, if set.
+    fn target(&self, node: &Node<'_, SyntaxTree>) -> Option<NodeId> {
+        let into = self.into.as_ref()?;
+        into.navigate(node).map(|n| n.node_id() as NodeId)
+    }
 }
 
 // ── Rewrite rules ───────────────────────────────────────────────
@@ -371,32 +338,21 @@ pub struct Rule {
     pub act: Act,
     pub skip: usize,
     pub limit: usize,
+    /// Insert results minus any string produced by this extract.
+    pub exclude: Option<crate::extract::Extract>,
+    /// Relocate the insertion/set-text target via a nav from the matched node.
+    pub into: Option<crate::extract::Extract>,
 }
 
 #[derive(Clone)]
 pub enum Act {
+    /// Rename the matched node's kind.
     SetKind(&'static str),
-    SetText(fn(&str) -> String),
+    /// Insert each string the extract produces as a virtual child of kind `target`.
     Insert(crate::extract::Extract, &'static str),
-    /// Move children of `source` kind (transformed) as virtual children of the
-    /// last non-source, non-comment child. For decorators.
-    MoveChildren {
-        source: &'static str,
-        target: &'static str,
-        tx: fn(&str) -> String,
-    },
-    /// Navigate to a field on the matched node and set its text using an Extract
-    /// applied to the same node. For Ruby send rewrite.
-    SetFieldText {
-        field_name: &'static str,
-        extract: crate::extract::Extract,
-    },
-    /// Insert results from `source` extract, minus any results from `exclude` extract.
-    InsertDiff {
-        source: crate::extract::Extract,
-        exclude: crate::extract::Extract,
-        target: &'static str,
-    },
+    /// Set the matched node's text to the extract's first result.
+    SetText(crate::extract::Extract),
+    /// Escape hatch for irreducible per-language rewrites.
     Custom(fn(&mut SyntaxTree)),
 }
 
@@ -408,6 +364,8 @@ impl Rule {
             act,
             skip: 0,
             limit: 0,
+            exclude: None,
+            into: None,
         }
     }
     pub fn when(mut self, c: crate::predicate::Pred) -> Self {
@@ -422,6 +380,17 @@ impl Rule {
         self.limit = 1;
         self
     }
+    /// Drop any inserted string also produced by `exclude` (set difference).
+    pub fn except(mut self, exclude: crate::extract::Extract) -> Self {
+        self.exclude = Some(exclude);
+        self
+    }
+    /// Insert onto / set text of the node reached by navigating `into` from the
+    /// matched node, instead of the matched node itself.
+    pub fn onto(mut self, into: crate::extract::Extract) -> Self {
+        self.into = Some(into);
+        self
+    }
 }
 
 pub fn rename(source: &'static str, target: &'static str) -> Rule {
@@ -434,58 +403,12 @@ pub fn insert(
 ) -> Rule {
     Rule::new(source, Act::Insert(extract, target))
 }
-pub fn set_text(kind: &'static str, tx: fn(&str) -> String) -> Rule {
-    Rule::new(kind, Act::SetText(tx))
-}
-pub fn move_children(
-    parent: &'static str,
-    source: &'static str,
-    target: &'static str,
-    tx: fn(&str) -> String,
-) -> Rule {
-    Rule::new(parent, Act::MoveChildren { source, target, tx })
-}
-
-pub fn set_field_text(
-    kind: &'static str,
-    field_name: &'static str,
-    extract: crate::extract::Extract,
-) -> Rule {
-    Rule::new(
-        kind,
-        Act::SetFieldText {
-            field_name,
-            extract,
-        },
-    )
-}
-
-pub fn insert_diff(
-    source_kind: &'static str,
-    source: crate::extract::Extract,
-    exclude: crate::extract::Extract,
-    target: &'static str,
-) -> Rule {
-    Rule::new(
-        source_kind,
-        Act::InsertDiff {
-            source,
-            exclude,
-            target,
-        },
-    )
+pub fn set_text(kind: &'static str, extract: crate::extract::Extract) -> Rule {
+    Rule::new(kind, Act::SetText(extract))
 }
 
 pub fn custom(f: fn(&mut SyntaxTree)) -> Rule {
     Rule::new("", Act::Custom(f))
-}
-
-// Transforms (used by Extract.strip_prefix / .trim_start_char and SetText rules)
-pub fn trim_backslash(s: &str) -> String {
-    s.trim_start_matches('\\').to_string()
-}
-pub fn strip_at(s: &str) -> String {
-    s.trim_start_matches('@').trim().to_string()
 }
 
 // ── SgNode / Doc ────────────────────────────────────────────────
@@ -668,10 +591,67 @@ mod tests {
     }
 
     #[test]
+    fn insert_rule_adds_virtual_children() {
+        use crate::extract::field;
+        use crate::node::Match;
+        let mut tree = py("class Foo(Bar): pass");
+        tree.apply_rewrites(&[crate::syntax_tree::insert(
+            "class_definition",
+            field("superclasses").collect(Match::AnyKind(&["identifier"])),
+            "__supertype",
+        )]);
+        let cls = tree
+            .children_of_kind(tree.root_id(), "class_definition")
+            .next()
+            .unwrap();
+        let supers: Vec<_> = tree
+            .children_of_kind(cls, "__supertype")
+            .map(|c| tree.text(c).to_string())
+            .collect();
+        assert_eq!(supers, vec!["Bar"]);
+    }
+
+    #[test]
     fn extract_works() {
         use crate::extract::field;
         let root = Root::doc(py("def foo(x): return x"));
         let func = root.root().children().next().unwrap();
         assert_eq!(field("name").apply(&func), Some("foo".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod rewrite_acts {
+    use super::*;
+    use crate::extract::{field, text};
+    use crate::node::Match;
+    use crate::{LanguageExt, SupportLang};
+
+    fn java(src: &str) -> SyntaxTree {
+        let ts = SupportLang::Java.ast_grep(src);
+        SyntaxTree::from_tree_sitter(src, &ts.doc.tree, SupportLang::Java)
+    }
+
+    #[test]
+    fn insert_except_computes_set_difference() {
+        let mut tree = java("public record Point(int x, int y) {}");
+        tree.apply_rewrites(&[crate::syntax_tree::insert(
+            "record_declaration",
+            field("parameters").collect_field(Match::Kind("formal_parameter"), "name"),
+            "__accessor",
+        )
+        .except(
+            field("body").each(
+                text()
+                    .where_(Match::Kind("method_declaration"))
+                    .field("name"),
+            ),
+        )]);
+        let rec = tree.nodes_of_kind("record_declaration").next().unwrap();
+        let acc: Vec<_> = tree
+            .children_of_kind(rec, "__accessor")
+            .map(|c| tree.text(c).to_string())
+            .collect();
+        assert_eq!(acc, vec!["x", "y"], "got {acc:?}");
     }
 }

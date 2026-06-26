@@ -1,21 +1,27 @@
 //! Composable node extraction pipelines for tree-sitter ASTs.
 //!
 //! An [`Extract`] is a chain of [`Step`]s that navigate through a CST,
-//! followed by an [`Emit`] that produces a string from the final node.
+//! followed by an [`Emit`] that produces one or more strings from the final
+//! node, optionally rewritten by a chain of [`TextTransform`]s.
 //!
-//! Every step is just `(Axis, Match)` — the same two enums used by
-//! `Node::find`. A step is either **required** (pipeline fails on miss)
-//! or **optional** (stays at current node on miss).
+//! A step navigates one of three ways: a required `(Axis, Match)` nav, an
+//! optional `Try` nav, or a `Where`/`WherePred` filter that tests the current
+//! node without moving. Filtering reuses the same [`Match`] and [`Pred`]
+//! vocabulary as `Node::find` and the predicate module — there is no second
+//! matching language.
+//!
+//! Set-producing emits are unified under [`Emit::Each`]: run an inner pipeline
+//! per child and flatten. "Collect children", "collect a field from each
+//! child", and arbitrary-depth nesting are all `each(inner)` with a deeper
+//! `inner`; the `collect*` builders are thin sugar over it.
 //!
 //! ```ignore
 //! use treesitter_visit::extract::*;
 //!
 //! field("name")
 //! field("function").field("object")
-//! field("receiver")
-//!     .child_of_kind("parameter_declaration")
-//!     .field("type")
-//!     .inner("pointer_type", "type_identifier")
+//! // each child of `superclasses` that is an identifier, as a separate string:
+//! field("superclasses").collect(Match::Kind("identifier"))
 //! ```
 
 use crate::node::{Axis, Match, Node};
@@ -33,6 +39,8 @@ pub enum Step {
     Try(Axis<'static>, Match<'static>),
     /// Fail pipeline if current node doesn't match (no navigation).
     Where(Match<'static>),
+    /// Fail pipeline if current node doesn't satisfy the predicate (no navigation).
+    WherePred(Box<crate::predicate::Pred>),
     /// Navigate to the n-th match along axis. Negative n counts from end (-1 = last).
     Nth(Axis<'static>, Match<'static>, isize),
 }
@@ -46,15 +54,13 @@ pub enum Emit {
     None,
     /// Try `field("name")`, then first child matching these kinds.
     Name(&'static [&'static str]),
-    /// Collect text of all children matching this criterion.
-    Children(Match<'static>),
-    /// Collect outermost descendants matching this criterion.
-    ShallowDescendants(Match<'static>),
-    /// Collect children matching a criterion, then extract a field from each.
-    ChildrenField(Match<'static>, &'static str),
-    /// For each child matching `outer`, collect THEIR children matching `inner`.
-    /// Two-level nested collection.
-    ChildrenNested(Match<'static>, Match<'static>),
+    /// For each direct child, run the inner pipeline and flatten the results.
+    /// Subsumes "collect children", "collect a field from each child", and
+    /// arbitrary-depth nested collection (the inner pipeline navigates deeper).
+    Each(Box<Extract>),
+    /// For each outermost descendant matching `m`, run the inner pipeline.
+    /// DFS stops recursing into a subtree once a node matches `m`.
+    EachDescendant(Match<'static>, Box<Extract>),
     /// A fixed constant string, ignoring the node.
     Const(&'static str),
 }
@@ -70,6 +76,9 @@ pub enum TextTransform {
     SplitLast(&'static str),
     /// Split on separator, take everything before the last segment.
     SplitInit(&'static str),
+    /// Render the current string into the `{}` slot of a template.
+    /// e.g. `Template("locals.{}")` turns `region` into `locals.region`.
+    Template(&'static str),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -218,6 +227,11 @@ impl Extract {
         self.push(Step::Where(m))
     }
 
+    /// Filter the current node with a boolean predicate (no navigation).
+    pub fn where_pred(self, p: crate::predicate::Pred) -> Self {
+        self.push(Step::WherePred(Box::new(p)))
+    }
+
     // Emit control
     pub fn or_default_name(mut self) -> Self {
         self.emit = Emit::Name(IDENT_KINDS);
@@ -232,30 +246,43 @@ impl Extract {
         self
     }
 
-    /// Collect text of all children matching this criterion.
-    /// Use with `apply_all()` instead of `apply()`.
-    pub fn collect(mut self, m: Match<'static>) -> Self {
-        self.emit = Emit::Children(m);
+    /// For each direct child, run `inner` (starting at that child) and flatten
+    /// the produced strings. `inner` typically opens with `where_(m)` to filter.
+    /// Nesting is just a deeper `inner` (e.g. another `each`).
+    pub fn each(mut self, inner: Extract) -> Self {
+        self.emit = Emit::Each(Box::new(inner));
         self
     }
 
-    /// Collect outermost descendants matching this criterion.
-    /// DFS stops recursing into a subtree once a match is found.
-    pub fn collect_shallow(mut self, m: Match<'static>) -> Self {
-        self.emit = Emit::ShallowDescendants(m);
+    /// Collect text of all children matching this criterion.
+    pub fn collect(self, m: Match<'static>) -> Self {
+        self.each(text().where_(m))
+    }
+
+    /// For each outermost descendant matching `m`, run `inner` (starting there).
+    /// DFS stops recursing into a subtree once a node matches `m`.
+    pub fn each_descendant(mut self, m: Match<'static>, inner: Extract) -> Self {
+        self.emit = Emit::EachDescendant(m, Box::new(inner));
         self
+    }
+
+    /// Collect text of outermost descendants matching this criterion.
+    pub fn collect_shallow(self, m: Match<'static>) -> Self {
+        self.each_descendant(m, text())
     }
 
     /// Collect children matching a criterion, then extract a named field from each.
-    pub fn collect_field(mut self, m: Match<'static>, field_name: &'static str) -> Self {
-        self.emit = Emit::ChildrenField(m, field_name);
-        self
+    pub fn collect_field(self, m: Match<'static>, field_name: &'static str) -> Self {
+        self.each(text().where_(m).field(field_name))
     }
 
     /// For each child matching `outer`, collect THEIR children matching `inner`.
-    pub fn collect_nested(mut self, outer: Match<'static>, inner: Match<'static>) -> Self {
-        self.emit = Emit::ChildrenNested(outer, inner);
-        self
+    pub fn collect_nested(self, outer: Match<'static>, inner: Match<'static>) -> Self {
+        self.each(
+            Extract::terminal(Emit::Text)
+                .where_(outer)
+                .each(text().where_(inner)),
+        )
     }
 
     /// Strip a prefix from emitted text.
@@ -292,6 +319,12 @@ impl Extract {
     /// Split on separator, keep everything before the last segment.
     pub fn split_init(mut self, sep: &'static str) -> Self {
         self.transforms.push(TextTransform::SplitInit(sep));
+        self
+    }
+
+    /// Render the emitted string into the `{}` slot of `tpl`.
+    pub fn template(mut self, tpl: &'static str) -> Self {
+        self.transforms.push(TextTransform::Template(tpl));
         self
     }
 
@@ -343,6 +376,9 @@ impl Extract {
                     } else {
                         s = String::new();
                     }
+                }
+                TextTransform::Template(tpl) => {
+                    s = tpl.replacen("{}", &s, 1);
                 }
             }
         }
@@ -408,6 +444,11 @@ impl Extract {
                         return None;
                     }
                 }
+                Step::WherePred(p) => {
+                    if !p.test(&cur) {
+                        return None;
+                    }
+                }
             }
         }
         Some(cur)
@@ -432,52 +473,31 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
             }
             None
         }
-        Emit::Children(_)
-        | Emit::ShallowDescendants(_)
-        | Emit::ChildrenField(..)
-        | Emit::ChildrenNested(..) => emit_all(mode, node).into_iter().next(),
+        Emit::Each(_) | Emit::EachDescendant(..) => emit_all(mode, node).into_iter().next(),
         Emit::Const(s) => Some(s.to_string()),
     }
 }
 
 fn emit_all<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Vec<String> {
     match mode {
-        Emit::Children(m) => node
-            .children()
-            .filter(|c| m.test(c))
-            .map(|c| c.text().to_string())
-            .collect(),
-        Emit::ShallowDescendants(m) => {
-            let mut results = Vec::new();
-            collect_shallow_rec(node, m, &mut results);
-            results
-        }
-        Emit::ChildrenField(m, field_name) => node
-            .children()
-            .filter(|c| m.test(c))
-            .filter_map(|c| c.field(field_name).map(|f| f.text().to_string()))
-            .collect(),
-        Emit::ChildrenNested(outer, inner) => {
-            let mut results = Vec::new();
-            for c in node.children() {
-                if outer.test(&c) {
-                    for gc in c.children() {
-                        if inner.test(&gc) {
-                            results.push(gc.text().to_string());
-                        }
-                    }
-                }
-            }
-            results
+        Emit::Each(inner) => node.children().flat_map(|c| inner.apply_all(&c)).collect(),
+        Emit::EachDescendant(m, inner) => {
+            let mut hits = Vec::new();
+            collect_shallow_rec(node, m, &mut hits);
+            hits.iter().flat_map(|c| inner.apply_all(c)).collect()
         }
         other => emit(other, node).into_iter().collect(),
     }
 }
 
-fn collect_shallow_rec<D: Doc>(node: &Node<'_, D>, m: &Match<'_>, results: &mut Vec<String>) {
+fn collect_shallow_rec<'r, D: Doc>(
+    node: &Node<'r, D>,
+    m: &Match<'_>,
+    results: &mut Vec<Node<'r, D>>,
+) {
     for child in node.children() {
         if m.test(&child) {
-            results.push(child.text().to_string());
+            results.push(child);
         } else {
             collect_shallow_rec(&child, m, results);
         }
@@ -588,6 +608,24 @@ mod tests {
     }
 
     #[test]
+    fn each_collect_variants() {
+        let root = SupportLang::Python.ast_grep("class Foo(Bar, Baz): pass");
+        let cls = root.root().children().next().unwrap();
+        assert_eq!(
+            field("superclasses")
+                .collect(Match::AnyKind(&["identifier"]))
+                .apply_all(&cls),
+            vec!["Bar", "Baz"],
+        );
+        assert_eq!(
+            field("superclasses")
+                .collect_shallow(Match::Kind("identifier"))
+                .apply_all(&cls),
+            vec!["Bar", "Baz"],
+        );
+    }
+
+    #[test]
     fn test_apply_all_collects_children() {
         let code = "class Foo:\n    def a(self): pass\n    def b(self): pass\n    x = 1";
         let root = SupportLang::Python.ast_grep(code);
@@ -625,5 +663,25 @@ mod tests {
                 format!("{cls_name}.{fn_name}")
             });
         assert_eq!(fqns, vec!["Foo.a", "Foo.b"]);
+    }
+}
+
+#[cfg(test)]
+mod each_collect {
+    use super::*;
+    use crate::node::Match;
+    use crate::{LanguageExt, SupportLang};
+
+    #[test]
+    fn java_record_params() {
+        let root = SupportLang::Java.ast_grep("public record Point(int x, int y) {}");
+        let rec = root
+            .root()
+            .find(Axis::Descendant, Match::Kind("record_declaration"))
+            .unwrap();
+        let names = field("parameters")
+            .collect_field(Match::Kind("formal_parameter"), "name")
+            .apply_all(&rec);
+        assert_eq!(names, vec!["x", "y"], "got {names:?}");
     }
 }

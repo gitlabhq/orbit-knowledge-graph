@@ -1,7 +1,6 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
-use treesitter_visit::Node;
 use treesitter_visit::extract::{child_of_kind, field};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree as rw;
@@ -11,8 +10,6 @@ use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
     ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
-
-type N<'a> = Node<'a, SyntaxTree>;
 
 // ── DSL parser spec ─────────────────────────────────────────────
 

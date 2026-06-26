@@ -23,31 +23,13 @@ pub struct JavaDsl;
 
 const JAVA_TYPE_KINDS: &[&str] = &["type_identifier", "generic_type", "scoped_type_identifier"];
 
-fn collect_type_children(
-    tree: &SyntaxTree,
-    parent: u32,
-    out: &mut Vec<(u32, String)>,
-    target: u32,
-) {
-    for &child in tree.children(parent) {
-        if JAVA_TYPE_KINDS.contains(&tree.kind(child)) {
-            out.push((target, tree.text(child).to_string()));
-        } else if tree.kind(child) == "type_list" {
-            for &inner in tree.children(child) {
-                if JAVA_TYPE_KINDS.contains(&tree.kind(inner)) {
-                    out.push((target, tree.text(inner).to_string()));
-                }
-            }
-        }
-    }
-}
-
-const NO_ARG_METHOD: treesitter_visit::Match<'static> =
-    treesitter_visit::Match::KindWhereFieldLacks(
-        "method_declaration",
+/// `method_declaration` whose `parameters` field has no real parameters.
+fn no_arg_method() -> Pred {
+    is_kind("method_declaration").and(field_lacks_children(
         "parameters",
         &["formal_parameter", "spread_parameter"],
-    );
+    ))
+}
 
 impl DslLanguage for JavaDsl {
     fn name() -> &'static str {
@@ -119,12 +101,12 @@ impl DslLanguage for JavaDsl {
             rw::rename("import_declaration", "__static_import").when(has_child_text("static")),
             rw::rename("import_declaration", "__wildcard_import").when(has_child(&["asterisk"])),
             // Record accessors: param names minus no-arg method names
-            rw::insert_diff(
+            rw::insert(
                 "record_declaration",
                 field("parameters").collect_field(Kind("formal_parameter"), "name"),
-                field("body").collect_field(NO_ARG_METHOD, "name"),
                 "__accessor",
-            ),
+            )
+            .except(field("body").each(text().where_pred(no_arg_method()).field("name"))),
         ]);
     }
 

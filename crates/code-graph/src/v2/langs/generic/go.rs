@@ -14,8 +14,6 @@ use treesitter_visit::Node;
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
-type N<'a> = Node<'a, SyntaxTree>;
-
 const GO_PRIMITIVE_TYPES: &[&str] = &[
     "int",
     "int8",
@@ -201,13 +199,12 @@ impl DslLanguage for GoDsl {
             0,
             rw::insert(
                 "type_spec",
-                field("type")
-                    .child_of_kind("field_declaration_list")
-                    .collect_field(
-                        treesitter_visit::Match::KindWithoutField("field_declaration", "name"),
-                        "type",
-                    )
-                    .strip_prefix("*"),
+                field("type").child_of_kind("field_declaration_list").each(
+                    text()
+                        .where_pred(is_kind("field_declaration").and(lacks_field("name")))
+                        .field("type")
+                        .strip_prefix("*"),
+                ),
                 "__supertype",
             )
             .when(field_kind("type", &["struct_type"])),

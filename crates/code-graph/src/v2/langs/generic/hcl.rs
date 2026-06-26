@@ -175,6 +175,10 @@ impl DslLanguage for HclDsl {
     }
 }
 
+#[expect(
+    clippy::ptr_arg,
+    reason = "signature must match the on_scope hook fn pointer"
+)]
 fn hcl_reanchor_var_module(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,

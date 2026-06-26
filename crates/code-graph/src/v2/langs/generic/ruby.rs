@@ -24,8 +24,6 @@ const CONSTRUCTOR_METHODS: &[&str] = &["new", "find", "find_by", "create", "firs
 use treesitter_visit::Node;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
-type N<'a> = Node<'a, SyntaxTree>;
-
 #[derive(Default)]
 pub struct RubyDsl;
 
@@ -281,71 +279,6 @@ use treesitter_visit::syntax_tree as rw;
 
 const SEND_METHODS: &[&str] = &["send", "public_send", "__send__"];
 
-fn ruby_super_types(tree: &mut SyntaxTree) {
-    fn strip_scope(s: &str) -> String {
-        s.strip_prefix("::").unwrap_or(s).to_string()
-    }
-    let mut out: Vec<(u32, String)> = Vec::new();
-    for cls in tree
-        .nodes_of_kind("class")
-        .chain(tree.nodes_of_kind("module"))
-        .collect::<Vec<_>>()
-    {
-        if let Some(sc) = tree.field(cls, "superclass") {
-            for &child in tree.children(sc) {
-                if matches!(tree.kind(child), "constant" | "scope_resolution") {
-                    let n = strip_scope(tree.text(child));
-                    if !n.is_empty() {
-                        out.push((cls, n));
-                    }
-                }
-            }
-        }
-        if let Some(body) = tree.field(cls, "body") {
-            for call in tree.children_of_kind(body, "call").collect::<Vec<_>>() {
-                let m = tree
-                    .field_text(call, "method")
-                    .unwrap_or_default()
-                    .to_string();
-                let collect = |tree: &SyntaxTree, call, out: &mut Vec<(u32, String)>, cls| {
-                    if let Some(args) = tree.field(call, "arguments") {
-                        for &arg in tree.children(args) {
-                            if matches!(tree.kind(arg), "constant" | "scope_resolution") {
-                                let n = strip_scope(tree.text(arg));
-                                if !n.is_empty() {
-                                    out.push((cls, n));
-                                }
-                            }
-                        }
-                    }
-                };
-                match m.as_str() {
-                    "include" | "extend" | "prepend" => collect(tree, call, &mut out, cls),
-                    "included" | "prepended" => {
-                        if let Some(bb) = tree
-                            .field(call, "block")
-                            .and_then(|b| tree.field(b, "body"))
-                        {
-                            for inner in tree.children_of_kind(bb, "call").collect::<Vec<_>>() {
-                                if matches!(
-                                    tree.field_text(inner, "method").unwrap_or_default(),
-                                    "include" | "extend" | "prepend"
-                                ) {
-                                    collect(tree, inner, &mut out, cls);
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    for (cls, text) in out {
-        tree.insert_child(cls, "__supertype", &text);
-    }
-}
-
 fn ruby_import_rules() -> Vec<rw::Rule> {
     let require_path = || {
         field("arguments")
@@ -453,19 +386,59 @@ fn ruby_rewrites() -> Vec<rw::Rule> {
         // alias → __method from name field
         rw::insert("alias", field("name"), "__method"),
         // send/public_send/__send__ → rewrite method text
-        rw::set_field_text(
+        rw::set_text(
             "call",
-            "method",
             field("arguments")
                 .nav(Child, AnyKind(&["simple_symbol", "string"]))
                 .try_child("string_content")
                 .strip_prefix(":"),
         )
-        .when(field_text_in("method", SEND_METHODS)),
-        // Super types (include/extend/prepend + superclass)
-        rw::custom(ruby_super_types),
-        // Imports
+        .when(field_text_in("method", SEND_METHODS))
+        .onto(field("method")),
     ]
+    .into_iter()
+    .chain(ruby_super_type_rules())
+    .collect()
+}
+
+const MIXIN_METHODS: &[&str] = &["include", "extend", "prepend"];
+const CONST_KINDS: &[&str] = &["constant", "scope_resolution"];
+
+/// Supertypes from `class Foo < Bar` and `include`/`extend`/`prepend` calls,
+/// including those nested inside `included`/`prepended` hook blocks.
+fn ruby_super_type_rules() -> Vec<rw::Rule> {
+    // arguments → constant/scope_resolution names, `::`-stripped.
+    let mixin_consts = || {
+        text()
+            .where_pred(method_in(MIXIN_METHODS))
+            .field("arguments")
+            .collect(AnyKind(CONST_KINDS))
+            .strip_prefix("::")
+    };
+    // call inside an `included`/`prepended` block body.
+    let hook_mixin_consts = || {
+        text()
+            .where_pred(method_in(&["included", "prepended"]))
+            .field("block")
+            .field("body")
+            .each(mixin_consts())
+    };
+    ["class", "module"]
+        .into_iter()
+        .flat_map(|kind| {
+            [
+                rw::insert(
+                    kind,
+                    field("superclass")
+                        .collect(AnyKind(CONST_KINDS))
+                        .strip_prefix("::"),
+                    "__supertype",
+                ),
+                rw::insert(kind, field("body").each(mixin_consts()), "__supertype"),
+                rw::insert(kind, field("body").each(hook_mixin_consts()), "__supertype"),
+            ]
+        })
+        .collect()
 }
 
 fn ruby_imported_symbol_candidates(
@@ -584,6 +557,7 @@ impl HasRules for RubyRules {
 mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
+    use crate::v2::types::ImportMode;
 
     fn parse(
         code: &str,
@@ -601,6 +575,27 @@ mod tests {
                 imports: r.imports,
             })
             .map_err(|e| crate::v2::pipeline::PipelineError::parse("test.rb", format!("{e:?}")))
+    }
+
+    #[test]
+    fn supertypes_from_superclass_include_and_hook_block() {
+        let code = "class Foo < Bar\n  include Mod1\n  prepend ::Mod2\n  included do\n    include Mod3\n  end\nend\n";
+        let result = parse(code).unwrap();
+        let foo = result
+            .definitions
+            .iter()
+            .find(|d| d.fqn.as_str().ends_with("Foo"))
+            .expect("Foo def");
+        let mut supers: Vec<&str> = foo
+            .metadata
+            .as_ref()
+            .expect("metadata")
+            .super_types
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        supers.sort_unstable();
+        assert_eq!(supers, vec!["Bar", "Mod1", "Mod2", "Mod3"]);
     }
 
     #[test]
