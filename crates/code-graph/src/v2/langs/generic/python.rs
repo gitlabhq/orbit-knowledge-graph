@@ -388,6 +388,9 @@ impl PythonImportRewriter {
     }
 
     fn resolve_source_root(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+        // Over-deep or bare-dot relative imports (e.g. `from ...x import Y` above
+        // the package root) reach here because resolve_python_relative_import
+        // returned None for them. They are still relative, so never source-root them.
         if raw_path.is_empty() || raw_path.starts_with('.') {
             return None;
         }
@@ -739,6 +742,18 @@ mod tests {
         assert_eq!(
             transform_import(&transformer, "Import", "requests", None, "src.pipeline"),
             ("requests".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_aliased_import_without_alias_keeps_first_segment() {
+        // `import a.b, c.d as e` labels the unaliased `a.b` name AliasedImport with
+        // alias=None, so the scope-name override must still bind `a`, not `src`.
+        let transformer = PythonImportRewriter::from_paths(["src/a/b.py", "src/main.py"], ".");
+
+        assert_eq!(
+            transform_import(&transformer, "AliasedImport", "a.b", None, "src.main"),
+            ("src.a.b".to_string(), Some("a".to_string()))
         );
     }
 
