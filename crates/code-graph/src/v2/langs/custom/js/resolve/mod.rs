@@ -31,7 +31,10 @@ use super::{
     extract::ResolvedJsFile,
 };
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "top-level resolution entry point combining graph, analysis, index, and context; a params struct would not reduce complexity at the single call site"
+)]
 pub fn attach_resolution_edges(
     graph: &mut CodeGraph,
     analyzed_files: &[ResolvedJsFile],

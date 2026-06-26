@@ -259,7 +259,10 @@ impl CodeGraph {
         file_node
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "internal method assembling a file node from its constituent parts; grouping into a struct would obscure the call sites that pass subsets"
+    )]
     fn add_file_with_language(
         &mut self,
         path: &str,
