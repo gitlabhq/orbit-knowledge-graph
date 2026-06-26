@@ -33,13 +33,11 @@ fn kotlin_rewrites() -> Vec<rw::Rule> {
             .when(descendant_text("class_modifier", "value")),
         rw::rename("class_declaration", "__annotation_class_declaration")
             .when(descendant_text("class_modifier", "annotation")),
-        rw::collect(
+        rw::insert(
             "class_declaration",
-            "delegation_specifiers",
-            &["user_type"],
+            field("delegation_specifiers").collect_shallow(Kind("user_type")),
             "__supertype",
-        )
-        .shallow(),
+        ),
         rw::rename("import_header", "__wildcard_import").when(has_child(&["wildcard_import"])),
         rw::rename("import_header", "__wildcard_import").when(has_child(&["MULT"])),
         rw::rename("import_header", "__aliased_import").when(has_child(&["import_alias"])),

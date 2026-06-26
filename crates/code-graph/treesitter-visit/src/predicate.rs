@@ -140,6 +140,10 @@ pub fn descendant_text(kind: &'static str, text: &'static str) -> Pred {
     exists(Extract::one(Axis::Descendant, Match::Kind(kind)).where_(Match::Text(text)))
 }
 
+pub fn field_text(field_name: &'static str, text: &'static str) -> Pred {
+    exists(extract::field(field_name).where_(Match::Text(text)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

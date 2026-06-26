@@ -251,104 +251,40 @@ impl SyntaxTree {
             let mut renames: Vec<(NodeId, &str)> = Vec::new();
             let mut texts: Vec<(NodeId, String)> = Vec::new();
 
-            for id in ids {
-                match &rule.act {
-                    Act::SetKind(k) => renames.push((id, k)),
-                    Act::Collect {
-                        field,
-                        kinds,
-                        shallow,
-                        target,
-                        tx,
-                    } => {
-                        let container = if field.is_empty() {
-                            id
-                        } else {
-                            match self.field(id, field) {
-                                Some(c) => c,
-                                None => continue,
-                            }
-                        };
-                        if *shallow {
-                            self.collect_shallow(container, kinds, id, *tx, *target, &mut inserts);
-                        } else {
-                            for &child in self.children(container) {
-                                if kinds.contains(&self.kind(child)) {
-                                    let t = tx(self.text(child));
-                                    if !t.is_empty() {
-                                        inserts.push((id, target, t));
-                                    }
-                                }
-                            }
-                        }
+            match &rule.act {
+                Act::SetKind(k) => {
+                    for id in ids {
+                        renames.push((id, k));
                     }
-                    Act::Expand {
-                        methods,
-                        target,
-                        skip,
-                        limit,
-                        strings,
-                    } => {
-                        let method = self.field_text(id, "method").unwrap_or_default();
-                        if !methods.contains(&method) {
-                            continue;
-                        }
-                        let Some(args) = self.field(id, "arguments") else {
-                            continue;
-                        };
-                        let (mut matched, mut skipped) = (0usize, 0usize);
-                        for &arg in self.children(args) {
-                            let name = match self.kind(arg) {
-                                "simple_symbol" => self
-                                    .text(arg)
-                                    .strip_prefix(':')
-                                    .filter(|s| !s.is_empty())
-                                    .map(|s| s.to_string()),
-                                "string" if *strings => self
-                                    .children_of_kind(arg, "string_content")
-                                    .next()
-                                    .map(|c| self.text(c).to_string())
-                                    .filter(|s| !s.is_empty()),
-                                _ => None,
-                            };
-                            let Some(name) = name else { continue };
-                            if skipped < *skip {
-                                skipped += 1;
-                                continue;
-                            }
-                            inserts.push((id, target, name));
-                            matched += 1;
-                            if *limit > 0 && matched >= *limit {
-                                break;
-                            }
-                        }
-                    }
-                    Act::Move { source, target, tx } => {
-                        let vals: Vec<String> = self
-                            .children_of_kind(id, source)
-                            .map(|c| tx(self.text(c)))
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        let dest = self
-                            .children(id)
-                            .iter()
-                            .copied()
-                            .rev()
-                            .find(|&c| self.kind(c) != *source && self.kind(c) != "comment");
-                        if let Some(d) = dest {
-                            for v in vals {
-                                inserts.push((d, target, v));
-                            }
-                        }
-                    }
-                    Act::SetText(tx) => {
+                }
+                Act::SetText(tx) => {
+                    for id in ids {
                         let t = tx(self.text(id));
                         if t != self.text(id) && !t.is_empty() {
                             texts.push((id, t));
                         }
                     }
-                    Act::Custom(_) => unreachable!(),
                 }
+                Act::Insert(extract, target) => {
+                    let root = crate::Root::doc(self.clone());
+                    for id in ids {
+                        let node = root.adopt(SyntaxNodeRef {
+                            tree: root.inner(),
+                            id,
+                        });
+                        let mut results = extract.apply_all(&node);
+                        if rule.skip > 0 {
+                            results = results.into_iter().skip(rule.skip).collect();
+                        }
+                        if rule.limit > 0 {
+                            results.truncate(rule.limit);
+                        }
+                        for text in results {
+                            inserts.push((id, target, text));
+                        }
+                    }
+                }
+                Act::Custom(_) => unreachable!(),
             }
             for (id, kind) in renames {
                 self.set_kind(id, kind);
@@ -361,27 +297,6 @@ impl SyntaxTree {
             }
         }
     }
-
-    fn collect_shallow(
-        &self,
-        node: NodeId,
-        kinds: &[&str],
-        target: NodeId,
-        tx: fn(&str) -> String,
-        target_kind: &'static str,
-        out: &mut Vec<(NodeId, &'static str, String)>,
-    ) {
-        for &child in self.children(node) {
-            if kinds.contains(&self.kind(child)) {
-                let t = tx(self.text(child));
-                if !t.is_empty() {
-                    out.push((target, target_kind, t));
-                }
-            } else {
-                self.collect_shallow(child, kinds, target, tx, target_kind, out);
-            }
-        }
-    }
 }
 
 // ── Rewrite rules ───────────────────────────────────────────────
@@ -391,169 +306,62 @@ pub struct Rule {
     pub kind: &'static str,
     pub cond: Option<crate::predicate::Pred>,
     pub act: Act,
+    pub skip: usize,
+    pub limit: usize,
 }
 
 #[derive(Clone)]
 pub enum Act {
     SetKind(&'static str),
-    Collect {
-        field: &'static str,
-        kinds: &'static [&'static str],
-        shallow: bool,
-        target: &'static str,
-        tx: fn(&str) -> String,
-    },
-    Expand {
-        methods: &'static [&'static str],
-        target: &'static str,
-        skip: usize,
-        limit: usize,
-        strings: bool,
-    },
-    Move {
-        source: &'static str,
-        target: &'static str,
-        tx: fn(&str) -> String,
-    },
     SetText(fn(&str) -> String),
+    Insert(crate::extract::Extract, &'static str),
     Custom(fn(&mut SyntaxTree)),
 }
 
 impl Rule {
+    fn new(kind: &'static str, act: Act) -> Self {
+        Self {
+            kind,
+            cond: None,
+            act,
+            skip: 0,
+            limit: 0,
+        }
+    }
     pub fn when(mut self, c: crate::predicate::Pred) -> Self {
         self.cond = Some(c);
         self
     }
-    pub fn shallow(mut self) -> Self {
-        if let Act::Collect {
-            ref mut shallow, ..
-        } = self.act
-        {
-            *shallow = true;
-        }
-        self
-    }
-    pub fn tx(mut self, f: fn(&str) -> String) -> Self {
-        match &mut self.act {
-            Act::Collect { tx, .. } | Act::Move { tx, .. } => *tx = f,
-            _ => {}
-        }
-        self
-    }
     pub fn skip(mut self, n: usize) -> Self {
-        if let Act::Expand { ref mut skip, .. } = self.act {
-            *skip = n;
-        }
+        self.skip = n;
         self
     }
     pub fn first(mut self) -> Self {
-        if let Act::Expand { ref mut limit, .. } = self.act {
-            *limit = 1;
-        }
-        self
-    }
-    pub fn with_strings(mut self) -> Self {
-        if let Act::Expand {
-            ref mut strings, ..
-        } = self.act
-        {
-            *strings = true;
-        }
+        self.limit = 1;
         self
     }
 }
 
-// Constructors
 pub fn rename(source: &'static str, target: &'static str) -> Rule {
-    Rule {
-        kind: source,
-        cond: None,
-        act: Act::SetKind(target),
-    }
+    Rule::new(source, Act::SetKind(target))
 }
-pub fn collect(
-    parent: &'static str,
-    field: &'static str,
-    kinds: &'static [&'static str],
-    target: &'static str,
-) -> Rule {
-    Rule {
-        kind: parent,
-        cond: None,
-        act: Act::Collect {
-            field,
-            kinds,
-            shallow: false,
-            target,
-            tx: identity,
-        },
-    }
-}
-pub fn collect_self(
-    parent: &'static str,
-    kinds: &'static [&'static str],
-    target: &'static str,
-) -> Rule {
-    collect(parent, "", kinds, target)
-}
-pub fn expand(methods: &'static [&'static str], target: &'static str) -> Rule {
-    Rule {
-        kind: "call",
-        cond: None,
-        act: Act::Expand {
-            methods,
-            target,
-            skip: 0,
-            limit: 0,
-            strings: false,
-        },
-    }
-}
-pub fn move_children(
-    parent: &'static str,
+pub fn insert(
     source: &'static str,
+    extract: crate::extract::Extract,
     target: &'static str,
-    tx: fn(&str) -> String,
 ) -> Rule {
-    Rule {
-        kind: parent,
-        cond: None,
-        act: Act::Move { source, target, tx },
-    }
+    Rule::new(source, Act::Insert(extract, target))
 }
 pub fn set_text(kind: &'static str, tx: fn(&str) -> String) -> Rule {
-    Rule {
-        kind,
-        cond: None,
-        act: Act::SetText(tx),
-    }
+    Rule::new(kind, Act::SetText(tx))
 }
 pub fn custom(f: fn(&mut SyntaxTree)) -> Rule {
-    Rule {
-        kind: "",
-        cond: None,
-        act: Act::Custom(f),
-    }
+    Rule::new("", Act::Custom(f))
 }
 
-// Re-export predicate constructors for rewrite conditions.
-// Use treesitter_visit::predicate::{has_child, parent_is, ...} directly.
-
-// Transforms
-pub fn identity(s: &str) -> String {
-    s.to_string()
-}
-pub fn strip_colon(s: &str) -> String {
-    s.strip_prefix(':').unwrap_or(s).to_string()
-}
-pub fn trim_quotes(s: &str) -> String {
-    s.trim_matches(|c: char| c == '"' || c == '\'').to_string()
-}
+// Transforms (used by Extract.strip_prefix / .trim_start_char and SetText rules)
 pub fn trim_backslash(s: &str) -> String {
     s.trim_start_matches('\\').to_string()
-}
-pub fn strip_star(s: &str) -> String {
-    s.strip_prefix('*').unwrap_or(s).to_string()
 }
 pub fn strip_at(s: &str) -> String {
     s.trim_start_matches('@').trim().to_string()

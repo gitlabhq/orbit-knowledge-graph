@@ -468,32 +468,70 @@ const ATTR_METHODS: &[&str] = &[
     "cattr_writer",
 ];
 
+fn method_is(name: &'static str) -> Pred {
+    field_text("method", name)
+}
+
+fn method_in(names: &[&'static str]) -> Pred {
+    names
+        .iter()
+        .copied()
+        .map(method_is)
+        .reduce(|a, b| a.or(b))
+        .unwrap()
+}
+
 fn ruby_rewrites() -> Vec<rw::Rule> {
+    let sym = || {
+        field("arguments")
+            .collect(Kind("simple_symbol"))
+            .strip_prefix(":")
+    };
+    let sym1 = || {
+        field("arguments")
+            .collect(Kind("simple_symbol"))
+            .strip_prefix(":")
+    }; // same but .first()
     vec![
-        rw::expand(ATTR_METHODS, "__property"),
-        rw::expand(&["delegate"], "__method"),
-        rw::expand(&["def_delegators", "def_delegator"], "__method").skip(1),
-        rw::expand(&["define_method"], "__method")
-            .first()
-            .with_strings(),
-        rw::expand(&["scope"], "__static_method").first(),
-        rw::expand(
-            &[
+        // attr_accessor/reader/writer → __property for each symbol arg
+        rw::insert("call", sym(), "__property").when(method_in(ATTR_METHODS)),
+        // delegate → __method for each symbol arg
+        rw::insert("call", sym(), "__method").when(method_is("delegate")),
+        // def_delegators → __method, skip first symbol
+        rw::insert("call", sym(), "__method")
+            .when(method_in(&["def_delegators", "def_delegator"]))
+            .skip(1),
+        // define_method → __method from first symbol or string
+        rw::insert(
+            "call",
+            field("arguments")
+                .collect(AnyKind(&["simple_symbol", "string"]))
+                .strip_prefix(":")
+                .try_child("string_content"),
+            "__method",
+        )
+        .when(method_is("define_method"))
+        .first(),
+        // scope → __static_method from first symbol
+        rw::insert("call", sym1(), "__static_method")
+            .when(method_is("scope"))
+            .first(),
+        // has_many etc → __method from first symbol
+        rw::insert("call", sym1(), "__method")
+            .when(method_in(&[
                 "has_many",
                 "belongs_to",
                 "has_one",
                 "has_and_belongs_to_many",
-            ],
-            "__method",
-        )
-        .first(),
-        rw::collect_self(
-            "alias",
-            &["method_name", "identifier", "constant", "operator"],
-            "__method",
-        ),
+            ]))
+            .first(),
+        // alias → __method from name field
+        rw::insert("alias", field("name"), "__method"),
+        // send/public_send/__send__ → rewrite method text
         rw::custom(ruby_send_rewrite),
+        // Super types (include/extend/prepend + superclass)
         rw::custom(ruby_super_types),
+        // Imports
         rw::custom(ruby_import_rewrite),
     ]
 }
