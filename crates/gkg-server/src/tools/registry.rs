@@ -133,14 +133,9 @@ impl ToolRegistry {
         // schema and guesses names it never saw (see gitlab-org/orbit/knowledge-graph#558).
         let base_description = "Execute graph queries to find nodes, traverse relationships, \
                                 explore neighborhoods, find paths, or aggregate data. \
-                                The Query DSL Schema below defines query STRUCTURE ONLY (the shape \
-                                of filters, columns, group_by, relationships) — it does NOT list \
-                                valid entity, property, or relationship NAMES. \
-                                Before filtering, selecting columns, grouping, or traversing, you \
-                                MUST call get_graph_schema (with expand_nodes for the entity types \
-                                you need) to discover the exact node, property, and edge names; do \
-                                not guess them from the grammar. Use get_query_dsl if you need the \
-                                grammar on its own.";
+                                The DSL schema below is STRUCTURE ONLY — it contains no entity, \
+                                property, or relationship names. You MUST call get_graph_schema \
+                                to discover valid names; do not guess them from the grammar.";
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!(
