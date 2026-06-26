@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -32,24 +33,8 @@ pub struct WriteReport {
     pub bytes: u64,
 }
 
-/// Per-table accumulation buffer for the cross-project drain. Tracks the seq range of
-/// buffered rows so the flush watermark can tell which projects are fully durable.
-#[derive(Default)]
-struct TableBuffer {
-    batches: Vec<RecordBatch>,
-    rows: usize,
-    min_seq: Option<u64>,
-    max_seq: u64,
-}
-
-impl TableBuffer {
-    fn min_pending_seq(&self) -> u64 {
-        self.min_seq.unwrap_or(self.max_seq)
-    }
-}
-
-/// A channel of `(table, batch, seq)` items. `seq` is a per-project monotonic id assigned
-/// by the producer so the drain can compute a durability watermark across projects.
+/// A channel of `(table, batch, seq)` items. `seq` is a per-project monotonic id so the
+/// drain can compute a durability watermark across projects.
 struct SeqReceiver {
     rx: tokio::sync::mpsc::Receiver<(String, RecordBatch, u64)>,
 }
@@ -154,150 +139,95 @@ impl ClickHouseWriter {
         })
     }
 
-    /// Cross-project drain. Coalesces `(table, batch, seq)` items from many projects into
-    /// one ~`max_rows` part per table. A table also flushes when `max_buffer_age` elapses
-    /// with rows pending. After each successful flush, the flush watermark advances to the
-    /// largest `seq` for which no table still buffers any row at or below it; a handler
-    /// whose project seq is at or below the watermark knows its rows are durable. A failed
-    /// flush returns immediately without advancing the watermark, so the contributing
-    /// projects never checkpoint.
+    /// Cross-project drain. Coalesces `(table, batch, seq)` items into one ~`max_rows` part
+    /// per table, also flushing a table once `max_buffer_age` elapses. After each successful
+    /// flush it advances a watermark to the highest seq with no row still buffered, so a
+    /// handler whose project seq is at or below the watermark knows its rows are durable. A
+    /// failed flush propagates without advancing the watermark, so contributors don't
+    /// checkpoint.
     async fn drain_buffered(
         self: &Arc<Self>,
         mut rx: SeqReceiver,
         max_rows: usize,
-        max_concurrent: usize,
-        max_buffer_age: Option<std::time::Duration>,
         flushed_seq_tx: tokio::sync::watch::Sender<u64>,
-    ) -> Result<Vec<WriteReport>, WriteError> {
+        max_buffer_age: Duration,
+    ) -> Result<(), WriteError> {
         let max_rows = max_rows.max(1);
-        let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
-        let mut pending: std::collections::HashMap<String, TableBuffer> =
-            std::collections::HashMap::new();
-        let mut reports = Vec::new();
-        let mut max_accepted_seq = 0u64;
+        let mut pending: HashMap<String, (Vec<RecordBatch>, usize, u64)> = HashMap::new();
+        let mut max_seq = 0u64;
 
-        let age = max_buffer_age.unwrap_or(std::time::Duration::from_secs(u64::MAX / 2));
-        let mut ticker = tokio::time::interval(age);
+        let mut ticker = tokio::time::interval(max_buffer_age);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         ticker.tick().await;
 
         loop {
-            let item = tokio::select! {
-                item = rx.recv() => item,
-                _ = ticker.tick() => {
-                    self.flush_all(&mut pending, &sem, &mut reports).await?;
-                    self.publish_watermark(&pending, max_accepted_seq, &flushed_seq_tx);
-                    continue;
+            tokio::select! {
+                item = rx.recv() => {
+                    let Some((table, batch, seq)) = item else { break };
+                    max_seq = max_seq.max(seq);
+                    let (batches, rows, min_seq) =
+                        pending.entry(table.clone()).or_insert((Vec::new(), 0, seq));
+                    *rows += batch.num_rows();
+                    *min_seq = (*min_seq).min(seq);
+                    batches.push(batch);
+                    if *rows >= max_rows {
+                        let (batches, ..) = pending.remove(&table).unwrap();
+                        self.write(&table, batches, Some(WriteDurability::Durable)).await?;
+                    } else {
+                        continue;
+                    }
                 }
-            };
-
-            let Some((table, batch, seq)) = item else {
-                break;
-            };
-            max_accepted_seq = max_accepted_seq.max(seq);
-            let entry = pending.entry(table.clone()).or_default();
-            entry.rows += batch.num_rows();
-            entry.min_seq = Some(entry.min_seq.map_or(seq, |m| m.min(seq)));
-            entry.max_seq = entry.max_seq.max(seq);
-            entry.batches.push(batch);
-            if entry.rows >= max_rows {
-                let buf = pending.remove(&table).unwrap();
-                self.flush_one(&table, buf.batches, &sem, &mut reports)
-                    .await?;
-                self.publish_watermark(&pending, max_accepted_seq, &flushed_seq_tx);
+                _ = ticker.tick() => {
+                    for (table, (batches, ..)) in std::mem::take(&mut pending) {
+                        self.write(&table, batches, Some(WriteDurability::Durable)).await?;
+                    }
+                }
             }
+            publish_watermark(&pending, max_seq, &flushed_seq_tx);
         }
 
-        self.flush_all(&mut pending, &sem, &mut reports).await?;
-        self.publish_watermark(&pending, max_accepted_seq, &flushed_seq_tx);
-        Ok(reports)
-    }
-
-    async fn flush_one(
-        self: &Arc<Self>,
-        table: &str,
-        batches: Vec<RecordBatch>,
-        sem: &Arc<tokio::sync::Semaphore>,
-        reports: &mut Vec<WriteReport>,
-    ) -> Result<(), WriteError> {
-        let _permit = sem.acquire().await.expect("write semaphore closed");
-        let report = self
-            .write(table, batches, Some(WriteDurability::Durable))
-            .await?;
-        reports.push(report);
+        for (table, (batches, ..)) in std::mem::take(&mut pending) {
+            self.write(&table, batches, Some(WriteDurability::Durable))
+                .await?;
+        }
+        publish_watermark(&pending, max_seq, &flushed_seq_tx);
         Ok(())
-    }
-
-    async fn flush_all(
-        self: &Arc<Self>,
-        pending: &mut std::collections::HashMap<String, TableBuffer>,
-        sem: &Arc<tokio::sync::Semaphore>,
-        reports: &mut Vec<WriteReport>,
-    ) -> Result<(), WriteError> {
-        let mut set = tokio::task::JoinSet::new();
-        for (table, buf) in pending.drain() {
-            if buf.batches.is_empty() {
-                continue;
-            }
-            let (w, p) = (self.clone(), sem.clone());
-            set.spawn(async move {
-                let _permit = p.acquire_owned().await.expect("write semaphore closed");
-                w.write(&table, buf.batches, Some(WriteDurability::Durable))
-                    .await
-            });
-        }
-        while let Some(r) = set.join_next().await {
-            reports.push(r.map_err(|e| WriteError::Write(format!("join: {e}"), None))??);
-        }
-        Ok(())
-    }
-
-    /// The watermark is the largest seq such that no still-buffered table holds a row at
-    /// or below it. Because seqs are assigned per project and a project's batches are sent
-    /// contiguously, this is the highest seq whose rows are fully durable: it is one below
-    /// the minimum `max_seq` still buffered, or the highest accepted seq when nothing is
-    /// pending.
-    fn publish_watermark(
-        &self,
-        pending: &std::collections::HashMap<String, TableBuffer>,
-        max_accepted_seq: u64,
-        flushed_seq_tx: &tokio::sync::watch::Sender<u64>,
-    ) {
-        let watermark = pending
-            .values()
-            .filter(|b| !b.batches.is_empty())
-            .map(|b| b.min_pending_seq())
-            .min()
-            .map(|min_pending| min_pending.saturating_sub(1))
-            .unwrap_or(max_accepted_seq);
-        flushed_seq_tx.send_if_modified(|cur| {
-            if watermark > *cur {
-                *cur = watermark;
-                true
-            } else {
-                false
-            }
-        });
     }
 }
 
-/// Process-wide write coalescer shared by every code-indexing job.
+/// Highest seq with no row still buffered: one below the lowest pending seq, or the highest
+/// accepted seq when the buffer is empty. Seqs are per-project and contiguous, so this is
+/// exactly the set of fully-durable projects.
+fn publish_watermark(
+    pending: &HashMap<String, (Vec<RecordBatch>, usize, u64)>,
+    max_seq: u64,
+    flushed_seq_tx: &watch::Sender<u64>,
+) {
+    let watermark = pending
+        .values()
+        .map(|(_, _, min_seq)| *min_seq)
+        .min()
+        .map_or(max_seq, |lowest| lowest.saturating_sub(1));
+    flushed_seq_tx.send_if_modified(|cur| {
+        let advance = watermark > *cur;
+        if advance {
+            *cur = watermark;
+        }
+        advance
+    });
+}
+
+/// Process-wide write coalescer shared by every backfill code-indexing job.
 ///
-/// Small repositories submit their edges into one shared per-table buffer
-/// ([`submit_buffered`]) so the long tail of tiny projects flushes as a few
-/// well-sized parts instead of one part each. Big repositories bypass the buffer
-/// ([`write_solo`]) and write their own parts immediately, so their completion is
-/// not gated behind small-repo flushes and they cannot bloat buffer latency.
-///
-/// Buffered durability is reported through a watch watermark: each project takes a
-/// monotonic seq from [`begin_project`], tags all its batches with it, and waits
-/// (via [`subscribe`]) until the watermark reaches that seq before checkpointing.
+/// Each project takes a monotonic seq from [`begin_project`], streams its batches in with
+/// that seq, then waits on [`subscribe`] until the flush watermark reaches the seq before
+/// checkpointing. Many small projects coalesce into one well-sized part per table; big
+/// projects cross the row cap on their own and flush promptly. A failed flush never
+/// advances the watermark, so contributing projects do not checkpoint.
 pub struct CodeWriteAggregator {
-    writer: Arc<ClickHouseWriter>,
     tx: tokio::sync::mpsc::Sender<(String, RecordBatch, u64)>,
     flushed_rx: watch::Receiver<u64>,
     next_seq: AtomicU64,
-    drain: tokio::task::JoinHandle<Result<Vec<WriteReport>, WriteError>>,
 }
 
 impl CodeWriteAggregator {
@@ -305,105 +235,42 @@ impl CodeWriteAggregator {
         writer: Arc<ClickHouseWriter>,
         channel_capacity: usize,
         max_rows: usize,
-        max_concurrent: usize,
         max_buffer_age: Duration,
     ) -> Arc<Self> {
         let (tx, rx) = tokio::sync::mpsc::channel(channel_capacity.max(1));
         let (flushed_tx, flushed_rx) = watch::channel(0u64);
-        let drain_writer = writer.clone();
-        let drain = tokio::spawn(async move {
-            drain_writer
-                .drain_buffered(
-                    SeqReceiver { rx },
-                    max_rows,
-                    max_concurrent,
-                    Some(max_buffer_age),
-                    flushed_tx,
-                )
+        tokio::spawn(async move {
+            if let Err(e) = writer
+                .drain_buffered(SeqReceiver { rx }, max_rows, flushed_tx, max_buffer_age)
                 .await
+            {
+                warn!(error = %e, "code write aggregator drain ended with error");
+            }
         });
         Arc::new(Self {
-            writer,
             tx,
             flushed_rx,
             next_seq: AtomicU64::new(1),
-            drain,
         })
     }
 
-    /// Reserve a seq for one project. All of that project's batches must be submitted
-    /// with this seq, and contiguously (before any later project's first batch), so the
-    /// watermark cleanly separates durable projects from buffered ones.
+    /// Reserve a seq for one project. All of that project's batches must be submitted with
+    /// this seq and contiguously, so the watermark cleanly separates durable from buffered.
     pub fn begin_project(&self) -> u64 {
         self.next_seq.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Buffer one batch for a small project. Backpressures when the shared channel is full.
-    pub async fn submit_buffered(
-        &self,
-        table: String,
-        batch: RecordBatch,
-        seq: u64,
-    ) -> Result<(), WriteError> {
-        self.tx
-            .send((table, batch, seq))
-            .await
-            .map_err(|_| WriteError::Write("code write aggregator drain closed".into(), None))
-    }
-
-    /// `submit_buffered` for use from the blocking parse thread. Backpressures the parser
-    /// when the shared channel is full, exactly like the async variant.
-    pub fn blocking_submit_buffered(
-        &self,
-        table: String,
-        batch: RecordBatch,
-        seq: u64,
-    ) -> Result<(), WriteError> {
+    /// Buffer one batch from the blocking parse thread, backpressuring the parser when the
+    /// shared channel is full.
+    pub fn submit(&self, table: String, batch: RecordBatch, seq: u64) -> Result<(), WriteError> {
         self.tx
             .blocking_send((table, batch, seq))
             .map_err(|_| WriteError::Write("code write aggregator drain closed".into(), None))
     }
 
-    /// Watch receiver that reports the highest fully-durable project seq.
+    /// Watch receiver reporting the highest fully-durable project seq.
     pub fn subscribe(&self) -> watch::Receiver<u64> {
         self.flushed_rx.clone()
-    }
-
-    /// Write a big repository's batches directly as their own parts, bypassing the buffer.
-    /// Batches are coalesced per table so each table flushes one part. Returns once every
-    /// table is durable.
-    pub async fn write_solo(
-        &self,
-        batches: Vec<(String, RecordBatch)>,
-    ) -> Result<Vec<WriteReport>, WriteError> {
-        let mut by_table: std::collections::HashMap<String, Vec<RecordBatch>> =
-            std::collections::HashMap::new();
-        for (table, batch) in batches {
-            by_table.entry(table).or_default().push(batch);
-        }
-        let mut reports = Vec::with_capacity(by_table.len());
-        for (table, batches) in by_table {
-            reports.push(
-                self.writer
-                    .write(&table, batches, Some(WriteDurability::Durable))
-                    .await?,
-            );
-        }
-        Ok(reports)
-    }
-
-    /// Close the channel and join the drain on shutdown, surfacing any final flush error.
-    pub async fn shutdown(self: Arc<Self>) {
-        let Ok(this) = Arc::try_unwrap(self) else {
-            warn!("code write aggregator still has live handles at shutdown; skipping join");
-            return;
-        };
-        drop(this.tx);
-        match this.drain.await {
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => warn!(error = %e, "code write aggregator drain ended with error"),
-            Err(e) => warn!(error = %e, "code write aggregator drain task panicked"),
-        }
     }
 }
 
@@ -436,6 +303,17 @@ mod tests {
         RecordBatch::try_new(schema, vec![Arc::new(col)]).unwrap()
     }
 
+    /// `submit` uses `blocking_send` (it runs on the parse `spawn_blocking` thread in prod),
+    /// so tests must submit off the async worker thread too.
+    async fn submit(agg: &Arc<CodeWriteAggregator>, table: &str, batch: RecordBatch, seq: u64) {
+        let agg = agg.clone();
+        let table = table.to_string();
+        tokio::task::spawn_blocking(move || agg.submit(table, batch, seq))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     async fn wait_for_watermark(rx: &mut watch::Receiver<u64>, want: u64) {
         tokio::time::timeout(Duration::from_secs(2), async {
             while *rx.borrow() < want {
@@ -446,78 +324,58 @@ mod tests {
         .unwrap_or_else(|_| panic!("watermark never reached {want}, stuck at {}", *rx.borrow()));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn watermark_advances_to_highest_seq_when_buffer_fully_flushed() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 1_000_000, 4, Duration::from_millis(30));
+        let agg = CodeWriteAggregator::start(writer, 16, 1_000_000, Duration::from_millis(30));
         let mut wm = agg.subscribe();
 
         for _ in 0..3 {
             let seq = agg.begin_project();
-            agg.submit_buffered("gl_edge".into(), batch(10), seq)
-                .await
-                .unwrap();
+            submit(&agg, "gl_edge", batch(10), seq).await;
         }
 
         wait_for_watermark(&mut wm, 3).await;
-        agg.shutdown().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn watermark_holds_back_seq_whose_other_table_is_still_buffered() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 100, 4, Duration::from_secs(3600));
+        let agg = CodeWriteAggregator::start(writer, 16, 100, Duration::from_secs(3600));
         let wm = agg.subscribe();
 
         let seq = agg.begin_project();
-        agg.submit_buffered("gl_code_edge".into(), batch(10), seq)
-            .await
-            .unwrap();
-        agg.submit_buffered("gl_edge".into(), batch(100), seq)
-            .await
-            .unwrap();
-        for _ in 0..20 {
-            tokio::task::yield_now().await;
-        }
+        submit(&agg, "gl_code_edge", batch(10), seq).await;
+        submit(&agg, "gl_edge", batch(100), seq).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             *wm.borrow(),
             0,
             "seq must not be durable while its gl_code_edge rows are still buffered",
         );
-
-        agg.shutdown().await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn age_flush_fires_without_reaching_row_cap() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 1_000_000, 4, Duration::from_millis(50));
+        let agg = CodeWriteAggregator::start(writer, 16, 1_000_000, Duration::from_millis(50));
         let mut wm = agg.subscribe();
 
         let seq = agg.begin_project();
-        agg.submit_buffered("gl_edge".into(), batch(5), seq)
-            .await
-            .unwrap();
+        submit(&agg, "gl_edge", batch(5), seq).await;
 
         wait_for_watermark(&mut wm, seq).await;
-        agg.shutdown().await;
     }
 
-    #[tokio::test]
-    async fn solo_write_coalesces_per_table() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn size_flush_coalesces_then_advances_watermark() {
         let writer = Arc::new(ClickHouseWriter::noop());
-        let agg = CodeWriteAggregator::start(writer, 16, 1_000_000, 4, Duration::from_secs(3600));
+        let agg = CodeWriteAggregator::start(writer, 16, 50, Duration::from_secs(3600));
+        let mut wm = agg.subscribe();
 
-        let reports = agg
-            .write_solo(vec![
-                ("gl_edge".into(), batch(10)),
-                ("gl_edge".into(), batch(20)),
-                ("gl_code_edge".into(), batch(5)),
-            ])
-            .await
-            .unwrap();
+        let seq = agg.begin_project();
+        submit(&agg, "gl_edge", batch(60), seq).await;
 
-        assert_eq!(reports.len(), 2, "one part per distinct table");
-        agg.shutdown().await;
+        wait_for_watermark(&mut wm, seq).await;
     }
 }

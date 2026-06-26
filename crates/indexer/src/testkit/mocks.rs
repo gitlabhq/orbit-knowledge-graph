@@ -131,7 +131,6 @@ pub fn test_aggregator() -> Arc<crate::clickhouse::CodeWriteAggregator> {
         test_writer(),
         8,
         500_000,
-        8,
         std::time::Duration::from_secs(60),
     )
 }

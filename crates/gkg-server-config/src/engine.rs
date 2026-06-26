@@ -410,8 +410,15 @@ impl CodeIndexingPipelineConfig {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
     }
 
-    pub fn aggregator_max_buffer_age(&self) -> Duration {
-        Duration::from_secs(self.aggregator_max_buffer_age_secs.max(1))
+    /// Buffer age that drives the shared coalescer. When the aggregator is disabled each
+    /// project flushes near-immediately (effectively per-project parts, the pre-aggregation
+    /// behavior); when enabled, small projects coalesce for up to the configured window.
+    pub fn effective_buffer_age(&self) -> Duration {
+        if self.aggregator_enabled {
+            Duration::from_secs(self.aggregator_max_buffer_age_secs.max(1))
+        } else {
+            Duration::from_millis(1)
+        }
     }
 
     pub fn aggregator_heartbeat(&self) -> Duration {

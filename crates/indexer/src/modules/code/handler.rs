@@ -224,7 +224,7 @@ impl CodeIndexingTaskHandler {
             .await;
 
         let outcome = match &result {
-            Ok(Some(o)) => o.metric_label(),
+            Ok(Some(label)) => label,
             Ok(None) => "skipped_lock",
             Err(_) => "error",
         };
@@ -253,7 +253,7 @@ impl CodeIndexingTaskHandler {
         had_prior_checkpoint: bool,
         started_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
-    ) -> Result<Option<IndexOutcome>, HandlerError> {
+    ) -> Result<Option<&'static str>, HandlerError> {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
@@ -286,7 +286,6 @@ impl CodeIndexingTaskHandler {
             task_id: request.task_id,
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
-            is_campaign: request.campaign_id.is_some(),
         };
         // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is transient (retried, then DLQ'd).
         let cancel = CancellationToken::new();
@@ -313,16 +312,17 @@ impl CodeIndexingTaskHandler {
             None => work.await,
         };
 
-        // A buffered project's rows aren't durable until the shared coalescer flushes. Wait
-        // for the flush watermark to reach its seq, heartbeating the lease and renewing the
-        // lock so neither lapses, then checkpoint. This wait is intentionally outside the
-        // job timeout: flush latency depends on other projects, not this job's own work.
-        let result = match result {
-            Ok(IndexOutcome::Buffered(pending)) => self
+        // Rows aren't durable until the shared coalescer flushes. Wait for the flush
+        // watermark to reach this project's seq, heartbeating the lease and renewing the lock
+        // so neither lapses, then checkpoint. This wait is intentionally outside the job
+        // timeout: flush latency depends on other projects, not this job's own work.
+        let result: Result<&'static str, HandlerError> = match result {
+            Ok(outcome @ IndexOutcome::EmptyRepository) => Ok(outcome.metric_label()),
+            Ok(IndexOutcome::Indexed(pending)) => self
                 .await_buffered_flush(context, &key, project_id, branch, pending)
                 .await
-                .map(|()| IndexOutcome::Indexed),
-            other => other,
+                .map(|()| "indexed"),
+            Err(e) => Err(e),
         };
 
         context

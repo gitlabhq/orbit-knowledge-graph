@@ -14,7 +14,6 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use crate::clickhouse::WriteReport;
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -25,156 +24,32 @@ pub struct IndexingRequest {
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub had_prior_checkpoint: bool,
-    /// True for reindex-campaign (backfill) tasks. Only these buffer into the shared
-    /// coalescer; steady-state CDC tasks write their own parts immediately so each retains
-    /// per-project failure isolation.
-    pub is_campaign: bool,
 }
 
 /// Terminal outcome of `CodeIndexingPipeline::index_project`.
-///
-/// The handler records a single `events_processed` outcome label based on
-/// this variant — keeping `indexed` and `empty_repository` mutually exclusive.
 pub enum IndexOutcome {
-    /// Repository parsed and written as its own parts; already checkpointed.
-    Indexed,
-    /// Repository parsed and buffered into the shared write coalescer. Its rows are
-    /// durable only once the flush watermark reaches `seq`; the handler must await that
-    /// (heartbeating the lease and renewing the lock) before checkpointing. The deferred
-    /// checkpoint is carried so the handler can write it after durability.
-    Buffered(PendingFlush),
-    /// Archive endpoint signalled no repository content (404 or 5xx); the
-    /// checkpoint was still set so retries and DLQ are avoided.
+    /// Repository parsed and buffered into the shared coalescer. Rows are durable only once
+    /// the flush watermark reaches `seq`; the handler awaits that (heartbeating the lease,
+    /// renewing the lock) before writing `checkpoint`.
+    Indexed(PendingFlush),
+    /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
 }
 
 impl IndexOutcome {
     pub fn metric_label(&self) -> &'static str {
         match self {
-            IndexOutcome::Indexed | IndexOutcome::Buffered(_) => "indexed",
+            IndexOutcome::Indexed(_) => "indexed",
             IndexOutcome::EmptyRepository => "empty_repository",
         }
     }
 }
 
-/// A buffered project waiting for its shared-buffer flush to make its rows durable.
+/// A project waiting for its shared-buffer flush to make its rows durable.
 pub struct PendingFlush {
     pub seq: u64,
     pub watermark: tokio::sync::watch::Receiver<u64>,
     pub checkpoint: CodeIndexingCheckpoint,
-}
-
-/// Post-filter size class deciding the write path and concurrency lane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RepoClass {
-    /// At most `small_repo_max_files` indexed files: buffered into the shared coalescer.
-    Small,
-    /// Above the cutoff: written as its own parts immediately.
-    Big,
-}
-
-/// Where a parse run's batches go. `Solo` collects in memory then writes own parts; `Buffered`
-/// streams slices into the shared coalescer tagged with the project seq.
-enum CodeGraphSink {
-    Solo {
-        collected: Arc<parking_lot::Mutex<Vec<(String, arrow::record_batch::RecordBatch)>>>,
-        aggregator: Arc<crate::clickhouse::CodeWriteAggregator>,
-        max_rows: usize,
-    },
-    Buffered {
-        aggregator: Arc<crate::clickhouse::CodeWriteAggregator>,
-        seq: u64,
-        max_rows: usize,
-    },
-}
-
-/// Outcome of feeding a parse run into a [`CodeGraphSink`].
-enum BuildOutput {
-    Solo(Vec<WriteReport>),
-    Buffered { seq: u64 },
-}
-
-impl CodeGraphSink {
-    /// Build the parser callback. Both variants slice batches to `max_rows` so no single
-    /// part exceeds the cap: solo slices feed an in-memory buffer, small slices stream into
-    /// the shared coalescer tagged with the project seq (backpressuring the parser).
-    fn on_batch(&self) -> Arc<code_graph::v2::OnBatch> {
-        match self {
-            CodeGraphSink::Solo {
-                collected,
-                max_rows,
-                ..
-            } => {
-                let collected = collected.clone();
-                let max_rows = (*max_rows).max(1);
-                Arc::new(
-                    move |table: &str, batch: arrow::record_batch::RecordBatch| {
-                        let table = table.to_string();
-                        let mut offset = 0;
-                        while offset < batch.num_rows() {
-                            let len = (batch.num_rows() - offset).min(max_rows);
-                            collected
-                                .lock()
-                                .push((table.clone(), batch.slice(offset, len)));
-                            offset += len;
-                        }
-                        Ok(())
-                    },
-                )
-            }
-            CodeGraphSink::Buffered {
-                aggregator,
-                seq,
-                max_rows,
-            } => {
-                let aggregator = aggregator.clone();
-                let seq = *seq;
-                let max_rows = (*max_rows).max(1);
-                Arc::new(
-                    move |table: &str, batch: arrow::record_batch::RecordBatch| {
-                        let table = table.to_string();
-                        let mut offset = 0;
-                        while offset < batch.num_rows() {
-                            let len = (batch.num_rows() - offset).min(max_rows);
-                            aggregator
-                                .blocking_submit_buffered(
-                                    table.clone(),
-                                    batch.slice(offset, len),
-                                    seq,
-                                )
-                                .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
-                            offset += len;
-                        }
-                        Ok(())
-                    },
-                )
-            }
-        }
-    }
-
-    async fn finish(self, project_id: i64) -> Result<BuildOutput, HandlerError> {
-        match self {
-            CodeGraphSink::Solo {
-                collected,
-                aggregator,
-                ..
-            } => {
-                let batches = std::mem::take(&mut *collected.lock());
-                let reports =
-                    aggregator
-                        .write_solo(batches)
-                        .await
-                        .map_err(|e| HandlerError::Permanent {
-                            message: format!(
-                                "fatal code indexing flush for project {project_id}: {e}"
-                            ),
-                            action: crate::handler::PermanentAction::DeadLetter,
-                        })?;
-                Ok(BuildOutput::Solo(reports))
-            }
-            CodeGraphSink::Buffered { seq, .. } => Ok(BuildOutput::Buffered { seq }),
-        }
-    }
 }
 
 pub struct CodeIndexingPipeline {
@@ -331,20 +206,14 @@ impl CodeIndexingPipeline {
         // start its Gitaly download while we wait for an indexing slot.
         drop(_fetch_slot);
 
-        // Phase 2: Process. The post-filter file count decides the write path and lane:
-        // small campaign repos buffer into the shared coalescer on the wide small lane; big
-        // (and all non-campaign) repos write their own parts on the reserved big lane so
-        // they never starve and keep per-project isolation.
-        let buffer_eligible = self.pipeline_config.aggregator_enabled && request.is_campaign;
-        let classification =
-            if buffer_eligible && repository.file_inventory.len() <= self.small_repo_max_files {
-                RepoClass::Small
-            } else {
-                RepoClass::Big
-            };
-        let lane = match classification {
-            RepoClass::Small => &self.small_indexing_slots,
-            RepoClass::Big => &self.big_indexing_slots,
+        // Phase 2: Process. The post-filter file count picks the concurrency lane only —
+        // a wide lane for the small-repo tail, a reserved lane so big repos never starve.
+        // Every job streams into the shared coalescer; big repos cross the row cap and flush
+        // promptly, small repos coalesce.
+        let lane = if repository.file_inventory.len() <= self.small_repo_max_files {
+            &self.small_indexing_slots
+        } else {
+            &self.big_indexing_slots
         };
         let _indexing_slot = acquire(lane, "indexing").await?;
 
@@ -352,15 +221,7 @@ impl CodeIndexingPipeline {
 
         let indexed_at = Utc::now();
         let indexing_result = self
-            .run_indexing(
-                context,
-                request,
-                &repository,
-                indexed_at,
-                classification,
-                observer,
-                cancel,
-            )
+            .run_indexing(context, request, &repository, indexed_at, observer, cancel)
             .await;
 
         if let Err(error) = self
@@ -379,30 +240,20 @@ impl CodeIndexingPipeline {
             self.metrics.record_cleanup("success");
         }
 
-        let output = indexing_result?;
+        let seq = indexing_result?;
 
-        let checkpoint = CodeIndexingCheckpoint {
-            traversal_path: request.traversal_path.clone(),
-            project_id: request.project_id,
-            branch: request.branch.clone(),
-            last_task_id: request.task_id,
-            last_commit: request.commit_sha.clone(),
-            indexed_at,
-        };
-
-        match output {
-            BuildOutput::Solo(_) => {
-                self.set_checkpoint(&checkpoint).await?;
-                Ok(IndexOutcome::Indexed)
-            }
-            // Buffered rows aren't durable yet; the handler awaits the flush watermark
-            // (heartbeating the lease, renewing the lock) and then checkpoints.
-            BuildOutput::Buffered { seq } => Ok(IndexOutcome::Buffered(PendingFlush {
-                seq,
-                watermark: self.aggregator.subscribe(),
-                checkpoint,
-            })),
-        }
+        Ok(IndexOutcome::Indexed(PendingFlush {
+            seq,
+            watermark: self.aggregator.subscribe(),
+            checkpoint: CodeIndexingCheckpoint {
+                traversal_path: request.traversal_path.clone(),
+                project_id: request.project_id,
+                branch: request.branch.clone(),
+                last_task_id: request.task_id,
+                last_commit: request.commit_sha.clone(),
+                indexed_at,
+            },
+        }))
     }
 
     /// Write a checkpoint after a project's rows are durable. Exposed so the handler can
@@ -438,27 +289,20 @@ impl CodeIndexingPipeline {
         request: &IndexingRequest,
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
-        classification: RepoClass,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<BuildOutput, HandlerError> {
+    ) -> Result<u64, HandlerError> {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel);
-        let (result, output) = self
-            .build_code_graph(request, repository, indexed_at, classification, config)
+        let (result, seq) = self
+            .build_code_graph(request, repository, indexed_at, config)
             .await?;
 
         context.progress.notify_in_progress().await;
         self.metrics
             .record_indexing_duration(indexing_start.elapsed());
 
-        // Buffered projects have no per-table write reports yet; record the empty set so
-        // node/file counters still land while the byte counters arrive at flush time.
-        let per_table_writes = match &output {
-            BuildOutput::Solo(reports) => reports.as_slice(),
-            BuildOutput::Buffered { .. } => &[],
-        };
-        self.record_indexing_results(&result, per_table_writes, observer, request, indexing_start);
+        self.record_indexing_results(&result, observer, request, indexing_start);
 
         if let Some(error) = result.errors.iter().find(|error| error.fatal) {
             return Err(HandlerError::Permanent {
@@ -473,7 +317,7 @@ impl CodeIndexingPipeline {
         context.progress.notify_in_progress().await;
         self.run_stale_cleanup(request, indexed_at, &result).await;
 
-        Ok(output)
+        Ok(seq)
     }
 
     fn build_pipeline_config(
@@ -513,14 +357,15 @@ impl CodeIndexingPipeline {
         }
     }
 
+    /// Parse the repository and stream its batches into the shared coalescer under one
+    /// project seq, returning that seq so the caller can await its flush.
     async fn build_code_graph(
         &self,
         request: &IndexingRequest,
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
-        classification: RepoClass,
         config: PipelineConfig,
-    ) -> Result<(code_graph::v2::PipelineResult, BuildOutput), HandlerError> {
+    ) -> Result<(code_graph::v2::PipelineResult, u64), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -536,9 +381,23 @@ impl CodeIndexingPipeline {
             self.table_names.clone(),
         ));
 
+        let seq = self.aggregator.begin_project();
+        let aggregator = self.aggregator.clone();
         let max_rows = self.pipeline_config.write_slice_rows.max(1);
-        let sink = self.build_sink(classification, max_rows);
-        let on_batch = sink.on_batch();
+        let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new(
+            move |table: &str, batch: arrow::record_batch::RecordBatch| {
+                let table = table.to_string();
+                let mut offset = 0;
+                while offset < batch.num_rows() {
+                    let len = (batch.num_rows() - offset).min(max_rows);
+                    aggregator
+                        .submit(table.clone(), batch.slice(offset, len), seq)
+                        .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
+                    offset += len;
+                }
+                Ok(())
+            },
+        );
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
@@ -557,35 +416,17 @@ impl CodeIndexingPipeline {
         })
         .await
         .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
-        let code_graph_duration = code_graph_start.elapsed();
         info!(
-            duration_ms = code_graph_duration.as_millis() as u64,
+            duration_ms = code_graph_start.elapsed().as_millis() as u64,
             "code-graph building completed"
         );
 
-        let output = sink.finish(request.project_id).await?;
-        Ok((result, output))
-    }
-
-    fn build_sink(&self, classification: RepoClass, max_rows: usize) -> CodeGraphSink {
-        match classification {
-            RepoClass::Big => CodeGraphSink::Solo {
-                collected: Arc::new(parking_lot::Mutex::new(Vec::new())),
-                aggregator: self.aggregator.clone(),
-                max_rows,
-            },
-            RepoClass::Small => CodeGraphSink::Buffered {
-                aggregator: self.aggregator.clone(),
-                seq: self.aggregator.begin_project(),
-                max_rows,
-            },
-        }
+        Ok((result, seq))
     }
 
     fn record_indexing_results(
         &self,
         result: &code_graph::v2::PipelineResult,
-        per_table_writes: &[WriteReport],
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,
@@ -638,9 +479,15 @@ impl CodeIndexingPipeline {
         observer.nodes_indexed("imported_symbol", result.stats.imports_count as u64);
         observer.nodes_indexed("edge", result.stats.edges_count as u64);
 
-        for write in per_table_writes {
-            observer.record_graph_write(&write.table, write.rows, write.bytes);
-        }
+        // Rows are written asynchronously by the shared coalescer, so the count comes from
+        // the parse result rather than write reports. Byte size is reported by the writer's
+        // own ClickHouse metrics.
+        let rows_written = (result.stats.directories_indexed
+            + result.stats.files_indexed
+            + result.stats.definitions_count
+            + result.stats.imports_count
+            + result.stats.edges_count) as u64;
+        observer.record_graph_write("code_graph", rows_written, 0);
         observer.record_duration(indexing_start.elapsed().as_millis() as u64);
 
         for skipped in &result.skipped {
