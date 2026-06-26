@@ -170,6 +170,55 @@ fn malformed_group_by_entry_shows_expected_shapes() {
 }
 
 #[test]
+fn invalid_column_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "columns": ["bogus_col"]},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("bogus_col"), "got: {msg}");
+    assert!(msg.contains("/node/columns"), "got: {msg}");
+    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("username"), "got: {msg}");
+    // The opaque oneOf fallthrough must not leak through.
+    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+}
+
+#[test]
+fn invalid_relationship_type_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "BOGUS_REL", "from": "u", "to": "n"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("BOGUS_REL"), "got: {msg}");
+    assert!(msg.contains("/relationships/0/type"), "got: {msg}");
+    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("AUTHORED"), "got: {msg}");
+    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full pipeline — SQL structure
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
 fn full_pipeline() {
     let json = r#"{
         "query_type": "traversal",

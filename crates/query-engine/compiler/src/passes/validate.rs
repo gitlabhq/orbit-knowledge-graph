@@ -53,10 +53,15 @@ const MAX_ENUM_CANDIDATES: usize = 10;
 /// Render a JSON Schema validation error into an actionable message.
 ///
 /// jsonschema's own `Display` truncates enum rejections to three candidates
-/// (`"a", "b" or N other candidates`), which leaves an agent guessing the
-/// valid values. We instead read the structured [`jsonschema::error::ValidationErrorKind`]
-/// so we can list the candidates (capped at [`MAX_ENUM_CANDIDATES`]) and, for
-/// `group_by` shape rejections, append the expected object shapes.
+/// (`"a", "b" or N other candidates`) and renders `oneOf` rejections as an
+/// opaque "not valid under any of the schemas listed in the 'oneOf' keyword",
+/// both of which leave an agent guessing the valid values. We instead read the
+/// structured [`jsonschema::error::ValidationErrorKind`] so we can:
+/// - list enum candidates (capped at [`MAX_ENUM_CANDIDATES`]);
+/// - unwrap a `oneOf` rejection to the enum inside its branches (columns,
+///   relationship types, filter operators all validate via a `oneOf` whose
+///   branches carry the real allowlist);
+/// - append the expected object shapes for a `group_by` rejection.
 fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
     use jsonschema::error::ValidationErrorKind;
 
@@ -64,15 +69,7 @@ fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
 
     match error.kind() {
         ValidationErrorKind::Enum { options } => {
-            let candidates = options
-                .as_array()
-                .map(|opts| format_candidates(opts))
-                .unwrap_or_default();
-            format!(
-                "{} is not one of the allowed values{} at {path}",
-                error.instance(),
-                candidates,
-            )
+            format_enum_rejection(&error.instance().to_string(), options, &path.to_string())
         }
         // `propertyNames` rejections (e.g. an unknown filter key) wrap the
         // inner enum error whose `instance()` is the offending key. Surface
@@ -84,6 +81,8 @@ fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
                 .map_or(inner_msg.as_str(), |(head, _)| head);
             format!("{stripped} at {path}")
         }
+        // `group_by` entries validate via a `oneOf` over object shapes (no inner
+        // enum), so the actionable hint is the expected shape, not a candidate list.
         ValidationErrorKind::OneOfNotValid { .. } if is_group_by_path(path) => {
             format!(
                 "{} is not a valid group_by entry at {path}. \
@@ -94,8 +93,52 @@ fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
                 error.instance(),
             )
         }
+        // Columns, relationship/edge types, and filter operators all reject via
+        // a `oneOf` whose branches carry the allowlist as an enum. Unwrap to that
+        // enum and list the candidates instead of the opaque oneOf message.
+        ValidationErrorKind::OneOfNotValid { context } => match find_inner_enum_options(context) {
+            Some(options) => {
+                format_enum_rejection(&error.instance().to_string(), options, &path.to_string())
+            }
+            None => format!("{error} at {path}"),
+        },
         _ => format!("{error} at {path}"),
     }
+}
+
+/// Build the enriched "not one of the allowed values" message for an enum
+/// rejection, listing candidates (capped, deduplicated) at the given path.
+fn format_enum_rejection(instance: &str, options: &serde_json::Value, path: &str) -> String {
+    let candidates = options
+        .as_array()
+        .map(|opts| format_candidates(opts))
+        .unwrap_or_default();
+    format!("{instance} is not an allowed value{candidates} at {path}")
+}
+
+/// Walk a `oneOf` rejection's branch errors (depth-first, including nested
+/// `oneOf`/`anyOf`) and return the first enum's `options`. Filter operators
+/// nest a `oneOf` inside the property-filter `oneOf`, so the search must recurse.
+fn find_inner_enum_options<'a>(
+    context: &'a [Vec<jsonschema::ValidationError<'a>>],
+) -> Option<&'a serde_json::Value> {
+    use jsonschema::error::ValidationErrorKind;
+
+    for branch in context {
+        for err in branch {
+            match err.kind() {
+                ValidationErrorKind::Enum { options } => return Some(options),
+                ValidationErrorKind::OneOfNotValid { context: inner }
+                | ValidationErrorKind::AnyOf { context: inner } => {
+                    if let Some(found) = find_inner_enum_options(inner) {
+                        return Some(found);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 /// Format an enum candidate list, capping at [`MAX_ENUM_CANDIDATES`] and
@@ -1162,6 +1205,27 @@ mod tests {
         assert!(rendered.contains("Valid values include:"), "{rendered}");
         assert!(rendered.contains("and 15 more"), "{rendered}");
         assert!(rendered.contains("get_graph_schema"), "{rendered}");
+    }
+
+    #[test]
+    fn one_of_rejection_unwraps_to_inner_enum() {
+        // Mirrors how columns/relationship-type/operator validate: a oneOf whose
+        // branches carry the allowlist as a (possibly nested) enum.
+        let schema = serde_json::json!({
+            "oneOf": [
+                { "const": "*" },
+                { "oneOf": [ { "enum": ["alpha", "beta", "gamma"] } ] }
+            ]
+        });
+        let validator = jsonschema::validator_for(&schema).expect("valid schema");
+        let value = serde_json::json!("delta");
+        let err = validator
+            .iter_errors(&value)
+            .next()
+            .expect("delta must be rejected");
+        let msg = format_schema_error(&err);
+        assert!(msg.contains("is not an allowed value"), "{msg}");
+        assert!(msg.contains("alpha, beta, gamma"), "{msg}");
     }
 
     fn test_ontology() -> Ontology {
