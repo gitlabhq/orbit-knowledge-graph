@@ -10,7 +10,26 @@ use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::orchestrator::scheduled::TaskError;
 
 const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
-const ROOT_PATH_PATTERN: &str = "^[0-9]+/[0-9]+/";
+const ROOT_NAMESPACE_PATH_PATTERN: &str = "^[0-9]+/[0-9]+/";
+
+const CHANGE_QUERY_SQL: &str = r#"WITH
+  enabled AS (
+    SELECT DISTINCT root_namespace_id, traversal_path
+    FROM {{enabled_namespace_table}}
+    WHERE {{deleted_column}} = false AND traversal_path != ''
+  ),
+  changed AS (
+{{branches}}
+  )
+SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path
+FROM changed
+INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#;
+
+const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path
+    FROM {{table}}
+    WHERE {{watermark_column}} > {lower:String}
+      AND {{watermark_column}} <= {upper:String}
+      AND match({{path}}, '{{root_namespace_path_pattern}}')"#;
 
 #[async_trait]
 pub(super) trait NamespaceChangeDetector: Send + Sync {
@@ -103,39 +122,30 @@ fn collect_reindex_sources(ontology: &ontology::Ontology) -> BTreeSet<ReindexSou
 }
 
 fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
-    let changed = reindex_sources
+    let branches = reindex_sources
         .iter()
         .map(render_change_branch)
         .collect::<Vec<_>>()
         .join("\nUNION ALL\n");
 
-    let deleted_column = ontology::siphon_deleted_column();
-
-    format!(
-        r#"WITH
-  enabled AS (
-    SELECT DISTINCT root_namespace_id, traversal_path
-    FROM {ENABLED_NAMESPACE_TABLE}
-    WHERE {deleted_column} = false AND traversal_path != ''
-  ),
-  changed AS (
-{changed}
-  )
-SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path
-FROM changed
-INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
-    )
+    CHANGE_QUERY_SQL
+        .replace("{{enabled_namespace_table}}", ENABLED_NAMESPACE_TABLE)
+        .replace("{{deleted_column}}", ontology::siphon_deleted_column())
+        .replace("{{branches}}", &branches)
 }
 
 fn render_change_branch(source_table: &ReindexSource) -> String {
     let path = path_expression(&source_table.traversal_path);
-    let watermark = ontology::siphon_watermark_column();
 
-    format!(
-        "    SELECT {root_path} AS root_path\n    FROM {table}\n    WHERE {watermark} > {{lower:String}}\n      AND {watermark} <= {{upper:String}}\n      AND match({path}, '{ROOT_PATH_PATTERN}')",
-        root_path = root_path_expression(&path),
-        table = source_table.table,
-    )
+    CHANGE_BRANCH_SQL
+        .replace("{{root_path}}", &root_path_expression(&path))
+        .replace("{{table}}", &source_table.table)
+        .replace("{{watermark_column}}", ontology::siphon_watermark_column())
+        .replace("{{path}}", &path)
+        .replace(
+            "{{root_namespace_path_pattern}}",
+            ROOT_NAMESPACE_PATH_PATTERN,
+        )
 }
 
 fn path_expression(resolution: &PathResolution) -> String {
@@ -191,7 +201,32 @@ mod tests {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
         assert!(query.sql.contains("splitByChar('/', traversal_path)[1]"));
         assert!(query.sql.contains("splitByChar('/', traversal_path)[2]"));
-        assert!(query.sql.contains(ROOT_PATH_PATTERN));
+        assert!(query.sql.contains(ROOT_NAMESPACE_PATH_PATTERN));
+    }
+
+    #[test]
+    fn change_query_renders_expected_sql_shape() {
+        let query = NamespaceChangeQuery::new([column_source("work_items")]);
+
+        assert_eq!(
+            query.sql,
+            r#"WITH
+  enabled AS (
+    SELECT DISTINCT root_namespace_id, traversal_path
+    FROM siphon_knowledge_graph_enabled_namespaces
+    WHERE _siphon_deleted = false AND traversal_path != ''
+  ),
+  changed AS (
+    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path
+    FROM work_items
+    WHERE _siphon_watermark > {lower:String}
+      AND _siphon_watermark <= {upper:String}
+      AND match(traversal_path, '^[0-9]+/[0-9]+/')
+  )
+SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path
+FROM changed
+INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
+        );
     }
 
     #[test]
