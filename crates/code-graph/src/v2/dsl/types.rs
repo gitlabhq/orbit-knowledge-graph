@@ -390,6 +390,11 @@ impl ImportRule {
         self
     }
 
+    pub fn runtime(mut self) -> Self {
+        self.mode = crate::v2::types::ImportMode::Runtime;
+        self
+    }
+
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         self.classify.map_or(self.label, |f| f(node))
     }

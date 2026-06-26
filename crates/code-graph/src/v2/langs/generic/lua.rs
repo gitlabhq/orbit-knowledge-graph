@@ -1,8 +1,8 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Node;
-use treesitter_visit::extract::field;
+use treesitter_visit::extract::{child_of_kind, field};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
@@ -63,16 +63,24 @@ impl DslLanguage for LuaDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        // require("module") is handled entirely via the on_import hook below.
-        vec![]
+        vec![
+            import("__require")
+                .label("Require")
+                .path_from(child_of_kind("__import_path"))
+                .split_last(".")
+                .runtime(),
+        ]
     }
 
     fn hooks() -> LanguageHooks {
         LanguageHooks {
-            on_import: Some(lua_extract_require),
             return_kinds: &["return_statement"],
             ..LanguageHooks::default()
         }
+    }
+
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_lua(tree);
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -139,59 +147,39 @@ impl DslLanguage for LuaDsl {
     }
 }
 
-/// Extract `require("module")` and `require "module"` as runtime imports.
-///
-/// Called for every AST node; returns `true` only for `function_call` nodes
-/// whose `name` field is the identifier `require`, preventing the default
-/// import extractor from also running on those nodes.
-fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
-    if node.kind().as_ref() != "function_call" {
-        return false;
-    }
-    let Some(name_node) = node.field("name") else {
-        return false;
-    };
-    if name_node.kind().as_ref() != "identifier" || name_node.text().as_ref() != "require" {
-        return false;
-    }
-    let Some(args) = node.field("arguments") else {
-        return true;
-    };
-    // `arguments` is either a `string` node directly (require "mod") or
-    // a parenthesized `arguments` node containing a string (require("mod")).
-    let string_node = if args.kind().as_ref() == "string" {
-        args
-    } else {
-        let Some(s) = args.child_of_kind("string") else {
-            // Dynamic argument (e.g. require(var)) — mark as consumed so no
-            // double-processing, but we can't resolve the path statically.
-            return true;
+fn extract_string_content(tree: &SyntaxTree, node: u32) -> Option<String> {
+    let raw = tree.text(node);
+    let trimmed = raw.trim_matches(|c: char| c == '"' || c == '\'');
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn rewrite_lua(tree: &mut SyntaxTree) {
+    let mut rewrites: Vec<(u32, String)> = Vec::new();
+
+    for call in tree.nodes_of_kind("function_call").collect::<Vec<_>>() {
+        let name = tree.field(call, "name");
+        if name.is_none_or(|n| tree.kind(n) != "identifier" || tree.text(n) != "require") {
+            continue;
+        }
+        let Some(args) = tree.field(call, "arguments") else {
+            continue;
         };
-        s
-    };
-
-    let raw = string_node.text().to_string();
-    let module_path = raw
-        .trim_matches(|c: char| c == '"' || c == '\'')
-        .to_string();
-    if module_path.is_empty() {
-        return true;
+        // `require "mod"` → args is a string node directly
+        // `require("mod")` → args contains a string child
+        let string_node = if tree.kind(args) == "string" {
+            Some(args)
+        } else {
+            tree.children_of_kind(args, "string").next()
+        };
+        if let Some(s) = string_node.and_then(|s| extract_string_content(tree, s)) {
+            rewrites.push((call, s));
+        }
     }
 
-    let name = module_path.rsplit('.').next().map(|s| s.to_string());
-    imports.push(CanonicalImport {
-        import_type: "Require",
-        binding_kind: ImportBindingKind::Named,
-        mode: ImportMode::Runtime,
-        path: module_path,
-        name,
-        alias: None,
-        scope_fqn: None,
-        range: crate::v2::types::Range::empty(),
-        is_type_only: false,
-        wildcard: false,
-    });
-    true
+    for (call, path) in rewrites {
+        tree.set_kind(call, "__require");
+        tree.insert_child(call, "__import_path", &path);
+    }
 }
 
 // ── Resolution rules ────────────────────────────────────────────
