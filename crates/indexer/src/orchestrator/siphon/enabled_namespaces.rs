@@ -1,4 +1,4 @@
-//! CDC route: newly-enabled namespaces trigger a per-namespace code backfill.
+//! CDC route: newly-enabled namespaces trigger SDLC indexing and code backfill.
 
 use std::sync::Arc;
 
@@ -7,19 +7,26 @@ use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, warn};
 
-use crate::orchestrator::dispatch::CodeBackfill;
+use crate::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use crate::orchestrator::scheduled::TaskError;
 use crate::orchestrator::siphon::decoder::ColumnExtractor;
 use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
 use crate::orchestrator::siphon::subjects;
 
 pub struct EnabledNamespacesRoute {
+    namespace_indexing: NamespaceIndexingDispatch,
     code_backfill: Arc<CodeBackfill>,
 }
 
 impl EnabledNamespacesRoute {
-    pub fn new(code_backfill: Arc<CodeBackfill>) -> Self {
-        Self { code_backfill }
+    pub fn new(
+        namespace_indexing: NamespaceIndexingDispatch,
+        code_backfill: Arc<CodeBackfill>,
+    ) -> Self {
+        Self {
+            namespace_indexing,
+            code_backfill,
+        }
     }
 }
 
@@ -86,13 +93,17 @@ impl Route for EnabledNamespacesRoute {
         events: &[LogicalReplicationEvents],
     ) -> Result<RouteOutcome, TaskError> {
         let enabled = extract_enabled_namespaces(events);
-        let outcome = self
+        let sdlc = self
+            .namespace_indexing
+            .dispatch_for_namespaces(&enabled, chrono::Utc::now(), ctx.campaign_id.clone())
+            .await?;
+        let code = self
             .code_backfill
             .dispatch_for_namespaces(&enabled, ctx.dispatch_id)
             .await?;
         Ok(RouteOutcome {
-            dispatched: outcome.dispatched,
-            skipped: outcome.skipped,
+            dispatched: sdlc.dispatched + code.dispatched,
+            skipped: sdlc.skipped + code.skipped,
         })
     }
 }

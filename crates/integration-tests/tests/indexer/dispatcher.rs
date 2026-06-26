@@ -3,6 +3,7 @@
 use super::common;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -10,16 +11,21 @@ use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use indexer::nats::versioning::NATS_VERSIONER;
+use indexer::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use indexer::orchestrator::scheduled::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
-use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
+use indexer::orchestrator::siphon::{CdcContext, EnabledNamespacesRoute, Route};
+use indexer::topic::{
+    CODE_INDEXING_TASK_SUBJECT_PATTERN, CodeIndexingTaskRequest, GLOBAL_INDEXING_SUBJECT,
+    INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN,
+};
 use serde::Deserialize;
+use siphon_proto::replication_event::{Column, Operation};
+use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
-
-// --- Test Infrastructure ---
 
 struct Namespace {
     id: i64,
@@ -79,12 +85,60 @@ impl TestContext {
         }
     }
 
+    async fn given_project_path(&self, project_id: i64, traversal_path: &str) {
+        self.clickhouse
+            .execute(&format!(
+                "INSERT INTO project_namespace_traversal_paths (id, traversal_path) \
+                 VALUES ({project_id}, '{traversal_path}')"
+            ))
+            .await;
+    }
+
+    async fn dispatch_enabled_namespace_cdc(
+        &self,
+        namespace: Namespace,
+    ) -> (Vec<NamespaceRequest>, Vec<CodeIndexingTaskRequest>) {
+        let services = indexer::orchestrator::scheduled::connect(&self.nats_config())
+            .await
+            .unwrap();
+        let backfill = Arc::new(CodeBackfill::new(
+            services.nats.clone(),
+            self.clickhouse.config.build_client(),
+            self.clickhouse.config.build_client(),
+            ScheduledTaskMetrics::new(),
+            Arc::new(indexer::campaign::CampaignState::new()),
+        ));
+        let route =
+            EnabledNamespacesRoute::new(NamespaceIndexingDispatch::new(services.nats), backfill);
+
+        route
+            .dispatch(
+                &CdcContext {
+                    dispatch_id: uuid::Uuid::new_v4(),
+                    campaign_id: None,
+                },
+                &[enabled_namespace_insert(namespace)],
+            )
+            .await
+            .unwrap();
+
+        (
+            self.consume_namespace_requests().await,
+            self.consume_code_indexing_requests().await,
+        )
+    }
+
     async fn consume_global_requests(&self) -> Vec<GlobalRequest> {
         self.consume_messages(GLOBAL_INDEXING_SUBJECT).await
     }
 
     async fn consume_namespace_requests(&self) -> Vec<NamespaceRequest> {
         self.consume_messages(NAMESPACE_INDEXING_SUBJECT_PATTERN)
+            .await
+    }
+
+    async fn consume_code_indexing_requests(&self) -> Vec<CodeIndexingTaskRequest> {
+        self.consume_messages(CODE_INDEXING_TASK_SUBJECT_PATTERN)
             .await
     }
 
@@ -142,6 +196,7 @@ impl TestContext {
                 subjects: vec![
                     NATS_VERSIONER.subject(GLOBAL_INDEXING_SUBJECT),
                     NATS_VERSIONER.subject(NAMESPACE_INDEXING_SUBJECT_PATTERN),
+                    NATS_VERSIONER.subject(CODE_INDEXING_TASK_SUBJECT_PATTERN),
                 ],
                 retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
                 max_messages_per_subject: 1,
@@ -154,7 +209,43 @@ impl TestContext {
     }
 }
 
-// --- Tests ---
+fn namespace(id: i64, traversal_path: &str) -> Namespace {
+    Namespace {
+        id,
+        traversal_path: traversal_path.to_string(),
+    }
+}
+
+fn enabled_namespace_insert(namespace: Namespace) -> LogicalReplicationEvents {
+    LogicalReplicationEvents {
+        event: 1,
+        table: "knowledge_graph_enabled_namespaces".to_string(),
+        schema: "public".to_string(),
+        application_identifier: "test".to_string(),
+        columns: vec![
+            "root_namespace_id".to_string(),
+            "traversal_path".to_string(),
+        ],
+        events: vec![ReplicationEvent {
+            operation: Operation::Insert as i32,
+            columns: vec![
+                Column {
+                    column_index: 0,
+                    value: Some(Value {
+                        value: Some(value::Value::Int64Value(namespace.id)),
+                    }),
+                },
+                Column {
+                    column_index: 1,
+                    value: Some(Value {
+                        value: Some(value::Value::StringValue(namespace.traversal_path)),
+                    }),
+                },
+            ],
+        }],
+        version_hash: 0,
+    }
+}
 
 #[tokio::test]
 async fn dispatcher_publishes_global_and_namespace_requests() {
@@ -162,18 +253,9 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
 
     context
         .given_enabled_namespaces([
-            Namespace {
-                id: 100,
-                traversal_path: "1/100/".to_string(),
-            },
-            Namespace {
-                id: 200,
-                traversal_path: "2/200/".to_string(),
-            },
-            Namespace {
-                id: 300,
-                traversal_path: "3/300/".to_string(),
-            },
+            namespace(100, "1/100/"),
+            namespace(200, "2/200/"),
+            namespace(300, "3/300/"),
         ])
         .await;
 
@@ -205,12 +287,10 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         .unwrap();
     let after = Utc::now();
 
-    // Global indexing request
     let global = context.consume_global_requests().await;
     assert_eq!(global.len(), 1);
     assert!(global[0].watermark >= before && global[0].watermark <= after);
 
-    // Namespace indexing requests
     let namespaces = context.consume_namespace_requests().await;
     assert_eq!(namespaces.len(), 3);
 
@@ -226,4 +306,23 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             .iter()
             .all(|r| r.watermark >= before && r.watermark <= after)
     );
+}
+
+#[tokio::test]
+async fn enabled_namespace_cdc_dispatches_sdlc_and_code_requests() {
+    let context = TestContext::new().await;
+
+    context.given_project_path(7000, "7/700/7000/").await;
+
+    let (namespaces, code) = context
+        .dispatch_enabled_namespace_cdc(namespace(700, "7/700/"))
+        .await;
+
+    assert_eq!(namespaces.len(), 1);
+    assert_eq!(namespaces[0].namespace, 700);
+    assert_eq!(namespaces[0].traversal_path, "7/700/");
+
+    assert_eq!(code.len(), 1);
+    assert_eq!(code[0].project_id, 7000);
+    assert_eq!(code[0].traversal_path, "7/700/7000/");
 }
