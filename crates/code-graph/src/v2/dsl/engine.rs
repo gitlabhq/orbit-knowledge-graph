@@ -14,7 +14,7 @@ use crate::v2::types::{
 };
 use treesitter_visit::syntax_tree::SyntaxTree;
 use treesitter_visit::{Axis, Match};
-use treesitter_visit::{Node, Root, SupportLang};
+use treesitter_visit::{Node, Root};
 
 /// Result of a defs-only parse. Just definitions and imports.
 pub struct ParsedDefs {
@@ -625,15 +625,13 @@ impl LanguageSpec {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
         let parse_start = cpu_time::ThreadTime::now();
-        let ts_ast = language
+        let mut syntax_tree = language
             .parse_ast(source_str, timeouts.parse)
             .map_err(|detail| ParseFullError::Aborted {
                 phase: crate::v2::error::AbortPhase::Parse,
                 detail,
             })?;
         let parse_cpu = parse_start.elapsed();
-        let lang = language.to_support_lang().unwrap_or(SupportLang::Python);
-        let mut syntax_tree = SyntaxTree::from_tree_sitter(source_str, &ts_ast.inner().tree, lang);
         (self.rewrite)(&mut syntax_tree);
         let ast = Root::doc(syntax_tree);
         let root = ast.root();

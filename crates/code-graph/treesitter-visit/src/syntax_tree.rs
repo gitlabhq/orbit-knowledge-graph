@@ -224,82 +224,66 @@ impl SyntaxTree {
 
     // ── Declarative rewrites ──────────────────────────────────────
 
-    pub fn apply_rewrites(&mut self, rules: &[RewriteRule]) {
+    pub fn apply_rewrites(&mut self, rules: &[Rule]) {
         for rule in rules {
-            match rule {
-                RewriteRule::Rename {
-                    source,
-                    condition,
-                    target,
-                } => {
-                    let ids: Vec<_> = self.nodes_of_kind(source).collect();
-                    for id in ids {
-                        if condition.test(self, id) {
-                            self.set_kind(id, target);
-                        }
-                    }
+            if let Act::Custom(f) = &rule.act {
+                f(self);
+                continue;
+            }
+            let ids: Vec<_> = self.nodes_of_kind(rule.kind).collect();
+            let mut inserts: Vec<(NodeId, &str, String)> = Vec::new();
+            let mut renames: Vec<(NodeId, &str)> = Vec::new();
+            let mut texts: Vec<(NodeId, String)> = Vec::new();
+
+            for id in ids {
+                if !rule.cond.test(self, id) {
+                    continue;
                 }
-                RewriteRule::Collect {
-                    parent_kind,
-                    field,
-                    child_kinds,
-                    shallow,
-                    target_kind,
-                    transform,
-                } => {
-                    let parents: Vec<_> = self.nodes_of_kind(parent_kind).collect();
-                    let mut inserts: Vec<(NodeId, String)> = Vec::new();
-                    for parent in parents {
+                match &rule.act {
+                    Act::SetKind(k) => renames.push((id, k)),
+                    Act::Collect {
+                        field,
+                        kinds,
+                        shallow,
+                        target,
+                        tx,
+                    } => {
                         let container = if field.is_empty() {
-                            parent
+                            id
                         } else {
-                            match self.field(parent, field) {
+                            match self.field(id, field) {
                                 Some(c) => c,
                                 None => continue,
                             }
                         };
                         if *shallow {
-                            self.collect_shallow_into(
-                                container,
-                                child_kinds,
-                                &mut inserts,
-                                parent,
-                                *transform,
-                            );
+                            self.collect_shallow(container, kinds, id, *tx, *target, &mut inserts);
                         } else {
                             for &child in self.children(container) {
-                                if child_kinds.contains(&self.kind(child)) {
-                                    let text = apply_transform(self.text(child), *transform);
-                                    if !text.is_empty() {
-                                        inserts.push((parent, text));
+                                if kinds.contains(&self.kind(child)) {
+                                    let t = tx(self.text(child));
+                                    if !t.is_empty() {
+                                        inserts.push((id, target, t));
                                     }
                                 }
                             }
                         }
                     }
-                    for (parent, text) in inserts {
-                        self.insert_child(parent, target_kind, &text);
-                    }
-                }
-                RewriteRule::ExpandSymbols {
-                    method_names,
-                    target_kind,
-                    skip,
-                    limit,
-                    include_strings,
-                } => {
-                    let calls: Vec<_> = self.nodes_of_kind("call").collect();
-                    let mut inserts: Vec<(NodeId, String)> = Vec::new();
-                    for call in calls {
-                        let method = self.field_text(call, "method").unwrap_or_default();
-                        if !method_names.contains(&method) {
+                    Act::Expand {
+                        methods,
+                        target,
+                        skip,
+                        limit,
+                        strings,
+                    } => {
+                        let method = self.field_text(id, "method").unwrap_or_default();
+                        if !methods.contains(&method) {
                             continue;
                         }
-                        let Some(args) = self.field(call, "arguments") else {
+                        let Some(args) = self.field(id, "arguments") else {
                             continue;
                         };
-                        let mut matched = 0usize;
-                        let mut skipped = 0usize;
+                        let (mut matched, mut skipped) = (0usize, 0usize);
                         for &arg in self.children(args) {
                             let name = match self.kind(arg) {
                                 "simple_symbol" => self
@@ -307,7 +291,7 @@ impl SyntaxTree {
                                     .strip_prefix(':')
                                     .filter(|s| !s.is_empty())
                                     .map(|s| s.to_string()),
-                                "string" if *include_strings => self
+                                "string" if *strings => self
                                     .children_of_kind(arg, "string_content")
                                     .next()
                                     .map(|c| self.text(c).to_string())
@@ -319,108 +303,280 @@ impl SyntaxTree {
                                 skipped += 1;
                                 continue;
                             }
-                            inserts.push((call, name));
+                            inserts.push((id, target, name));
                             matched += 1;
                             if *limit > 0 && matched >= *limit {
                                 break;
                             }
                         }
                     }
-                    for (call, text) in inserts {
-                        self.insert_child(call, target_kind, &text);
-                    }
-                }
-                RewriteRule::ExtractImport {
-                    source_kind,
-                    target_kind,
-                    path_child,
-                    transform,
-                } => {
-                    let nodes: Vec<_> = self.nodes_of_kind(source_kind).collect();
-                    let mut inserts: Vec<(NodeId, String)> = Vec::new();
-                    for node in nodes {
-                        if let Some(pc) = self.children_of_kind(node, path_child).next() {
-                            let text = apply_transform(self.text(pc), *transform);
-                            if !text.is_empty() {
-                                inserts.push((node, text));
-                            }
-                        }
-                    }
-                    for (node, text) in inserts {
-                        self.set_kind(node, target_kind);
-                        self.insert_child(node, "__import_path", &text);
-                    }
-                }
-                RewriteRule::RewriteText { kind, transform } => {
-                    let ids: Vec<_> = self.nodes_of_kind(kind).collect();
-                    let mut changes: Vec<(NodeId, String)> = Vec::new();
-                    for id in ids {
-                        let text = apply_transform(self.text(id), *transform);
-                        if text != self.text(id) && !text.is_empty() {
-                            changes.push((id, text));
-                        }
-                    }
-                    for (id, text) in changes {
-                        self.set_text(id, &text);
-                    }
-                }
-                RewriteRule::MoveChildren {
-                    parent_kind,
-                    source_child_kind,
-                    target_kind,
-                    transform,
-                } => {
-                    let parents: Vec<_> = self.nodes_of_kind(parent_kind).collect();
-                    let mut inserts: Vec<(NodeId, String)> = Vec::new();
-                    for parent in parents {
-                        let texts: Vec<String> = self
-                            .children_of_kind(parent, source_child_kind)
-                            .map(|c| apply_transform(self.text(c), *transform))
+                    Act::Move { source, target, tx } => {
+                        let vals: Vec<String> = self
+                            .children_of_kind(id, source)
+                            .map(|c| tx(self.text(c)))
                             .filter(|s| !s.is_empty())
                             .collect();
-                        let target = self.children(parent).iter().copied().rev().find(|&c| {
-                            self.kind(c) != *source_child_kind && self.kind(c) != "comment"
-                        });
-                        if let Some(def) = target {
-                            for text in texts {
-                                inserts.push((def, text));
+                        let dest = self
+                            .children(id)
+                            .iter()
+                            .copied()
+                            .rev()
+                            .find(|&c| self.kind(c) != *source && self.kind(c) != "comment");
+                        if let Some(d) = dest {
+                            for v in vals {
+                                inserts.push((d, target, v));
                             }
                         }
                     }
-                    for (def, text) in inserts {
-                        self.insert_child(def, target_kind, &text);
+                    Act::SetText(tx) => {
+                        let t = tx(self.text(id));
+                        if t != self.text(id) && !t.is_empty() {
+                            texts.push((id, t));
+                        }
                     }
+                    Act::Custom(_) => unreachable!(),
                 }
-                RewriteRule::Custom(f) => f(self),
+            }
+            for (id, kind) in renames {
+                self.set_kind(id, kind);
+            }
+            for (parent, kind, text) in inserts {
+                self.insert_child(parent, kind, &text);
+            }
+            for (id, text) in texts {
+                self.set_text(id, &text);
             }
         }
     }
 
-    fn collect_shallow_into(
+    fn collect_shallow(
         &self,
         node: NodeId,
         kinds: &[&str],
-        out: &mut Vec<(NodeId, String)>,
         target: NodeId,
-        transform: fn(&str) -> String,
+        tx: fn(&str) -> String,
+        target_kind: &'static str,
+        out: &mut Vec<(NodeId, &'static str, String)>,
     ) {
         for &child in self.children(node) {
             if kinds.contains(&self.kind(child)) {
-                let text = apply_transform(self.text(child), transform);
-                if !text.is_empty() {
-                    out.push((target, text));
+                let t = tx(self.text(child));
+                if !t.is_empty() {
+                    out.push((target, target_kind, t));
                 }
             } else {
-                self.collect_shallow_into(child, kinds, out, target, transform);
+                self.collect_shallow(child, kinds, target, tx, target_kind, out);
             }
         }
     }
 }
 
-fn apply_transform(s: &str, f: fn(&str) -> String) -> String {
-    f(s)
+// ── Rewrite rules ───────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct Rule {
+    pub kind: &'static str,
+    pub cond: Cond,
+    pub act: Act,
 }
 
+#[derive(Clone)]
+pub enum Cond {
+    Any,
+    HasChild(&'static str),
+    ChildText(&'static str),
+    DescText(&'static str, &'static str),
+    ParentIs(&'static str),
+    InScope(&'static str),
+    And(Box<Cond>, Box<Cond>),
+    FieldIs(&'static str, &'static str),
+}
+
+impl Cond {
+    fn test(&self, t: &SyntaxTree, id: NodeId) -> bool {
+        match self {
+            Self::Any => true,
+            Self::HasChild(k) => t.has_child_of_kind(id, k),
+            Self::ChildText(s) => t.has_child_text(id, s),
+            Self::DescText(k, s) => t.descendant_text(id, k, s),
+            Self::ParentIs(k) => t.parent(id).is_some_and(|p| t.kind(p) == *k),
+            Self::InScope(k) => t.parent(id).and_then(|p| t.parent(p)).is_some_and(|gp| {
+                t.kind(gp) == *k
+                    || t.kind(gp) == "block" && t.parent(gp).is_some_and(|ggp| t.kind(ggp) == *k)
+            }),
+            Self::And(a, b) => a.test(t, id) && b.test(t, id),
+            Self::FieldIs(f, k) => t.field(id, f).is_some_and(|c| t.kind(c) == *k),
+        }
+    }
+    pub fn and(self, other: Cond) -> Cond {
+        Cond::And(Box::new(self), Box::new(other))
+    }
+}
+
+#[derive(Clone)]
+pub enum Act {
+    SetKind(&'static str),
+    Collect {
+        field: &'static str,
+        kinds: &'static [&'static str],
+        shallow: bool,
+        target: &'static str,
+        tx: fn(&str) -> String,
+    },
+    Expand {
+        methods: &'static [&'static str],
+        target: &'static str,
+        skip: usize,
+        limit: usize,
+        strings: bool,
+    },
+    Move {
+        source: &'static str,
+        target: &'static str,
+        tx: fn(&str) -> String,
+    },
+    SetText(fn(&str) -> String),
+    Custom(fn(&mut SyntaxTree)),
+}
+
+impl Rule {
+    pub fn when(mut self, c: Cond) -> Self {
+        self.cond = c;
+        self
+    }
+    pub fn shallow(mut self) -> Self {
+        if let Act::Collect {
+            ref mut shallow, ..
+        } = self.act
+        {
+            *shallow = true;
+        }
+        self
+    }
+    pub fn tx(mut self, f: fn(&str) -> String) -> Self {
+        match &mut self.act {
+            Act::Collect { tx, .. } | Act::Move { tx, .. } => *tx = f,
+            _ => {}
+        }
+        self
+    }
+    pub fn skip(mut self, n: usize) -> Self {
+        if let Act::Expand { ref mut skip, .. } = self.act {
+            *skip = n;
+        }
+        self
+    }
+    pub fn first(mut self) -> Self {
+        if let Act::Expand { ref mut limit, .. } = self.act {
+            *limit = 1;
+        }
+        self
+    }
+    pub fn with_strings(mut self) -> Self {
+        if let Act::Expand {
+            ref mut strings, ..
+        } = self.act
+        {
+            *strings = true;
+        }
+        self
+    }
+}
+
+// Constructors
+pub fn rename(source: &'static str, target: &'static str) -> Rule {
+    Rule {
+        kind: source,
+        cond: Cond::Any,
+        act: Act::SetKind(target),
+    }
+}
+pub fn collect(
+    parent: &'static str,
+    field: &'static str,
+    kinds: &'static [&'static str],
+    target: &'static str,
+) -> Rule {
+    Rule {
+        kind: parent,
+        cond: Cond::Any,
+        act: Act::Collect {
+            field,
+            kinds,
+            shallow: false,
+            target,
+            tx: identity,
+        },
+    }
+}
+pub fn collect_self(
+    parent: &'static str,
+    kinds: &'static [&'static str],
+    target: &'static str,
+) -> Rule {
+    collect(parent, "", kinds, target)
+}
+pub fn expand(methods: &'static [&'static str], target: &'static str) -> Rule {
+    Rule {
+        kind: "call",
+        cond: Cond::Any,
+        act: Act::Expand {
+            methods,
+            target,
+            skip: 0,
+            limit: 0,
+            strings: false,
+        },
+    }
+}
+pub fn move_children(
+    parent: &'static str,
+    source: &'static str,
+    target: &'static str,
+    tx: fn(&str) -> String,
+) -> Rule {
+    Rule {
+        kind: parent,
+        cond: Cond::Any,
+        act: Act::Move { source, target, tx },
+    }
+}
+pub fn set_text(kind: &'static str, tx: fn(&str) -> String) -> Rule {
+    Rule {
+        kind,
+        cond: Cond::Any,
+        act: Act::SetText(tx),
+    }
+}
+pub fn custom(f: fn(&mut SyntaxTree)) -> Rule {
+    Rule {
+        kind: "",
+        cond: Cond::Any,
+        act: Act::Custom(f),
+    }
+}
+
+// Conditions
+pub fn has_child(kind: &'static str) -> Cond {
+    Cond::HasChild(kind)
+}
+pub fn child_text(text: &'static str) -> Cond {
+    Cond::ChildText(text)
+}
+pub fn descendant_text(kind: &'static str, text: &'static str) -> Cond {
+    Cond::DescText(kind, text)
+}
+pub fn parent_is(kind: &'static str) -> Cond {
+    Cond::ParentIs(kind)
+}
+pub fn in_scope(kind: &'static str) -> Cond {
+    Cond::InScope(kind)
+}
+pub fn field_is(field: &'static str, kind: &'static str) -> Cond {
+    Cond::FieldIs(field, kind)
+}
+
+// Transforms
 pub fn identity(s: &str) -> String {
     s.to_string()
 }
@@ -436,265 +592,8 @@ pub fn trim_backslash(s: &str) -> String {
 pub fn strip_star(s: &str) -> String {
     s.strip_prefix('*').unwrap_or(s).to_string()
 }
-
-// ── Rewrite rules ───────────────────────────────────────────────
-
-#[derive(Clone)]
-pub enum RewriteCondition {
-    Always,
-    HasChildOfKind(&'static str),
-    HasChildText(&'static str),
-    DescendantText(&'static str, &'static str),
-    ParentIs(&'static str),
-    GrandparentIs(&'static str),
-    /// True when grandparent is X, or grandparent is "block" whose parent is X.
-    /// Handles Python's `class_definition > block > function_definition` nesting.
-    InScope(&'static str),
-    And(Box<RewriteCondition>, Box<RewriteCondition>),
-    FieldIs(&'static str, &'static str),
-}
-
-impl RewriteCondition {
-    fn test(&self, tree: &SyntaxTree, id: NodeId) -> bool {
-        match self {
-            Self::Always => true,
-            Self::HasChildOfKind(k) => tree.has_child_of_kind(id, k),
-            Self::HasChildText(t) => tree.has_child_text(id, t),
-            Self::DescendantText(k, t) => tree.descendant_text(id, k, t),
-            Self::ParentIs(k) => tree.parent(id).is_some_and(|p| tree.kind(p) == *k),
-            Self::GrandparentIs(k) => tree
-                .parent(id)
-                .and_then(|p| tree.parent(p))
-                .is_some_and(|gp| tree.kind(gp) == *k),
-            Self::InScope(k) => tree
-                .parent(id)
-                .and_then(|p| tree.parent(p))
-                .is_some_and(|gp| {
-                    tree.kind(gp) == *k
-                        || tree.kind(gp) == "block"
-                            && tree.parent(gp).is_some_and(|ggp| tree.kind(ggp) == *k)
-                }),
-            Self::And(a, b) => a.test(tree, id) && b.test(tree, id),
-            Self::FieldIs(f, k) => tree.field(id, f).is_some_and(|c| tree.kind(c) == *k),
-        }
-    }
-
-    pub fn and(self, other: RewriteCondition) -> Self {
-        Self::And(Box::new(self), Box::new(other))
-    }
-}
-
-#[derive(Clone)]
-pub enum RewriteRule {
-    Rename {
-        source: &'static str,
-        condition: RewriteCondition,
-        target: &'static str,
-    },
-    Collect {
-        parent_kind: &'static str,
-        field: &'static str,
-        child_kinds: &'static [&'static str],
-        shallow: bool,
-        target_kind: &'static str,
-        transform: fn(&str) -> String,
-    },
-    ExpandSymbols {
-        method_names: &'static [&'static str],
-        target_kind: &'static str,
-        skip: usize,
-        limit: usize,
-        include_strings: bool,
-    },
-    ExtractImport {
-        source_kind: &'static str,
-        target_kind: &'static str,
-        path_child: &'static str,
-        transform: fn(&str) -> String,
-    },
-    RewriteText {
-        kind: &'static str,
-        transform: fn(&str) -> String,
-    },
-    /// For each node of `parent_kind`, copy children of `source_child_kind`
-    /// (transformed) as virtual children of the LAST non-matching child.
-    /// Used for moving decorators from `decorated_definition` to the inner def.
-    MoveChildren {
-        parent_kind: &'static str,
-        source_child_kind: &'static str,
-        target_kind: &'static str,
-        transform: fn(&str) -> String,
-    },
-    /// Custom rewrite function for patterns that don't fit the declarative rules.
-    Custom(fn(&mut SyntaxTree)),
-}
-
-// ── Builders ────────────────────────────────────────────────────
-
-pub struct RenameBuilder {
-    source: &'static str,
-    condition: RewriteCondition,
-}
-pub struct CollectBuilder {
-    parent: &'static str,
-    field: &'static str,
-    kinds: &'static [&'static str],
-    shallow: bool,
-    transform: fn(&str) -> String,
-}
-pub struct ExpandBuilder {
-    methods: &'static [&'static str],
-    skip: usize,
-    limit: usize,
-    include_strings: bool,
-}
-
-pub fn rename(source: &'static str) -> RenameBuilder {
-    RenameBuilder {
-        source,
-        condition: RewriteCondition::Always,
-    }
-}
-pub fn collect(parent: &'static str, field: &'static str) -> CollectBuilder {
-    CollectBuilder {
-        parent,
-        field,
-        kinds: &[],
-        shallow: false,
-        transform: identity,
-    }
-}
-pub fn collect_self(parent: &'static str) -> CollectBuilder {
-    CollectBuilder {
-        parent,
-        field: "",
-        kinds: &[],
-        shallow: false,
-        transform: identity,
-    }
-}
-pub fn expand(methods: &'static [&'static str]) -> ExpandBuilder {
-    ExpandBuilder {
-        methods,
-        skip: 0,
-        limit: 0,
-        include_strings: false,
-    }
-}
-pub fn extract_import(source: &'static str, path_child: &'static str) -> RewriteRule {
-    RewriteRule::ExtractImport {
-        source_kind: source,
-        target_kind: source,
-        path_child,
-        transform: identity,
-    }
-}
-pub fn rewrite_text(kind: &'static str, transform: fn(&str) -> String) -> RewriteRule {
-    RewriteRule::RewriteText { kind, transform }
-}
-
-pub fn move_children(
-    parent_kind: &'static str,
-    source_child_kind: &'static str,
-    target_kind: &'static str,
-    transform: fn(&str) -> String,
-) -> RewriteRule {
-    RewriteRule::MoveChildren {
-        parent_kind,
-        source_child_kind,
-        target_kind,
-        transform,
-    }
-}
-
-pub fn custom(f: fn(&mut SyntaxTree)) -> RewriteRule {
-    RewriteRule::Custom(f)
-}
-
 pub fn strip_at(s: &str) -> String {
     s.trim_start_matches('@').trim().to_string()
-}
-
-impl RenameBuilder {
-    pub fn when(mut self, cond: RewriteCondition) -> Self {
-        self.condition = cond;
-        self
-    }
-    pub fn to(self, target: &'static str) -> RewriteRule {
-        RewriteRule::Rename {
-            source: self.source,
-            condition: self.condition,
-            target,
-        }
-    }
-}
-
-impl CollectBuilder {
-    pub fn kinds(mut self, k: &'static [&'static str]) -> Self {
-        self.kinds = k;
-        self
-    }
-    pub fn shallow(mut self) -> Self {
-        self.shallow = true;
-        self
-    }
-    pub fn transform(mut self, f: fn(&str) -> String) -> Self {
-        self.transform = f;
-        self
-    }
-    pub fn as_child(self, target: &'static str) -> RewriteRule {
-        RewriteRule::Collect {
-            parent_kind: self.parent,
-            field: self.field,
-            child_kinds: self.kinds,
-            shallow: self.shallow,
-            target_kind: target,
-            transform: self.transform,
-        }
-    }
-}
-
-impl ExpandBuilder {
-    pub fn skip(mut self, n: usize) -> Self {
-        self.skip = n;
-        self
-    }
-    pub fn first(mut self) -> Self {
-        self.limit = 1;
-        self
-    }
-    pub fn with_strings(mut self) -> Self {
-        self.include_strings = true;
-        self
-    }
-    pub fn as_child(self, target: &'static str) -> RewriteRule {
-        RewriteRule::ExpandSymbols {
-            method_names: self.methods,
-            target_kind: target,
-            skip: self.skip,
-            limit: self.limit,
-            include_strings: self.include_strings,
-        }
-    }
-}
-
-pub fn has_child(kind: &'static str) -> RewriteCondition {
-    RewriteCondition::HasChildOfKind(kind)
-}
-pub fn child_text(text: &'static str) -> RewriteCondition {
-    RewriteCondition::HasChildText(text)
-}
-pub fn descendant_text(kind: &'static str, text: &'static str) -> RewriteCondition {
-    RewriteCondition::DescendantText(kind, text)
-}
-pub fn parent_is(kind: &'static str) -> RewriteCondition {
-    RewriteCondition::ParentIs(kind)
-}
-pub fn in_scope(kind: &'static str) -> RewriteCondition {
-    RewriteCondition::InScope(kind)
-}
-pub fn field_is(field: &'static str, kind: &'static str) -> RewriteCondition {
-    RewriteCondition::FieldIs(field, kind)
 }
 
 // ── SgNode / Doc ────────────────────────────────────────────────

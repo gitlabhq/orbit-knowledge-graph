@@ -86,15 +86,12 @@ macro_rules! define_languages {
                 }
             }
 
-            /// Parse with tree-sitter, optionally CPU-budgeted; `Err` if there is no grammar or the parse aborted.
+            /// Parse with tree-sitter and convert to SyntaxTree.
             pub fn parse_ast(
                 &self,
                 code: &str,
                 budget: Option<std::time::Duration>,
-            ) -> Result<
-                treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
-                String,
-            > {
+            ) -> Result<treesitter_visit::syntax_tree::SyntaxTree, String> {
                 let lang = self
                     .to_support_lang()
                     .ok_or_else(|| format!("{self} has no tree-sitter grammar"))?;
@@ -102,7 +99,12 @@ macro_rules! define_languages {
                 if let Some(b) = budget {
                     guard = guard.with_budget(b);
                 }
-                treesitter_visit::Root::try_new(code, lang, &guard)
+                let ts = treesitter_visit::Root::try_new(code, lang, &guard)?;
+                Ok(treesitter_visit::syntax_tree::SyntaxTree::from_tree_sitter(
+                    code,
+                    &ts.inner().tree,
+                    lang,
+                ))
             }
         }
     };

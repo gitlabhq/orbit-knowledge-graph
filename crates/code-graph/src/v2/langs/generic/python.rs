@@ -55,53 +55,29 @@ fn python_super_types(tree: &mut SyntaxTree) {
     }
 }
 
-fn python_rewrites() -> Vec<rw::RewriteRule> {
-    let is_method = rw::in_scope("class_definition");
-    let is_async = rw::child_text("async");
-    let is_decorated = rw::parent_is("decorated_definition");
+fn python_rewrites() -> Vec<rw::Rule> {
+    let m = rw::in_scope("class_definition");
+    let a = rw::child_text("async");
+    let d = rw::parent_is("decorated_definition");
 
     vec![
-        // Function classify (8 variants, most specific first)
-        rw::rename("function_definition")
-            .when(
-                is_method
-                    .clone()
-                    .and(is_async.clone())
-                    .and(is_decorated.clone()),
-            )
-            .to("__decorated_async_method"),
-        rw::rename("function_definition")
-            .when(is_method.clone().and(is_async.clone()))
-            .to("__async_method"),
-        rw::rename("function_definition")
-            .when(is_method.clone().and(is_decorated.clone()))
-            .to("__decorated_method"),
-        rw::rename("function_definition")
-            .when(is_method)
-            .to("__method"),
-        rw::rename("function_definition")
-            .when(is_async.clone().and(is_decorated.clone()))
-            .to("__decorated_async_function"),
-        rw::rename("function_definition")
-            .when(is_async)
-            .to("__async_function"),
-        rw::rename("function_definition")
-            .when(is_decorated)
-            .to("__decorated_function"),
-        // Class classify
-        rw::rename("class_definition")
-            .when(rw::parent_is("decorated_definition"))
-            .to("__decorated_class"),
-        // Import classify
-        rw::rename("import_statement")
-            .when(rw::has_child("wildcard_import"))
-            .to("__wildcard_import_statement"),
-        rw::rename("import_statement")
-            .when(rw::has_child("aliased_import"))
-            .to("__aliased_import_statement"),
-        rw::rename("import_from_statement")
-            .when(rw::has_child("wildcard_import"))
-            .to("__wildcard_from_statement"),
+        rw::rename("function_definition", "__decorated_async_method")
+            .when(m.clone().and(a.clone()).and(d.clone())),
+        rw::rename("function_definition", "__async_method").when(m.clone().and(a.clone())),
+        rw::rename("function_definition", "__decorated_method").when(m.clone().and(d.clone())),
+        rw::rename("function_definition", "__method").when(m),
+        rw::rename("function_definition", "__decorated_async_function")
+            .when(a.clone().and(d.clone())),
+        rw::rename("function_definition", "__async_function").when(a),
+        rw::rename("function_definition", "__decorated_function").when(d),
+        rw::rename("class_definition", "__decorated_class")
+            .when(rw::parent_is("decorated_definition")),
+        rw::rename("import_statement", "__wildcard_import_statement")
+            .when(rw::has_child("wildcard_import")),
+        rw::rename("import_statement", "__aliased_import_statement")
+            .when(rw::has_child("aliased_import")),
+        rw::rename("import_from_statement", "__wildcard_from_statement")
+            .when(rw::has_child("wildcard_import")),
         // Decorators: move from decorated_definition to inner definition
         rw::move_children(
             "decorated_definition",

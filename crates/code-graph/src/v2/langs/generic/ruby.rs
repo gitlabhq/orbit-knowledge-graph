@@ -468,36 +468,32 @@ const ATTR_METHODS: &[&str] = &[
     "cattr_writer",
 ];
 
-fn ruby_rewrites() -> Vec<rw::RewriteRule> {
+fn ruby_rewrites() -> Vec<rw::Rule> {
     vec![
-        // Synthetic defs from DSL methods
-        rw::expand(ATTR_METHODS).as_child("__property"),
-        rw::expand(&["delegate"]).as_child("__method"),
-        rw::expand(&["def_delegators", "def_delegator"])
-            .skip(1)
-            .as_child("__method"),
-        rw::expand(&["define_method"])
+        rw::expand(ATTR_METHODS, "__property"),
+        rw::expand(&["delegate"], "__method"),
+        rw::expand(&["def_delegators", "def_delegator"], "__method").skip(1),
+        rw::expand(&["define_method"], "__method")
             .first()
-            .with_strings()
-            .as_child("__method"),
-        rw::expand(&["scope"]).first().as_child("__static_method"),
-        rw::expand(&[
-            "has_many",
-            "belongs_to",
-            "has_one",
-            "has_and_belongs_to_many",
-        ])
-        .first()
-        .as_child("__method"),
-        // alias → __method from name field
-        rw::collect_self("alias")
-            .kinds(&["method_name", "identifier", "constant", "operator"])
-            .as_child("__method"),
-        // send/public_send/__send__ → rewrite method text
+            .with_strings(),
+        rw::expand(&["scope"], "__static_method").first(),
+        rw::expand(
+            &[
+                "has_many",
+                "belongs_to",
+                "has_one",
+                "has_and_belongs_to_many",
+            ],
+            "__method",
+        )
+        .first(),
+        rw::collect_self(
+            "alias",
+            &["method_name", "identifier", "constant", "operator"],
+            "__method",
+        ),
         rw::custom(ruby_send_rewrite),
-        // Super types (include/extend/prepend + superclass)
         rw::custom(ruby_super_types),
-        // Imports
         rw::custom(ruby_import_rewrite),
     ]
 }
