@@ -1130,6 +1130,19 @@ impl FamilyPipeline {
             })
             .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
+        let import_rewriters: FxHashMap<Language, Box<crate::v2::dsl::types::ImportRewriter>> =
+            member_ctxs
+                .iter()
+                .filter_map(|(&language, lctx)| {
+                    let build = lctx.spec.hooks.import_rewriter?;
+                    let paths = files
+                        .iter()
+                        .filter(|file| file.language == language)
+                        .map(|file| file.path.as_str())
+                        .collect::<Vec<_>>();
+                    Some((language, build(&paths, expected_sep)))
+                })
+                .collect();
 
         // ── Phase 1a: parallel parse with per-file spec ─────────
         let pb = progress_bar(file_count as u64, "parse + graph");
@@ -1205,10 +1218,17 @@ impl FamilyPipeline {
                     walk: ctx.config.per_file_walk_timeout,
                     ssa: ctx.config.per_file_ssa_timeout,
                 };
-                let result = match lctx
-                    .spec
-                    .parse_full_collect(&source, &f.path, f.language, tracer, timeouts)
-                {
+                let result = lctx.spec.parse_full_collect_with_options(
+                    &source,
+                    &f.path,
+                    f.language,
+                    tracer,
+                    timeouts,
+                    crate::v2::dsl::engine::ParseFullOptions {
+                        import_rewriter: import_rewriters.get(&f.language).map(|r| r.as_ref()),
+                    },
+                );
+                let result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
                         tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");

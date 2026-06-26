@@ -8,9 +8,15 @@ use crate::v2::types::{DefKind, DefinitionMetadata};
 
 use super::extractors::MetadataRule;
 
-/// Signature for import path resolution hooks.
-/// Called with (raw_path, module_scope, separator). Returns resolved path or None.
-pub type ImportPathResolver = fn(&str, &str, &str) -> Option<String>;
+/// A per-family import rewriter. Given an import (mutated in place) plus the
+/// importing module's scope and the FQN separator, it may rewrite the import
+/// path and optionally return a local-binding scope-name override.
+pub type ImportRewriter = dyn Fn(&mut crate::v2::types::CanonicalImport, Option<&str>, &str) -> Option<String>
+    + Send
+    + Sync;
+
+/// Builds an [`ImportRewriter`] from a parse family's file paths and separator.
+pub type ImportRewriterBuilder = fn(paths: &[&str], sep: &str) -> Box<ImportRewriter>;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
@@ -794,11 +800,9 @@ pub struct LanguageHooks {
     /// to the new def. Handles decorators/annotations that are CST siblings
     /// of the decorated function/class definition.
     pub adopt_sibling_refs: &'static [&'static str],
-    /// Resolve an import path relative to the current module scope.
-    /// Called with (raw_path, module_scope, separator). Returns the
-    /// resolved absolute path, or None to keep the raw path.
-    /// Handles Python's `from .models import User` → `package.models`.
-    pub resolve_import_path: Option<ImportPathResolver>,
+    /// Build an import rewriter from the current parse family's file paths.
+    /// Resolves language-specific source-root or relative import prefixes.
+    pub import_rewriter: Option<ImportRewriterBuilder>,
     /// Node kinds that represent expression-bodied function bodies
     /// (e.g. Kotlin's `function_body` when it contains `=`).
     /// When the engine encounters one of these nodes with a `=` child,

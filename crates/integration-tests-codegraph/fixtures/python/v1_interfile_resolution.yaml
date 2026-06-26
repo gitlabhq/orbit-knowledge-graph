@@ -78,7 +78,7 @@ fixtures:
 tests:
   # ── T1: test_absolute_import_simple_module ──
   - name: "Absolute import resolves (from utils import helper)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.test_absolute_simple.use_helper'
@@ -89,7 +89,7 @@ tests:
 
   # ── T2: test_absolute_import_package_module ──
   - name: "Dotted absolute import resolves (from package.module import module_func)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.test_absolute_dotted.use_module'

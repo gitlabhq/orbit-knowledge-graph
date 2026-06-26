@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::types::{LanguageSpec, Rule};
+use super::types::{ImportRewriter, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -15,6 +15,11 @@ use crate::v2::types::{
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Axis, Match};
 use treesitter_visit::{Node, SupportLang};
+
+#[derive(Default)]
+pub(crate) struct ParseFullOptions<'a> {
+    pub import_rewriter: Option<&'a ImportRewriter>,
+}
 
 /// Result of a defs-only parse. Just definitions and imports.
 pub struct ParsedDefs {
@@ -37,10 +42,12 @@ fn import_scope_name(
     hooks: &super::types::LanguageHooks,
     imp: &CanonicalImport,
     sep: &str,
+    scope_name_override: Option<&str>,
 ) -> Option<String> {
-    hooks
-        .import_scope_name
-        .and_then(|f| f(imp, sep))
+    imp.alias
+        .clone()
+        .or_else(|| scope_name_override.map(ToString::to_string))
+        .or_else(|| hooks.import_scope_name.and_then(|f| f(imp, sep)))
         .or_else(|| default_import_scope_name(imp, sep))
 }
 
@@ -434,8 +441,6 @@ impl LanguageSpec {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
         imports: &mut Vec<CanonicalImport>,
-        module_scope: Option<&str>,
-        sep: &str,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -452,14 +457,7 @@ impl LanguageSpec {
         let label = rule.resolve_label(node);
 
         if let Some(child_kinds) = rule.multi_child_kinds {
-            let raw_path = rule.extract().apply(node).unwrap_or_default();
-            let base_path = if let Some(resolve) = self.hooks.resolve_import_path
-                && let Some(ms) = module_scope
-            {
-                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
-            } else {
-                raw_path
-            };
+            let base_path = rule.extract().apply(node).unwrap_or_default();
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -535,13 +533,7 @@ impl LanguageSpec {
                 }
             }
         } else if let Some(raw_path) = rule.extract().apply(node) {
-            let full_path = if let Some(resolve) = self.hooks.resolve_import_path
-                && let Some(ms) = module_scope
-            {
-                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
-            } else {
-                raw_path
-            };
+            let full_path = raw_path;
             let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
             // in `import com.example.*`) or the always_wildcard flag (e.g. C#
@@ -614,6 +606,25 @@ impl LanguageSpec {
         tracer: &Tracer,
         timeouts: PhaseTimeouts,
     ) -> Result<ParseFullResult, ParseFullError> {
+        self.parse_full_collect_with_options(
+            source,
+            file_path,
+            language,
+            tracer,
+            timeouts,
+            ParseFullOptions::default(),
+        )
+    }
+
+    pub(crate) fn parse_full_collect_with_options(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+        tracer: &Tracer,
+        timeouts: PhaseTimeouts,
+        options: ParseFullOptions<'_>,
+    ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
         let parse_start = cpu_time::ThreadTime::now();
@@ -628,7 +639,13 @@ impl LanguageSpec {
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path, timeouts.walk);
+        let mut state = WalkFullState::new(
+            &arena,
+            tracer,
+            file_path,
+            timeouts.walk,
+            options.import_rewriter,
+        );
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -1064,13 +1081,18 @@ impl LanguageSpec {
                 .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
-                let ms = state.scope_stack.first().map(|s| s.as_ref());
-                self.evaluate_imports(node, nk, &mut state.imports, ms, sep);
+                self.evaluate_imports(node, nk, &mut state.imports);
             }
+            let module_scope = state.scope_stack.first().map(ToString::to_string);
+            let module_scope = module_scope.as_deref();
+            let import_rewriter = state.import_rewriter;
             for idx in import_count_before..state.imports.len() {
+                let scope_override = import_rewriter
+                    .and_then(|rewrite| rewrite(&mut state.imports[idx], module_scope, sep));
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
-                let effective_name = import_scope_name(&self.hooks, imp, sep);
+                let effective_name =
+                    import_scope_name(&self.hooks, imp, sep, scope_override.as_deref());
                 trace!(
                     state.tracer,
                     ImportRecorded {
@@ -1508,6 +1530,7 @@ struct WalkFullState<'a> {
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
+    import_rewriter: Option<&'a ImportRewriter>,
     top_level_depth: usize,
     in_return: bool,
     tracer: &'a Tracer,
@@ -1522,6 +1545,7 @@ impl<'a> WalkFullState<'a> {
         tracer: &'a Tracer,
         file_path: &'a str,
         budget: Option<std::time::Duration>,
+        import_rewriter: Option<&'a ImportRewriter>,
     ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
@@ -1538,6 +1562,7 @@ impl<'a> WalkFullState<'a> {
             pending_refs: Vec::new(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
+            import_rewriter,
             top_level_depth: 0,
             in_return: false,
             tracer,
