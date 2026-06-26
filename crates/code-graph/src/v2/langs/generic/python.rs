@@ -11,7 +11,7 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::BindingKind;
 
-use crate::v2::dsl::types::{ImportTransformer, LanguageHooks};
+use crate::v2::dsl::types::LanguageHooks;
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
@@ -101,7 +101,7 @@ impl DslLanguage for PythonDsl {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["decorator"],
-            import_transformer: Some(build_python_import_transformer),
+            import_rewriter: Some(build_python_import_rewriter),
             import_scope_name: Some(python_import_scope_name),
             ..LanguageHooks::default()
         }
@@ -370,12 +370,12 @@ impl HasRules for PythonRules {
     }
 }
 
-pub(crate) struct PythonImportTransformer {
+struct PythonImportRewriter {
     importable_paths: rustc_hash::FxHashSet<String>,
 }
 
-impl PythonImportTransformer {
-    pub(crate) fn from_paths<'a>(paths: impl IntoIterator<Item = &'a str>, sep: &str) -> Self {
+impl PythonImportRewriter {
+    fn from_paths<'a>(paths: impl IntoIterator<Item = &'a str>, sep: &str) -> Self {
         let mut importable_paths = rustc_hash::FxHashSet::default();
         for module in paths
             .into_iter()
@@ -387,12 +387,7 @@ impl PythonImportTransformer {
         Self { importable_paths }
     }
 
-    pub(crate) fn resolve_source_root(
-        &self,
-        raw_path: &str,
-        module_scope: &str,
-        sep: &str,
-    ) -> Option<String> {
+    fn resolve_source_root(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
         if raw_path.is_empty() || raw_path.starts_with('.') {
             return None;
         }
@@ -413,29 +408,28 @@ impl PythonImportTransformer {
         }
         resolved
     }
-}
 
-impl ImportTransformer for PythonImportTransformer {
-    fn transform(
+    fn rewrite(
         &self,
         import: &mut CanonicalImport,
-        cx: ImportTransformContext<'_>,
-    ) -> ImportTransformResult {
-        let Some(module_scope) = cx.module_scope else {
-            return ImportTransformResult::default();
-        };
+        module_scope: Option<&str>,
+        sep: &str,
+    ) -> Option<String> {
+        let module_scope = module_scope?;
 
-        if let Some(path) = resolve_python_relative_import(&import.path, module_scope, cx.sep) {
+        if let Some(path) = resolve_python_relative_import(&import.path, module_scope, sep) {
             import.path = path;
-            return ImportTransformResult::default();
+            return None;
         }
 
-        if let Some(path) = self.resolve_source_root(&import.path, module_scope, cx.sep) {
+        if let Some(path) = self.resolve_source_root(&import.path, module_scope, sep) {
+            // The local binding keeps the originally-written first segment, so
+            // capture it before the path gains the source-root prefix.
             let scope_name =
                 if import.import_type == "Import" || import.import_type == "AliasedImport" {
                     import
                         .path
-                        .split(cx.sep)
+                        .split(sep)
                         .next()
                         .filter(|segment| !segment.is_empty())
                         .map(ToString::to_string)
@@ -443,23 +437,16 @@ impl ImportTransformer for PythonImportTransformer {
                     None
                 };
             import.path = path;
-            return scope_name.map_or_else(ImportTransformResult::default, |scope_name| {
-                ImportTransformResult::default().with_scope_name(scope_name)
-            });
+            return scope_name;
         }
 
-        ImportTransformResult::default()
+        None
     }
 }
 
-fn build_python_import_transformer(cx: ImportTransformConfig<'_>) -> Box<dyn ImportTransformer> {
-    Box::new(PythonImportTransformer::from_paths(
-        cx.files
-            .iter()
-            .filter(|file| file.language == cx.language)
-            .map(|file| file.path),
-        cx.sep,
-    ))
+fn build_python_import_rewriter(paths: &[&str], sep: &str) -> Box<ImportRewriter> {
+    let rewriter = PythonImportRewriter::from_paths(paths.iter().copied(), sep);
+    Box::new(move |import, module_scope, sep| rewriter.rewrite(import, module_scope, sep))
 }
 
 fn insert_importable_path_prefixes(
@@ -566,7 +553,7 @@ mod tests {
     use crate::v2::types::{ImportBindingKind, ImportMode, Range};
 
     fn transform_import(
-        transformer: &PythonImportTransformer,
+        rewriter: &PythonImportRewriter,
         import_type: &'static str,
         path: &str,
         name: Option<&str>,
@@ -584,14 +571,8 @@ mod tests {
             is_type_only: false,
             wildcard: false,
         };
-        let result = transformer.transform(
-            &mut import,
-            ImportTransformContext {
-                module_scope: Some(module_scope),
-                sep: ".",
-            },
-        );
-        (import.path, result.scope_name)
+        let scope_name = rewriter.rewrite(&mut import, Some(module_scope), ".");
+        (import.path, scope_name)
     }
 
     fn parse(
@@ -731,7 +712,7 @@ mod tests {
 
     #[test]
     fn import_transformer_uses_actual_module_files() {
-        let transformer = PythonImportTransformer::from_paths(
+        let transformer = PythonImportRewriter::from_paths(
             [
                 "lib/myapp/service.py",
                 "lib/myapp/worker.py",
@@ -763,7 +744,7 @@ mod tests {
 
     #[test]
     fn import_transformer_uses_module_parent_packages() {
-        let transformer = PythonImportTransformer::from_paths(
+        let transformer = PythonImportRewriter::from_paths(
             ["src/package/module.py", "src/test_package_import.py"],
             ".",
         );
@@ -782,7 +763,7 @@ mod tests {
 
     #[test]
     fn import_transformer_rejects_ambiguous_ancestor_matches() {
-        let transformer = PythonImportTransformer::from_paths(
+        let transformer = PythonImportRewriter::from_paths(
             [
                 "src/alpha/common/scoring.py",
                 "src/alpha/other/common/scoring.py",
@@ -805,7 +786,7 @@ mod tests {
 
     #[test]
     fn import_transformer_handles_relative_imports() {
-        let transformer = PythonImportTransformer::from_paths(std::iter::empty(), ".");
+        let transformer = PythonImportRewriter::from_paths(std::iter::empty(), ".");
 
         assert_eq!(
             transform_import(

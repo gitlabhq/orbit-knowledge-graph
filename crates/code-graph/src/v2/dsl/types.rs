@@ -4,49 +4,19 @@ use treesitter_visit::predicate::Pred;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-use crate::v2::config::Language;
 use crate::v2::types::{DefKind, DefinitionMetadata};
 
 use super::extractors::MetadataRule;
 
-pub struct ImportTransformContext<'a> {
-    pub module_scope: Option<&'a str>,
-    pub sep: &'a str,
-}
+/// A per-family import rewriter. Given an import (mutated in place) plus the
+/// importing module's scope and the FQN separator, it may rewrite the import
+/// path and optionally return a local-binding scope-name override.
+pub type ImportRewriter = dyn Fn(&mut crate::v2::types::CanonicalImport, Option<&str>, &str) -> Option<String>
+    + Send
+    + Sync;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ImportTransformResult {
-    pub scope_name: Option<String>,
-}
-
-impl ImportTransformResult {
-    pub fn with_scope_name(mut self, scope_name: impl Into<String>) -> Self {
-        self.scope_name = Some(scope_name.into());
-        self
-    }
-}
-
-pub trait ImportTransformer: Send + Sync {
-    fn transform(
-        &self,
-        import: &mut crate::v2::types::CanonicalImport,
-        cx: ImportTransformContext<'_>,
-    ) -> ImportTransformResult;
-}
-
-#[derive(Clone, Copy)]
-pub struct ImportTransformFile<'a> {
-    pub language: Language,
-    pub path: &'a str,
-}
-
-pub struct ImportTransformConfig<'a> {
-    pub language: Language,
-    pub files: &'a [ImportTransformFile<'a>],
-    pub sep: &'a str,
-}
-
-pub type ImportTransformerFactory = fn(ImportTransformConfig<'_>) -> Box<dyn ImportTransformer>;
+/// Builds an [`ImportRewriter`] from a parse family's file paths and separator.
+pub type ImportRewriterBuilder = fn(paths: &[&str], sep: &str) -> Box<ImportRewriter>;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
@@ -830,8 +800,9 @@ pub struct LanguageHooks {
     /// to the new def. Handles decorators/annotations that are CST siblings
     /// of the decorated function/class definition.
     pub adopt_sibling_refs: &'static [&'static str],
-    /// Build an import transformer from the current parse family.
-    pub import_transformer: Option<ImportTransformerFactory>,
+    /// Build an import rewriter from the current parse family's file paths.
+    /// Resolves language-specific source-root or relative import prefixes.
+    pub import_rewriter: Option<ImportRewriterBuilder>,
     /// Node kinds that represent expression-bodied function bodies
     /// (e.g. Kotlin's `function_body` when it contains `=`).
     /// When the engine encounters one of these nodes with a `=` child,

@@ -1156,30 +1156,19 @@ impl FamilyPipeline {
             })
             .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
-        let import_transform_files = files
-            .iter()
-            .map(|file| crate::v2::dsl::types::ImportTransformFile {
-                language: file.language,
-                path: file.path.as_str(),
-            })
-            .collect::<Vec<_>>();
-        let import_transformers: FxHashMap<
-            Language,
-            Box<dyn crate::v2::dsl::types::ImportTransformer>,
-        > = member_ctxs
-            .iter()
-            .filter_map(|(&language, lctx)| {
-                let build = lctx.spec.hooks.import_transformer?;
-                Some((
-                    language,
-                    build(crate::v2::dsl::types::ImportTransformConfig {
-                        language,
-                        files: &import_transform_files,
-                        sep: expected_sep,
-                    }),
-                ))
-            })
-            .collect();
+        let import_rewriters: FxHashMap<Language, Box<crate::v2::dsl::types::ImportRewriter>> =
+            member_ctxs
+                .iter()
+                .filter_map(|(&language, lctx)| {
+                    let build = lctx.spec.hooks.import_rewriter?;
+                    let paths = files
+                        .iter()
+                        .filter(|file| file.language == language)
+                        .map(|file| file.path.as_str())
+                        .collect::<Vec<_>>();
+                    Some((language, build(&paths, expected_sep)))
+                })
+                .collect();
 
         // ── Phase 1a: parallel parse with per-file spec ─────────
         let pb = progress_bar(file_count as u64, "parse + graph");
@@ -1262,9 +1251,7 @@ impl FamilyPipeline {
                     tracer,
                     timeouts,
                     crate::v2::dsl::engine::ParseFullOptions {
-                        import_transformer: import_transformers
-                            .get(&f.language)
-                            .map(|transformer| transformer.as_ref()),
+                        import_rewriter: import_rewriters.get(&f.language).map(|r| r.as_ref()),
                     },
                 );
                 let result = match result {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::types::{ImportTransformContext, ImportTransformer, LanguageSpec, Rule};
+use super::types::{ImportRewriter, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -16,11 +16,9 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Axis, Match};
 use treesitter_visit::{Node, SupportLang};
 
-type ImportTransformerOverride<'a> = &'a dyn ImportTransformer;
-
 #[derive(Default)]
 pub(crate) struct ParseFullOptions<'a> {
-    pub import_transformer: Option<ImportTransformerOverride<'a>>,
+    pub import_rewriter: Option<&'a ImportRewriter>,
 }
 
 /// Result of a defs-only parse. Just definitions and imports.
@@ -442,7 +440,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-        state: &mut WalkFullState<'_>,
+        imports: &mut Vec<CanonicalImport>,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -459,8 +457,7 @@ impl LanguageSpec {
         let label = rule.resolve_label(node);
 
         if let Some(child_kinds) = rule.multi_child_kinds {
-            let raw_path = rule.extract().apply(node).unwrap_or_default();
-            let base_path = raw_path.clone();
+            let base_path = rule.extract().apply(node).unwrap_or_default();
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -480,26 +477,22 @@ impl LanguageSpec {
                         } else {
                             infer_import_binding_kind(name.as_deref(), alias.as_deref(), false)
                         };
-                        state.push_import(
-                            CanonicalImport {
-                                import_type: label,
-                                path,
-                                binding_kind,
-                                mode: ImportMode::Declarative,
-                                name,
-                                alias,
-                                scope_fqn: None,
-                                range,
-                                is_type_only: false,
-                                wildcard: false,
-                            },
-                            None,
-                        );
+                        imports.push(CanonicalImport {
+                            import_type: label,
+                            path,
+                            binding_kind,
+                            mode: ImportMode::Declarative,
+                            name,
+                            alias,
+                            scope_fqn: None,
+                            range,
+                            is_type_only: false,
+                            wildcard: false,
+                        });
                     }
                 } else if child_kinds.iter().any(|&k| k == ck.as_ref()) {
                     let child_text = child.text().to_string();
-                    if !base_path.is_empty() && (child_text == base_path || child_text == raw_path)
-                    {
+                    if !base_path.is_empty() && child_text == base_path {
                         continue;
                     }
                     let (path, name) = if base_path.is_empty() {
@@ -512,37 +505,31 @@ impl LanguageSpec {
                     } else {
                         infer_import_binding_kind(name.as_deref(), None, false)
                     };
-                    state.push_import(
-                        CanonicalImport {
-                            import_type: label,
-                            binding_kind,
-                            mode: ImportMode::Declarative,
-                            path,
-                            name,
-                            alias: None,
-                            scope_fqn: None,
-                            range,
-                            is_type_only: false,
-                            wildcard: false,
-                        },
-                        None,
-                    );
+                    imports.push(CanonicalImport {
+                        import_type: label,
+                        binding_kind,
+                        mode: ImportMode::Declarative,
+                        path,
+                        name,
+                        alias: None,
+                        scope_fqn: None,
+                        range,
+                        is_type_only: false,
+                        wildcard: false,
+                    });
                 } else if rule.wildcard_child_kind.is_some_and(|wk| wk == ck.as_ref()) {
-                    state.push_import(
-                        CanonicalImport {
-                            import_type: label,
-                            binding_kind: ImportBindingKind::Named,
-                            mode: ImportMode::Declarative,
-                            path: base_path.clone(),
-                            name: Some(rule.wildcard_symbol.to_string()),
-                            alias: None,
-                            scope_fqn: None,
-                            range,
-                            is_type_only: false,
-                            wildcard: true,
-                        },
-                        None,
-                    );
+                    imports.push(CanonicalImport {
+                        import_type: label,
+                        binding_kind: ImportBindingKind::Named,
+                        mode: ImportMode::Declarative,
+                        path: base_path.clone(),
+                        name: Some(rule.wildcard_symbol.to_string()),
+                        alias: None,
+                        scope_fqn: None,
+                        range,
+                        is_type_only: false,
+                        wildcard: true,
+                    });
                 }
             }
         } else if let Some(raw_path) = rule.extract().apply(node) {
@@ -561,21 +548,18 @@ impl LanguageSpec {
 
             if is_wildcard_import {
                 // Wildcard import: path is the full extracted name, no split needed.
-                state.push_import(
-                    CanonicalImport {
-                        import_type: label,
-                        binding_kind: ImportBindingKind::Named,
-                        mode: ImportMode::Declarative,
-                        path: full_path,
-                        name: None,
-                        alias: None,
-                        scope_fqn: None,
-                        range,
-                        is_type_only: false,
-                        wildcard: true,
-                    },
-                    None,
-                );
+                imports.push(CanonicalImport {
+                    import_type: label,
+                    binding_kind: ImportBindingKind::Named,
+                    mode: ImportMode::Declarative,
+                    path: full_path,
+                    name: None,
+                    alias: None,
+                    scope_fqn: None,
+                    range,
+                    is_type_only: false,
+                    wildcard: true,
+                });
             } else {
                 let (path, name) = if rule.should_split() {
                     rule.split_path_name(&full_path)
@@ -585,21 +569,18 @@ impl LanguageSpec {
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
                 let binding_kind =
                     infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
-                state.push_import(
-                    CanonicalImport {
-                        import_type: label,
-                        binding_kind,
-                        mode: ImportMode::Declarative,
-                        path,
-                        name,
-                        alias,
-                        scope_fqn: None,
-                        range,
-                        is_type_only: false,
-                        wildcard: is_wildcard,
-                    },
-                    None,
-                );
+                imports.push(CanonicalImport {
+                    import_type: label,
+                    binding_kind,
+                    mode: ImportMode::Declarative,
+                    path,
+                    name,
+                    alias,
+                    scope_fqn: None,
+                    range,
+                    is_type_only: false,
+                    wildcard: is_wildcard,
+                });
             }
         }
     }
@@ -663,7 +644,7 @@ impl LanguageSpec {
             tracer,
             file_path,
             timeouts.walk,
-            options.import_transformer,
+            options.import_rewriter,
         );
 
         if let Some(f) = self.hooks.module_scope
@@ -1100,20 +1081,18 @@ impl LanguageSpec {
                 .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
-                self.evaluate_imports(node, nk, state);
+                self.evaluate_imports(node, nk, &mut state.imports);
             }
             let module_scope = state.scope_stack.first().map(ToString::to_string);
             let module_scope = module_scope.as_deref();
+            let import_rewriter = state.import_rewriter;
             for idx in import_count_before..state.imports.len() {
-                state.transform_import(idx, module_scope, sep);
+                let scope_override = import_rewriter
+                    .and_then(|rewrite| rewrite(&mut state.imports[idx], module_scope, sep));
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
-                let effective_name = import_scope_name(
-                    &self.hooks,
-                    imp,
-                    sep,
-                    state.import_scope_overrides.get(&idx).map(String::as_str),
-                );
+                let effective_name =
+                    import_scope_name(&self.hooks, imp, sep, scope_override.as_deref());
                 trace!(
                     state.tracer,
                     ImportRecorded {
@@ -1548,11 +1527,10 @@ struct WalkFullState<'a> {
     enclosing_def_stack: Vec<u32>,
     defs: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
-    import_scope_overrides: rustc_hash::FxHashMap<usize, String>,
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
-    import_transformer: Option<ImportTransformerOverride<'a>>,
+    import_rewriter: Option<&'a ImportRewriter>,
     top_level_depth: usize,
     in_return: bool,
     tracer: &'a Tracer,
@@ -1567,7 +1545,7 @@ impl<'a> WalkFullState<'a> {
         tracer: &'a Tracer,
         file_path: &'a str,
         budget: Option<std::time::Duration>,
-        import_transformer: Option<ImportTransformerOverride<'a>>,
+        import_rewriter: Option<&'a ImportRewriter>,
     ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
@@ -1581,38 +1559,16 @@ impl<'a> WalkFullState<'a> {
             enclosing_def_stack: Vec::new(),
             defs: Vec::new(),
             imports: Vec::new(),
-            import_scope_overrides: rustc_hash::FxHashMap::default(),
             pending_refs: Vec::new(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
-            import_transformer,
+            import_rewriter,
             top_level_depth: 0,
             in_return: false,
             tracer,
             file_path,
             budget: budget.map(treesitter_visit::CpuBudget::start),
             timed_out: false,
-        }
-    }
-
-    fn push_import(&mut self, import: CanonicalImport, scope_name: Option<String>) {
-        let idx = self.imports.len();
-        self.imports.push(import);
-        if let Some(scope_name) = scope_name {
-            self.import_scope_overrides.insert(idx, scope_name);
-        }
-    }
-
-    fn transform_import(&mut self, idx: usize, module_scope: Option<&str>, sep: &str) {
-        let Some(transformer) = self.import_transformer else {
-            return;
-        };
-        let result = transformer.transform(
-            &mut self.imports[idx],
-            ImportTransformContext { module_scope, sep },
-        );
-        if let Some(scope_name) = result.scope_name {
-            self.import_scope_overrides.insert(idx, scope_name);
         }
     }
 
