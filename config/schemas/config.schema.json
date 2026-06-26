@@ -249,8 +249,7 @@
             "cron": "0 */5 * * * *"
           },
           "namespace": {
-            "cron": "*/30 * * * * *",
-            "max_lookback_secs": 30
+            "cron": "*/30 * * * * *"
           },
           "namespace-deletion": {
             "cron": "0 0 3 * * *"
@@ -1014,12 +1013,6 @@
             "null"
           ],
           "default": null
-        },
-        "max_lookback_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 30,
-          "minimum": 0
         }
       }
     },
@@ -1493,8 +1486,7 @@
               "cron": "0 */5 * * * *"
             },
             "namespace": {
-              "cron": "*/30 * * * * *",
-              "max_lookback_secs": 30
+              "cron": "*/30 * * * * *"
             },
             "namespace-deletion": {
               "cron": "0 0 3 * * *"
@@ -1542,8 +1534,7 @@
         "namespace": {
           "$ref": "#/$defs/NamespaceDispatcherConfig",
           "default": {
-            "cron": "*/30 * * * * *",
-            "max_lookback_secs": 30
+            "cron": "*/30 * * * * *"
           }
         },
         "namespace-deletion": {
