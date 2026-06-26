@@ -28,7 +28,7 @@ pub(super) struct DatalakeEnabledNamespaceReader {
 }
 
 impl DatalakeEnabledNamespaceReader {
-    fn new(datalake: ArrowClickHouseClient) -> Self {
+    pub(super) fn new(datalake: ArrowClickHouseClient) -> Self {
         let deleted_column = ontology::siphon_deleted_column();
         Self {
             datalake,

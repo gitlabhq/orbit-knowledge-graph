@@ -10,9 +10,11 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
-use indexer::checkpoint::ClickHouseCheckpointStore;
+use indexer::checkpoint::{CheckpointStore, ClickHouseCheckpointStore};
+use indexer::durability::WriteDurability;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
+use indexer::orchestrator::scheduled::namespace::CHECKPOINT_KEY;
 use indexer::orchestrator::scheduled::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::orchestrator::siphon::{CdcContext, EnabledNamespacesRoute, Route};
@@ -60,6 +62,16 @@ fn namespace(id: i64, traversal_path: &str) -> Namespace {
     Namespace {
         id,
         traversal_path: traversal_path.to_string(),
+    }
+}
+
+/// A lookback wide enough that a seeded checkpoint stays within the window for
+/// the whole test, so the dispatcher keeps to the incremental change-detection
+/// path regardless of how long the testcontainer setup takes.
+fn incremental_dispatcher_config() -> NamespaceDispatcherConfig {
+    NamespaceDispatcherConfig {
+        max_lookback_secs: 86_400,
+        ..Default::default()
     }
 }
 
@@ -131,6 +143,7 @@ struct TestContext {
     clickhouse: ClickHouseContext,
     _nats: testcontainers::ContainerAsync<Nats>,
     nats_url: String,
+    created_at: DateTime<Utc>,
 }
 
 impl TestContext {
@@ -143,6 +156,7 @@ impl TestContext {
             clickhouse,
             _nats: nats,
             nats_url,
+            created_at: Utc::now(),
         }
     }
 
@@ -257,7 +271,20 @@ impl TestContext {
         }
     }
 
-    async fn dispatch_namespace_changes(&self) -> Vec<NamespaceRequest> {
+    /// Pins the change-detection lower bound to before the test's data inserts
+    /// so `run()` takes the incremental path instead of the cold-start sweep.
+    async fn seed_change_checkpoint(&self) {
+        let store = ClickHouseCheckpointStore::new(Arc::new(self.clickhouse.config.build_client()));
+        store
+            .save_completed(CHECKPOINT_KEY, &self.created_at, WriteDurability::Durable)
+            .await
+            .unwrap();
+    }
+
+    async fn run_namespace_dispatcher(
+        &self,
+        config: NamespaceDispatcherConfig,
+    ) -> Vec<NamespaceRequest> {
         let services = indexer::orchestrator::scheduled::connect(&self.nats_config())
             .await
             .unwrap();
@@ -269,7 +296,7 @@ impl TestContext {
                 self.clickhouse.config.build_client(),
             ))),
             ScheduledTaskMetrics::new(),
-            NamespaceDispatcherConfig::default(),
+            config,
             Arc::new(indexer::campaign::CampaignState::new()),
             &ontology,
         );
@@ -277,6 +304,17 @@ impl TestContext {
         dispatcher.run().await.unwrap();
 
         self.consume_namespace_requests().await
+    }
+
+    async fn dispatch_namespace_changes(&self) -> Vec<NamespaceRequest> {
+        self.seed_change_checkpoint().await;
+        self.run_namespace_dispatcher(incremental_dispatcher_config())
+            .await
+    }
+
+    async fn dispatch_namespace_cold_start(&self) -> Vec<NamespaceRequest> {
+        self.run_namespace_dispatcher(NamespaceDispatcherConfig::default())
+            .await
     }
 
     async fn dispatch_enabled_namespace_cdc(
@@ -447,6 +485,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         ])
         .await;
     context.given_changed_work_item("2/200/").await;
+    context.seed_change_checkpoint().await;
 
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
@@ -470,7 +509,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             datalake,
             checkpoint_store,
             metrics,
-            NamespaceDispatcherConfig::default(),
+            incremental_dispatcher_config(),
             Arc::new(indexer::campaign::CampaignState::new()),
             &ontology,
         )),
@@ -521,6 +560,19 @@ async fn namespace_dispatcher_detects_project_and_merge_request_sources() {
         .await;
 
     let namespaces = context.dispatch_namespace_changes().await;
+
+    assert_dispatched_namespaces(&namespaces, &[(100, "1/100/"), (200, "2/200/")]);
+}
+
+#[tokio::test]
+async fn namespace_dispatcher_sweeps_all_enabled_on_cold_start() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([namespace(100, "1/100/"), namespace(200, "2/200/")])
+        .await;
+
+    let namespaces = context.dispatch_namespace_cold_start().await;
 
     assert_dispatched_namespaces(&namespaces, &[(100, "1/100/"), (200, "2/200/")]);
 }
