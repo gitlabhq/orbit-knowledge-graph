@@ -1,0 +1,45 @@
+# ast-grep rule: high-precision narration-comment detector (block-label subset).
+#
+# This rule encodes ONLY the half of the H2 hypothesis that ast-grep can
+# express deterministically: the block-label denylist. A line comment is
+# flagged when ALL of the following hold:
+#   * it is a `line_comment` node (so /// and //! doc comments are excluded by
+#     the leading-`// ` anchor below — doc comments are `// /` or `//!`),
+#   * its first word is a known imperative/section-label opener
+#     (`Setup`, `Verify`, `Insert`, `Load`, …),
+#   * it does NOT contain a "why" signal word (because / so / since / must /
+#     note / safety / a URL / an issue ref), which marks legitimate intent
+#     comments the AGENTS.md rule wants to keep.
+#
+# The second half of H2 — "comment tokens are a subset of the NEXT code line"
+# (token_overlap) — cannot be expressed in ast-grep: the Rust `regex` crate has
+# no lookahead, and ast-grep relational rules (`precedes`/`follows`) cannot
+# compare token sets across two nodes. That half lives in the companion Python
+# scorer `narration_score.py`. Run BOTH for full coverage; this file is the
+# build-time/lint-friendly, dependency-free subset.
+#
+# Usage:
+#   mise exec -- ast-grep scan --rule scripts/comment-guard/narration-comments.yml crates/
+#
+id: narration-comment-block-label
+language: rust
+severity: warning
+message: >-
+  Narration comment: this restates the next line / labels a block. A comment
+  must say *why* (a constraint, gotcha, ADR/issue link), never *what*. Delete it
+  or rewrite it as an invariant the code does not state. See AGENTS.md "Code
+  quality". If this is a legitimate why-comment, add a why-word or rephrase.
+rule:
+  all:
+    - kind: line_comment
+    # First word is an imperative/section-label opener (case-insensitive).
+    - regex: "(?i)^//[[:space:]]*(setup|set|cleanup|clean|teardown|arrange|act|assert|given|when|then|test|tests|testing|create|creates|build|builds|make|makes|insert|inserts|add|adds|verify|verifies|check|checks|clear|clears|call|calls|run|runs|get|gets|fetch|fetches|remove|removes|delete|deletes|initialize|init|prepare|register|registers|define|defines|now|first|next|finally|start|starts|loop|iterate|parse|parses|load|loads|save|saves|spawn|spawns|mock|stub|wait|configure|enable|disable|apply|applies|compute|computes|collect|collects|convert|converts|extract|extracts|validate|validates|process|handle|handles|open|opens|close|closes|push|send|sends|store|stores|update|updates|find|finds|filter|filters|skip|skips|advance)\\b"
+    # Exclude comments that carry a "why" signal — those are legitimate.
+    - not:
+        regex: "(?i)\\b(because|so|since|otherwise|must|note|safety|gotcha|invariant|intentionally|deliberately|avoid|avoids|prevents?|ensures?|would|cannot|can't|won't|never|always|only|instead|rather|due|workaround|hack|fixme|todo|bug|edge|race|deadlock|panic|unsafe|assumes?|expects?|requires?|needs?|guarantees?|means|matches|silently|already|hits?|don't|doesn't|wins?|refused|corrupt)\\b"
+    # Exclude comments that reference a URL or issue/MR id (links are why).
+    - not:
+        regex: "(https?://|#[0-9]+|![0-9]+|[A-Z]+-[0-9]+)"
+    # Exclude decorated section dividers (// ── X ── / // --- X ---).
+    - not:
+        regex: "^//[[:space:]]*[─=*#~-]{2,}"
