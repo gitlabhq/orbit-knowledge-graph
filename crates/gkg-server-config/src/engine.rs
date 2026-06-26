@@ -275,6 +275,30 @@ fn default_code_indexing_write_max_concurrent_writes() -> usize {
     8
 }
 
+fn default_code_indexing_aggregator_enabled() -> bool {
+    false
+}
+
+fn default_code_indexing_aggregator_max_buffer_age_secs() -> u64 {
+    60
+}
+
+fn default_code_indexing_aggregator_heartbeat_secs() -> u64 {
+    90
+}
+
+fn default_code_indexing_small_repo_max_files() -> usize {
+    650
+}
+
+fn default_code_indexing_small_indexing_slots() -> usize {
+    6
+}
+
+fn default_code_indexing_big_indexing_slots() -> usize {
+    2
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -323,6 +347,33 @@ pub struct CodeIndexingPipelineConfig {
     /// Concurrent in-flight inserts from the streaming sink. Defaults to 8.
     #[serde(default = "default_code_indexing_write_max_concurrent_writes")]
     pub write_max_concurrent_writes: usize,
+    /// Coalesce small backfill projects into a shared process-wide write buffer so
+    /// many tiny repos flush as one ~`write_slice_rows` part per table instead of
+    /// one part each. Backfill/campaign path only. Defaults to false.
+    #[serde(default = "default_code_indexing_aggregator_enabled")]
+    pub aggregator_enabled: bool,
+    /// Force-flush the shared write buffer after this many seconds even if no table
+    /// reached `write_slice_rows`, so a trickle of small repos still lands with
+    /// bounded latency. Must stay below `nats.ack_wait_secs`. Defaults to 60.
+    #[serde(default = "default_code_indexing_aggregator_max_buffer_age_secs")]
+    pub aggregator_max_buffer_age_secs: u64,
+    /// While a buffered project waits for its flush, the handler heartbeats the NATS
+    /// lease and renews its per-project lock on this interval. Must stay below
+    /// `nats.ack_wait_secs`. Defaults to 90.
+    #[serde(default = "default_code_indexing_aggregator_heartbeat_secs")]
+    pub aggregator_heartbeat_secs: u64,
+    /// Post-filter file-count cutoff: a repository with at most this many indexed
+    /// files is "small" (buffered, small lane); above it is "big" (solo flush, big
+    /// lane). Defaults to 650.
+    #[serde(default = "default_code_indexing_small_repo_max_files")]
+    pub small_repo_max_files: usize,
+    /// Concurrent indexing+write slots for small repositories. Defaults to 6.
+    #[serde(default = "default_code_indexing_small_indexing_slots")]
+    pub small_indexing_slots: usize,
+    /// Concurrent indexing+write slots reserved for big repositories so a flood of
+    /// small repos cannot starve monorepos. Defaults to 2.
+    #[serde(default = "default_code_indexing_big_indexing_slots")]
+    pub big_indexing_slots: usize,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -343,6 +394,12 @@ impl Default for CodeIndexingPipelineConfig {
             write_channel_capacity: default_code_indexing_write_channel_capacity(),
             write_slice_rows: default_code_indexing_write_slice_rows(),
             write_max_concurrent_writes: default_code_indexing_write_max_concurrent_writes(),
+            aggregator_enabled: default_code_indexing_aggregator_enabled(),
+            aggregator_max_buffer_age_secs: default_code_indexing_aggregator_max_buffer_age_secs(),
+            aggregator_heartbeat_secs: default_code_indexing_aggregator_heartbeat_secs(),
+            small_repo_max_files: default_code_indexing_small_repo_max_files(),
+            small_indexing_slots: default_code_indexing_small_indexing_slots(),
+            big_indexing_slots: default_code_indexing_big_indexing_slots(),
         }
     }
 }
@@ -351,6 +408,14 @@ impl CodeIndexingPipelineConfig {
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
+    }
+
+    pub fn aggregator_max_buffer_age(&self) -> Duration {
+        Duration::from_secs(self.aggregator_max_buffer_age_secs.max(1))
+    }
+
+    pub fn aggregator_heartbeat(&self) -> Duration {
+        Duration::from_secs(self.aggregator_heartbeat_secs.max(1))
     }
 }
 

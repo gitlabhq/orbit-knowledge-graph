@@ -10,7 +10,7 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
+use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest, PendingFlush};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
@@ -39,6 +39,7 @@ pub struct CodeIndexingTaskHandler {
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
     lock_ttl: Duration,
+    aggregator_heartbeat: Duration,
     subscription: Subscription,
     analytics: IndexingAnalytics,
 }
@@ -54,6 +55,7 @@ impl CodeIndexingTaskHandler {
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
         lock_ttl: Duration,
+        aggregator_heartbeat: Duration,
         subscription: Subscription,
         analytics: IndexingAnalytics,
     ) -> Self {
@@ -63,6 +65,7 @@ impl CodeIndexingTaskHandler {
             checkpoint_store,
             metrics,
             lock_ttl,
+            aggregator_heartbeat,
             subscription,
             analytics,
         }
@@ -221,16 +224,12 @@ impl CodeIndexingTaskHandler {
             .await;
 
         let outcome = match &result {
-            Ok(Some(IndexOutcome::Indexed)) => "indexed",
-            Ok(Some(IndexOutcome::EmptyRepository)) => "empty_repository",
+            Ok(Some(o)) => o.metric_label(),
             Ok(None) => "skipped_lock",
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        if matches!(
-            &result,
-            Ok(Some(IndexOutcome::Indexed | IndexOutcome::EmptyRepository))
-        ) {
+        if matches!(&result, Ok(Some(_))) {
             self.metrics.record_repository_indexed(outcome);
         }
         self.metrics.record_handler_duration(started_at);
@@ -287,6 +286,7 @@ impl CodeIndexingTaskHandler {
             task_id: request.task_id,
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
+            is_campaign: request.campaign_id.is_some(),
         };
         // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is transient (retried, then DLQ'd).
         let cancel = CancellationToken::new();
@@ -313,6 +313,18 @@ impl CodeIndexingTaskHandler {
             None => work.await,
         };
 
+        // A buffered project's rows aren't durable until the shared coalescer flushes. Wait
+        // for the flush watermark to reach its seq, heartbeating the lease and renewing the
+        // lock so neither lapses, then checkpoint. This wait is intentionally outside the
+        // job timeout: flush latency depends on other projects, not this job's own work.
+        let result = match result {
+            Ok(IndexOutcome::Buffered(pending)) => self
+                .await_buffered_flush(context, &key, project_id, branch, pending)
+                .await
+                .map(|()| IndexOutcome::Indexed),
+            other => other,
+        };
+
         context
             .indexing_status
             .record_completion(
@@ -328,6 +340,39 @@ impl CodeIndexingTaskHandler {
         }
 
         result.map(Some)
+    }
+
+    async fn await_buffered_flush(
+        &self,
+        context: &HandlerContext,
+        lock_key: &str,
+        project_id: i64,
+        branch: &str,
+        mut pending: PendingFlush,
+    ) -> Result<(), HandlerError> {
+        let mut beat = tokio::time::interval(self.aggregator_heartbeat);
+        beat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        beat.tick().await;
+
+        while *pending.watermark.borrow() < pending.seq {
+            tokio::select! {
+                changed = pending.watermark.changed() => {
+                    if changed.is_err() {
+                        return Err(HandlerError::Processing(
+                            "code write aggregator closed before flushing buffered project".into(),
+                        ));
+                    }
+                }
+                _ = beat.tick() => {
+                    context.progress.notify_in_progress().await;
+                    if let Err(e) = context.lock_service.renew(lock_key, self.lock_ttl).await {
+                        warn!(project_id, branch = %branch, error = %e, "failed to renew lock while awaiting buffered flush");
+                    }
+                }
+            }
+        }
+
+        self.pipeline.set_checkpoint(&pending.checkpoint).await
     }
 }
 
@@ -377,6 +422,10 @@ mod tests {
 
     impl TestContext {
         fn new() -> Self {
+            Self::new_with_heartbeat(Duration::from_secs(90))
+        }
+
+        fn new_with_heartbeat(heartbeat: Duration) -> Self {
             let mock_repo = MockRepositoryService::with_default_branch(123, "main");
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
@@ -403,17 +452,16 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let writer = crate::testkit::test_writer();
+            let aggregator = crate::testkit::test_aggregator();
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
-                writer,
+                aggregator,
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
                 gkg_server_config::CodeIndexingPipelineConfig::default(),
-                0,
             ));
 
             let handler = CodeIndexingTaskHandler::new(
@@ -422,6 +470,7 @@ mod tests {
                 Arc::clone(&checkpoint_store),
                 metrics,
                 Duration::from_secs(60),
+                heartbeat,
                 CodeIndexingTaskRequest::subscription(),
                 IndexingAnalytics::disabled(),
             );
@@ -662,14 +711,14 @@ mod tests {
         assert_eq!(checkpoint.last_task_id, 7);
     }
 
-    #[test]
-    fn handler_name() {
+    #[tokio::test]
+    async fn handler_name() {
         let ctx = TestContext::new();
         assert_eq!(ctx.handler.name(), "code_indexing_task");
     }
 
-    #[test]
-    fn handler_subscription_matches_request_subscription() {
+    #[tokio::test]
+    async fn handler_subscription_matches_request_subscription() {
         let ctx = TestContext::new();
         let subscription = ctx.handler.subscription();
         let expected = CodeIndexingTaskRequest::subscription();
@@ -683,5 +732,56 @@ mod tests {
             project_lock_key(42, "refs/heads/main"),
             "project.42.cmVmcy9oZWFkcy9tYWlu"
         );
+    }
+
+    #[tokio::test]
+    async fn buffered_flush_renews_lock_then_checkpoints_after_watermark() {
+        let ctx = TestContext::new_with_heartbeat(Duration::from_millis(10));
+        let (wm_tx, watermark) = tokio::sync::watch::channel(0u64);
+        let pending = PendingFlush {
+            seq: 5,
+            watermark,
+            checkpoint: CodeIndexingCheckpoint {
+                traversal_path: "1/7/".into(),
+                project_id: 7,
+                branch: "main".into(),
+                last_task_id: 42,
+                last_commit: Some("deadbeef".into()),
+                indexed_at: Utc::now(),
+            },
+        };
+
+        let context = ctx.handler_context();
+        let key = project_lock_key(7, "main");
+
+        // Release the flush only after the wait has heartbeated at least once, so the
+        // assertions on "not yet durable" hold deterministically.
+        let releaser = {
+            let locks = ctx.mock_locks.clone();
+            tokio::spawn(async move {
+                while locks.renew_count() == 0 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                wm_tx.send(5).unwrap();
+            })
+        };
+
+        ctx.handler
+            .await_buffered_flush(&context, &key, 7, "main", pending)
+            .await
+            .unwrap();
+        releaser.await.unwrap();
+
+        assert!(
+            ctx.mock_locks.renew_count() >= 1,
+            "lock must be renewed while awaiting the buffered flush",
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .get_checkpoint("1/7/", 7, "main")
+            .await
+            .unwrap()
+            .expect("checkpoint written after watermark reached the project seq");
+        assert_eq!(checkpoint.last_task_id, 42);
     }
 }

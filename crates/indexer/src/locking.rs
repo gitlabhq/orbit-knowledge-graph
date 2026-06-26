@@ -20,6 +20,10 @@ pub enum LockError {
 pub trait LockService: Send + Sync {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
     async fn release(&self, key: &str) -> Result<(), LockError>;
+    /// Push the lock's expiration `ttl` into the future. The caller is assumed to
+    /// hold the lock; renewal is required when a job outlives the original TTL
+    /// (e.g. a small project parked in the cross-project write buffer).
+    async fn renew(&self, key: &str, ttl: Duration) -> Result<(), LockError>;
 }
 
 pub struct LockGuard {
@@ -48,6 +52,13 @@ impl LockGuard {
             service.release(&self.key).await
         } else {
             Ok(())
+        }
+    }
+
+    pub async fn renew(&self, ttl: Duration) -> Result<(), LockError> {
+        match &self.service {
+            Some(service) => service.renew(&self.key, ttl).await,
+            None => Ok(()),
         }
     }
 }
@@ -158,6 +169,37 @@ impl LockService for NatsLockService {
             .map_err(|e| LockError::Backend(e.to_string()));
         debug!(key, "lock released");
         result
+    }
+
+    async fn renew(&self, key: &str, ttl: Duration) -> Result<(), LockError> {
+        let chrono_ttl =
+            chrono::Duration::from_std(ttl).map_err(|e| LockError::Backend(e.to_string()))?;
+        let value = encode_expiration(Utc::now() + chrono_ttl);
+
+        let entry = self
+            .nats
+            .kv_get(INDEXING_LOCKS_BUCKET, key)
+            .await
+            .map_err(|e| LockError::Backend(e.to_string()))?;
+        let opts = match &entry {
+            Some(entry) => KvPutOptions::update_revision(entry.revision),
+            None => KvPutOptions::create_only(),
+        };
+
+        match self
+            .nats
+            .kv_put(INDEXING_LOCKS_BUCKET, key, value, opts)
+            .await
+            .map_err(|e| LockError::Backend(e.to_string()))?
+        {
+            KvPutResult::Success(_) => {
+                debug!(key, "lock renewed");
+                Ok(())
+            }
+            KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Err(LockError::Backend(
+                format!("lock renew lost race for key {key}"),
+            )),
+        }
     }
 }
 
@@ -310,6 +352,28 @@ mod tests {
                     .await
                     .unwrap(),
                 "fresh acquire after release must succeed",
+            );
+        }
+
+        #[tokio::test]
+        async fn renew_pushes_expiration_into_the_future() {
+            let (nats, svc) = new_service();
+            assert!(svc.try_acquire("p6", Duration::from_secs(1)).await.unwrap());
+            let before = decode_expiration(&nats.get_kv(INDEXING_LOCKS_BUCKET, "p6").unwrap())
+                .expect("rfc3339");
+
+            svc.renew("p6", Duration::from_secs(300))
+                .await
+                .expect("renew");
+
+            let after = decode_expiration(&nats.get_kv(INDEXING_LOCKS_BUCKET, "p6").unwrap())
+                .expect("rfc3339");
+            assert!(after > before, "renew must extend the stored expiration");
+            assert!(
+                !svc.try_acquire("p6", Duration::from_secs(30))
+                    .await
+                    .unwrap(),
+                "a renewed lock must still be held",
             );
         }
 

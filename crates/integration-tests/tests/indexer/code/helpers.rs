@@ -80,17 +80,23 @@ impl CodeIndexingDeps {
             )
             .expect("writer must build"),
         );
+        let aggregator = indexer::clickhouse::CodeWriteAggregator::start(
+            writer,
+            pipeline_config.write_channel_capacity,
+            pipeline_config.write_slice_rows,
+            pipeline_config.write_max_concurrent_writes,
+            pipeline_config.aggregator_max_buffer_age(),
+        );
 
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
-            writer,
+            aggregator,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
             table_names,
             Arc::new(ontology),
             pipeline_config,
-            0,
         ));
 
         Self {
@@ -125,16 +131,23 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
+        let config = CodeIndexingPipelineConfig::default();
+        let aggregator = indexer::clickhouse::CodeWriteAggregator::start(
+            writer,
+            config.write_channel_capacity,
+            config.write_slice_rows,
+            config.write_max_concurrent_writes,
+            config.aggregator_max_buffer_age(),
+        );
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
-            writer,
+            aggregator,
             Arc::clone(&self.checkpoint_store) as _,
             stale_data_cleaner,
             self.metrics.clone(),
             table_names,
             Arc::new(ontology),
-            CodeIndexingPipelineConfig::default(),
-            0,
+            config,
         ));
         CodeIndexingTaskHandler::new(
             pipeline,
@@ -142,6 +155,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(90),
             CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
@@ -154,6 +168,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(90),
             CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )

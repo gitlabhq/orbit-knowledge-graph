@@ -284,6 +284,21 @@ The graph is converted to Apache Arrow record batches and written to six ClickHo
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
+##### Cross-project write coalescing (backfill)
+
+The edge tables (`gl_code_edge`, `gl_edge`) are unpartitioned `ReplacingMergeTree`s, so every project's inserts share one part budget. During a full reindex the long tail of tiny repositories (most projects emit fewer than 500 edges) would otherwise produce one small part per table per project, outrunning ClickHouse merges until part-count backpressure throttles inserts.
+
+To avoid this, all code jobs share one process-wide write coalescer (`CodeWriteAggregator`). Each job is classified after fetch by its post-filter file count:
+
+- **Big** repositories (more than `small_repo_max_files`, default 650) and all steady-state CDC tasks write their own parts immediately, bypassing the buffer. They keep per-project failure isolation and never wait behind small-repo work.
+- **Small** reindex-campaign repositories buffer their edges into a shared per-table buffer. A table flushes when it reaches `write_slice_rows` (default 500k) or after `aggregator_max_buffer_age_secs` (default 60), so many tiny projects coalesce into one well-sized part instead of hundreds of small ones.
+
+Buffering is gated on `aggregator_enabled` and only applies to campaign (backfill) tasks. Two indexing lanes bound concurrency: a wide small lane (`small_indexing_slots`, default 6) and a reserved big lane (`big_indexing_slots`, default 2) so a flood of small repositories cannot starve monorepos.
+
+A buffered project's rows are durable only once the shared buffer flushes. The coalescer publishes a flush watermark (the highest project seq whose rows are fully written across every table); the handler waits for the watermark to reach its seq before checkpointing. While waiting it heartbeats the NATS lease and renews its per-project lock every `aggregator_heartbeat_secs` (default 90), both safely below `nats.ack_wait_secs`. This wait sits outside the per-job wall-clock timeout, since flush latency depends on other projects rather than this job's own work. A failed flush never advances the watermark, so the contributing projects do not checkpoint and are redelivered independently.
+
+Parts that span many namespaces are safe to query: the edge sort key is `(traversal_path, relationship_kind, …)`, so ClickHouse still prunes by primary key within a mixed part.
+
 #### Checkpoint tracking
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits.

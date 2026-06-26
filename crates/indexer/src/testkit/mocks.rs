@@ -126,6 +126,16 @@ pub fn test_writer() -> Arc<crate::clickhouse::ClickHouseWriter> {
     Arc::new(crate::clickhouse::ClickHouseWriter::noop())
 }
 
+pub fn test_aggregator() -> Arc<crate::clickhouse::CodeWriteAggregator> {
+    crate::clickhouse::CodeWriteAggregator::start(
+        test_writer(),
+        8,
+        500_000,
+        8,
+        std::time::Duration::from_secs(60),
+    )
+}
+
 /// Mock handler for testing.
 pub struct MockHandler {
     name: String,
@@ -239,6 +249,7 @@ impl Handler for MockHandler {
 #[derive(Clone, Default)]
 pub struct MockLockService {
     held: Arc<Mutex<HashSet<String>>>,
+    renew_count: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl MockLockService {
@@ -252,6 +263,10 @@ impl MockLockService {
 
     pub fn is_held(&self, key: &str) -> bool {
         self.held.lock().contains(key)
+    }
+
+    pub fn renew_count(&self) -> usize {
+        self.renew_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -269,6 +284,12 @@ impl LockService for MockLockService {
 
     async fn release(&self, key: &str) -> Result<(), LockError> {
         self.held.lock().remove(key);
+        Ok(())
+    }
+
+    async fn renew(&self, _key: &str, _ttl: Duration) -> Result<(), LockError> {
+        self.renew_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

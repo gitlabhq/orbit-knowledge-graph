@@ -66,6 +66,10 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
+              "aggregator_enabled": false,
+              "aggregator_heartbeat_secs": 90,
+              "aggregator_max_buffer_age_secs": 60,
+              "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
               "job_timeout_secs": 250,
@@ -77,6 +81,8 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
+              "small_indexing_slots": 6,
+              "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_channel_capacity": 8,
               "write_max_concurrent_writes": 8,
@@ -400,6 +406,32 @@
     "CodeIndexingPipelineConfig": {
       "type": "object",
       "properties": {
+        "aggregator_enabled": {
+          "description": "Coalesce small backfill projects into a shared process-wide write buffer so\nmany tiny repos flush as one ~`write_slice_rows` part per table instead of\none part each. Backfill/campaign path only. Defaults to false.",
+          "type": "boolean",
+          "default": false
+        },
+        "aggregator_heartbeat_secs": {
+          "description": "While a buffered project waits for its flush, the handler heartbeats the NATS\nlease and renews its per-project lock on this interval. Must stay below\n`nats.ack_wait_secs`. Defaults to 90.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 90,
+          "minimum": 0
+        },
+        "aggregator_max_buffer_age_secs": {
+          "description": "Force-flush the shared write buffer after this many seconds even if no table\nreached `write_slice_rows`, so a trickle of small repos still lands with\nbounded latency. Must stay below `nats.ack_wait_secs`. Defaults to 60.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
+        },
+        "big_indexing_slots": {
+          "description": "Concurrent indexing+write slots reserved for big repositories so a flood of\nsmall repos cannot starve monorepos. Defaults to 2.",
+          "type": "integer",
+          "format": "uint",
+          "default": 2,
+          "minimum": 0
+        },
         "cross_file_resolve_timeout_ms": {
           "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). 0 = no timeout.",
           "type": "integer",
@@ -471,6 +503,20 @@
           "default": 100,
           "minimum": 0
         },
+        "small_indexing_slots": {
+          "description": "Concurrent indexing+write slots for small repositories. Defaults to 6.",
+          "type": "integer",
+          "format": "uint",
+          "default": 6,
+          "minimum": 0
+        },
+        "small_repo_max_files": {
+          "description": "Post-filter file-count cutoff: a repository with at most this many indexed\nfiles is \"small\" (buffered, small lane); above it is \"big\" (solo flush, big\nlane). Defaults to 650.",
+          "type": "integer",
+          "format": "uint",
+          "default": 650,
+          "minimum": 0
+        },
         "worker_threads": {
           "type": "integer",
           "format": "uint",
@@ -507,6 +553,10 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
+            "aggregator_enabled": false,
+            "aggregator_heartbeat_secs": 90,
+            "aggregator_max_buffer_age_secs": 60,
+            "big_indexing_slots": 2,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 6,
             "job_timeout_secs": 250,
@@ -518,6 +568,8 @@
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
             "per_file_walk_timeout_ms": 100,
+            "small_indexing_slots": 6,
+            "small_repo_max_files": 650,
             "worker_threads": 0,
             "write_channel_capacity": 8,
             "write_max_concurrent_writes": 8,
@@ -606,6 +658,10 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
+                "aggregator_enabled": false,
+                "aggregator_heartbeat_secs": 90,
+                "aggregator_max_buffer_age_secs": 60,
+                "big_indexing_slots": 2,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 6,
                 "job_timeout_secs": 250,
@@ -617,6 +673,8 @@
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
                 "per_file_walk_timeout_ms": 100,
+                "small_indexing_slots": 6,
+                "small_repo_max_files": 650,
                 "worker_threads": 0,
                 "write_channel_capacity": 8,
                 "write_max_concurrent_writes": 8,
@@ -855,6 +913,10 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
+              "aggregator_enabled": false,
+              "aggregator_heartbeat_secs": 90,
+              "aggregator_max_buffer_age_secs": 60,
+              "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
               "job_timeout_secs": 250,
@@ -866,6 +928,8 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
+              "small_indexing_slots": 6,
+              "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_channel_capacity": 8,
               "write_max_concurrent_writes": 8,

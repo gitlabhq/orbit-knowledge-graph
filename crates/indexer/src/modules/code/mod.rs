@@ -92,24 +92,24 @@ pub async fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-    let concurrency_limit = config
-        .engine
-        .topics
-        .get(CODE_INDEXING_TASK_TOPIC)
-        .and_then(|t| t.concurrency_group.as_deref())
-        .and_then(|g| config.engine.concurrency_groups.get(g).copied())
-        .unwrap_or(0);
+    let pipeline_config = code_indexing_task_config.pipeline.clone();
+    let aggregator = crate::clickhouse::CodeWriteAggregator::start(
+        writer,
+        pipeline_config.write_channel_capacity,
+        pipeline_config.write_slice_rows,
+        pipeline_config.write_max_concurrent_writes,
+        pipeline_config.aggregator_max_buffer_age(),
+    );
 
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
-        writer,
+        aggregator,
         Arc::clone(&checkpoint_store),
         stale_data_cleaner,
         metrics.clone(),
         table_names,
         Arc::new(ontology.clone()),
-        code_indexing_task_config.pipeline.clone(),
-        concurrency_limit,
+        pipeline_config,
     ));
 
     let mut subscription = CodeIndexingTaskRequest::subscription();
@@ -126,6 +126,7 @@ pub async fn register_handlers(
         Arc::clone(&checkpoint_store),
         metrics,
         config.nats.ack_wait(),
+        code_indexing_task_config.pipeline.aggregator_heartbeat(),
         subscription,
         analytics,
     )));

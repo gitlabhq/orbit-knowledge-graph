@@ -322,6 +322,9 @@ mod tests {
         async fn release(&self, _key: &str) -> Result<(), LockError> {
             Ok(())
         }
+        async fn renew(&self, _key: &str, _ttl: Duration) -> Result<(), LockError> {
+            Ok(())
+        }
     }
 
     /// Yield enough times for spawned tasks to process through their await points.
