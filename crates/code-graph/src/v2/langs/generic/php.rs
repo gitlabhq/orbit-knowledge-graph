@@ -22,36 +22,52 @@ const PHP_PRIMITIVE_TYPES: &[&str] = &[
     "callable", "iterable", "never", "self", "static", "parent",
 ];
 
+const PHP_TYPE_NAME_KINDS: &[&str] = &["name", "qualified_name"];
+
 #[derive(Default)]
 pub struct PhpDsl;
 
-/// Parents from extends, implements, and body-level `use TraitName;` (traits as supertypes).
-fn php_super_types(node: &N<'_>) -> Vec<String> {
-    let is_type_name = |k: &str| k == "name" || k == "qualified_name";
-    let mut out = Vec::new();
-    for child in node.children() {
-        match child.kind().as_ref() {
-            "base_clause" | "class_interface_clause" => {
-                for t in child.children() {
-                    if is_type_name(t.kind().as_ref()) {
-                        // Graph FQNs omit the leading `\` of an absolute name.
-                        out.push(t.text().trim_start_matches('\\').to_string());
+fn rewrite_php(tree: &mut SyntaxTree) {
+    let mut supertypes: Vec<(u32, String)> = Vec::new();
+
+    let class_kinds = [
+        "class_declaration",
+        "interface_declaration",
+        "trait_declaration",
+        "enum_declaration",
+    ];
+    for kind in class_kinds {
+        for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
+            for &child in tree.children(cls) {
+                let k = tree.kind(child);
+                if k == "base_clause" || k == "class_interface_clause" {
+                    for &t in tree.children(child) {
+                        if PHP_TYPE_NAME_KINDS.contains(&tree.kind(t)) {
+                            supertypes
+                                .push((cls, tree.text(t).trim_start_matches('\\').to_string()));
+                        }
                     }
                 }
             }
-            _ => {}
-        }
-    }
-    if let Some(body) = node.field("body") {
-        for u in body.children().filter(|c| c.kind() == "use_declaration") {
-            for t in u.children() {
-                if is_type_name(t.kind().as_ref()) {
-                    out.push(t.text().trim_start_matches('\\').to_string());
+            if let Some(body) = tree.field(cls, "body") {
+                for ud in tree
+                    .children_of_kind(body, "use_declaration")
+                    .collect::<Vec<_>>()
+                {
+                    for &t in tree.children(ud) {
+                        if PHP_TYPE_NAME_KINDS.contains(&tree.kind(t)) {
+                            supertypes
+                                .push((cls, tree.text(t).trim_start_matches('\\').to_string()));
+                        }
+                    }
                 }
             }
         }
     }
-    out
+
+    for (cls, text) in supertypes {
+        tree.insert_child(cls, "__supertype", &text);
+    }
 }
 
 impl DslLanguage for PhpDsl {
@@ -74,8 +90,19 @@ impl DslLanguage for PhpDsl {
         }
     }
 
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_php(tree);
+    }
+
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(php_super_types);
+        let class_meta = || {
+            metadata().super_types(|n: &Node<'_, SyntaxTree>| {
+                n.children()
+                    .filter(|c| c.kind().as_ref() == "__supertype")
+                    .map(|c| c.text().to_string())
+                    .collect()
+            })
+        };
 
         vec![
             scope("class_declaration", "Class")

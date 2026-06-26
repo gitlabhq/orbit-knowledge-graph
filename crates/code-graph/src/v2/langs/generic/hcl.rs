@@ -89,9 +89,16 @@ impl DslLanguage for HclDsl {
                 .when(has_child_text("terraform"))
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            // Attributes inside a locals block become property definitions.
-            // Handled via on_scope hook for the Locals block to avoid
-            // matching attributes in other block types.
+            // Synthetic nodes injected by rewrite_hcl
+            scope("__resource", "Resource")
+                .def_kind(DefKind::Class)
+                .no_scope(),
+            scope("__data_source", "DataSource")
+                .def_kind(DefKind::Class)
+                .no_scope(),
+            scope("__local", "Local")
+                .def_kind(DefKind::Property)
+                .no_scope(),
         ]
     }
 
@@ -126,10 +133,13 @@ impl DslLanguage for HclDsl {
         ]
     }
 
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_hcl(tree);
+    }
+
     fn hooks() -> LanguageHooks {
         LanguageHooks {
-            on_scope: Some(hcl_on_scope),
-            ref_name_rewrite: Some(hcl_rewrite_ref),
+            on_scope: Some(hcl_reanchor_var_module),
             ..LanguageHooks::default()
         }
     }
@@ -139,167 +149,124 @@ impl DslLanguage for HclDsl {
     }
 }
 
-/// For resource and data blocks with two labels, inject a child definition
-/// named by the second label. This produces FQNs like `aws_instance.web`
-/// (scope "aws_instance" + child def "web").
-fn hcl_on_scope(
+fn hcl_reanchor_var_module(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-    scope_stack: &[std::sync::Arc<str>],
+    _scope_stack: &[std::sync::Arc<str>],
     sep: &'static str,
 ) -> bool {
     if node.kind().as_ref() != "block" {
         return false;
     }
-
     let block_type = node
         .children()
         .find(|c| c.kind().as_ref() == "identifier")
         .map(|c| c.text().to_string());
-
-    match block_type.as_deref() {
-        Some("resource") | Some("data") => {
-            let labels: Vec<_> = node
-                .children()
-                .filter(|c| c.kind().as_ref() == "string_lit")
-                .collect();
-
-            if labels.len() >= 2 {
-                let name = labels[1]
-                    .children()
-                    .find(|c| c.kind().as_ref() == "template_literal")
-                    .map(|c| c.text().to_string());
-
-                if let Some(name) = name {
-                    let fqn = Fqn::from_scope(scope_stack, &name, sep);
-                    let def_type = if block_type.as_deref() == Some("data") {
-                        "DataSource"
-                    } else {
-                        "Resource"
-                    };
-                    defs.push(crate::v2::types::CanonicalDefinition {
-                        definition_type: def_type,
-                        kind: DefKind::Class,
-                        name,
-                        fqn,
-                        range: crate::v2::types::Range::empty(),
-                        is_top_level: false,
-                        metadata: None,
-                    });
-                }
-            }
+    if let Some(ns @ ("variable" | "module")) = block_type.as_deref() {
+        let expected = if ns == "variable" {
+            "Variable"
+        } else {
+            "Module"
+        };
+        let prefix = if ns == "variable" { "var" } else { "module" };
+        if let Some(last) = defs.last_mut()
+            && last.definition_type == expected
+        {
+            let name = last.name.clone();
+            last.fqn = Fqn::from_parts(&[prefix, name.as_str()], sep);
         }
-        Some("locals") => {
-            // Extract each attribute inside the locals block body as a Local def.
-            if let Some(body) = node.children().find(|c| c.kind().as_ref() == "body") {
-                for attr in body.children().filter(|c| c.kind().as_ref() == "attribute") {
-                    if let Some(id) = attr.children().find(|c| c.kind().as_ref() == "identifier") {
-                        let name = id.text().to_string();
-                        let fqn = Fqn::from_scope(scope_stack, &name, sep);
-                        defs.push(crate::v2::types::CanonicalDefinition {
-                            definition_type: "Local",
-                            kind: DefKind::Property,
-                            name,
-                            fqn,
-                            range: crate::v2::types::Range::empty(),
-                            is_top_level: false,
-                            metadata: None,
-                        });
-                    }
-                }
-            }
-        }
-        // Variable/Module blocks are `.no_scope()`, so the scope rule pushed a
-        // single flat def whose fqn equals its name (e.g. "region"). The engine's
-        // bare-name cross-file strategy (GlobalName) only admits a non-type-container
-        // def when fqn != name, so flat Variable defs were unreachable across files
-        // (var.x is defined in variables.tf but referenced from main.tf). Re-anchor
-        // the fqn under the reference namespace ("var"/"module") so a bare `var.x` /
-        // `module.x` reference resolves through the CAPPED GlobalName strategy.
-        // References stay bare in hcl_rewrite_ref; this is the def-side half.
-        // `last.name` (not `last.fqn`) keeps this idempotent.
-        Some(ns @ ("variable" | "module")) => {
-            let expected = if ns == "variable" {
-                "Variable"
-            } else {
-                "Module"
-            };
-            if let Some(last) = defs.last_mut()
-                && last.definition_type == expected
-            {
-                let prefix = if ns == "variable" { "var" } else { "module" };
-                let name = last.name.clone();
-                last.fqn = Fqn::from_parts(&[prefix, name.as_str()], sep);
-            }
-        }
-        _ => {}
     }
     false
 }
 
-/// Terraform built-in namespaces that aren't user-defined references.
 const TF_BUILTIN_NAMESPACES: &[&str] = &["each", "self", "count", "path", "terraform"];
 
-/// Rewrite `variable_expr` references to include the first `get_attr`
-/// sibling, producing dot-separated names like `aws_vpc.main` that
-/// match resource FQNs. For `var` and `local` prefixes, emits just
-/// the attribute name since variables and locals are flat definitions.
-fn hcl_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
-    if node.kind().as_ref() != "variable_expr" {
-        return None;
-    }
-    if TF_BUILTIN_NAMESPACES.contains(&name) {
-        return None;
-    }
+fn get_attr_ident(tree: &SyntaxTree, get_attr: u32) -> Option<String> {
+    tree.children_of_kind(get_attr, "identifier")
+        .next()
+        .map(|id| tree.text(id).to_string())
+}
 
-    let parent = node.parent()?;
-    if parent.kind().as_ref() != "expression" {
-        return None;
-    }
+fn rewrite_hcl(tree: &mut SyntaxTree) {
+    let mut inserts: Vec<(u32, &str, String)> = Vec::new();
+    let mut text_rewrites: Vec<(u32, String)> = Vec::new();
 
-    // Find the first get_attr sibling after the variable_expr.
-    let attr_name = parent
-        .children()
-        .find(|c| c.kind().as_ref() == "get_attr")?
-        .children()
-        .find(|c| c.kind().as_ref() == "identifier")
-        .map(|c| c.text().to_string())?;
+    // on_scope: resource/data second-label defs, locals attribute defs
+    for block in tree.nodes_of_kind("block").collect::<Vec<_>>() {
+        let block_type = tree
+            .children_of_kind(block, "identifier")
+            .next()
+            .map(|id| tree.text(id).to_string());
 
-    // Rewrite strategy is split by how the engine resolves the result:
-    //  - Bare names (var.x → "x", module.x → "x") route through the CAPPED
-    //    GlobalName strategy, matching the namespaced def fqn (var.x / module.x)
-    //    that hcl_on_scope produces — bounded cross-directory fan-out.
-    //  - Dotted names (local.x → "locals.x", data/resource → "type.name") match
-    //    a dotted def fqn via the engine's UNBOUNDED by_fqn fast path: full recall
-    //    but cross-directory over-resolution (a known engine gap — there is no
-    //    directory/module-scoped resolution strategy for HCL's flat namespace).
-    match name {
-        // var.x → "x": resolves to the namespaced `var.x` def via GlobalName.
-        "var" => Some(attr_name),
-        // local.x → "locals.x" (locals scope is named "locals")
-        "local" => Some(format!("locals.{attr_name}")),
-        // module.x → "x": resolves to the namespaced `module.x` def via GlobalName.
-        "module" => Some(attr_name),
-        // data.type.name → "type.name" to match data source FQNs
-        "data" => {
-            let attrs: Vec<_> = parent
-                .children()
-                .filter(|c| c.kind().as_ref() == "get_attr")
-                .take(2)
-                .filter_map(|ga| {
-                    ga.children()
-                        .find(|c| c.kind().as_ref() == "identifier")
-                        .map(|c| c.text().to_string())
-                })
-                .collect();
-            if attrs.len() == 2 {
-                Some(format!("{}.{}", attrs[0], attrs[1]))
-            } else {
-                None
+        match block_type.as_deref() {
+            Some("resource") | Some("data") => {
+                let labels: Vec<_> = tree.children_of_kind(block, "string_lit").collect();
+                if labels.len() >= 2 {
+                    if let Some(name) = tree
+                        .children_of_kind(labels[1], "template_literal")
+                        .next()
+                        .map(|tl| tree.text(tl).to_string())
+                    {
+                        let kind = if block_type.as_deref() == Some("data") {
+                            "__data_source"
+                        } else {
+                            "__resource"
+                        };
+                        inserts.push((block, kind, name));
+                    }
+                }
             }
+            Some("locals") => {
+                for body in tree.children_of_kind(block, "body") {
+                    for attr in tree.children_of_kind(body, "attribute").collect::<Vec<_>>() {
+                        if let Some(id) = tree.children_of_kind(attr, "identifier").next() {
+                            inserts.push((block, "__local", tree.text(id).to_string()));
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
-        // resource refs: aws_vpc.main → "aws_vpc.main"
-        _ => Some(format!("{name}.{attr_name}")),
+    }
+
+    // ref_name_rewrite: merge variable_expr + get_attr into one text
+    for var_expr in tree.nodes_of_kind("variable_expr").collect::<Vec<_>>() {
+        let name = tree.text(var_expr).to_string();
+        if TF_BUILTIN_NAMESPACES.contains(&name.as_str()) {
+            continue;
+        }
+        let Some(parent) = tree.parent(var_expr) else {
+            continue;
+        };
+        if tree.kind(parent) != "expression" {
+            continue;
+        }
+        let get_attrs: Vec<_> = tree.children_of_kind(parent, "get_attr").collect();
+        let Some(first_attr) = get_attrs.first().and_then(|&ga| get_attr_ident(tree, ga)) else {
+            continue;
+        };
+
+        let new_text = match name.as_str() {
+            "var" | "module" => first_attr,
+            "local" => format!("locals.{first_attr}"),
+            "data" => {
+                if let Some(second_attr) = get_attrs.get(1).and_then(|&ga| get_attr_ident(tree, ga))
+                {
+                    format!("{first_attr}.{second_attr}")
+                } else {
+                    continue;
+                }
+            }
+            _ => format!("{name}.{first_attr}"),
+        };
+        text_rewrites.push((var_expr, new_text));
+    }
+
+    for (parent, kind, text) in inserts {
+        tree.insert_child(parent, kind, &text);
+    }
+    for (id, text) in text_rewrites {
+        tree.set_text(id, &text);
     }
 }
 
