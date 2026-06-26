@@ -112,7 +112,6 @@ schedule:
       cron: "0 */1 * * * *"           # every minute
     namespace:
       cron: "*/30 * * * * *"          # every 30 seconds
-      max_lookback_secs: 30           # checkpoint freshness window before falling back to full sweep
     namespace-sweep:
       cron: "0 0 * * * *"             # hourly, full re-dispatch safety net
     code-backfill:

@@ -65,16 +65,6 @@ fn namespace(id: i64, traversal_path: &str) -> Namespace {
     }
 }
 
-/// A lookback wide enough that a seeded checkpoint stays within the window for
-/// the whole test, so the dispatcher keeps to the incremental change-detection
-/// path regardless of how long the testcontainer setup takes.
-fn incremental_dispatcher_config() -> NamespaceDispatcherConfig {
-    NamespaceDispatcherConfig {
-        max_lookback_secs: 86_400,
-        ..Default::default()
-    }
-}
-
 fn project_path(id: i64, traversal_path: &str) -> ProjectPath {
     ProjectPath {
         id,
@@ -308,7 +298,7 @@ impl TestContext {
 
     async fn dispatch_namespace_changes(&self) -> Vec<NamespaceRequest> {
         self.seed_change_checkpoint().await;
-        self.run_namespace_dispatcher(incremental_dispatcher_config())
+        self.run_namespace_dispatcher(NamespaceDispatcherConfig::default())
             .await
     }
 
@@ -509,7 +499,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             datalake,
             checkpoint_store,
             metrics,
-            incremental_dispatcher_config(),
+            NamespaceDispatcherConfig::default(),
             Arc::new(indexer::campaign::CampaignState::new()),
             &ontology,
         )),

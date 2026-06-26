@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use tracing::info;
 
 use change_detection::{DatalakeChangeDetector, NamespaceChangeDetector};
@@ -149,25 +149,19 @@ impl NamespaceDispatcher {
         &self,
         upper: DateTime<Utc>,
     ) -> Result<Vec<DispatchNamespace>, TaskError> {
-        match self.resume_watermark(upper).await? {
+        match self.resume_watermark().await? {
             Some(watermark) => self.changed_since(watermark, upper).await,
             None => self.all_enabled_namespaces().await,
         }
     }
 
-    async fn resume_watermark(
-        &self,
-        upper: DateTime<Utc>,
-    ) -> Result<Option<DateTime<Utc>>, TaskError> {
-        let floor = upper - Duration::seconds(self.config.max_lookback_secs as i64);
+    async fn resume_watermark(&self) -> Result<Option<DateTime<Utc>>, TaskError> {
         let checkpoint = self
             .checkpoint_store
             .load(CHECKPOINT_KEY)
             .await
             .map_err(TaskError::new)?;
-        Ok(checkpoint
-            .map(|checkpoint| checkpoint.watermark)
-            .filter(|watermark| *watermark >= floor))
+        Ok(checkpoint.map(|checkpoint| checkpoint.watermark))
     }
 
     async fn changed_since(
@@ -214,6 +208,7 @@ mod tests {
     use super::*;
     use crate::checkpoint::{Checkpoint, CheckpointError};
     use crate::testkit::mocks::MockNatsServices;
+    use chrono::Duration;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -352,7 +347,7 @@ mod tests {
         }
     }
 
-    fn fresh_checkpoint_store() -> Arc<StubCheckpointStore> {
+    fn checkpoint_store_with_checkpoint() -> Arc<StubCheckpointStore> {
         let store = Arc::new(StubCheckpointStore::default());
         *store.loaded.lock().unwrap() = Some(checkpoint_at(Utc::now() - Duration::seconds(5)));
         store
@@ -383,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn checkpoint_advances_after_successful_publish() {
-        let checkpoint_store = fresh_checkpoint_store();
+        let checkpoint_store = checkpoint_store_with_checkpoint();
         let dispatcher = dispatcher_with(
             Arc::new(StubDetector {
                 result: Ok(one_namespace()),
@@ -400,7 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn checkpoint_does_not_advance_when_query_fails() {
-        let checkpoint_store = fresh_checkpoint_store();
+        let checkpoint_store = checkpoint_store_with_checkpoint();
         let dispatcher = dispatcher_with(
             Arc::new(StubDetector {
                 result: Err("query failed"),
@@ -418,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn checkpoint_does_not_advance_when_publish_fails() {
-        let checkpoint_store = fresh_checkpoint_store();
+        let checkpoint_store = checkpoint_store_with_checkpoint();
         let dispatcher = dispatcher_with(
             Arc::new(StubDetector {
                 result: Ok(one_namespace()),
@@ -462,7 +457,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_checkpoint_falls_back_to_full_sweep() {
+    async fn old_checkpoint_still_drives_incremental_detection() {
         let detector = CapturingDetector::new();
         let reader = StubReader::new(Ok(one_namespace()));
         let checkpoint_store = Arc::new(StubCheckpointStore::default());
@@ -476,18 +471,15 @@ mod tests {
 
         dispatcher.dispatch_inner().await.unwrap();
 
+        assert_eq!(detector.lower(), DateTime::<Utc>::UNIX_EPOCH);
         assert!(
-            reader.was_called(),
-            "stale checkpoint should fall back to sweep"
-        );
-        assert!(
-            !detector.was_called(),
-            "detector should be skipped when stale"
+            !reader.was_called(),
+            "any checkpoint, however old, keeps the incremental path"
         );
     }
 
     #[tokio::test]
-    async fn fresh_checkpoint_within_window_is_used_verbatim() {
+    async fn checkpoint_is_used_verbatim() {
         let detector = CapturingDetector::new();
         let reader = StubReader::new(Ok(Vec::new()));
         let watermark = Utc::now() - Duration::seconds(5);
@@ -505,7 +497,7 @@ mod tests {
         assert_eq!(detector.lower(), watermark);
         assert!(
             !reader.was_called(),
-            "fresh checkpoint should use incremental path"
+            "an existing checkpoint should use the incremental path"
         );
     }
 }

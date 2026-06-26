@@ -211,10 +211,11 @@ backfills from the beginning of the Siphon window into the new-prefix tables; no
 needed. (The change-detection dispatcher alone would miss namespaces with no recent source changes,
 since its checkpoint is global, not per-prefix.)
 
-On a dispatcher boot with no namespace-change checkpoint, or with a checkpoint older than the
-configured lookback window, the change-detection dispatcher re-dispatches every enabled namespace
-instead of querying from the Unix epoch. The sweep task remains the periodic backstop for missed
-windows.
+On a dispatcher boot with no namespace-change checkpoint, the change-detection dispatcher
+dispatches every enabled namespace once and records a checkpoint; later ticks query Siphon changes
+since that checkpoint, however old it is. The sweep task remains the periodic backstop for missed
+windows and for enabled namespaces with no recent source changes, since the change-detection
+checkpoint is global, not per-prefix.
 
 ### Indexer readiness gate
 
