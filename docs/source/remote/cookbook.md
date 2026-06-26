@@ -257,3 +257,52 @@ Answer: "Where are our security risks, and how did they get there?"
   "limit": 10
 }
 ```
+
+## Fetch source code
+
+Answer: "Show me the actual code."
+
+Virtual columns (`content` on `File` and `Definition`) trigger a Gitaly fetch
+after the graph query. Response time is higher than non-virtual queries.
+Always request them explicitly in `columns`. They are excluded from
+`dynamic_columns` in `path_finding` and `neighbors` queries.
+
+### Fetch the source text of a file
+
+Replace the `path` filter value with a file path that exists in an indexed project.
+Use `limit: 1` when fetching full file content to avoid large responses.
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "f",
+    "entity": "File",
+    "columns": ["path", "language", "content"],
+    "filters": {
+      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+    }
+  },
+  "limit": 1
+}
+```
+
+### Fetch the source text of a specific function or class definition
+
+The `content` field returns the raw source text of just that definition,
+not the full file.
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "d",
+    "entity": "Definition",
+    "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"],
+    "filters": {
+      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+    }
+  },
+  "limit": 5
+}
+```
