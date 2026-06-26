@@ -30,26 +30,38 @@ const SWIFT_IMPORT_KINDS: &[&str] = &[
     "actor",
 ];
 
-fn swift_super_types(node: &N<'_>) -> Vec<String> {
-    let mut result = Vec::new();
-    for child in node.children() {
-        if child.kind().as_ref() == "type_inheritance_clause" {
-            for inner in child.children() {
-                match inner.kind().as_ref() {
-                    "type_identifier" => result.push(inner.text().to_string()),
-                    "inheritance_specifier" => {
-                        for t in inner.children() {
-                            if t.kind().as_ref() == "type_identifier" {
-                                result.push(t.text().to_string());
+fn rewrite_swift(tree: &mut SyntaxTree) {
+    let mut supertypes: Vec<(u32, String)> = Vec::new();
+
+    let class_kinds = ["class_declaration", "protocol_declaration"];
+    for kind in class_kinds {
+        for cls in tree.nodes_of_kind(kind).collect::<Vec<_>>() {
+            for tic in tree
+                .children_of_kind(cls, "type_inheritance_clause")
+                .collect::<Vec<_>>()
+            {
+                for &inner in tree.children(tic) {
+                    match tree.kind(inner) {
+                        "type_identifier" => {
+                            supertypes.push((cls, tree.text(inner).to_string()));
+                        }
+                        "inheritance_specifier" => {
+                            for &t in tree.children(inner) {
+                                if tree.kind(t) == "type_identifier" {
+                                    supertypes.push((cls, tree.text(t).to_string()));
+                                }
                             }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
     }
-    result
+
+    for (cls, text) in supertypes {
+        tree.insert_child(cls, "__supertype", &text);
+    }
 }
 
 fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
@@ -110,15 +122,19 @@ impl DslLanguage for SwiftDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        // Rules for class_declaration are evaluated in reverse insertion order (last → first).
-        // The unconditional fallback at index 0 catches actors and any future keyword variants.
+        let st_meta = || {
+            metadata().super_types(|n: &Node<'_, SyntaxTree>| {
+                n.children()
+                    .filter(|c| c.kind().as_ref() == "__supertype")
+                    .map(|c| c.text().to_string())
+                    .collect()
+            })
+        };
         vec![
             scope("class_declaration", "Class")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(swift_super_types)),
-            // Extensions index the name but do not push a scope — methods inside would receive
-            // the wrong FQN prefix without a reattach hook (tracked in #765).
+                .metadata(st_meta()),
             scope("class_declaration", "Extension")
                 .def_kind(DefKind::Other)
                 .when(has_child_text("extension"))
@@ -132,16 +148,16 @@ impl DslLanguage for SwiftDsl {
                 .def_kind(DefKind::Class)
                 .when(has_child_text("struct"))
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(swift_super_types)),
+                .metadata(st_meta()),
             scope("class_declaration", "Class")
                 .def_kind(DefKind::Class)
                 .when(has_child_text("class"))
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(swift_super_types)),
+                .metadata(st_meta()),
             scope("protocol_declaration", "Interface")
                 .def_kind(DefKind::Interface)
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(swift_super_types)),
+                .metadata(st_meta()),
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
                 .name_from(child_of_kind("simple_identifier")),
@@ -222,6 +238,10 @@ impl DslLanguage for SwiftDsl {
             loop_rule("while_statement"),
             loop_rule("repeat_while_statement"),
         ]
+    }
+
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_swift(tree);
     }
 
     fn hooks() -> types::LanguageHooks {

@@ -78,7 +78,12 @@ impl DslLanguage for GoDsl {
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
                 .when(field_kind("type", &["struct_type"]))
-                .metadata(metadata().super_types(go_embedded_types)),
+                .metadata(metadata().super_types(|n: &Node<'_, SyntaxTree>| {
+                    n.children()
+                        .filter(|c| c.kind().as_ref() == "__supertype")
+                        .map(|c| c.text().to_string())
+                        .collect()
+                })),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),
@@ -182,6 +187,10 @@ impl DslLanguage for GoDsl {
         }
     }
 
+    fn rewrite(tree: &mut SyntaxTree) {
+        rewrite_go(tree);
+    }
+
     fn package_node() -> Option<(&'static str, Extract)> {
         Some(("package_clause", child_of_kind("package_identifier")))
     }
@@ -202,27 +211,37 @@ impl DslLanguage for GoDsl {
     }
 }
 
-/// Extract embedded (promoted) types from a Go struct's field_declaration_list.
-/// Embedded fields have a `type` but no `name`, e.g. `type Foo struct { Bar }`.
-fn go_embedded_types(node: &N<'_>) -> Vec<String> {
-    let Some(struct_type) = node.field("type") else {
-        return vec![];
-    };
-    let Some(fdl) = struct_type.child_of_kind("field_declaration_list") else {
-        return vec![];
-    };
-    fdl.children_matching(Kind("field_declaration"))
-        .filter(|fd| fd.field("name").is_none())
-        .filter_map(|fd| {
-            fd.field("type").map(|t| {
-                let s = t.text().to_string();
-                // Strip pointer prefix: `*Bar` → `Bar`
-                s.strip_prefix('*')
-                    .map(|stripped| stripped.to_string())
-                    .unwrap_or(s)
-            })
-        })
-        .collect()
+fn rewrite_go(tree: &mut SyntaxTree) {
+    let mut supertypes: Vec<(u32, String)> = Vec::new();
+
+    for ts in tree.nodes_of_kind("type_spec").collect::<Vec<_>>() {
+        if let Some(struct_type) = tree
+            .field(ts, "type")
+            .filter(|&t| tree.kind(t) == "struct_type")
+        {
+            for fdl in tree.children_of_kind(struct_type, "field_declaration_list") {
+                for fd in tree
+                    .children_of_kind(fdl, "field_declaration")
+                    .collect::<Vec<_>>()
+                {
+                    if tree.field(fd, "name").is_some() {
+                        continue;
+                    }
+                    if let Some(type_node) = tree.field(fd, "type") {
+                        let s = tree.text(type_node);
+                        let name = s.strip_prefix('*').unwrap_or(s);
+                        if !name.is_empty() {
+                            supertypes.push((ts, name.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (ts, text) in supertypes {
+        tree.insert_child(ts, "__supertype", &text);
+    }
 }
 
 fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
