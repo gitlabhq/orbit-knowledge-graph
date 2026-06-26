@@ -99,7 +99,19 @@ fn collect_reindex_sources(ontology: &ontology::Ontology) -> BTreeSet<ReindexSou
     node_sources
         .chain(derived_sources)
         .chain(edge_sources)
+        .chain(std::iter::once(enabled_namespace_source()))
         .collect()
+}
+
+/// The enabled-namespaces table is itself a change source: a newly enabled
+/// namespace must dispatch immediately, and its row carries `traversal_path`
+/// directly (no dictionary), so this is the reliable initial-publish path that
+/// does not depend on the reconciler having populated the path dictionaries.
+fn enabled_namespace_source() -> ReindexSource {
+    ReindexSource {
+        table: ENABLED_NAMESPACE_TABLE.to_string(),
+        traversal_path: PathResolution::Column("traversal_path".to_string()),
+    }
 }
 
 fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
@@ -223,11 +235,11 @@ mod tests {
     }
 
     #[test]
-    fn ontology_reindex_sources_cover_data_tables_not_the_enabled_table() {
+    fn ontology_reindex_sources_include_data_tables_and_enabled_namespaces() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
         let sources = collect_reindex_sources(&ontology);
         let tables: BTreeSet<&str> = sources.iter().map(|s| s.table.as_str()).collect();
         assert!(tables.contains("work_items"));
-        assert!(!tables.contains(ENABLED_NAMESPACE_TABLE));
+        assert!(sources.contains(&enabled_namespace_source()));
     }
 }
