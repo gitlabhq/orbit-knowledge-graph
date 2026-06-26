@@ -72,14 +72,21 @@ fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
             format_enum_rejection(&error.instance().to_string(), options, &path.to_string())
         }
         // `propertyNames` rejections (e.g. an unknown filter key) wrap the
-        // inner enum error whose `instance()` is the offending key. Surface
-        // the inner enrichment but keep the outer path (`/node/filters`).
+        // inner enum error whose `instance()` is the offending key. Read the
+        // inner enum structurally and rebuild against the outer path
+        // (`/node/filters`); only the inner's own deeper path is dropped, never
+        // the candidate text, so there's no `" at "` parsing invariant.
         ValidationErrorKind::PropertyNames { error: inner } => {
-            let inner_msg = format_schema_error(inner);
-            let stripped = inner_msg
-                .rsplit_once(" at ")
-                .map_or(inner_msg.as_str(), |(head, _)| head);
-            format!("{stripped} at {path}")
+            match inner.kind() {
+                ValidationErrorKind::Enum { options } => {
+                    format_enum_rejection(&inner.instance().to_string(), options, &path.to_string())
+                }
+                // propertyNames only ever wraps an enum here (the schema validates
+                // keys against `{enum: filterable_fields}`), but guard the shape
+                // explicitly rather than assume it. The inner Display already
+                // carries its own accurate path, so emit it directly.
+                _ => format!("{inner} at {}", inner.instance_path()),
+            }
         }
         // `group_by` entries validate via a `oneOf` over object shapes (no inner
         // enum), so the actionable hint is the expected shape, not a candidate list.
@@ -119,6 +126,12 @@ fn format_enum_rejection(instance: &str, options: &serde_json::Value, path: &str
 /// Walk a `oneOf` rejection's branch errors (depth-first, including nested
 /// `oneOf`/`anyOf`) and return the first enum's `options`. Filter operators
 /// nest a `oneOf` inside the property-filter `oneOf`, so the search must recurse.
+///
+/// Returns the *first* enum found depth-first. Every `oneOf` the ontology
+/// derives today (`columns`, relationship `type`, filter `op`) carries exactly
+/// one allowlist enum, so "first" is unambiguous. If a future schema branch ever
+/// carried multiple distinct enums, the first would win and could surface a
+/// partial candidate set — revisit this if that shape appears.
 fn find_inner_enum_options<'a>(
     context: &'a [Vec<jsonschema::ValidationError<'a>>],
 ) -> Option<&'a serde_json::Value> {
@@ -179,10 +192,21 @@ fn render_candidate(value: &serde_json::Value) -> String {
 }
 
 /// Whether a JSON pointer points at a `group_by` array element (`/group_by/N`).
+///
+/// Uses the structured segment iterator rather than matching the `Location`
+/// `Display` string, so a future change to jsonschema's pointer serialization
+/// can't silently make this fall through to the opaque default arm.
 fn is_group_by_path(path: &jsonschema::paths::Location) -> bool {
-    let s = path.to_string();
-    s.strip_prefix("/group_by/")
-        .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit()) && !rest.is_empty())
+    use jsonschema::paths::LocationSegment;
+    let mut segments = path.into_iter();
+    matches!(
+        (segments.next(), segments.next(), segments.next()),
+        (
+            Some(LocationSegment::Property(key)),
+            Some(LocationSegment::Index(_)),
+            None,
+        ) if key.as_ref() == "group_by"
+    )
 }
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
@@ -1205,6 +1229,29 @@ mod tests {
         assert!(rendered.contains("Valid values include:"), "{rendered}");
         assert!(rendered.contains("and 15 more"), "{rendered}");
         assert!(rendered.contains("get_graph_schema"), "{rendered}");
+    }
+
+    #[test]
+    fn group_by_path_matches_only_group_by_array_elements() {
+        use jsonschema::paths::{Location, LocationSegment};
+        use std::borrow::Cow;
+
+        let prop = |s: &'static str| LocationSegment::Property(Cow::Borrowed(s));
+        let idx = LocationSegment::Index;
+
+        let mk = |segs: Vec<LocationSegment<'static>>| segs.into_iter().collect::<Location>();
+
+        assert!(is_group_by_path(&mk(vec![prop("group_by"), idx(0)])));
+        assert!(is_group_by_path(&mk(vec![prop("group_by"), idx(12)])));
+
+        assert!(!is_group_by_path(&mk(vec![prop("group_by")])));
+        assert!(!is_group_by_path(&mk(vec![
+            prop("group_by"),
+            idx(0),
+            prop("kind")
+        ])));
+        assert!(!is_group_by_path(&mk(vec![prop("node"), prop("filters")])));
+        assert!(!is_group_by_path(&mk(vec![prop("group_by_extra"), idx(0)])));
     }
 
     #[test]
