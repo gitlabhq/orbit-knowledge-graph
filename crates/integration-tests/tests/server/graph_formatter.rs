@@ -217,7 +217,7 @@ async fn run_pipeline_with_security(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
     let mut pipeline_ctx = QueryPipelineContext {
-        query_json: String::new(),
+        query: query_engine::compiler::QueryInput::Json(String::new()),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),

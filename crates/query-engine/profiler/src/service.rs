@@ -48,7 +48,7 @@ impl ProfilerPipelineService {
         }
 
         let mut ctx = QueryPipelineContext {
-            query_json: query_json.to_string(),
+            query: compiler::QueryInput::Json(query_json.to_string()),
             compiled: None,
             ontology: Arc::clone(&self.ontology),
             security_context: Some(security_ctx),

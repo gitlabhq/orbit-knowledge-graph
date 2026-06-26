@@ -189,7 +189,7 @@ async fn run_pipeline(
     server_extensions.insert(registry);
 
     let mut ctx = QueryPipelineContext {
-        query_json: json.to_string(),
+        query: query_engine::compiler::QueryInput::Json(json.to_string()),
         compiled: None,
         ontology: Arc::clone(ontology),
         security_context: None,

@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = []
 testutils = ["formatters/testutils"]
+cypher = ["compiler/cypher"]
 
 [dependencies]
 compiler = { path = "compiler" }

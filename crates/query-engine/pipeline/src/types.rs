@@ -2,7 +2,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use compiler::{CompiledQueryContext, SecurityContext};
+use compiler::{CompiledQueryContext, QueryInput, SecurityContext};
 use ontology::Ontology;
 
 use crate::error::PipelineError;
@@ -47,7 +47,8 @@ impl TypeMap {
 }
 
 pub struct QueryPipelineContext {
-    pub query_json: String,
+    /// The query source and its surface language (JSON DSL or Cypher).
+    pub query: QueryInput,
     pub compiled: Option<Arc<CompiledQueryContext>>,
     pub ontology: Arc<Ontology>,
     pub security_context: Option<SecurityContext>,

@@ -21,7 +21,7 @@ impl PipelineStage for CompilationStage {
             .security_context()
             .inspect_err(|e| obs.record_error(e))?;
 
-        let compiled = compiler::compile(&ctx.query_json, ontology, security_context)
+        let compiled = compiler::compile(ctx.query.clone(), ontology, security_context)
             .map_err(|e| PipelineError::Compile {
                 client_safe: e.is_client_safe(),
                 message: e.to_string(),

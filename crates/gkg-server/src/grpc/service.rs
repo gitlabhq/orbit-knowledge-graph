@@ -5,6 +5,7 @@ use std::sync::Arc;
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use ontology::Ontology;
+use query_engine::compiler::QueryInput;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -24,11 +25,11 @@ use crate::proto::{
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
     GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
     InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
-    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
-    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, QueryType,
+    ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
+    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
+    execute_query_message, get_graph_schema_response, get_query_dsl_response,
+    get_response_format_response, invoke_agent_command_response,
 };
 use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
 use gkg_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
@@ -306,16 +307,17 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
+                // Unknown enum values default to JSON. Cypher is rejected later
+                // (with a clear error) when the server is built without the
+                // `cypher` feature, so no gating is needed here.
+                let query = match QueryType::try_from(req.query_type).unwrap_or_default() {
+                    QueryType::Cypher => QueryInput::Cypher(req.query),
+                    QueryType::Json => QueryInput::Json(req.query),
+                };
+
                 let timeout = std::time::Duration::from_secs(stream_timeout);
                 let result = pipeline
-                    .run_query(
-                        claims,
-                        coding_agent,
-                        &req.query,
-                        tx.clone(),
-                        stream,
-                        timeout,
-                    )
+                    .run_query(claims, coding_agent, query, tx.clone(), stream, timeout)
                     .await;
 
                 match result {

@@ -36,7 +36,7 @@ impl PipelineStage for PathResolutionStage {
             return Ok(());
         }
 
-        let input = validate_normalize(&ctx.query_json, &ctx.ontology).map_err(|e| {
+        let input = validate_normalize(ctx.query.clone(), &ctx.ontology).map_err(|e| {
             PipelineError::Compile {
                 client_safe: e.is_client_safe(),
                 message: e.to_string(),
@@ -450,11 +450,11 @@ mod tests {
 
     #[tokio::test]
     async fn missing_resolver_is_noop() {
-        use query_engine::compiler::SecurityContext;
+        use query_engine::compiler::{QueryInput, SecurityContext};
         use query_engine::pipeline::{NoOpObserver, TypeMap};
 
         let mut ctx = QueryPipelineContext {
-            query_json: r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [42]}, "limit": 1}"#.to_string(),
+            query: QueryInput::Json(r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [42]}, "limit": 1}"#.to_string()),
             compiled: None,
             ontology: Arc::new(Ontology::load_embedded().unwrap()),
             security_context: Some(SecurityContext::new(1, vec!["1/".into()]).unwrap()),

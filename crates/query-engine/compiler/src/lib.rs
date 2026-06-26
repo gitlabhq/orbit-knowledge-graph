@@ -137,9 +137,9 @@ pub fn compile(
 /// Lets the querying pipeline's path-resolution stage read normalized scope
 /// keys before the full pipeline runs, then resolve and attach the tight
 /// traversal_path prefix as [`SecurityContext`] scope metadata.
-pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
+pub fn validate_normalize(query: impl Into<QueryInput>, ontology: &Ontology) -> Result<Input> {
     let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
-    ctx.set_query(QueryInput::Json(json_input.to_string()));
+    ctx.set_query(query.into());
     config::run_validate_normalize(&mut ctx)
         .and_then(|()| {
             ctx.take_input().ok_or_else(|| {

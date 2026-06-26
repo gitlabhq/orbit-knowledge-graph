@@ -74,7 +74,7 @@ mod tests {
         );
 
         let mut ctx = QueryPipelineContext {
-            query_json: String::new(),
+            query: query_engine::compiler::QueryInput::Json(String::new()),
             compiled: None,
             ontology: Arc::new(Ontology::new()),
             security_context: None,

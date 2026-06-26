@@ -103,7 +103,7 @@ pub(super) async fn run_query_with_security(
     server_extensions.insert(client);
     server_extensions.insert(resolver_registry);
     let mut pipeline_ctx = QueryPipelineContext {
-        query_json: String::new(),
+        query: query_engine::compiler::QueryInput::Json(String::new()),
         compiled: Some(Arc::clone(&compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx),

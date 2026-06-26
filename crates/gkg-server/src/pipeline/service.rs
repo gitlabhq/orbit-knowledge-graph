@@ -13,6 +13,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
+use query_engine::compiler::QueryInput;
 use query_engine::pipeline::{
     MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
@@ -84,7 +85,7 @@ impl QueryPipelineService {
         &self,
         claims: Claims,
         coding_agent: Option<String>,
-        query_json: &str,
+        query: QueryInput,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
         timeout: std::time::Duration,
@@ -121,7 +122,7 @@ impl QueryPipelineService {
         }
 
         let mut ctx = QueryPipelineContext {
-            query_json: query_json.to_string(),
+            query,
             compiled: None,
             ontology: Arc::clone(&self.ontology),
             security_context: None,

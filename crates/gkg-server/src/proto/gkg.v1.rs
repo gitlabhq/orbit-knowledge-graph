@@ -583,11 +583,13 @@ impl FormatName {
         }
     }
 }
-/// Query language selector. Only JSON DSL is supported today.
+/// Query language selector. JSON DSL is the default; Cypher is the DSL v2
+/// surface, accepted only when the server is built with the `cypher` feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
     Json = 0,
+    Cypher = 1,
 }
 impl QueryType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -597,12 +599,14 @@ impl QueryType {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Json => "QUERY_TYPE_JSON",
+            Self::Cypher => "QUERY_TYPE_CYPHER",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "QUERY_TYPE_JSON" => Some(Self::Json),
+            "QUERY_TYPE_CYPHER" => Some(Self::Cypher),
             _ => None,
         }
     }

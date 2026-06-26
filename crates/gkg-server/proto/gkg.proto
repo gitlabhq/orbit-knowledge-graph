@@ -85,9 +85,11 @@ message ExecuteQueryMessage {
   }
 }
 
-// Query language selector. Only JSON DSL is supported today.
+// Query language selector. JSON DSL is the default; Cypher is the DSL v2
+// surface, accepted only when the server is built with the `cypher` feature.
 enum QueryType {
   QUERY_TYPE_JSON = 0;
+  QUERY_TYPE_CYPHER = 1;
 }
 
 // Client-sent initial message to start a query.

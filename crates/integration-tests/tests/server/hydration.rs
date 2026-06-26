@@ -120,7 +120,7 @@ async fn compile_execute_hydrate(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
-        query_json: String::new(),
+        query: query_engine::compiler::QueryInput::Json(String::new()),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
@@ -162,7 +162,7 @@ async fn compile_execute_redact_hydrate(
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(client));
     let mut pipeline_ctx = QueryPipelineContext {
-        query_json: String::new(),
+        query: query_engine::compiler::QueryInput::Json(String::new()),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(ontology),
         security_context: Some(security_ctx.clone()),
@@ -820,7 +820,7 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(Arc::clone(&client));
     let mut pipeline_ctx = QueryPipelineContext {
-        query_json: String::new(),
+        query: query_engine::compiler::QueryInput::Json(String::new()),
         compiled: Some(Arc::new(compiled)),
         ontology: Arc::clone(&ontology),
         security_context: Some(security_ctx.clone()),

@@ -12,6 +12,7 @@ path = "src/main.rs"
 default = []
 regenerate-protos = []
 testkit = ["gkg-analytics/testkit"]
+cypher = ["query-engine/cypher"]
 
 [dependencies]
 mimalloc = { workspace = true, features = ["secure"] }
