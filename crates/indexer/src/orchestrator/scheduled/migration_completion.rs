@@ -69,13 +69,14 @@ static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
 /// Count distinct projects whose top-level namespace is enabled.
 static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
+    let top = gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
     format!(
         "SELECT count(DISTINCT p.id) AS ns_count \
          FROM project_namespace_traversal_paths AS p \
          WHERE p.deleted = false \
-           AND extract(p.traversal_path, '^[0-9]+/[0-9]+/') IN (\
+           AND extract(p.traversal_path, '{top}') IN (\
                SELECT traversal_path FROM siphon_knowledge_graph_enabled_namespaces \
-               WHERE {del} = false AND match(traversal_path, '^[0-9]+/[0-9]+/$'))"
+               WHERE {del} = false AND match(traversal_path, '{top}$'))"
     )
 });
 
@@ -453,11 +454,13 @@ impl MigrationCompletionChecker {
         let ids = i64::extract_column(&batches, 0).map_err(|e| e.to_string())?;
         let paths = String::extract_column(&batches, 1).map_err(|e| e.to_string())?;
 
-        let (count, top_level_paths, skipped) = split_top_level(ids, paths);
+        let (count, top_level_paths, skipped) =
+            gkg_utils::traversal_path::split_top_level(ids, paths);
         if !skipped.is_empty() {
             warn!(
-                skipped_namespace_ids = ?skipped,
-                "excluding non-top-level enabled namespaces from migration completion gate"
+                skipped = ?skipped,
+                reason = "traversal_path is not a top-level org/namespace path",
+                "excluding enabled namespaces from migration completion gate"
             );
         }
         Ok((count, top_level_paths))
@@ -672,29 +675,6 @@ fn compile_preserve_patterns(raw: &[String]) -> Vec<regex::Regex> {
         .collect()
 }
 
-/// A top-level namespace path is `<org_id>/<namespace_id>/`: exactly two
-/// segments. Subgroups (three or more segments) are never indexed.
-fn is_top_level(path: &str) -> bool {
-    path.split('/').filter(|s| !s.is_empty()).count() == 2
-}
-
-/// Splits enabled `(id, path)` rows into the distinct count of top-level
-/// namespaces with their paths, and the ids dropped for being non-top-level.
-fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> (u64, Vec<String>, Vec<i64>) {
-    let mut kept_ids = HashSet::new();
-    let mut kept_paths = Vec::new();
-    let mut skipped = Vec::new();
-    for (id, path) in ids.into_iter().zip(paths) {
-        if is_top_level(&path) {
-            kept_ids.insert(id);
-            kept_paths.push(path);
-        } else {
-            skipped.push(id);
-        }
-    }
-    (kept_ids.len() as u64, kept_paths, skipped)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,34 +740,6 @@ mod tests {
             COUNT_CODE_ELIGIBLE_PROJECTS.contains("extract(p.traversal_path, '^[0-9]+/[0-9]+/')")
         );
         assert!(!COUNT_CODE_ELIGIBLE_PROJECTS.contains("arrayExists"));
-    }
-
-    #[test]
-    fn is_top_level_accepts_org_and_namespace() {
-        assert!(is_top_level("1/100/"));
-    }
-
-    #[test]
-    fn is_top_level_rejects_subgroup_and_malformed() {
-        assert!(!is_top_level("1/100/200/"));
-        assert!(!is_top_level("0/"));
-        assert!(!is_top_level("1/"));
-        assert!(!is_top_level(""));
-    }
-
-    #[test]
-    fn split_top_level_keeps_top_level_and_skips_the_rest() {
-        let ids = vec![1, 2, 3, 4];
-        let paths = vec![
-            "1/100/".to_string(),
-            "1/100/200/".to_string(),
-            "0/".to_string(),
-            "1/300/".to_string(),
-        ];
-        let (count, kept, skipped) = split_top_level(ids, paths);
-        assert_eq!(count, 2);
-        assert_eq!(kept, vec!["1/100/".to_string(), "1/300/".to_string()]);
-        assert_eq!(skipped, vec![2, 3]);
     }
 
     #[test]
