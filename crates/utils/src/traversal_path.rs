@@ -1,6 +1,8 @@
 //! Helpers for the `<org_id>/<namespace_id>/` traversal path format used
 //! throughout the indexer, NATS topic routing, and query profiler.
 
+use std::collections::HashSet;
+
 /// Convert slash-separated segments to dot-separated, stripping empties.
 ///
 /// `"42/9970/" → "42.9970"`, `"42/9970/12345/" → "42.9970.12345"`.
@@ -74,6 +76,47 @@ pub fn is_valid(path: &str) -> bool {
         return false;
     };
     org.parse::<u64>().is_ok() && namespace.parse::<u64>().is_ok()
+}
+
+/// Regex (RE2) matching the top-level `<org_id>/<namespace_id>/` prefix of a
+/// traversal path. Anchor with `$` to match a path that is exactly top-level.
+pub const TOP_LEVEL_PREFIX_REGEX: &str = "^[0-9]+/[0-9]+/";
+
+/// A path is top-level when it is exactly `<org_id>/<namespace_id>/` (two
+/// segments). Subgroups (three or more segments) are never indexed.
+pub fn is_top_level(path: &str) -> bool {
+    path.split('/').filter(|s| !s.is_empty()).count() == 2
+}
+
+/// Result of [`split_top_level`].
+pub struct TopLevelSplit {
+    /// Distinct count of top-level namespaces.
+    pub count: u64,
+    /// Traversal paths of the top-level namespaces.
+    pub paths: Vec<String>,
+    /// `(id, path)` rows dropped for not being top-level.
+    pub skipped: Vec<(i64, String)>,
+}
+
+/// Partitions enabled `(id, path)` rows into top-level namespaces and the rows
+/// dropped for not being top-level.
+pub fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> TopLevelSplit {
+    let mut kept_ids = HashSet::new();
+    let mut kept_paths = Vec::new();
+    let mut skipped = Vec::new();
+    for (id, path) in ids.into_iter().zip(paths) {
+        if is_top_level(&path) {
+            kept_ids.insert(id);
+            kept_paths.push(path);
+        } else {
+            skipped.push((id, path));
+        }
+    }
+    TopLevelSplit {
+        count: kept_ids.len() as u64,
+        paths: kept_paths,
+        skipped,
+    }
 }
 
 #[cfg(test)]
@@ -228,5 +271,39 @@ mod tests {
     #[test]
     fn is_valid_rejects_subgroup() {
         assert!(!is_valid("1/100/1000/"));
+    }
+
+    #[test]
+    fn is_top_level_accepts_org_and_namespace() {
+        assert!(is_top_level("1/100/"));
+    }
+
+    #[test]
+    fn is_top_level_rejects_subgroup_and_malformed() {
+        assert!(!is_top_level("1/100/200/"));
+        assert!(!is_top_level("0/"));
+        assert!(!is_top_level("1/"));
+        assert!(!is_top_level(""));
+    }
+
+    #[test]
+    fn split_top_level_keeps_top_level_and_skips_the_rest() {
+        let ids = vec![1, 2, 3, 4];
+        let paths = vec![
+            "1/100/".to_string(),
+            "1/100/200/".to_string(),
+            "0/".to_string(),
+            "1/300/".to_string(),
+        ];
+        let split = split_top_level(ids, paths);
+        assert_eq!(split.count, 2);
+        assert_eq!(
+            split.paths,
+            vec!["1/100/".to_string(), "1/300/".to_string()]
+        );
+        assert_eq!(
+            split.skipped,
+            vec![(2, "1/100/200/".to_string()), (3, "0/".to_string())]
+        );
     }
 }
