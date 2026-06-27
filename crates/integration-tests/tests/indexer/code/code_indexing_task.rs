@@ -1280,7 +1280,16 @@ async fn timed_out_job_writes_no_data() {
     let envelope = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
 
     let result = handler.handle(handler_context(), envelope).await;
-    assert!(result.is_err(), "slow fetch should trip the job timeout");
+    assert!(
+        matches!(
+            result,
+            Err(indexer::handler::HandlerError::Permanent {
+                action: indexer::handler::PermanentAction::DeadLetter,
+                ..
+            })
+        ),
+        "a timed-out job must dead-letter, not retry; got {result:?}"
+    );
 
     for table in ["gl_file", "gl_definition"] {
         let rows = clickhouse

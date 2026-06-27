@@ -303,12 +303,18 @@ impl CodeIndexingTaskHandler {
                         project_id,
                         branch = %branch,
                         timeout_secs = timeout.as_secs(),
-                        "code indexing job exceeded wall-clock timeout"
+                        "code indexing job exceeded wall-clock timeout; dead-lettering"
                     );
-                    Err(HandlerError::Processing(format!(
-                        "code indexing job exceeded the {}s timeout",
-                        timeout.as_secs()
-                    )))
+                    // A job that blows the (generous) wall-clock budget is treated as structurally
+                    // stuck: dead-letter it instead of burning the full retry budget re-attempting
+                    // a repo that will almost certainly time out again.
+                    Err(HandlerError::Permanent {
+                        message: format!(
+                            "code indexing job exceeded the {}s timeout",
+                            timeout.as_secs()
+                        ),
+                        action: crate::handler::PermanentAction::DeadLetter,
+                    })
                 }
             },
             None => work.await,

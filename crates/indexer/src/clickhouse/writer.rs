@@ -299,18 +299,43 @@ impl Drop for NotifyOnDrop {
     }
 }
 
+/// Backoff before each insert retry. A short, bounded ladder so a transient ClickHouse blip
+/// does not cost the whole project a re-index next sweep tick, without stalling the writer
+/// through a sustained outage.
+const WRITE_RETRY_BACKOFF: &[Duration] = &[Duration::from_secs(2), Duration::from_secs(4)];
+
 /// Write one coalesced part, then notify every batch's token of the outcome. A single part can
-/// hold batches from many producers; each is told precisely whether its rows landed.
+/// hold batches from many producers; each is told precisely whether its rows landed. Retries the
+/// insert with bounded backoff so a transient failure does not strand the part for the sweep.
 async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
     let guard = NotifyOnDrop(buf.tokens);
-    let durable = writer
-        .write(table, buf.batches, Some(WriteDurability::Durable))
-        .await;
+
+    // Retry the insert with bounded backoff so a transient ClickHouse failure does not cost the
+    // project a re-index next sweep tick. Arrow batches are Arc-backed, so the per-attempt clone
+    // is a refcount bump, not a data copy.
+    let mut tries = 0;
+    let durable = loop {
+        match writer
+            .write(table, buf.batches.clone(), Some(WriteDurability::Durable))
+            .await
+        {
+            Ok(report) => break Ok(report),
+            Err(e) => match WRITE_RETRY_BACKOFF.get(tries) {
+                Some(delay) => {
+                    warn!(table, attempt = tries, error = %e, "buffered write failed; retrying after backoff");
+                    tokio::time::sleep(*delay).await;
+                    tries += 1;
+                }
+                None => break Err(e),
+            },
+        }
+    };
+
     let tokens = guard.disarm();
     match durable {
         Ok(_) => tokens.into_iter().for_each(|t| t.on_flushed()),
         Err(e) => {
-            warn!(table, error = %e, "buffered write flush failed");
+            warn!(table, error = %e, "buffered write flush failed after retries");
             tokens.into_iter().for_each(|t| t.on_failed());
         }
     }

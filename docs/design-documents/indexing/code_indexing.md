@@ -290,6 +290,8 @@ The edge tables (`gl_code_edge`, `gl_edge`) are unpartitioned `ReplacingMergeTre
 
 To avoid this, all code jobs stream their edges into one process-wide `BufferedWriter` (a coalescing layer over `ClickHouseWriter`). A table flushes when it reaches `write_slice_rows` (default 500k) or after `write_buffer_age_secs` (default 60), so the long tail coalesces into well-sized parts while big repositories (which cross the row cap on their own) still flush promptly. Each submitted batch carries a `FlushToken` the writer invokes once that batch's part lands (or fails), so a producer learns durability per part without the writer knowing what the rows mean. Up to `write_max_concurrent` (default 4) parts are written to ClickHouse at once; they may land out of order, which is safe because the edge tables are `ReplacingMergeTree`s keyed by row identity + `_version` and stale cleanup keys on `indexed_at`, so nothing depends on insert order. The bound trades memory (that many `write_slice_rows`-sized parts in flight) for write throughput.
 
+Each part insert is retried with bounded backoff (2s then 4s) before the part is declared failed, so a transient ClickHouse blip does not cost the project a full re-index on the next sweep tick. Only after the retries are exhausted is the part's token marked failed.
+
 Concurrency is split into two lanes by post-filter file count: a wide lane (`small_indexing_slots`, default 6) for the small-repo tail and a reserved lane (`big_indexing_slots`, default 2) so a flood of small repositories cannot starve monorepos.
 
 A project is checkpointed only after its rows are durable. The handler attaches a per-project `ProjectCommit` token to every batch it submits and holds a `+1` sentinel; the writer decrements the token as each part lands, and whichever decrement reaches zero (a flushed part, or the sentinel the pipeline drops after the parse finishes) finalizes the project: it tombstones the prior version's stale rows, then writes the checkpoint. If any of the project's parts failed to flush, the token is marked failed and the checkpoint is skipped, so the once-a-minute backfill sweep re-dispatches it and NATS redelivery bounds the retries (re-indexing is idempotent). A crash before a part lands has the same effect. This keeps the checkpoint the single durable record: no watermark, no durability handshake, no lease heartbeat, no lock renewal.
@@ -303,6 +305,8 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
 Projects whose Gitaly archive endpoint returns 404 (no refs) or 5xx (no repository storage) are checkpointed with no commit and treated as terminal "indexed empty". This prevents retries and DLQ churn for projects with no content. Once the project is populated, subsequent siphon tasks arrive with a larger `task_id` than the stored checkpoint and are re-processed normally. The `gkg.indexer.code.repository.empty` counter (labelled `reason=not_found|server_error`) tracks how often this short-circuit fires.
 
 Tasks with no `branch` field resolve the default branch via `GET /api/v4/internal/orbit/project/:id/info`. When that endpoint returns 404 (project deleted in Rails but still referenced by the dispatcher's datalake view), the task is acked with the same `empty_repository{reason=not_found}` counter and no checkpoint is stored — the branch is unknown, so there is no key to write under. The ack avoids DLQ churn; the dispatcher stopping emission for deleted projects is tracked separately.
+
+A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 250s) is treated as structurally stuck and dead-lettered on the first occurrence rather than retried: the budget is generous, so a job that blows it will almost certainly do so again, and burning the full delivery budget re-attempting it wastes an indexing slot each time. (A transient write failure is different — that is retried in the writer with backoff, above, and does not dead-letter the job.)
 
 #### Flow visual representation
 
@@ -344,7 +348,66 @@ Tasks with no `branch` field resolve the default branch via `GET /api/v4/interna
                            |       |- Write to ClickHouse (6 tables)
                            |       \- Clean up stale data
                            |- 7. Delete downloaded repository from disk
-                           \- 8. Update checkpoint, release lock
+                           \- 8. Release lock (checkpoint happens asynchronously,
+                                  once the buffered writes for the project land)
+```
+
+The handler acks after its batches are *buffered*, not after they are written. The actual ClickHouse writes, the stale cleanup, and the checkpoint happen asynchronously in the writer's drain task once the project's parts are durable. The two diagrams below show that durable-write path.
+
+##### ProjectCommit state machine
+
+```plantuml
+@startuml
+hide empty description
+[*] --> Open : pipeline creates commit\n(remaining = 1 sentinel)
+Open --> Open : batch submitted\n(remaining += 1)
+Open --> Draining : parse done\n(sentinel released, remaining -= 1)
+Open --> Failed : a part failed / parse panicked / timeout\n(failed = true)
+Draining --> Draining : part lands\n(remaining -= 1)
+Draining --> Failed : a part failed after retries\n(failed = true)
+Draining --> Checkpointed : remaining hits 0, not failed\n(stale-clean then checkpoint)
+Failed --> Abandoned : remaining hits 0\n(no checkpoint; sweep re-indexes)
+Checkpointed --> [*]
+Abandoned --> [*]
+@enduml
+```
+
+##### Write data flow
+
+One coalesced part can hold batches from many projects; each batch carries its own project's token, so a single part write notifies every contributing project precisely. The insert is retried with bounded backoff before a part is declared failed.
+
+```plantuml
+@startuml
+skinparam shadowing false
+skinparam ParticipantPadding 20
+skinparam BoxPadding 12
+
+box "indexer" #F7F7F7
+  participant "project A parse" as A
+  participant "project B parse" as B
+  participant "BufferedWriter\ndrain task" as W
+end box
+database ClickHouse as CH
+
+A -> W : submit(gl_edge, batchA, tokenA)
+B -> W : submit(gl_edge, batchB, tokenB)
+note over W : coalesce per table until\nwrite_slice_rows (500k) or age (60s)
+
+W -> CH : write one gl_edge part\n(batchA + batchB together)
+note right of W : up to write_max_concurrent parts in flight;\ninsert retried 2s/4s before giving up
+
+alt part durable (possibly after retry)
+  CH --> W : ok
+  W -> A : tokenA.on_flushed()
+  W -> B : tokenB.on_flushed()
+else part failed after retries / panic
+  CH --> W : err
+  W -> A : tokenA.on_failed()
+  W -> B : tokenB.on_failed()
+end
+
+note over A, B : each token decrements its project's\nremaining count; the project whose\ncount hits 0 (and never failed)\nstale-cleans then checkpoints
+@enduml
 ```
 
 ### Differences from the original local tool
