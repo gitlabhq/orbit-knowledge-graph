@@ -51,9 +51,9 @@ pub struct CodeIndexingPipeline {
     resolver: RepositoryResolver,
     writer: BufferedWriter,
     seq: AtomicU64,
-    checkpoints: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
+    completions: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
+    completed: watch::Receiver<u64>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
-    stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
@@ -89,19 +89,22 @@ impl CodeIndexingPipeline {
             pipeline_config.write_slice_rows,
             pipeline_config.write_buffer_age(),
         );
-        let checkpoints = Arc::new(Mutex::new(BTreeMap::new()));
-        tokio::spawn(write_durable_checkpoints(
+        let completions = Arc::new(Mutex::new(BTreeMap::new()));
+        let (completed_tx, completed) = watch::channel(0u64);
+        tokio::spawn(complete_durable(
             writer.flushed(),
-            checkpoints.clone(),
+            completions.clone(),
             checkpoint_store.clone(),
+            stale_data_cleaner.clone(),
+            completed_tx,
         ));
         Self {
             resolver,
             writer,
             seq: AtomicU64::new(1),
-            checkpoints,
+            completions,
+            completed,
             checkpoint_store,
-            stale_data_cleaner,
             metrics,
             table_names,
             ontology,
@@ -129,6 +132,24 @@ impl CodeIndexingPipeline {
     /// Hard per-job wall-clock timeout, or `None` when disabled.
     pub fn job_timeout(&self) -> Option<std::time::Duration> {
         self.pipeline_config.job_timeout()
+    }
+
+    /// Flush all buffered writes and wait until the completion task has cleaned and
+    /// checkpointed everything they made durable. For tests and shutdown; steady state relies
+    /// on the size/age flush and the completion task.
+    pub async fn flush(&self) -> Result<(), HandlerError> {
+        self.writer
+            .flush()
+            .await
+            .map_err(|e| HandlerError::Processing(format!("flush failed: {e}")))?;
+        let target = *self.writer.flushed().borrow();
+        let mut completed = self.completed.clone();
+        while *completed.borrow_and_update() < target {
+            if completed.changed().await.is_err() {
+                break;
+            }
+        }
+        Ok(())
     }
 
     #[tracing::instrument(
@@ -255,8 +276,8 @@ impl CodeIndexingPipeline {
 
         let seq = indexing_result?;
 
-        // Insert before finish() so the watermark can't pass seq before its checkpoint is mapped.
-        self.checkpoints.lock().insert(
+        // Insert before finish() so the watermark can't pass seq before its completion is mapped.
+        self.completions.lock().insert(
             seq,
             CodeIndexingCheckpoint {
                 traversal_path: request.traversal_path.clone(),
@@ -311,8 +332,6 @@ impl CodeIndexingPipeline {
         }
 
         context.progress.notify_in_progress().await;
-        self.run_stale_cleanup(request, indexed_at, &result).await;
-
         Ok(seq)
     }
 
@@ -513,86 +532,72 @@ impl CodeIndexingPipeline {
             self.metrics.record_stage_error(error.stage);
         }
     }
+}
 
-    async fn run_stale_cleanup(
-        &self,
-        request: &IndexingRequest,
-        indexed_at: DateTime<Utc>,
-        result: &code_graph::v2::PipelineResult,
-    ) {
-        // A killed first-time run can leave partial rows that only this sweep removes.
-        info!(
-            project_id = request.project_id,
-            branch = %request.branch,
-            watermark = %indexed_at,
-            definitions = result.stats.definitions_count,
-            imports = result.stats.imports_count,
-            files = result.stats.files_indexed,
-            directories = result.stats.directories_indexed,
-            files_discovered = result.stats.files_discovered,
-            faulted = result.faults.len(),
-            skipped = result.skipped.len(),
-            "cleaning stale code data: tombstoning prior-version rows not re-emitted by this run"
-        );
-        let cleanup_start = Instant::now();
-        if let Err(error) = self
-            .stale_data_cleaner
+/// Completes each project once the buffered-writer watermark reaches its seq, so stale cleanup
+/// and checkpointing only happen after its rows are durable.
+async fn complete_durable(
+    mut flushed: watch::Receiver<u64>,
+    completions: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
+    store: Arc<dyn CodeCheckpointStore>,
+    cleaner: Arc<dyn StaleDataCleaner>,
+    completed: watch::Sender<u64>,
+) {
+    loop {
+        let watermark = *flushed.borrow_and_update();
+        complete_up_to(&completions, &store, &cleaner, watermark).await;
+        let _ = completed.send(watermark);
+        if flushed.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+/// For each project at or below `watermark`: tombstone its prior version's stale rows (now safe,
+/// since the new rows are durable), then checkpoint it.
+async fn complete_up_to(
+    completions: &Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>,
+    store: &Arc<dyn CodeCheckpointStore>,
+    cleaner: &Arc<dyn StaleDataCleaner>,
+    watermark: u64,
+) {
+    loop {
+        let next = {
+            let mut map = completions.lock();
+            match map.keys().next().copied() {
+                Some(seq) if seq <= watermark => map.remove(&seq),
+                _ => None,
+            }
+        };
+        let Some(checkpoint) = next else { break };
+
+        if let Err(error) = cleaner
             .delete_stale_data(
-                &request.traversal_path,
-                request.project_id,
-                &request.branch,
-                indexed_at,
+                &checkpoint.traversal_path,
+                checkpoint.project_id,
+                &checkpoint.branch,
+                checkpoint.indexed_at,
             )
             .await
         {
             warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
+                project_id = checkpoint.project_id,
                 %error,
                 "failed to delete stale data, will retry on next indexing"
             );
         }
-        let stale_data_cleanup_duration = cleanup_start.elapsed();
-        info!(
-            duration_ms = stale_data_cleanup_duration.as_millis() as u64,
-            "stale data cleanup completed"
-        );
-    }
-}
 
-/// Writes each registered checkpoint once the buffered-writer watermark reaches its seq, so a
-/// project is only checkpointed after its rows are durable.
-async fn write_durable_checkpoints(
-    mut flushed: watch::Receiver<u64>,
-    checkpoints: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
-    store: Arc<dyn CodeCheckpointStore>,
-) {
-    loop {
-        let watermark = *flushed.borrow_and_update();
-        loop {
-            let next = {
-                let mut map = checkpoints.lock();
-                match map.keys().next().copied() {
-                    Some(seq) if seq <= watermark => map.remove(&seq),
-                    _ => None,
-                }
-            };
-            let Some(checkpoint) = next else { break };
-            match store.set_checkpoint(&checkpoint).await {
-                Ok(()) => info!(
-                    project_id = checkpoint.project_id,
-                    task_id = checkpoint.last_task_id,
-                    "completed code indexing"
-                ),
-                Err(e) => warn!(
-                    project_id = checkpoint.project_id,
-                    error = %e,
-                    "failed to checkpoint code indexing; project will be re-indexed",
-                ),
-            }
-        }
-        if flushed.changed().await.is_err() {
-            return;
+        match store.set_checkpoint(&checkpoint).await {
+            Ok(()) => info!(
+                project_id = checkpoint.project_id,
+                task_id = checkpoint.last_task_id,
+                "completed code indexing"
+            ),
+            Err(e) => warn!(
+                project_id = checkpoint.project_id,
+                error = %e,
+                "failed to checkpoint code indexing; project will be re-indexed",
+            ),
         }
     }
 }
@@ -637,11 +642,20 @@ mod tests {
     #[tokio::test]
     async fn checkpoints_only_seqs_at_or_below_the_watermark() {
         let store = Arc::new(MockCodeCheckpointStore::new());
-        let checkpoints = Arc::new(Mutex::new(BTreeMap::new()));
-        checkpoints.lock().insert(1, checkpoint(1));
-        checkpoints.lock().insert(2, checkpoint(2));
+        let cleaner =
+            Arc::new(super::super::stale_data_cleaner::test_utils::MockStaleDataCleaner::default());
+        let completions = Arc::new(Mutex::new(BTreeMap::new()));
+        completions.lock().insert(1, checkpoint(1));
+        completions.lock().insert(2, checkpoint(2));
         let (tx, rx) = watch::channel(0u64);
-        let task = tokio::spawn(write_durable_checkpoints(rx, checkpoints, store.clone()));
+        let (completed_tx, _completed) = watch::channel(0u64);
+        let task = tokio::spawn(complete_durable(
+            rx,
+            completions,
+            store.clone(),
+            cleaner,
+            completed_tx,
+        ));
 
         tx.send(1).unwrap();
         tokio::time::timeout(Duration::from_secs(1), async {

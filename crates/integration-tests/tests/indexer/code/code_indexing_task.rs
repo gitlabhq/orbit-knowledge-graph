@@ -50,6 +50,7 @@ async fn indexes_repository() {
 
     let result = handler.handle(context, envelope).await;
     assert!(result.is_ok(), "handler failed: {:?}", result);
+    handler.flush().await.expect("flush");
 
     assert_code_indexed(&clickhouse, project_id).await;
     assert_branch_indexed(&clickhouse, project_id, "main", traversal_path).await;
@@ -620,38 +621,22 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
         )],
     );
     let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
-    let (context, indexing_status) = handler_context_with_status();
+    let (context, _indexing_status) = handler_context_with_status();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
-    let error = failing_handler
+    // Writes are buffered, so the handler acks; the deferred flush fails, the project's seq is
+    // poisoned (never checkpointed), and the backfill sweep re-indexes it.
+    failing_handler
         .handle(context, envelope)
         .await
-        .expect_err("writer failure should fail the task");
+        .expect("buffered handler acks even when the deferred write will fail");
+    let _ = failing_handler.flush().await;
 
-    assert!(
-        error
-            .to_string()
-            .contains("fatal code indexing pipeline error"),
-        "unexpected error: {error}"
-    );
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_file_not_active(&clickhouse, project_id, "src/Other.java").await;
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1),
         "failed reindex must not advance the checkpoint"
-    );
-
-    let progress = indexing_status
-        .get(traversal_path)
-        .await
-        .expect("progress lookup should succeed")
-        .expect("failed run should record indexing progress");
-    assert!(
-        progress
-            .last_error
-            .as_deref()
-            .is_some_and(|error| error.contains("fatal code indexing pipeline error")),
-        "failed run should record the fatal pipeline error in indexing progress, got {progress:?}"
     );
 }
 
@@ -884,6 +869,7 @@ async fn index_code(
         .handle(context, envelope)
         .await
         .unwrap_or_else(|e| panic!("indexing commit {commit_sha} (task {task_id}) failed: {e}"));
+    handler.flush().await.expect("flush");
 }
 
 async fn insert_file_row_with_version(

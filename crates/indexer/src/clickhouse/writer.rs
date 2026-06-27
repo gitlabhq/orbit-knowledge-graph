@@ -130,6 +130,7 @@ impl ClickHouseWriter {
 enum Msg {
     Submit(String, RecordBatch, u64),
     Finish(u64),
+    Flush(tokio::sync::oneshot::Sender<()>),
 }
 
 /// Coalesces tagged writes into well-sized parts. A table flushes at `max_rows` or after
@@ -169,6 +170,19 @@ impl BufferedWriter {
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
 
+    /// Flush all buffered rows now and wait until they are written. Used to make writes
+    /// synchronously visible (tests, shutdown); the steady-state path relies on the size/age
+    /// flush instead.
+    pub async fn flush(&self) -> Result<(), WriteError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(Msg::Flush(tx))
+            .await
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))?;
+        rx.await
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+    }
+
     /// Highest fully-durable tag. Watch it to learn when a tag's rows have landed.
     pub fn flushed(&self) -> watch::Receiver<u64> {
         self.flushed.clone()
@@ -202,6 +216,14 @@ async fn drain(
             msg = rx.recv() => match msg {
                 None => break,
                 Some(Msg::Finish(tag)) => max_finished = max_finished.max(tag),
+                Some(Msg::Flush(ack)) => {
+                    for (table, buf) in std::mem::take(&mut pending) {
+                        flush(&writer, &table, buf, &mut failed_floor).await;
+                    }
+                    publish(&pending, max_finished, failed_floor, &flushed);
+                    let _ = ack.send(());
+                    continue;
+                }
                 Some(Msg::Submit(table, batch, tag)) => {
                     let buf = pending.entry(table.clone()).or_insert(TableBuffer { min_tag: tag, ..Default::default() });
                     buf.rows += batch.num_rows();
