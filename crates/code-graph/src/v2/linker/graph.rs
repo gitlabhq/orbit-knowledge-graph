@@ -191,10 +191,6 @@ impl ReexportIndex {
     pub fn wildcard_sources(&self, module: &str) -> &[String] {
         self.wildcard.get(module).map_or(&[], Vec::as_slice)
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.named.is_empty() && self.wildcard.is_empty()
-    }
 }
 
 pub struct CodeGraph {

@@ -1355,10 +1355,17 @@ impl FamilyPipeline {
             None
         };
 
-        let shared_reexport_index = member_ctxs.values().find_map(|lc| {
-            let build = lc.rules.hooks.reexport_index_builder?;
-            Some(Arc::new(build(&graph, expected_sep)))
-        });
+        let reexport_builders: Vec<_> = member_ctxs
+            .values()
+            .filter_map(|lc| lc.rules.hooks.reexport_index_builder)
+            .collect();
+        assert!(
+            reexport_builders.len() <= 1,
+            "FamilyPipeline supports at most one reexport_index_builder per family"
+        );
+        let shared_reexport_index = reexport_builders
+            .first()
+            .map(|build| Arc::new(build(&graph, expected_sep)));
 
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
