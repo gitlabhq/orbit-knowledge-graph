@@ -32,20 +32,11 @@ use query_engine::formatters::ColumnDescriptor;
 use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
 use serde_json::{Map, Value};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MustInspect — drop-enforced result wrapper
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Wrapper that panics on drop if the inner value was never inspected.
 ///
 /// Returned by [`ResponseView`] methods that satisfy enforcement requirements
-/// (`node_ids`, `edges_of_type`, `path_ids`). Transparent in normal use —
-/// implements [`Deref`], [`PartialEq`], and [`Debug`] so callers can compare,
-/// iterate, or call methods without ceremony. Panics on drop only if the
+/// (`node_ids`, `edges_of_type`, `path_ids`). Panics on drop only if the
 /// value was never accessed at all (the "satisfy and discard" pattern).
-///
-/// Use [`Deref`] to access the value, or call assertion methods directly
-/// on the [`ResponseView`] that returned this wrapper.
 pub struct MustInspect<T> {
     value: Option<T>,
     accessed: std::cell::Cell<bool>,
@@ -94,14 +85,7 @@ impl<T> Drop for MustInspect<T> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ResponseView
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Typed view over a formatted query pipeline response.
-///
-/// Wraps [`GraphResponse`] and provides ergonomic lookup, iteration, and
-/// assertion helpers for integration tests.
 ///
 /// When created via [`for_query`](Self::for_query), the query JSON is parsed
 /// to derive assertion requirements. If the test drops the view without
@@ -110,12 +94,8 @@ impl<T> Drop for MustInspect<T> {
 pub struct ResponseView {
     pub response: GraphResponse,
     tracker: AssertionTracker,
-    /// Edge types that have been positively asserted by the test.
-    ///
-    /// Populated by methods that satisfy [`Requirement::Relationship`] or
-    /// [`Requirement::Neighbors`]. Used by [`assert_all_edge_types_covered`]
-    /// to verify that the test has acknowledged every edge type present in
-    /// the response.
+    /// Edge types positively asserted by the test; consumed by
+    /// [`assert_all_edge_types_covered`] to detect silently-ignored types.
     asserted_edge_types: RefCell<HashSet<String>>,
 }
 
@@ -175,10 +155,8 @@ fn group_node_property<'a>(
 }
 
 impl ResponseView {
-    /// Create a view without assertion enforcement.
-    ///
-    /// Only available in `integration-testkit`'s own unit tests.
-    /// External crates must use [`for_query`](Self::for_query).
+    /// Create a view without assertion enforcement. External crates must use
+    /// [`for_query`](Self::for_query); this is gated to in-crate unit tests.
     #[cfg(test)]
     pub(crate) fn new(response: GraphResponse) -> Self {
         Self {
@@ -282,8 +260,6 @@ impl ResponseView {
         self.response.edges.len()
     }
 
-    // ── Node lookups ─────────────────────────────────────────────────
-
     pub fn find_node(&self, entity_type: &str, id: i64) -> Option<&GraphNode> {
         self.response
             .nodes
@@ -329,8 +305,6 @@ impl ResponseView {
             .map(|n| (n.entity_type.clone(), n.id))
             .collect()
     }
-
-    // ── Edge lookups ─────────────────────────────────────────────────
 
     pub fn find_edge(
         &self,
@@ -404,9 +378,6 @@ impl ResponseView {
     }
 
     /// Return the distinct path_ids present in edges, in first-seen order.
-    ///
-    /// Tests should use this to discover which paths exist, then call
-    /// [`path`] for each one explicitly.
     /// Satisfies [`Requirement::PathFinding`].
     pub fn path_ids(&self) -> MustInspect<Vec<usize>> {
         self.tracker.satisfy(Requirement::PathFinding);
@@ -422,10 +393,7 @@ impl ResponseView {
     }
 
     /// Return edges belonging to a specific `path_id`, sorted by `step`.
-    ///
-    /// Returns an empty vec if no edges have this path_id. Tests should
-    /// call [`path_ids`] first and iterate explicitly rather than relying
-    /// on auto-grouping.
+    /// Empty if no edges have this path_id.
     pub fn path(&self, path_id: usize) -> Vec<&GraphEdge> {
         let mut edges: Vec<&GraphEdge> = self
             .response
@@ -436,8 +404,6 @@ impl ResponseView {
         edges.sort_by_key(|e| e.step.unwrap_or(0));
         edges
     }
-
-    // ── Assertions ───────────────────────────────────────────────────
 
     pub fn assert_node_exists(&self, entity_type: &str, id: i64) {
         assert!(
@@ -1021,12 +987,7 @@ fn assert_predicate_is_nontrivial(
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NodeExt — typed property access for GraphNode
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Extension trait providing property access and assertion helpers on
-/// [`GraphNode`]. Properties live in the flattened `properties` map.
+/// Property access and assertion helpers on [`GraphNode`].
 pub trait NodeExt {
     fn prop(&self, key: &str) -> Option<&Value>;
     fn prop_str(&self, key: &str) -> Option<&str>;
@@ -1265,8 +1226,6 @@ pub(crate) mod tests {
         }
     }
 
-    // ── ResponseView: basic accessors ────────────────────────────────
-
     #[test]
     fn query_type_returns_response_type() {
         let view = ResponseView::new(sample_response());
@@ -1279,8 +1238,6 @@ pub(crate) mod tests {
         assert_eq!(view.node_count(), 4);
         assert_eq!(view.edge_count(), 3);
     }
-
-    // ── Node lookups ─────────────────────────────────────────────────
 
     #[test]
     fn find_node_returns_matching_node() {
@@ -1329,8 +1286,6 @@ pub(crate) mod tests {
         assert!(all.contains(&("User".to_string(), 1)));
         assert!(all.contains(&("Group".to_string(), 101)));
     }
-
-    // ── Edge lookups ─────────────────────────────────────────────────
 
     #[test]
     fn find_edge_returns_matching_edge() {
@@ -1390,7 +1345,6 @@ pub(crate) mod tests {
         )));
     }
 
-    // ── Path helpers ─────────────────────────────────────────────────
     #[test]
     fn path_ids_returns_empty_when_no_path_edges() {
         let view = ResponseView::new(sample_response());
@@ -1455,8 +1409,6 @@ pub(crate) mod tests {
         let view = ResponseView::new(sample_response());
         assert!(view.path(99).is_empty());
     }
-
-    // ── Assertions ───────────────────────────────────────────────────
 
     #[test]
     fn assert_node_exists_passes_for_present_node() {
@@ -1572,8 +1524,6 @@ pub(crate) mod tests {
         ResponseView::new(resp).assert_referential_integrity();
     }
 
-    // ── NodeExt ──────────────────────────────────────────────────────
-
     #[test]
     fn prop_returns_non_null_value() {
         let node = make_node("User", 1, &[("name", json!("alice")), ("age", json!(30))]);
@@ -1668,8 +1618,6 @@ pub(crate) mod tests {
         node.assert_prop("tags", &json!(["a", "b"]));
     }
 
-    // ── Empty response ───────────────────────────────────────────────
-
     #[test]
     fn empty_response_returns_zero_counts_and_empty_collections() {
         let resp = GraphResponse {
@@ -1730,7 +1678,6 @@ mod edge_coverage_tests {
     #[should_panic(expected = "Uncovered edge types")]
     fn assert_all_edge_types_covered_panics_on_missing_type() {
         let view = ResponseView::new(response_with_two_edge_types());
-        // Only assert MEMBER_OF, skip AUTHORED
         view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
         view.assert_all_edge_types_covered();
     }
@@ -1822,7 +1769,6 @@ mod edge_coverage_tests {
             pagination: None,
         };
         let view = ResponseView::new(resp);
-        // Use different assertion methods for different edge types
         view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 102)]);
         view.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
         view.assert_all_edge_types_covered();

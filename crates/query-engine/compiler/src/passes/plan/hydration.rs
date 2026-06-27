@@ -1,5 +1,3 @@
-//! Hydration plan: fetch node properties for a set of IDs.
-
 use std::collections::HashMap;
 
 use crate::error::{QueryError, Result};

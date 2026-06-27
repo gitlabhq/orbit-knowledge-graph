@@ -30,12 +30,10 @@ impl DslLanguage for LuaDsl {
         // [0] is the unconditional fallback for plain `function foo()`.
         vec![
             scope("function_declaration", "Function").def_kind(DefKind::Function),
-            // function M.helper() — table dot syntax; name = bare field identifier
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
                 .when(field_kind("name", &["dot_index_expression"]))
                 .name_from(field("name").field("field")),
-            // function M:method() — colon syntax with implicit self
             scope("function_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .when(field_kind("name", &["method_index_expression"]))
@@ -45,17 +43,14 @@ impl DslLanguage for LuaDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // obj:method() — colon call; receiver is the table
             reference("function_call")
                 .name_from(field("name").field("method"))
                 .when(field_kind("name", &["method_index_expression"]))
                 .receiver_via(field("name").field("table")),
-            // M.func() — dot call; receiver is the table
             reference("function_call")
                 .name_from(field("name").field("field"))
                 .when(field_kind("name", &["dot_index_expression"]))
                 .receiver_via(field("name").field("table")),
-            // foo() — simple call
             reference("function_call").name_from(field("name")),
         ]
     }
@@ -124,7 +119,6 @@ impl DslLanguage for LuaDsl {
 
     fn bindings() -> Vec<BindingRule> {
         vec![
-            // local x = expr  /  local x, y = e1, e2
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["variable_list"])
                 .value_from("expression_list"),
@@ -159,8 +153,6 @@ fn is_require() -> Pred {
     field_text("name", "require")
 }
 
-// ── Resolution rules ────────────────────────────────────────────
-
 pub struct LuaRules;
 
 impl HasRules for LuaRules {
@@ -186,8 +178,6 @@ impl HasRules for LuaRules {
         .with_hooks(ResolverHooks::default())
     }
 }
-
-// ── Unit tests ───────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

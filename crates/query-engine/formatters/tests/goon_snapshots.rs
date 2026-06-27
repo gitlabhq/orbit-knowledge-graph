@@ -114,9 +114,6 @@ fn snapshot_traversal() {
 
 #[test]
 fn snapshot_aggregation_node_grouped() {
-    // Group by entity node (User) — author leaderboard. Each row's grouped
-    // node is inlined as `{type, id, properties}`; the encoder lifts the
-    // unique nodes into @nodes so rows stay one-line `User:id` references.
     let mut r = empty_response("aggregation");
     r.columns = Some(vec![ColumnDescriptor {
         name: "merged_count".into(),
@@ -156,8 +153,6 @@ fn snapshot_aggregation_node_grouped() {
 
 #[test]
 fn snapshot_aggregation_property_grouped() {
-    // Group by property (vulnerability severity bucket). Pure scalar group
-    // values — no node lift needed; @nodes stays empty.
     let mut r = empty_response("aggregation");
     r.columns = Some(vec![ColumnDescriptor {
         name: "vulnerability_count".into(),
@@ -190,8 +185,6 @@ fn snapshot_aggregation_property_grouped() {
 
 #[test]
 fn snapshot_aggregation_ungrouped() {
-    // Single-row scalar aggregation — no group_by. The single row carries
-    // the metric value directly in @rows.
     let mut r = empty_response("aggregation");
     r.columns = Some(vec![ColumnDescriptor {
         name: "total".into(),

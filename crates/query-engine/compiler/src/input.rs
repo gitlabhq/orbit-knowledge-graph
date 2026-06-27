@@ -1,5 +1,3 @@
-//! Input types for JSON query deserialization.
-//!
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
@@ -7,19 +5,13 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Top-level input
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum DynamicColumnMode {
-    /// Fetch all columns from the ontology for each entity type.
     #[serde(rename = "*")]
     All,
-    /// Fetch only the entity's `default_columns` from the ontology.
     #[default]
     #[serde(rename = "default")]
     Default,
@@ -29,11 +21,8 @@ pub enum DynamicColumnMode {
 /// semantics. Only `dynamic_columns` and `include_debug_sql` are recognized.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct QueryOptions {
-    /// Columns fetched for dynamically-discovered entities during hydration.
-    /// `All` returns every column; `Default` returns the entity's `default_columns`.
     #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
-    /// When true, includes compiled ClickHouse SQL in the response metadata.
     /// On SaaS: honored for GitLab team members. On self-managed/Dedicated:
     /// honored for instance admins only.
     #[serde(default)]
@@ -47,7 +36,6 @@ pub struct QueryOptions {
 pub struct EntityAuthConfig {
     /// Rails resource type sent to the authorization service (e.g. "projects").
     pub resource_type: String,
-    /// Ability to check (e.g. "read_code").
     pub ability: String,
     /// DB column whose value is used as the authorization ID.
     /// "id" for most entities; e.g. "project_id" for Definition/File/Branch.
@@ -100,7 +88,6 @@ pub struct Input {
     /// so dynamic nodes (path/neighbors) can be resolved without re-consulting the ontology.
     #[serde(skip)]
     pub entity_auth: HashMap<String, EntityAuthConfig>,
-    /// Metadata accumulated across compiler passes (lowering, optimize, etc.).
     #[serde(skip)]
     pub compiler: CompilerMetadata,
     /// True when this Input was constructed for the *dynamic* hydration codepath
@@ -340,15 +327,12 @@ pub enum QueryType {
 #[serde(default)]
 pub struct InputNode {
     pub id: String,
-    /// Entity type (e.g., "User", "Project"). Determines which table to query.
     #[serde(default)]
     pub entity: Option<String>,
     /// Resolved table name (e.g., "gl_user"). Populated during normalization.
     #[serde(skip)]
     pub table: Option<String>,
-    /// Columns to return for this node. Use `ColumnSelection::All` for all columns,
-    /// or `ColumnSelection::List` for specific columns. If not specified, only
-    /// mandatory columns (id, type) are returned.
+    /// If not specified, only mandatory columns (id, type) are returned.
     #[serde(default, deserialize_with = "deserialize_columns")]
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
@@ -362,17 +346,15 @@ pub struct InputNode {
     /// Always set before enforce.rs runs; do not add fallbacks in downstream code.
     #[serde(skip)]
     pub redaction_id_column: String,
-    /// Virtual columns stripped by normalize, consumed by the hydration plan.
     #[serde(skip)]
     pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
     /// Filters on virtual columns, separated by normalize so they don't flow
     /// into SQL. Applied in-memory after hydration resolves the column values.
     #[serde(skip)]
     pub virtual_filters: Vec<(String, InputFilter)>,
-    /// Whether the node table has a traversal_path column. Set during normalization.
     #[serde(skip)]
     pub has_traversal_path: bool,
-    /// Whether the entity is declared `global: true` in the ontology. Set during normalization.
+    /// Whether the entity is declared `global: true` in the ontology.
     #[serde(skip)]
     pub is_global: bool,
     /// Narrowed traversal paths extracted from base query results. Used by the
@@ -403,12 +385,9 @@ impl Default for InputNode {
     }
 }
 
-/// Column selection for a node's result set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ColumnSelection {
-    /// Select all columns for this entity ("*")
     All,
-    /// Select specific columns by name
     List(Vec<String>),
 }
 
@@ -476,10 +455,6 @@ where
         })
         .collect()
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Filters
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InputFilter {
@@ -559,10 +534,6 @@ fn parse_single_filter(value: Value) -> InputFilter {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Relationships
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputRelationship {
     #[serde(rename = "type", deserialize_with = "deserialize_rel_types")]
@@ -628,7 +599,6 @@ pub enum Direction {
 }
 
 impl Direction {
-    /// Returns (start_col, end_col) for edge traversal.
     pub fn edge_columns(self) -> (&'static str, &'static str) {
         match self {
             Direction::Outgoing | Direction::Both => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN),
@@ -636,10 +606,6 @@ impl Direction {
         }
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregations
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -875,10 +841,6 @@ impl AggFunction {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Path finding
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputPath {
     #[serde(rename = "type")]
@@ -900,10 +862,6 @@ pub enum PathType {
     Shortest,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Neighbors
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputNeighbors {
     pub node: String,
@@ -912,10 +870,6 @@ pub struct InputNeighbors {
     #[serde(default)]
     pub rel_types: Vec<String>,
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Ordering
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputOrderBy {
@@ -940,19 +894,10 @@ pub struct InputAggSort {
     pub direction: OrderDirection,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Parse JSON into Input structure.
 #[must_use = "the parsed input should be used"]
 pub fn parse_input(json: &str) -> Result<Input, serde_json::Error> {
     serde_json::from_str(json)
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1045,8 +990,6 @@ mod tests {
 
     #[test]
     fn multi_filter_bare_array_is_equality() {
-        // A bare array like [1, 2, 3] should be treated as a single equality
-        // filter with an array value, NOT as multiple filters.
         let input = parse_input(
             r#"{
             "query_type": "traversal",

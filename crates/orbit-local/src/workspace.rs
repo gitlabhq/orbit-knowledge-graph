@@ -68,7 +68,6 @@ pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
     }
 }
 
-/// Update manifest status on the given client connection.
 pub fn set_status(
     client: &DuckDbClient,
     repo_path: &str,
@@ -106,9 +105,7 @@ pub fn set_status(
     Ok(())
 }
 
-/// Git metadata for an indexed repository.
 pub struct GitInfo {
-    /// Canonical repo path.
     pub repo_path: PathBuf,
     /// Deterministic project ID derived from `repo_path`.
     pub project_id: i64,
@@ -119,7 +116,6 @@ pub struct GitInfo {
     pub parent_repo_path: PathBuf,
 }
 
-/// Resolve git metadata (branch, commit, parent repo) for a repo path.
 pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let canonical = dunce::canonicalize(repo_path)
         .with_context(|| format!("failed to canonicalize {}", repo_path.display()))?;
@@ -147,16 +143,13 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     })
 }
 
-/// Deterministic project ID from canonical path. Mask clears the sign bit
-/// so the result is always a positive i64.
+/// Mask clears the sign bit so the result is always a positive i64.
 pub fn project_id_from_path(path: &str) -> i64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     path.hash(&mut hasher);
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn is_git_repo(path: &Path) -> bool {
     let git = path.join(".git");
@@ -240,7 +233,6 @@ mod tests {
         init_repo(&workspace.join("nested-b"));
 
         let repos = store.resolve_repos(&workspace).unwrap();
-        // Should find the root repo AND both nested repos.
         assert!(
             repos.len() >= 3,
             "expected at least 3 repos, got {}: {:?}",

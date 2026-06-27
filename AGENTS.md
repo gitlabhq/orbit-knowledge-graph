@@ -152,11 +152,12 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
 - Before touching billing-emission code, anything in `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs`, or wiring billing-relevant data (any field that populates `BillingInputs` in `crates/gkg-billing/src/inputs.rs`), read `docs/dev/sox-billing-boundary.md`. If a task you are given would require breaking any of those rules, stop and surface the conflict rather than working around it.
 - **Do not hardcode magic numbers or string literals that are environment-dependent or derivable.** Prefer deriving values from the ontology, a typed config field (`HandlersConfiguration`, `QuerySettings`), or a named constant. If a reviewer has to ask "what is this number?" or "should this be configurable?", the value needed a name or a config path. This applies across all crates, not just the indexer.
+- **A graph-shape fact belongs in the ontology, declared once — not mirrored in Rust.** Before adding a Rust flag, config field, ETL tag, or constant that encodes a node/edge property (global-ness, scope, table routing), check whether the ontology YAML already declares it or should. The ontology is the single source of truth; ETL, query validation, and redaction all read from it. If the same fact lands in two places, delete one.
 - **Keep MRs focused.** Each MR should address one concern. If you discover a second issue while working, open a follow-up issue or MR instead of bundling unrelated changes. Bundled MRs slow review and risk merging untested side-effects.
 
 ## Code-graph contributions
 
-Language-specific code belongs in `crates/code-graph/src/v2/langs/{generic,custom}/`, not in the shared linker, pipeline, or analyzer. The linker is performance-sensitive production code — introducing per-language branches there increases complexity for all languages. When adding a new language, include a `code-indexing-benchmark.yaml` entry and test fixture repos under `fixtures/code/` so the team can evaluate coverage.
+Language-specific code belongs in `crates/code-graph/src/v2/langs/{generic,custom}/`, not in the shared linker, pipeline, or analyzer — both are performance-sensitive and per-language branches there add complexity for every language. Express special handling as a **generic hook the pipeline already exposes** (e.g. a per-language import/scope hook via config) or reuse an existing edge type, rather than a language branch in shared code. When adding a new language, include a `code-indexing-benchmark.yaml` entry and test fixture repos under `fixtures/code/` so the team can evaluate coverage.
 
 ## MR and issue descriptions and comments
 

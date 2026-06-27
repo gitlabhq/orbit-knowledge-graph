@@ -270,8 +270,8 @@ impl ToolService {
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         let format = parse_format(arguments);
-        let expand_nodes = args.expand_nodes.as_deref().unwrap_or(&[]);
-        let response = self.build_graph_schema_response(expand_nodes);
+        let expand_nodes = args.resolve_expand_nodes();
+        let response = self.build_graph_schema_response(&expand_nodes);
 
         let result = match format {
             OutputFormat::Llm => {
@@ -358,6 +358,22 @@ fn parse_format(arguments: &Value) -> OutputFormat {
 struct GetGraphSchemaArgs {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
+    #[serde(default)]
+    entity_types: Option<Vec<String>>,
+}
+
+impl GetGraphSchemaArgs {
+    fn resolve_expand_nodes(self) -> Vec<String> {
+        let mut nodes = self.expand_nodes.unwrap_or_default();
+        if let Some(entity_types) = self.entity_types {
+            for node in entity_types {
+                if !nodes.contains(&node) {
+                    nodes.push(node);
+                }
+            }
+        }
+        nodes
+    }
 }
 
 #[cfg(test)]
@@ -432,6 +448,44 @@ mod tests {
             "User should have username property"
         );
         assert!(output.contains("id"), "User should have id property");
+    }
+
+    #[test]
+    fn test_entity_types_alias_shows_properties() {
+        let output = get_toon_output(r#"{"entity_types": ["User"]}"#);
+
+        assert!(output.contains("props"), "entity_types should expand props");
+        assert!(
+            output.contains("username"),
+            "User should have username property via entity_types: {output}"
+        );
+    }
+
+    #[test]
+    fn test_entity_types_and_expand_nodes_union() {
+        let output = get_toon_output(r#"{"expand_nodes": ["User"], "entity_types": ["Project"]}"#);
+
+        assert!(
+            output.contains("username"),
+            "User should be expanded from expand_nodes"
+        );
+        assert!(
+            output.contains("Project,{") || output.contains("path"),
+            "Project should be expanded from entity_types: {output}"
+        );
+    }
+
+    #[test]
+    fn resolve_command_accepts_entity_types() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+
+        assert!(
+            service
+                .resolve_command("get_graph_schema", r#"{"entity_types": ["MergeRequest"]}"#)
+                .is_ok(),
+            "entity_types alias should be a valid parameter"
+        );
     }
 
     #[test]
@@ -696,8 +750,6 @@ mod tests {
 
     #[test]
     fn get_graph_schema_rejects_unknown_parameter() {
-        // get_graph_schema declares additionalProperties: false, so an unknown
-        // parameter is a hard error instead of being silently dropped.
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let service = ToolService::new(ontology);
         let result = service.resolve(

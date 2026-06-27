@@ -1,9 +1,3 @@
-//! E2E integration tests for the GraphFormatter.
-//!
-//! Tests the full compile → execute → redact → hydrate → format flow against
-//! a real ClickHouse instance with seeded data and mock redaction service.
-//! Every test validates output against the JSON Schema and checks exact values.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -92,10 +86,6 @@ fn aggregation_nodes(value: &Value, group_key: &str) -> Vec<Value> {
         .collect()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Data seeding
-// ─────────────────────────────────────────────────────────────────────────────
-
 // Topology:
 //
 //   User 1 (alice)   →MEMBER_OF→ Group 100 (Public)     →CONTAINS→ Project 1000
@@ -124,7 +114,6 @@ async fn seed(ctx: &TestContext) {
     ))
     .await;
 
-    // Groups: 100-102 are direct, 200-300 form a depth chain reachable only via multi-hop
     ctx.execute(&format!(
         "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (100, 'Public Group', 'public', '1/100/'),
@@ -191,10 +180,6 @@ async fn seed(ctx: &TestContext) {
 
     ctx.optimize_all().await;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pipeline helper
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService) -> Value {
     run_pipeline_with_security(ctx, json, svc, test_security_context()).await
@@ -271,10 +256,6 @@ fn allow_all() -> MockRedactionService {
     svc.allow("note", &[3000, 3001, 3002, 3003, 9000]);
     svc
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Search
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_exact_properties(ctx: &TestContext) {
     let value = run_pipeline(
@@ -387,10 +368,6 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
 
     assert!(value["nodes"].as_array().unwrap().is_empty());
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Traversal
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_single_hop_exact(ctx: &TestContext) {
     let value = run_pipeline(
@@ -550,7 +527,6 @@ async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
 }
 
 async fn traversal_with_filter(ctx: &TestContext) {
-    // Only active users → groups
     let value = run_pipeline(
         ctx,
         r#"{
@@ -585,10 +561,6 @@ async fn traversal_with_filter(ctx: &TestContext) {
     assert_eq!(edges[0]["to_id"], "102");
     assert_eq!(edges[0]["type"], "MEMBER_OF");
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregation
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn aggregation_count_exact(ctx: &TestContext) {
     let value = run_pipeline(
@@ -684,10 +656,6 @@ async fn aggregation_redaction(ctx: &TestContext) {
     let bob = find_node(&nodes, "User", 2);
     assert_eq!(bob["username"].as_str().unwrap(), "bob");
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Path Finding
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_exact_path(ctx: &TestContext) {
     let value = run_pipeline(
@@ -814,10 +782,6 @@ async fn path_finding_max_depth(ctx: &TestContext) {
         assert!(max_step <= 2, "max 3 hops = max step 2 (0-indexed)");
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Neighbors
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn neighbors_outgoing_exact(ctx: &TestContext) {
     let value = run_pipeline(
@@ -962,7 +926,6 @@ async fn neighbors_both_exact(ctx: &TestContext) {
         "should have CONTAINS edges"
     );
 
-    // MEMBER_OF edges: User→Group (incoming to center), so from=User, to=Group
     assert!(edges.iter().any(|e| {
         e["from"] == "User"
             && e["from_id"] == "1"
@@ -977,7 +940,6 @@ async fn neighbors_both_exact(ctx: &TestContext) {
             && e["to_id"] == "100"
             && e["type"] == "MEMBER_OF"
     }));
-    // CONTAINS edge: Group→Project (outgoing from center), so from=Group, to=Project
     assert!(edges.iter().any(|e| {
         e["from"] == "Group"
             && e["from_id"] == "100"
@@ -994,8 +956,6 @@ async fn neighbors_both_exact(ctx: &TestContext) {
 }
 
 async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
-    // User 1 is MEMBER_OF Group 100 (User→Group edge in gl_edge)
-    // Query neighbors of User 1 in both directions
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1010,8 +970,6 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
     let edges = value["edges"].as_array().unwrap();
     assert!(!edges.is_empty(), "should have neighbor edges");
 
-    // User 1 is the source of MEMBER_OF edges (outgoing from center)
-    // so from=User, to=Group
     for edge in edges {
         if edge["type"] == "MEMBER_OF" {
             assert_eq!(edge["from"], "User", "MEMBER_OF is outgoing from User");
@@ -1021,7 +979,6 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
 }
 
 async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
-    // MR 2000 has incoming AUTHORED from User 1 and outgoing HAS_NOTE to Notes 3000, 3002, 3003
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1036,7 +993,6 @@ async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
     let edges = value["edges"].as_array().unwrap();
     assert!(!edges.is_empty(), "should have neighbor edges");
 
-    // AUTHORED: User→MergeRequest (incoming to center), so from=User, to=MergeRequest
     assert!(
         edges.iter().any(|e| {
             e["from"] == "User"
@@ -1048,7 +1004,6 @@ async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
         "AUTHORED edge should show User as source"
     );
 
-    // HAS_NOTE: MergeRequest→Note (outgoing from center), so from=MergeRequest, to=Note
     let has_note_edges: Vec<_> = edges.iter().filter(|e| e["type"] == "HAS_NOTE").collect();
     assert!(!has_note_edges.is_empty(), "should have HAS_NOTE edges");
     for edge in &has_note_edges {
@@ -1103,10 +1058,6 @@ async fn neighbors_redaction(ctx: &TestContext) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Attack vectors & edge cases
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn giant_string_survives_pipeline(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
@@ -1160,10 +1111,6 @@ async fn sql_injection_string_preserved(ctx: &TestContext) {
         );
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregation — all functions
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn aggregation_sum(ctx: &TestContext) {
     let value = run_pipeline(
@@ -1282,7 +1229,6 @@ async fn aggregation_min_max(ctx: &TestContext) {
         assert!(min_val <= max_val, "min must be <= max");
     }
 
-    // Group 101 has users 1,2 → min=1, max=2
     let priv_group = find_node(&nodes, "Group", 101);
     assert_eq!(priv_group["min_id"].as_i64().unwrap(), 1);
     assert_eq!(priv_group["max_id"].as_i64().unwrap(), 2);
@@ -1376,10 +1322,6 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
 
     assert!(value["edges"].as_array().unwrap().is_empty());
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Ungrouped aggregation
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
     let value = run_pipeline(
@@ -1514,13 +1456,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
     assert_eq!(row["total"].as_i64().unwrap(), 5);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Traversal — direction variants
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn traversal_incoming_direction(ctx: &TestContext) {
-    // Incoming: Group ← User via MEMBER_OF (reversed: "from": "g", "to": "u", direction: incoming)
-    // This finds which users are members of groups, but from the group's perspective
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1646,12 +1582,7 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Column types — Bool, DateTime, Nullable
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn search_boolean_columns(ctx: &TestContext) {
-    // Note.confidential is Bool, Note.internal is Bool
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1684,7 +1615,6 @@ async fn search_boolean_columns(ctx: &TestContext) {
 async fn search_datetime_columns(ctx: &TestContext) {
     seed(ctx).await;
 
-    // Insert a note with an explicit created_at
     ctx.execute(&format!(
         "INSERT INTO {} (id, note, noteable_type, traversal_path, created_at) VALUES
          (9000, 'timestamped', 'MergeRequest', '1/100/1000/', '2024-06-15 12:30:00')",
@@ -1724,7 +1654,6 @@ async fn search_datetime_columns(ctx: &TestContext) {
 }
 
 async fn search_nullable_columns(ctx: &TestContext) {
-    // Note 3000 has no created_at → should be null
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1748,10 +1677,6 @@ async fn search_nullable_columns(ctx: &TestContext) {
         assert!(ts.is_null(), "unset datetime should be null, got: {ts}");
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Wildcard columns
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_wildcard_columns(ctx: &TestContext) {
     // Admin context so the wildcard expansion includes admin_only columns
@@ -1790,12 +1715,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Path finding — type variations
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn path_finding_with_rel_types(ctx: &TestContext) {
-    // Only follow MEMBER_OF edges — should find User→Group but not Group→Project (CONTAINS)
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1816,13 +1736,7 @@ async fn path_finding_with_rel_types(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Neighbors — rel_types filter and dynamic columns
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
-    // User 1 has outgoing: MEMBER_OF (to groups) and AUTHORED (to MRs)
-    // Filter to only AUTHORED → should only see MergeRequest neighbors
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1910,10 +1824,6 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Filter operators
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn filter_in_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
@@ -1984,7 +1894,6 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
 }
 
 async fn filter_is_null_operator(ctx: &TestContext) {
-    // Users without created_at (all seeded users have no created_at)
     let value = run_pipeline(
         ctx,
         r#"{
@@ -2011,10 +1920,6 @@ async fn filter_is_null_operator(ctx: &TestContext) {
         }
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Search — node_ids filtering and order_by
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_node_ids_filtering(ctx: &TestContext) {
     let value = run_pipeline(
@@ -2068,10 +1973,6 @@ async fn search_with_order_by(ctx: &TestContext) {
     assert_eq!(alice["username"].as_str().unwrap(), "alice");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Edge cases (continued)
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn empty_result_all_fields_present(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
@@ -2090,10 +1991,6 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
     assert!(value["nodes"].as_array().unwrap().is_empty());
     assert!(value["edges"].as_array().unwrap().is_empty());
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Traversal — variable-length (multi-hop)
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
     let value = run_pipeline(
@@ -2216,10 +2113,6 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Traversal chains (no traversal_path prefix in joins)
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn traversal_chain_user_group_project(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
@@ -2308,10 +2201,6 @@ async fn traversal_chain_user_mr_note(ctx: &TestContext) {
         "HAS_NOTE edge should exist"
     );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pagination in formatted output
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn pagination_present_in_response(ctx: &TestContext) {
     let value = run_pipeline(
@@ -2420,14 +2309,9 @@ async fn pagination_with_redaction(ctx: &TestContext) {
     assert_eq!(ids, vec![1, 3], "first page of authorized users");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Default alias (no user-supplied alias)
-//
 // When the query omits `alias`, the column `name` in the response MUST equal
 // the function name (e.g. "count", "sum", "avg"). Regression guard for the
 // v2 compiler bug where the default was "agg_result" instead.
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
@@ -2554,16 +2438,11 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
         "all nodes must carry 'count' key"
     );
 
-    // Verify descending order by count value.
     let counts: Vec<i64> = nodes.iter().filter_map(|n| n["count"].as_i64()).collect();
     for w in counts.windows(2) {
         assert!(w[0] >= w[1], "expected descending order: {counts:?}");
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Test runner
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn graph_formatter_e2e() {
@@ -2573,7 +2452,6 @@ async fn graph_formatter_e2e() {
     // Read-only subtests share one database (seed once, query many).
     run_subtests_shared!(
         &ctx,
-        // Search — properties and redaction
         search_exact_properties,
         search_unicode_properties,
         search_redaction_exact,
@@ -2581,25 +2459,19 @@ async fn graph_formatter_e2e() {
         search_wildcard_columns,
         search_node_ids_filtering,
         search_with_order_by,
-        // Search — column types
         search_boolean_columns,
         search_nullable_columns,
-        // Traversal — basic
         traversal_single_hop_exact,
         traversal_with_filter,
         traversal_deduplicates_shared_nodes,
         traversal_redaction_removes_unauthorized_paths,
-        // Traversal — variable-length (multi-hop)
         traversal_variable_length_reaches_depth_2,
         traversal_variable_length_min_hops_skips_shallow,
         traversal_variable_length_with_redaction_at_depth,
-        // Traversal — direction
         traversal_incoming_direction,
         traversal_both_direction,
-        // Traversal — chains (no traversal_path prefix in joins)
         traversal_chain_user_group_project,
         traversal_chain_user_mr_note,
-        // Aggregation — all functions
         aggregation_count_exact,
         aggregation_sum,
         aggregation_avg,
@@ -2607,22 +2479,18 @@ async fn graph_formatter_e2e() {
         aggregation_min_string,
         aggregation_multiple_functions,
         aggregation_redaction,
-        // Ungrouped aggregation
         ungrouped_count_emits_aggregates,
         ungrouped_multiple_functions_emits_aggregates,
         grouped_aggregation_uses_node_group_rows,
         ungrouped_count_with_redaction,
-        // Default alias (no user-supplied alias)
         no_alias_grouped_count_uses_function_name,
         no_alias_ungrouped_count_uses_function_name,
         no_alias_multi_agg_each_uses_own_function_name,
         no_alias_aggregation_with_sort,
-        // Path finding — type variations
         path_finding_exact_path,
         path_finding_with_rel_types,
         path_finding_redaction_blocks_path,
         path_finding_max_depth,
-        // Neighbors — full coverage
         neighbors_outgoing_exact,
         neighbors_incoming_exact,
         neighbors_both_exact,
@@ -2631,16 +2499,13 @@ async fn graph_formatter_e2e() {
         neighbors_with_rel_types_filter,
         neighbors_dynamic_columns_all,
         neighbors_redaction,
-        // Filter operators
         filter_in_operator,
         filter_contains_operator,
         filter_starts_with_operator,
         filter_is_null_operator,
-        // Edge cases
         giant_string_survives_pipeline,
         sql_injection_string_preserved,
         empty_result_all_fields_present,
-        // Pagination
         pagination_present_in_response,
         pagination_absent_without_cursor,
         pagination_last_page_has_more_false,
@@ -2650,10 +2515,6 @@ async fn graph_formatter_e2e() {
     // Mutating subtests need their own forked databases.
     run_subtests!(&ctx, traversal_shared_target_node, search_datetime_columns,);
 }
-
-// Schema-negative tests — no ClickHouse required. These hand-craft JSON values
-// and assert the schema validator rejects responses missing `format_version`
-// or carrying an invalid version string.
 
 #[test]
 fn schema_rejects_response_missing_format_version() {

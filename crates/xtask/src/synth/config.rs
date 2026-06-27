@@ -1,26 +1,19 @@
-//! Configuration for synthetic data generation and evaluation.
-
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Root configuration for the simulator.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// ClickHouse connection and schema settings.
     pub clickhouse: ClickHouseConfig,
-    /// Data generation settings.
     pub generation: GenerationConfig,
-    /// Evaluation settings. Required when running the evaluator.
     #[serde(default)]
     pub evaluation: EvaluationConfig,
 }
 
 impl Config {
-    /// Load configuration from a YAML file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path)
@@ -30,7 +23,6 @@ impl Config {
         Ok(config)
     }
 
-    /// Save configuration to a YAML file.
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
         let contents = serde_yaml::to_string(self)?;
         std::fs::write(path, contents)?;
@@ -38,26 +30,19 @@ impl Config {
     }
 }
 
-/// ClickHouse connection and schema settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClickHouseConfig {
-    /// Connection URL.
     #[serde(default = "default_clickhouse_url")]
     pub url: String,
-    /// Database name.
     #[serde(default = "default_database")]
     pub database: String,
-    /// Username for authentication.
     #[serde(default = "default_username")]
     pub username: String,
-    /// Password for authentication (optional).
     #[serde(default)]
     pub password: Option<String>,
-    /// Client connection settings.
     #[serde(default)]
     pub client: ClientConfig,
-    /// Schema settings.
     #[serde(default)]
     pub schema: SchemaConfig,
 }
@@ -88,7 +73,6 @@ impl Default for ClickHouseConfig {
 }
 
 impl ClickHouseConfig {
-    /// Build an ArrowClickHouseClient from this config.
     pub fn build_client(&self) -> clickhouse_client::ArrowClickHouseClient {
         clickhouse_client::ArrowClickHouseClient::new(
             &self.url,
@@ -101,7 +85,6 @@ impl ClickHouseConfig {
     }
 }
 
-/// Client connection settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
@@ -111,7 +94,6 @@ pub struct ClientConfig {
     /// Receive timeout in seconds.
     #[serde(default = "default_timeout")]
     pub receive_timeout: u32,
-    /// Max rows per insert batch.
     #[serde(default = "default_insert_block_size")]
     pub max_insert_block_size: usize,
 }
@@ -134,48 +116,34 @@ impl Default for ClientConfig {
     }
 }
 
-/// Schema configuration for tables.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SchemaConfig {
-    /// Table engine type: MergeTree, ReplacingMergeTree, etc.
     #[serde(default = "default_engine_type")]
     pub engine: String,
-    /// Use per-node sort_key from the ontology YAML instead of global node_order_by.
     /// When true, each node table gets its own ORDER BY from the ontology
     /// (e.g. gl_user uses [id], code tables use [traversal_path, project_id, branch, id]).
-    /// When false (default), all node tables share the same node_order_by.
+    /// When false (default), all node tables share node_order_by.
     #[serde(default)]
     pub use_ontology_sort_keys: bool,
-    /// PRIMARY KEY columns for node tables (sparse index, not uniqueness constraint).
-    /// If empty, defaults to ORDER BY columns.
-    /// Ignored when use_ontology_sort_keys is true.
+    /// If empty, defaults to ORDER BY columns. Ignored when use_ontology_sort_keys is true.
     #[serde(default)]
     pub node_primary_key: Vec<String>,
-    /// ORDER BY columns for node tables (physical sort order on disk).
     /// Ignored when use_ontology_sort_keys is true.
     #[serde(default = "default_node_order_by")]
     pub node_order_by: Vec<String>,
-    /// PRIMARY KEY columns for edge table.
     /// If empty, defaults to ORDER BY columns.
     #[serde(default)]
     pub edge_primary_key: Vec<String>,
-    /// ORDER BY columns for edge table.
     #[serde(default = "default_edge_order_by")]
     pub edge_order_by: Vec<String>,
-    /// Index granularity (rows per granule).
     #[serde(default = "default_index_granularity")]
     pub index_granularity: u32,
-    /// Data skipping indexes.
     #[serde(default)]
     pub indexes: Vec<IndexConfig>,
-    /// Projections for bidirectional traversal.
     #[serde(default)]
     pub projections: Vec<ProjectionConfig>,
-    /// Additional MergeTree SETTINGS options.
-    ///
-    /// These are appended to the CREATE TABLE SETTINGS clause.
-    /// Common options:
+    /// Appended to the CREATE TABLE SETTINGS clause. Common options:
     /// - `min_bytes_for_wide_part`: Threshold for wide vs compact parts (default: 10MB)
     /// - `merge_with_ttl_timeout`: TTL merge interval in seconds
     /// - `storage_policy`: Named storage policy for tiered storage
@@ -200,8 +168,7 @@ fn default_node_order_by() -> Vec<String> {
 
 fn default_edge_order_by() -> Vec<String> {
     use ontology::constants::{EDGE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN};
-    // Subset of EDGE_RESERVED_COLUMNS in query-optimal order.
-    // All values validated against EDGE_RESERVED_COLUMNS at startup.
+    // Subset of EDGE_RESERVED_COLUMNS in query-optimal order; validated against EDGE_RESERVED_COLUMNS at startup.
     vec![
         TRAVERSAL_PATH_COLUMN.to_string(),
         EDGE_RESERVED_COLUMNS[2].to_string(), // source_id
@@ -231,20 +198,15 @@ impl Default for SchemaConfig {
     }
 }
 
-/// Data skipping index configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndexConfig {
-    /// Index name.
     pub name: String,
     /// Target table ("*" for all node tables, "edges" for edge table).
     pub table: String,
-    /// Column expression to index.
     pub expression: String,
-    /// Index type: bloom_filter, minmax, set, tokenbf_v1, ngrambf_v1.
     #[serde(rename = "type")]
     pub index_type: String,
-    /// Granularity (typically 1-8 for good selectivity).
     #[serde(default = "default_index_granularity_small")]
     pub granularity: u32,
 }
@@ -253,75 +215,52 @@ fn default_index_granularity_small() -> u32 {
     4
 }
 
-/// Projection configuration for reverse lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectionConfig {
-    /// Projection name.
     pub name: String,
-    /// Target table.
     pub table: String,
-    /// Columns to include in projection (SELECT clause).
     pub columns: Vec<String>,
-    /// ORDER BY columns for projection.
     pub order_by: Vec<String>,
 }
 
-/// Data generation settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerationConfig {
-    /// Path to ontology fixtures.
     #[serde(default = "default_ontology_path")]
     pub ontology_path: String,
-    /// Output directory for Parquet files.
     #[serde(default = "default_output_dir")]
     pub output_dir: String,
-    /// Skip generation if Parquet files already exist.
     #[serde(default)]
     pub skip_if_present: bool,
-    /// Number of organizations to generate.
     #[serde(default = "default_organizations")]
     pub organizations: u32,
 
-    /// Root entities with absolute counts per organization.
-    /// These entities have no parent and are generated first.
-    /// Example: { "User": 100, "Group": 50 }
+    /// Root entities (no parent, generated first) with absolute counts per organization.
     #[serde(default)]
     pub roots: HashMap<String, usize>,
 
-    /// Relationship-based generation configuration.
-    /// Defines how child entities are generated based on ontology edges.
     #[serde(default)]
     pub relationships: RelationshipConfig,
 
-    /// Entity type that defines the namespace hierarchy.
-    ///
-    /// This entity type gets namespace IDs (extending traversal paths)
-    /// instead of regular entity IDs. In GitLab's data model this is
-    /// "Group" — groups define the `org/ns1/ns2/` hierarchy that scopes
-    /// all other entities.
+    /// Entity type that defines the namespace hierarchy: it gets namespace IDs
+    /// (extending traversal paths) instead of regular entity IDs. In GitLab's
+    /// data model this is "Group".
     #[serde(default = "default_namespace_entity")]
     pub namespace_entity: String,
 
-    /// Association edges configuration.
-    /// Creates edges between existing entities (e.g., AUTHORED, MEMBER_OF).
     #[serde(default)]
     pub associations: AssociationConfig,
 
-    /// Batch size for Parquet row groups.
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
-    /// Run generation in parallel across organizations.
     #[serde(default)]
     pub parallel: bool,
 
-    /// Random seed for reproducible data generation.
     /// If not set, uses thread-local random source.
     #[serde(default)]
     pub seed: Option<u64>,
 
-    /// Path to fake data YAML file for customizing generated values.
     #[serde(default = "default_fake_data_path")]
     pub fake_data_path: String,
 }
@@ -377,7 +316,6 @@ impl Default for GenerationConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum EdgeRatio {
-    /// Fixed count of children per parent.
     Count(usize),
     /// Probability of creating the relationship (0.0-1.0).
     Probability(f64),
@@ -393,11 +331,13 @@ pub enum EdgeRatio {
     ///     count: 2
     ///     max_depth: 3
     /// ```
-    Recursive { count: usize, max_depth: usize },
+    Recursive {
+        count: usize,
+        max_depth: usize,
+    },
 }
 
 impl EdgeRatio {
-    /// Sample a count from this ratio.
     pub fn sample(&self, rng: &mut impl Rng) -> usize {
         match self {
             EdgeRatio::Count(n) | EdgeRatio::Recursive { count: n, .. } => *n,
@@ -411,7 +351,6 @@ impl EdgeRatio {
         }
     }
 
-    /// Sample a count with variance (for more realistic distributions).
     /// For counts, returns a value in range [count/2, count*1.5].
     pub fn sample_with_variance(&self, rng: &mut impl Rng) -> usize {
         match self {
@@ -437,16 +376,11 @@ impl Default for EdgeRatio {
     }
 }
 
-/// Configuration for a single edge relationship variant.
-///
 /// Format in YAML: `"SourceKind -> TargetKind": ratio`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeVariantConfig {
-    /// Source node type (e.g., "Group").
     pub source: String,
-    /// Target node type (e.g., "Project").
     pub target: String,
-    /// Ratio or probability for this relationship.
     pub ratio: EdgeRatio,
 }
 
@@ -464,9 +398,6 @@ pub struct EdgeVariantConfig {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelationshipConfig {
-    /// Map of edge type to variant configurations.
-    /// Key: edge relationship kind (e.g., "CONTAINS")
-    /// Value: map of "Source -> Target" to ratio
     #[serde(flatten)]
     pub edges: HashMap<String, HashMap<String, EdgeRatio>>,
 }
@@ -482,7 +413,6 @@ impl RelationshipConfig {
         }
     }
 
-    /// Get all configured relationships as a flat list.
     pub fn all_relationships(&self) -> Vec<(String, String, String, EdgeRatio)> {
         let mut result = Vec::new();
         for (edge_type, variants) in &self.edges {
@@ -496,41 +426,31 @@ impl RelationshipConfig {
     }
 }
 
-/// Iteration direction for association edge generation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IterationDirection {
-    /// Iterate over target entities (default).
     /// For each target, sample source entities to link.
     #[default]
     Target,
-    /// Iterate over source entities.
     /// For each source, sample target entities to link.
     Source,
 }
 
-/// Extended association edge configuration with iteration direction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssociationEdgeExtended {
-    /// Ratio or probability for this relationship.
     pub ratio: EdgeRatio,
-    /// Which side to iterate over when generating edges.
     #[serde(default)]
     pub per: IterationDirection,
 }
 
-/// Association edge value - can be simple ratio or extended config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AssociationEdgeValue {
-    /// Simple ratio (defaults to iterating over targets).
     Simple(EdgeRatio),
-    /// Extended config with iteration direction.
     Extended(AssociationEdgeExtended),
 }
 
 impl AssociationEdgeValue {
-    /// Get the ratio from this config.
     pub fn ratio(&self) -> &EdgeRatio {
         match self {
             AssociationEdgeValue::Simple(r) => r,
@@ -538,7 +458,6 @@ impl AssociationEdgeValue {
         }
     }
 
-    /// Get the iteration direction.
     pub fn iteration_direction(&self) -> IterationDirection {
         match self {
             AssociationEdgeValue::Simple(_) => IterationDirection::Target,
@@ -574,13 +493,11 @@ impl AssociationEdgeValue {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AssociationConfig {
-    /// Map of edge type to variant configurations.
     #[serde(flatten)]
     pub edges: HashMap<String, HashMap<String, AssociationEdgeValue>>,
 }
 
 impl AssociationConfig {
-    /// Get all configured associations as a flat list.
     /// Returns (edge_type, source_kind, target_kind, ratio, iteration_direction).
     pub fn all_associations(&self) -> Vec<(String, String, String, EdgeRatio, IterationDirection)> {
         let mut result = Vec::new();
@@ -601,36 +518,29 @@ impl AssociationConfig {
     }
 }
 
-/// Evaluation settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvaluationConfig {
-    /// Path to queries YAML file.
     pub queries_path: String,
     /// Number of IDs to sample per entity type.
     #[serde(default = "default_sample_size")]
     pub sample_size: usize,
-    /// Number of iterations to run each query.
     #[serde(default = "default_iterations")]
     pub iterations: usize,
-    /// Number of queries to execute concurrently.
     /// 1 = serial (default), >1 = concurrent load testing.
     #[serde(default = "default_concurrency")]
     pub concurrency: usize,
-    /// Skip cache warming.
     #[serde(default)]
     pub skip_cache_warm: bool,
-    /// Filter pattern for queries.
     #[serde(default)]
     pub filter: Option<String>,
-    /// Output settings.
     #[serde(default)]
     pub output: OutputConfig,
     /// Directory to save run metadata (query plans, params, sample data).
     #[serde(default)]
     pub metadata_dir: Option<String>,
-    /// ClickHouse query-level SETTINGS appended to every evaluated query.
-    /// These override the built-in safe defaults (e.g. `join_algorithm`).
+    /// ClickHouse query-level SETTINGS appended to every evaluated query;
+    /// these override the built-in safe defaults (e.g. `join_algorithm`).
     #[serde(default)]
     pub settings: std::collections::HashMap<String, String>,
 }
@@ -664,7 +574,6 @@ impl Default for EvaluationConfig {
 }
 
 impl EvaluationConfig {
-    /// Validate that required fields are set.
     /// `queries_path` has no serde default so YAML deserialization enforces it,
     /// but `Default` leaves it empty for convenience. Call this before evaluation.
     pub fn validate(&self) -> Result<()> {
@@ -677,7 +586,6 @@ impl EvaluationConfig {
     }
 }
 
-/// Output configuration for evaluation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutputConfig {
@@ -702,24 +610,17 @@ impl Default for OutputConfig {
     }
 }
 
-/// Fake data configuration loaded from YAML.
-///
-/// Controls string pools, classification rules, boolean probabilities,
-/// and integer ranges used by `FakeValueGenerator`.
 /// All fields are mandatory in YAML — no serde defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataConfig {
-    /// String pools and classification rules.
     pub strings: FakeDataStrings,
-    /// Boolean probabilities keyed by field name, with a default fallback.
     pub bools: FakeDataBools,
-    /// Integer ranges keyed by field name, with a default fallback.
     pub ints: FakeDataInts,
 }
 
 impl FakeDataConfig {
-    /// Load from a YAML file. Validates all values after deserialization.
+    /// Validates all values after deserialization.
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path)
@@ -732,7 +633,6 @@ impl FakeDataConfig {
         Ok(config)
     }
 
-    /// Validate all values are within expected bounds.
     pub fn validate(&self) -> Result<()> {
         self.validate_string_pools()?;
         self.validate_bools()?;
@@ -808,17 +708,14 @@ fn validate_int_range(range: [u32; 2], field: &str) -> Result<()> {
     Ok(())
 }
 
-/// String pools and classification rules.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataStrings {
-    /// Named string pools referenced by generation strategies.
     pub pools: FakeDataStringPools,
     /// Classification rules for string fields (first match wins).
     pub classify: Vec<StringClassifyRule>,
 }
 
-/// Named string pools.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataStringPools {
@@ -830,18 +727,14 @@ pub struct FakeDataStringPools {
     pub branch_prefixes: Vec<String>,
 }
 
-/// A classification rule: if the lowercased field name contains any pattern, use this kind.
+/// If the lowercased field name contains any `contains` pattern, use this `kind`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StringClassifyRule {
-    /// Substrings to match against the lowercased field name.
     pub contains: Vec<String>,
-    /// The generation strategy to use.
     pub kind: StringKind,
 }
 
-/// String generation strategy. Each variant maps to a different formatting template
-/// in the generator code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StringKind {
@@ -856,23 +749,21 @@ pub enum StringKind {
     RefOrBranch,
 }
 
-/// Boolean probabilities keyed by lowercased field name.
+/// Keyed by lowercased field name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataBools {
     /// Fallback probability for fields not in `fields`.
     pub default: f64,
-    /// Per-field probabilities (0.0–1.0).
     pub fields: HashMap<String, f64>,
 }
 
-/// Integer ranges keyed by lowercased field name.
+/// Keyed by lowercased field name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FakeDataInts {
     /// Fallback range [min, max] (inclusive) for fields not in `fields`.
     pub default: [u32; 2],
-    /// Per-field ranges.
     pub fields: HashMap<String, [u32; 2]>,
 }
 
@@ -1045,7 +936,6 @@ strings:
         );
     }
 
-    /// Build a minimal valid FakeDataConfig for testing validation.
     fn minimal_fake_data_config() -> FakeDataConfig {
         FakeDataConfig {
             strings: FakeDataStrings {
@@ -1072,10 +962,8 @@ strings:
 
     #[test]
     fn test_fake_data_validate() {
-        // Valid config passes.
         minimal_fake_data_config().validate().unwrap();
 
-        // Empty string pool.
         let mut cfg = minimal_fake_data_config();
         cfg.strings.pools.name_prefixes = vec![];
         assert!(
@@ -1085,7 +973,6 @@ strings:
                 .contains("name_prefixes must not be empty")
         );
 
-        // Negative probability.
         let mut cfg = minimal_fake_data_config();
         cfg.bools.default = -0.1;
         assert!(
@@ -1095,7 +982,6 @@ strings:
                 .contains("bools.default")
         );
 
-        // Probability > 1.
         let mut cfg = minimal_fake_data_config();
         cfg.bools.fields.insert("bad".into(), 1.5);
         assert!(
@@ -1105,12 +991,10 @@ strings:
                 .contains("bools.fields.bad")
         );
 
-        // NaN probability.
         let mut cfg = minimal_fake_data_config();
         cfg.bools.default = f64::NAN;
         assert!(cfg.validate().unwrap_err().to_string().contains("finite"));
 
-        // Inverted int range.
         let mut cfg = minimal_fake_data_config();
         cfg.ints.default = [100, 1];
         assert!(
@@ -1120,7 +1004,6 @@ strings:
                 .contains("min (100) must be <= max (1)")
         );
 
-        // Overflowing int range.
         let mut cfg = minimal_fake_data_config();
         cfg.ints.fields.insert("huge".into(), [0, u32::MAX]);
         assert!(cfg.validate().unwrap_err().to_string().contains("overflow"));

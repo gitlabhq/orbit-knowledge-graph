@@ -15,8 +15,6 @@ use crate::v2::linker::rules::{
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct JavaDsl;
 
@@ -132,23 +130,20 @@ impl DslLanguage for JavaDsl {
             reference("method_invocation")
                 .name_from(field("name"))
                 .receiver("object"),
-            // Simple constructor: new Foo() — extract type name directly
             reference("object_creation_expression")
                 .name_from(field("type").inner("type_arguments", "type_identifier"))
                 .when(!has_descendant("scoped_type_identifier")),
-            // Qualified constructor: new Outer.Inner() — name is last segment,
-            // receiver is first segment. Chain becomes [Ident("Outer"), Call("Inner")]
-            // and the resolver looks up Inner as a nested member of Outer.
+            // Qualified constructor new Outer.Inner(): chain becomes
+            // [Ident("Outer"), Call("Inner")] so the resolver looks up Inner as a
+            // nested member of Outer.
             reference("object_creation_expression")
                 .name_from(field("type").nth(Child, Kind("type_identifier"), -1))
                 .when(has_descendant("scoped_type_identifier"))
                 .receiver_via(field("type").nth(Child, Kind("type_identifier"), 0)),
-            // Bare type references: declarations, casts, instanceof, annotations.
             // Skip inside object_creation_expression (already tracked above).
             reference("type_identifier")
                 .name_from(text())
                 .when(!parent_is("object_creation_expression")),
-            // Method references: Executor::executeFn
             reference("method_reference")
                 .name_from(
                     Extract::terminal(treesitter_visit::extract::Emit::Text).nth(
@@ -164,7 +159,6 @@ impl DslLanguage for JavaDsl {
                         0,
                     ),
                 ),
-            // Annotation references: @Override, @Deprecated
             references(&["marker_annotation", "annotation"]).name_from(field("name")),
         ]
     }
@@ -213,10 +207,9 @@ impl DslLanguage for JavaDsl {
         let java_type = |rule: BindingRule| {
             rule.typed(
                 vec![
-                    // Dotted types (Outer.Inner): navigate to type field, match scoped_type_identifier,
-                    // emit full text. The engine resolves first segment via imports, appends rest.
+                    // Dotted types (Outer.Inner): the engine resolves the first segment
+                    // via imports and appends the rest, so emit the full scoped text.
                     Extract::one(Field("type"), Kind("scoped_type_identifier")),
-                    // Simple types (Foo): strip generics, extract type_identifier text
                     field("type").inner("type_arguments", "type_identifier"),
                 ],
                 skip,
@@ -250,7 +243,6 @@ impl DslLanguage for JavaDsl {
             binding("assignment_expression", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
-            // instanceof pattern variable: `expr instanceof Bar bar`
             binding("instanceof_expression", BindingKind::Assignment)
                 .name_from(&["name"])
                 .typed(vec![field("right")], skip)
@@ -295,8 +287,6 @@ impl DslLanguage for JavaDsl {
         }
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct JavaRules;
 
@@ -420,7 +410,6 @@ mod tests {
                 .unwrap()
         };
 
-        // Sealed interface
         let r = probe(
             "public sealed interface Shape permits Circle, Rectangle, Triangle {\n    double area();\n}\n",
         );
@@ -438,7 +427,6 @@ mod tests {
             assert_eq!(r#ref.enclosing_def, Some(shape_idx));
         }
 
-        // Sealed class, with extends/implements alongside permits
         let r = probe(
             "public sealed class Animal extends Creature implements Living permits Dog, Cat {\n}\n",
         );

@@ -10,6 +10,7 @@ use rand::seq::SliceRandom;
 use tracing::{debug, info};
 use uuid::Uuid;
 
+use super::DispatchOutcome;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -36,7 +37,6 @@ WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-/// Enabled namespace ID + traversal path pairs from the datalake.
 static ENABLED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
@@ -45,11 +45,6 @@ static ENABLED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
          WHERE {del} = false AND traversal_path != ''"
     )
 });
-
-pub struct DispatchOutcome {
-    pub dispatched: u64,
-    pub skipped: u64,
-}
 
 pub struct PendingProject {
     pub project_id: i64,
@@ -96,8 +91,6 @@ impl CodeBackfill {
         self.dispatch_for_namespaces(&enabled, dispatch_id).await
     }
 
-    /// Dispatch code backfill for an explicit set of (namespace_id, path) pairs
-    /// (e.g. namespaces newly enabled via CDC).
     pub async fn dispatch_for_namespaces(
         &self,
         namespaces: &[(i64, String)],

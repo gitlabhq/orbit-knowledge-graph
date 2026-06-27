@@ -16,9 +16,6 @@ pub async fn load_seed(ctx: &TestContext, name: &str) {
     }
 }
 
-/// Applies the schema version table prefix to graph table names in SQL.
-/// Prefixes tables starting with `gl_`, plus `checkpoint`,
-/// `namespace_deletion_schedule`, and `code_indexing_checkpoint`.
 /// Siphon tables (`siphon_*`) and system tables are never prefixed.
 fn prefix_graph_tables(sql: &str, prefix: &str) -> String {
     if prefix.is_empty() {

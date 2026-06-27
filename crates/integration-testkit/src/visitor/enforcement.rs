@@ -3,35 +3,25 @@ use std::collections::HashSet;
 
 use query_engine::compiler::input::{Input, QueryType};
 
-/// Query features that require corresponding assertions in the test.
-///
 /// Some variants carry data from the AST (field name, edge type) so the
 /// enforcement is granular: a query with two filter fields or two
 /// relationship types produces one requirement per field/type, and the
 /// test must assert each individually.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Requirement {
-    /// Query has `order_by` — test must call `assert_node_order`.
     OrderBy,
-    /// Query filters on `field` — test must call `assert_filter` for this field.
-    Filter { field: String },
-    /// Query has `node_ids` — test must verify IDs via `node_ids()` or `assert_node_order`.
+    Filter {
+        field: String,
+    },
     NodeIds,
-    /// Query type is `path_finding` — test must call `path_ids` + `path`.
     PathFinding,
-    /// Query type is `aggregation` — test must assert an aggregate row value.
     Aggregation,
-    /// Traversal query includes edge type — test must assert edges of this type
-    /// via `edges_of_type`, `assert_edge_exists`, or `assert_edge_absent`.
-    Relationship { edge_type: String },
-    /// Query type is `neighbors` — test must verify neighbor edges.
+    Relationship {
+        edge_type: String,
+    },
     Neighbors,
-    /// Query has `aggregation_sort` — test must verify row ordering.
     AggregationSort,
-    /// Query has `cursor` — test must call `assert_node_count` to verify the page.
     Cursor,
-    /// Query returns nodes — test must call `assert_node_count`.
-    ///
     /// Always derived for `search`, `traversal`, and `neighbors` queries
     /// to ensure no unexpected rows leak into the response.
     NodeCount,
@@ -70,11 +60,6 @@ impl std::fmt::Display for Requirement {
     }
 }
 
-/// Extension trait that derives assertion [`Requirement`]s from the
-/// compiler's validated query AST.
-///
-/// Implemented on [`Input`] so callers can write `input.requirements()`
-/// instead of a free function.
 pub trait QueryRequirements {
     fn requirements(&self) -> HashSet<Requirement>;
 }
@@ -234,8 +219,6 @@ mod tests {
         parse_input(json).expect("test query JSON should parse into Input")
     }
 
-    // ── Requirement derivation ───────────────────────────────────────
-
     #[test]
     fn requirements_from_search_with_order_by() {
         let input = parse_test_input(
@@ -340,7 +323,6 @@ mod tests {
 
     #[test]
     fn requirements_from_default_input_has_node_count() {
-        // Input::default() has query_type Search, which always requires NodeCount.
         assert_eq!(
             Input::default().requirements(),
             HashSet::from([Requirement::NodeCount])
@@ -443,8 +425,6 @@ mod tests {
         assert!(reqs.contains(&Requirement::Aggregation));
         assert_eq!(reqs.len(), 2);
     }
-
-    // ── Assertion enforcement ────────────────────────────────────────
 
     #[test]
     fn for_query_plain_search_requires_node_count() {
@@ -762,8 +742,6 @@ mod tests {
         drop(view);
     }
 
-    // ── Panic on unsatisfied ─────────────────────────────────────────
-
     #[test]
     #[should_panic(expected = "NodeCount")]
     fn for_query_panics_on_unsatisfied_node_count() {
@@ -920,8 +898,6 @@ mod tests {
             matches!(n.prop_str("username"), Some("alice" | "bob"))
         });
     }
-
-    // ── Skip + new() ─────────────────────────────────────────────────
 
     #[test]
     fn skip_requirement_prevents_panic() {

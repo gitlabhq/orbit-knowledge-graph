@@ -1,9 +1,7 @@
 use anyhow::{Result, bail};
 use clickhouse_client::ArrowClickHouseClient;
 
-/// Check that ClickHouse is running and healthy.
 pub async fn check_clickhouse_health(client: &ArrowClickHouseClient) -> Result<()> {
-    // Try a simple query to verify connectivity
     let result: Result<String, _> = client.inner().query("SELECT version()").fetch_one().await;
 
     match result {

@@ -1,8 +1,3 @@
-//! Post-execution profiling queries against ClickHouse system tables.
-//!
-//! Retrieves EXPLAIN plans, query_log entries, processor profiles, and
-//! instance health.
-
 use std::collections::HashMap;
 
 use crate::arrow_client::ArrowClickHouseClient;
@@ -51,11 +46,8 @@ impl ArrowClickHouseClient {
         self.fetch_text(&format!("EXPLAIN PIPELINE {sql}")).await
     }
 
-    /// Fetch a query_log entry by matching against `log_comment`.
-    ///
     /// Flushes the query log first to ensure the entry is available.
-    /// The `log_comment_match` should be a unique substring (e.g. a
-    /// profiling UUID) that identifies the target query.
+    /// `log_comment_match` must be a unique substring (e.g. a profiling UUID).
     pub async fn fetch_query_log(
         &self,
         log_comment_match: &str,
@@ -68,7 +60,6 @@ impl ArrowClickHouseClient {
         self.fetch_query_log_where(&where_clause).await
     }
 
-    /// Fetch a query_log entry by `query_id`.
     pub async fn fetch_query_log_by_id(
         &self,
         query_id: &str,
@@ -307,9 +298,8 @@ fn validate_query_id(query_id: &str) -> Result<(), ClickHouseError> {
     Ok(())
 }
 
-/// Extract a u64 from a JSON value that may be a number or a string.
 /// `clusterAllReplicas` wraps columns in `Nullable`, which ClickHouse
-/// serializes as strings in JSONEachRow format.
+/// serializes as strings in JSONEachRow format, so a value may be a number or a string.
 fn json_u64(v: &serde_json::Value) -> u64 {
     v.as_u64()
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))

@@ -315,7 +315,6 @@ pub(super) async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
 }
 
 pub(super) async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
-    // min_hops=2 should skip Group 200 (depth 1) and only return Group 300 (depth 2).
     let resp = run_query(
         ctx,
         r#"{
@@ -372,29 +371,24 @@ pub(super) async fn traversal_variable_length_includes_depth_2_path_to_project(c
     .await;
 
     resp.assert_referential_integrity();
-    // 1 user + 1 wi + 1 project + 2 groups = 5 nodes.
     resp.assert_node_count(5);
     resp.assert_node_ids("User", &[7]);
     resp.assert_node_ids("WorkItem", &[4010]);
     resp.assert_node_ids("Project", &[1010]);
-    // Both groups must appear: Group 200 (depth-1 to Project 1010) and
-    // Group 100 (depth-2 via Group 200). Pre-fix dropped Group 100.
     resp.assert_node_ids("Group", &[100, 200]);
     resp.assert_edge_exists("User", 7, "WorkItem", 4010, "AUTHORED");
     resp.assert_edge_exists("WorkItem", 4010, "Project", 1010, "IN_PROJECT");
     // Variable-length CONTAINS arms collapse each path into a single
     // (start_group, end_project) edge in the response, with intermediate
-    // hops carried in path_nodes. Both depth-1 (Group 200 → Project 1010)
-    // and depth-2 (Group 100 → ... → Project 1010) arms must contribute.
+    // hops carried in path_nodes.
     resp.assert_edge_exists("Group", 200, "Project", 1010, "CONTAINS");
     resp.assert_edge_exists("Group", 100, "Project", 1010, "CONTAINS");
 }
 
 pub(super) async fn aggregation_variable_length_counts_all_depths(ctx: &TestContext) {
-    // Aggregation analog of the M1 cliff. group_by=u keeps the per-User row
-    // so we can read the count from that row's `n` column. Two matching
-    // paths exist (Group 200, depth-1) and (Group 100, depth-2), so n=2 when
-    // the depth-2 arm is correctly scanned. Pre-fix bug returned n=1.
+    // Aggregation analog of the variable-length cliff (MR !1069): two matching
+    // paths exist (Group 200 depth-1, Group 100 depth-2), so n=2 only when the
+    // depth-2 arm is correctly scanned. Pre-fix returned n=1.
     let resp = run_query(
         ctx,
         r#"{
@@ -423,18 +417,12 @@ pub(super) async fn aggregation_variable_length_counts_all_depths(ctx: &TestCont
 }
 
 pub(super) async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
-    // Redact Group 200 (the intermediate node in the 100→200→300 chain).
-    //
     // Variable-length traversals carry intermediate node IDs in a `path_nodes`
     // array column (built by `build_hop_arm` in lower.rs). Redaction extracts
-    // these into `dynamic_nodes` and checks each one. Since Group 200 appears
-    // in `path_nodes` for every depth-2 row (as the intermediate hop), and in
-    // the child column for every depth-1 row, ALL rows are denied:
-    //   - Depth-1 (parent=100, child=200): denied — child 200 unauthorized
-    //   - Depth-2 (parent=100, child=300): denied — path_nodes contains 200
-    //
-    // This is security-correct: without it, a multi-hop traversal could bypass
-    // namespace authorization on intermediate nodes.
+    // these into `dynamic_nodes` and checks each one. Redacting Group 200 (the
+    // intermediate hop) therefore denies ALL rows, both depth-1 (child=200) and
+    // depth-2 (path_nodes contains 200). Without this, a multi-hop traversal
+    // could bypass namespace authorization on intermediate nodes.
     let mut svc = MockRedactionService::new();
     svc.allow("group", &[100, 300]);
 
@@ -462,8 +450,6 @@ pub(super) async fn traversal_variable_length_with_redaction_at_depth(ctx: &Test
 }
 
 pub(super) async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
-    // Users 1 and 2 are both MEMBER_OF Group 100. The response should
-    // contain Group 100 exactly once, not duplicated per fan-in path.
     let resp = run_query(
         ctx,
         r#"{
@@ -479,7 +465,6 @@ pub(super) async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
     )
     .await;
 
-    // User 1 → Group 100, 102. User 2 → Group 100. Group 100 appears once.
     resp.assert_node_count(4);
     resp.assert_node_ids("User", &[1, 2]);
     resp.assert_node_ids("Group", &[100, 102]);
@@ -487,9 +472,6 @@ pub(super) async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
 }
 
 pub(super) async fn traversal_shared_target_fan_in(ctx: &TestContext) {
-    // Multiple MRs on the same project each have notes. MR 2000 has notes
-    // 3000, 3002, 3003. This tests fan-out from a single source correctly
-    // produces unique target nodes.
     let resp = run_query(
         ctx,
         r#"{
@@ -535,7 +517,6 @@ pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
 }
 
 pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
-    // order_by on the source (from) node's non-id property
     let resp = run_query(
         ctx,
         r#"{
@@ -555,12 +536,10 @@ pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
     resp.assert_node_count(9);
     resp.assert_referential_integrity();
     resp.assert_edge_count("MEMBER_OF", 9);
-    // Usernames alphabetically: alice, bob, charlie, diana, eve, 用户...
     resp.assert_node_order("User", &[1, 2, 3, 4, 5, 6]);
 }
 
 pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
-    // order_by combined with node_ids filter
     let resp = run_query(
         ctx,
         r#"{
@@ -579,9 +558,7 @@ pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
 
     resp.assert_node_count(5);
     resp.assert_referential_integrity();
-    // Only users 1 and 2 — alice authored MRs 2000,2001; bob authored MR 2002
     resp.assert_node_ids("User", &[1, 2]);
-    // Titles DESC: Refactor C, Fix bug B, Add feature A
     resp.assert_node_order("MergeRequest", &[2002, 2001, 2000]);
     resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001), (2, 2002)]);
 }
@@ -605,9 +582,8 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
     )
     .await;
 
-    // id_range scopes callers to 12000-12999 (all seed definitions).
-    // Seed data: compile(12000) → helper(12001), helper(12001) → run_query(12002),
-    // plus cross-project: helper(12001) → run_query(12102) in project 1001.
+    // Seed CALLS graph: compile(12000) → helper(12001) → run_query(12002) in
+    // project 1000, plus cross-project helper(12001) → run_query(12102) in 1001.
     resp.assert_node_count(4);
     resp.assert_referential_integrity();
     resp.assert_node("Definition", 12000, |n| {
@@ -634,16 +610,14 @@ pub(super) async fn traversal_code_graph_calls_with_node_ids(ctx: &TestContext) 
     )
     .await;
 
-    // Pinned to compile(12000): only compile → helper edge
     resp.assert_node_count(2);
     resp.assert_referential_integrity();
     resp.assert_node_ids("Definition", &[12000, 12001]);
     resp.assert_edge_set("CALLS", &[(12000, 12001)]);
 }
 
-/// Filtering Definition by project_id should scope both the node scan
-/// and the CALLS edge scan (auto-injected via push_edge_predicates).
-/// Project 1000 has compile→helper→run_query; project 1001 should not appear.
+/// Filtering Definition by project_id scopes both the node scan and the CALLS
+/// edge scan (the edge predicate is auto-injected via push_edge_predicates).
 pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -660,11 +634,8 @@ pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &Te
     )
     .await;
 
-    // Project 1000: compile(12000)→helper(12001), helper(12001)→run_query(12002)
-    // The cross-project edge helper(12001)→run_query(12102) must NOT appear
-    // because the edge's project_id=1001 doesn't match the filter.
-    // Correctness is proven by assert_node_ids (exact set, 12102 absent)
-    // and assert_edge_set (cross-project edge excluded).
+    // The cross-project edge helper(12001)→run_query(12102) must NOT appear:
+    // its edge project_id=1001 doesn't match the filter.
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });
@@ -683,9 +654,6 @@ pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &Te
     resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
 }
 
-/// Filtering by project_id on the OTHER side of the relationship also
-/// scopes the edge scan. Callee filtered to project 1001 should only
-/// return edges where the target is in that project.
 pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edges(
     ctx: &TestContext,
 ) {
@@ -704,7 +672,6 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     )
     .await;
 
-    // Only the cross-project edge helper(12001)→run_query(12102) survives.
     // Can't assert_filter because both caller (project 1000) and callee
     // (project 1001) are Definition nodes -- skip and prove via exact IDs.
     resp.skip_requirement(Requirement::Filter {
@@ -719,8 +686,8 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     resp.assert_edge_set("CALLS", &[(12001, 12102)]);
 }
 
-/// Explicit relationship-level filter on project_id should also work
-/// (existing mechanism, not auto-injected).
+/// Relationship-level project_id filter (the explicit mechanism, not the
+/// auto-injected one) scopes the edge scan.
 pub(super) async fn traversal_code_graph_edge_level_project_filter(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -737,14 +704,12 @@ pub(super) async fn traversal_code_graph_edge_level_project_filter(ctx: &TestCon
     )
     .await;
 
-    // Explicit edge filter: only edges with project_id=1000
     resp.assert_node_count(3);
     resp.assert_referential_integrity();
     resp.assert_node_ids("Definition", &[12000, 12001, 12002]);
     resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
 }
 
-/// Filtering by a non-existent project_id should return zero results.
 pub(super) async fn traversal_code_graph_project_id_filter_no_match_returns_empty(
     ctx: &TestContext,
 ) {
@@ -763,8 +728,7 @@ pub(super) async fn traversal_code_graph_project_id_filter_no_match_returns_empt
     )
     .await;
 
-    // No nodes match project 99999, so we can't assert filter properties
-    // on individual nodes. Skip the filter requirement and verify emptiness.
+    // No nodes match project 99999, so filter properties can't be asserted.
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });

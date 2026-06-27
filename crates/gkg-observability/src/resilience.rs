@@ -1,5 +1,3 @@
-//! Circuit-breaker metrics and the production `MetricsObserver` implementation.
-
 use circuit_breaker::{CircuitBreakerObserver, StateLabel, Transition};
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue};
@@ -46,8 +44,6 @@ const FROM_KEY: Key = Key::from_static_str(labels::FROM);
 const TO_KEY: Key = Key::from_static_str(labels::TO);
 const OUTCOME_KEY: Key = Key::from_static_str(labels::OUTCOME);
 
-/// Production observer that emits OpenTelemetry counter increments and
-/// `tracing` events on state transitions.
 pub struct MetricsObserver {
     state_transitions: Counter<u64>,
     calls_rejected: Counter<u64>,

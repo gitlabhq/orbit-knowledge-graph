@@ -11,7 +11,6 @@ pub enum Format {
     Csv,
 }
 
-/// Write `batches` to `out` in the requested format.
 pub fn write<W: Write>(out: W, format: Format, batches: &[RecordBatch]) -> Result<()> {
     match format {
         Format::Table => write_table(out, batches),

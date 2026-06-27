@@ -354,14 +354,12 @@ mod tests {
         assert!(!path_main.exists());
         assert!(path_dev.exists());
 
-        // Project directory still exists because "develop" branch is present
         let project_dir = dir.path().join("42");
         assert!(project_dir.exists());
 
         cache.invalidate(42, "develop").await.unwrap();
         assert!(!path_dev.exists());
 
-        // Project directory removed after all branches invalidated
         assert!(
             !project_dir.exists(),
             "project directory should be removed when all branches are invalidated"
@@ -444,9 +442,7 @@ mod tests {
     async fn extract_archive_drops_excluded_extensions_and_keeps_resolver_inputs() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[
-            // Source.
             ("project-abc/src/main.rs", b"fn main() {}"),
-            // Excluded extensions: dropped at extraction.
             ("project-abc/assets/logo.png", b"\x89PNG\r\n\x1a\nfake"),
             ("project-abc/static/banner.gif", b"GIF89a"),
             ("project-abc/fonts/Inter.woff2", b""),
@@ -484,14 +480,11 @@ mod tests {
             "retained non-parsable files should be present in archive inventory"
         );
 
-        // Source kept.
         assert!(path.join("src/main.rs").exists());
-        // Excluded extensions dropped.
         assert!(!path.join("assets/logo.png").exists());
         assert!(!path.join("static/banner.gif").exists());
         assert!(!path.join("fonts/Inter.woff2").exists());
         assert!(!path.join("dist/build.zip").exists());
-        // Resolver inputs preserved.
         assert!(path.join("Cargo.toml").exists());
         assert!(path.join("Cargo.lock").exists());
         assert!(path.join("package.json").exists());

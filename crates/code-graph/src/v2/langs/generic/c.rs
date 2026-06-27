@@ -10,8 +10,6 @@ use crate::v2::linker::rules::{
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct CDsl;
 
@@ -45,12 +43,10 @@ impl DslLanguage for CDsl {
             scope("union_specifier", "Union")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
-            // typedef struct { ... } Name;
             scope("type_definition", "Typedef")
                 .def_kind(DefKind::Other)
                 .name_from(field("declarator"))
                 .no_scope(),
-            // Enum constants
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
@@ -59,11 +55,9 @@ impl DslLanguage for CDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Direct function call: foo()
             reference("call_expression")
                 .name_from(field("function"))
                 .when(!has_descendant("field_expression")),
-            // Member call via pointer/struct: obj->method() or obj.method()
             reference("call_expression")
                 .name_from(field("function").field("field"))
                 .when(has_descendant("field_expression"))
@@ -72,10 +66,7 @@ impl DslLanguage for CDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![
-            // #include "header.h" / #include <header.h>
-            import("preproc_include").path_from(field("path")),
-        ]
+        vec![import("preproc_include").path_from(field("path"))]
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -103,15 +94,12 @@ impl DslLanguage for CDsl {
 
     fn bindings() -> Vec<BindingRule> {
         vec![
-            // Variable declarations: int x = foo();
             binding("init_declarator", BindingKind::Assignment)
                 .name_from(&["declarator"])
                 .value_from("value"),
-            // Parameters: void foo(int x, char *y)
             binding("parameter_declaration", BindingKind::Parameter)
                 .name_from(&["declarator"])
                 .no_value(),
-            // Assignment: x = expr
             binding("assignment_expression", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
@@ -140,8 +128,6 @@ impl DslLanguage for CDsl {
         types::SsaConfig::default()
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct CRules;
 

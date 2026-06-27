@@ -11,4 +11,5 @@ pub mod lua;
 pub mod php;
 pub mod python;
 pub mod ruby;
+pub mod scala;
 pub mod swift;

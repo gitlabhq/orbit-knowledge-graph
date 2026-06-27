@@ -183,8 +183,16 @@ yaml_test!(
     "python/v1_interfile_resolution.yaml"
 );
 yaml_test!(
+    python_source_root_imports,
+    "python/source_root_imports.yaml"
+);
+yaml_test!(
     python_imported_symbol_fallback_matrix,
     "python/imported_symbol_fallback_matrix.yaml"
+);
+yaml_test!(
+    python_reexport_resolution,
+    "python/reexport_resolution.yaml"
 );
 
 // Java
@@ -227,6 +235,10 @@ yaml_test!(
     kotlin_imported_symbol_fallback_matrix,
     "kotlin/imported_symbol_fallback_matrix.yaml"
 );
+
+//Scala
+yaml_test!(scala_call_resolution, "scala_resolution.yaml");
+yaml_test!(scala_definitions, "scala/definitions.yaml");
 
 // Go
 yaml_test!(go_method_call, "go/method_call.yaml");

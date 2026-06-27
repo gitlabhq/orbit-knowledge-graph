@@ -137,15 +137,12 @@ impl JsCrossFileResolver {
         }
     }
 
-    /// Create a resolver with project alias hints already applied.
     pub fn new_with_hints(probe: &WorkspaceProbe) -> Self {
         let mut resolver = Self::new(probe);
         resolver.apply_project_resolution_hints(probe);
         resolver
     }
 
-    /// Apply explicit project alias config when the repository exposes it
-    /// through supported config files.
     pub fn apply_project_resolution_hints(&mut self, probe: &WorkspaceProbe) {
         let aliases = load_project_aliases(probe);
         if !aliases.is_empty() {
@@ -160,11 +157,8 @@ impl JsCrossFileResolver {
         }
     }
 
-    /// Resolve cross-file CALLS edges for imported function calls.
-    ///
-    /// Files are resolved in parallel via rayon. Each file's calls are
-    /// processed sequentially within the file, but different files run
-    /// concurrently.
+    /// Files are resolved in parallel via rayon; calls within a single file
+    /// are processed sequentially.
     pub fn resolve_calls(
         &self,
         calls_by_file: &[(String, Vec<JsCallEdge>)],

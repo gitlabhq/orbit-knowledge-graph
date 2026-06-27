@@ -507,7 +507,6 @@ fn parse_rust_file_standalone(
     root_path: &str,
 ) -> Result<ParsedRustFile, RustFileError> {
     let abs_path = to_absolute_path(root_path, file_path);
-    // Never read a file that resolves outside the repo root.
     let Some(relative_path) = relative_path_if_under_root(root_path, &abs_path) else {
         return Err((
             file_path.to_string(),

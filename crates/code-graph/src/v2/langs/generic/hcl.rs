@@ -16,7 +16,6 @@ use treesitter_visit::syntax_tree::SyntaxTree;
 
 type N<'a> = Node<'a, SyntaxTree>;
 
-/// Extract the text of the Nth `string_lit` child's inner `template_literal`.
 fn nth_label(n: isize) -> treesitter_visit::extract::Extract {
     text()
         .nth(Child, Kind("string_lit"), n)
@@ -37,60 +36,50 @@ impl DslLanguage for HclDsl {
 
     fn scopes() -> Vec<ScopeRule> {
         vec![
-            // resource "type" "name" { ... }
-            // Creates a scope named by the resource type (first label).
-            // The on_scope hook injects a child def for the resource name (second label).
+            // on_scope injects a child def for the resource name (second label).
             scope("block", "Resource")
                 .def_kind(DefKind::Class)
                 .when(has_child_text("resource"))
                 .name_from(nth_label(0)),
-            // data "type" "name" { ... }
             scope("block", "DataSource")
                 .def_kind(DefKind::Class)
                 .when(has_child_text("data"))
                 .name_from(nth_label(0)),
-            // variable "name" { ... }
             scope("block", "Variable")
                 .def_kind(DefKind::Property)
                 .when(has_child_text("variable"))
                 .no_scope()
                 .name_from(nth_label(0)),
-            // output "name" { ... }
             scope("block", "Output")
                 .def_kind(DefKind::Property)
                 .when(has_child_text("output"))
                 .no_scope()
                 .name_from(nth_label(0)),
-            // module "name" { ... }
             scope("block", "Module")
                 .def_kind(DefKind::Module)
                 .when(has_child_text("module"))
                 .no_scope()
                 .name_from(nth_label(0)),
-            // locals { key = value; ... }
             scope("block", "Locals")
                 .def_kind(DefKind::Other)
                 .when(has_child_text("locals"))
                 .name_from(child_of_kind("identifier")),
-            // provider "name" { ... }
             scope("block", "Provider")
                 .def_kind(DefKind::Other)
                 .when(has_child_text("provider"))
                 .no_scope()
                 .name_from(nth_label(0)),
-            // dynamic "name" { for_each = ...; content { ... } }
             // The label becomes an iterator variable (e.g. ingress.value).
             scope("block", "Dynamic")
                 .def_kind(DefKind::Property)
                 .when(has_child_text("dynamic"))
                 .name_from(nth_label(0)),
-            // terraform { required_version, required_providers, backend }
             scope("block", "Terraform")
                 .def_kind(DefKind::Other)
                 .when(has_child_text("terraform"))
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            // Synthetic nodes injected by rewrite_hcl
+            // Synthetic nodes injected by rewrite().
             scope("__resource", "Resource")
                 .def_kind(DefKind::Class)
                 .no_scope(),
@@ -105,10 +94,7 @@ impl DslLanguage for HclDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Function calls: merge(...), file(...), toset(...), etc.
             reference("function_call").name_from(child_of_kind("identifier")),
-            // Bare variable references: aws_vpc, var, local, module, data, etc.
-            // These are the base of dot-separated reference chains.
             reference("variable_expr").name_from(child_of_kind("identifier")),
         ]
     }
@@ -126,12 +112,7 @@ impl DslLanguage for HclDsl {
     }
 
     fn loops() -> Vec<LoopRule> {
-        vec![
-            // { for k, v in expr : key => value }
-            loop_rule("for_object_expr"),
-            // [ for v in expr : value ]
-            loop_rule("for_tuple_expr"),
-        ]
+        vec![loop_rule("for_object_expr"), loop_rule("for_tuple_expr")]
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
@@ -252,8 +233,6 @@ fn hcl_ref_rules() -> Vec<rw::Rule> {
             .when((!text_in(TF_BUILTIN_NAMESPACES)).and(!text_in(TF_HANDLED_NAMESPACES))),
     ]
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct HclRules;
 
@@ -599,8 +578,6 @@ resource "aws_instance" "web" {
 }
 "#,
         );
-        // Builtins pass through with their original name (no dot-join rewrite),
-        // so they won't accidentally match a resource FQN like "self.trigger".
         assert!(
             !refs.iter().any(|r| r == "self.trigger"),
             "self.trigger should not be rewritten to a dot-joined ref: {refs:?}"

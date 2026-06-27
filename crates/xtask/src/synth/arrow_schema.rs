@@ -1,12 +1,9 @@
-//! Dynamic Arrow schema generation from ontology entities.
-
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
 use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use ontology::{DataType, Field, NodeEntity};
 
-/// Extension trait to convert ontology types to Arrow types.
 pub trait ToArrowSchema {
-    /// Convert to an Arrow schema, prepending traversal_path.
+    /// Prepends traversal_path as the first field.
     fn to_arrow_schema(&self) -> Schema;
 }
 
@@ -19,7 +16,7 @@ impl ToArrowSchema for NodeEntity {
         )];
 
         for field in &self.fields {
-            // Skip traversal_path if defined in ontology - it's a system column
+            // traversal_path is prepended unconditionally above; drop any ontology copy.
             if field.name == TRAVERSAL_PATH_COLUMN {
                 continue;
             }
@@ -30,9 +27,7 @@ impl ToArrowSchema for NodeEntity {
     }
 }
 
-/// Extension trait to convert ontology Field to Arrow Field.
 pub trait ToArrowField {
-    /// Convert to an Arrow field.
     fn to_arrow_field(&self) -> ArrowField;
 }
 
@@ -43,9 +38,7 @@ impl ToArrowField for Field {
     }
 }
 
-/// Extension trait to convert ontology DataType to Arrow DataType.
 pub trait ToArrowType {
-    /// Convert to Arrow DataType.
     fn to_arrow_type(&self) -> ArrowDataType;
 }
 
@@ -62,7 +55,6 @@ impl ToArrowType for DataType {
     }
 }
 
-/// Create the Arrow schema for the unified edges table.
 pub fn edge_schema(ontology: &ontology::Ontology) -> Schema {
     Schema::new(
         ontology
@@ -76,7 +68,6 @@ pub fn edge_schema(ontology: &ontology::Ontology) -> Schema {
     )
 }
 
-/// Convert Arrow schema to ClickHouse CREATE TABLE statement.
 pub fn to_clickhouse_ddl(table_name: &str, schema: &Schema, order_by: &[&str]) -> String {
     let columns: Vec<String> = schema
         .fields()
@@ -97,9 +88,7 @@ pub fn to_clickhouse_ddl(table_name: &str, schema: &Schema, order_by: &[&str]) -
     )
 }
 
-/// Convert Arrow DataType to ClickHouse type string.
-///
-/// This is the single source of truth for Arrow→ClickHouse type mapping.
+/// Single source of truth for Arrow→ClickHouse type mapping.
 /// Used by both `to_clickhouse_ddl()` and `clickhouse::schema::SchemaGenerator`.
 pub(crate) fn arrow_to_clickhouse_type(arrow_type: &ArrowDataType, nullable: bool) -> String {
     let base_type = match arrow_type {
@@ -166,7 +155,7 @@ mod tests {
         };
 
         let schema = node.to_arrow_schema();
-        assert_eq!(schema.fields().len(), 4); // traversal_path + 3 fields
+        assert_eq!(schema.fields().len(), 4);
 
         assert_eq!(schema.field(0).name(), "traversal_path");
         assert_eq!(schema.field(0).data_type(), &ArrowDataType::Utf8);

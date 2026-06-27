@@ -1,5 +1,3 @@
-//! The continuous, reactive Siphon CDC trigger.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -51,7 +49,6 @@ impl Siphon {
             .manage_stream(false)
     }
 
-    /// Drains every route to empty exactly once. Returns the aggregate outcome.
     pub async fn drain_once(&self) -> Result<RouteOutcome, TaskError> {
         let mut total = RouteOutcome::default();
         for route in &self.routes {

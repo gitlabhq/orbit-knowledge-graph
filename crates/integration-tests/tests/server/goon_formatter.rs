@@ -1,14 +1,6 @@
-//! E2E integration tests for the GoonFormatter wire path.
-//!
-//! Mirrors the pipeline that `gkg-server::grpc::execute_query` runs when a
-//! client requests `ResponseFormat::Llm`: compile → execute → redact →
-//! hydrate → `GoonFormatter.format_stamped`. Asserts the formatter is wired
-//! into the PipelineOutput surface, returns the expected (string, version,
-//! name) triple, and emits valid GOON syntax against real ClickHouse data.
-//!
-//! These tests guard the dispatch in
-//! `crates/gkg-server/src/grpc/service.rs` against regressions where the
-//! LLM branch silently falls through to the raw `GraphFormatter`.
+//! Guards the dispatch in `crates/gkg-server/src/grpc/service.rs` against
+//! regressions where the `ResponseFormat::Llm` branch silently falls through
+//! to the raw `GraphFormatter`.
 
 use std::sync::Arc;
 
@@ -27,10 +19,6 @@ use query_engine::formatters::{
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::{PipelineOutput, RedactionOutput};
 use serde_json::Value;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Data seeding
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn seed(ctx: &TestContext) {
     ctx.execute(&format!(
@@ -70,11 +58,6 @@ async fn seed(ctx: &TestContext) {
 
     ctx.optimize_all().await;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pipeline helper — returns PipelineOutput so each subtest can format it
-// through both formatters and compare.
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn run_pipeline(
     ctx: &TestContext,
@@ -147,10 +130,6 @@ fn goon_str(value: &Value) -> &str {
         .as_str()
         .expect("GoonFormatter must return Value::String, not a JSON object")
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Subtests
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
     let output = run_pipeline(
@@ -265,9 +244,6 @@ async fn quoting_handles_strings_with_spaces_and_escapes(ctx: &TestContext) {
 }
 
 async fn aggregation_node_grouping_lifts_unique_nodes_and_emits_rows(ctx: &TestContext) {
-    // Top-level `group_by` with kind=node — group by entity. Encoder
-    // dedups the inlined node, surfaces it in @nodes once, and rows
-    // reference it as `g=Group:id`.
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "aggregation",
@@ -306,8 +282,6 @@ async fn aggregation_node_grouping_lifts_unique_nodes_and_emits_rows(ctx: &TestC
 }
 
 async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
-    // Top-level `group_by` with kind=property — group by ontology-validated
-    // node property (User.state). Pure scalar group values, no node lift.
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "aggregation",
@@ -345,7 +319,6 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
 }
 
 async fn ungrouped_aggregation_emits_single_row_no_group_by_line(ctx: &TestContext) {
-    // No top-level group_by — single scalar row.
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "aggregation",
@@ -407,10 +380,6 @@ async fn graph_and_goon_formatters_agree_on_node_and_edge_counts(ctx: &TestConte
         "GOON header must mirror raw edge count ({raw_edge_count}): {goon_str}"
     );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Test runner
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn goon_formatter_e2e() {

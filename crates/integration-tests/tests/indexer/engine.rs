@@ -1,7 +1,4 @@
-//! Integration tests for the ETL engine.
-//!
-//! These tests verify the full message flow: NATS -> Handler -> ClickHouse.
-//! They require a Docker-compatible runtime (Docker, Colima, etc).
+//! Require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -437,7 +434,6 @@ async fn subject_is_unblocked_after_handler_panic() {
     let should_panic = Arc::new(AtomicBool::new(true));
     let writer = context.create_writer();
 
-    // Phase 1: the handler panics; the engine should term-ack, freeing the subject slot.
     {
         let broker = context.create_broker_with_config(nats_config.clone()).await;
 
@@ -476,7 +472,6 @@ async fn subject_is_unblocked_after_handler_panic() {
         "panicked message should not be written"
     );
 
-    // Phase 2: subject slot is free; a non-panicking handler processes the next message.
     should_panic.store(false, Ordering::SeqCst);
 
     let broker = context.create_broker_with_config(nats_config).await;
@@ -505,8 +500,6 @@ async fn subject_is_unblocked_after_handler_panic() {
         "second message should be processed"
     );
 }
-
-// -- Permanent error test helpers --
 
 use indexer::handler::PermanentAction;
 

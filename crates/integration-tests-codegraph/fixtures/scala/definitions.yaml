@@ -1,0 +1,119 @@
+name: Scala definitions
+
+fixtures:
+  - path: Animals.scala
+    content: |
+      class Animal {
+        def speak(): Unit = {}
+        def eat(): Unit = {}
+      }
+
+      class Dog extends Animal {
+        def fetch(): Unit = {}
+      }
+
+      case class Point(x: Double, y: Double)
+
+      trait Drawable {
+        def draw(): Unit
+        def resize(factor: Double): Unit
+      }
+
+      trait Identifiable extends Drawable {
+        def identify(): Unit
+      }
+
+      object Zoo {
+        val name: String = "City Zoo"
+        def open(): Unit = {}
+      }
+
+tests:
+  - name: Animal class is indexed with correct type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Animal'
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Animal", fqn: "Animal", type: "Class" } }
+
+  - name: Dog subclass is indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Dog'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class" } }
+
+  - name: Point case class is indexed with CaseClass type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Point'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "CaseClass" } }
+
+  - name: Drawable trait is indexed with Trait type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Drawable'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Trait" } }
+
+  - name: Identifiable trait is indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Identifiable'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Trait" } }
+
+  - name: Zoo object is indexed with Object type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Zoo'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Object" } }
+
+  - name: Animal.speak is scoped under Animal FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Animal.speak'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "speak" } }
+
+  - name: Dog.fetch is scoped under Dog FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Dog.fetch'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+
+  - name: Zoo.open is scoped under Zoo FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Zoo.open'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "open" } }
+
+  - name: All top-level types are in the same file
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Class', 'CaseClass', 'Trait', 'Object']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { no_nulls: file }
+      - { match: { field: file, pattern: "Animals.scala" } }

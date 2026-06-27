@@ -50,8 +50,6 @@ use resolve::{
     ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks, paths_per_routes_query,
 };
 
-/// Raw row pulled from the extract SQL. The transform parses, resolves, and
-/// emits edges from these rows in batches.
 struct ExtractedNote {
     note: String,
     noteable_id: i64,
@@ -62,7 +60,6 @@ struct ExtractedNote {
     action: String,
 }
 
-/// Best-effort default-project lookup keyed on `project_id`.
 type DefaultProjectLookup = HashMap<i64, String>;
 
 pub(in crate::modules::sdlc) struct SystemNotesTransform {
@@ -128,9 +125,7 @@ impl BlockTransform for SystemNotesTransform {
     }
 }
 
-/// Register the `system_notes` transform factory in the registry. Called
-/// from `register_handlers` during handler setup; the captured `datalake`
-/// handle is available for second-hop lookups (ADR 015).
+/// The captured `datalake` handle is available for second-hop lookups (ADR 015).
 pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
@@ -151,10 +146,6 @@ pub(in crate::modules::sdlc) fn register(
     });
     registry.register(TRANSFORM_NAME, factory);
 }
-
-// ---------------------------------------------------------------------------
-// Extract block → ExtractedNote
-// ---------------------------------------------------------------------------
 
 fn col<'a, A: 'static>(block: &'a RecordBatch, name: &str) -> Result<&'a A, HandlerError> {
     ArrowUtils::get_column_by_name::<A>(block, name)
@@ -197,10 +188,6 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
     }
     Ok(notes)
 }
-
-// ---------------------------------------------------------------------------
-// Resolve + emit
-// ---------------------------------------------------------------------------
 
 async fn resolve_and_emit(
     datalake: &dyn DatalakeQuery,
@@ -282,10 +269,6 @@ fn plan_for_batch(
     }
     plan
 }
-
-// ---------------------------------------------------------------------------
-// Datalake lookups
-// ---------------------------------------------------------------------------
 
 async fn resolve_default_projects(
     datalake: &dyn DatalakeQuery,
@@ -447,10 +430,6 @@ async fn query_entities(
     }
     Ok(rows)
 }
-
-// ---------------------------------------------------------------------------
-// Edge → RecordBatch
-// ---------------------------------------------------------------------------
 
 fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerError> {
     let len = edges.len();

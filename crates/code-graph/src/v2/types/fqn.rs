@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-/// A fully qualified name: cached joined string + separator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Fqn {
     cached: String,

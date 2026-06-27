@@ -10,38 +10,37 @@ use serde_json::Value;
 
 pub use gkg_utils::clickhouse::{ChScalar, ChType};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Expressions
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Expression that produces a value in SQL.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    /// Column reference → `table.column`
-    Column { table: String, column: String },
+    Column {
+        table: String,
+        column: String,
+    },
     /// Bare SQL identifier, used for lambda parameters.
     Identifier(String),
-    /// Constant value → parameterized as `{pN:Type}`, type inferred from Value.
+    /// Constant value, type inferred from Value.
     Literal(Value),
-    /// Constant value with explicit ClickHouse type → `{pN:Type}`.
-    Param { data_type: ChType, value: Value },
-    /// Function call → `NAME(arg1, arg2, ...)`
-    /// Used for aggregates (COUNT, SUM) and ClickHouse functions (arrayConcat, has).
-    FuncCall { name: String, args: Vec<Expr> },
-    /// Lambda expression → `param -> body`.
-    Lambda { param: String, body: Box<Expr> },
-    /// Binary operation → `(left OP right)`
-    /// Examples: `x = y`, `a AND b`, `col IN (1, 2, 3)`
+    Param {
+        data_type: ChType,
+        value: Value,
+    },
+    FuncCall {
+        name: String,
+        args: Vec<Expr>,
+    },
+    Lambda {
+        param: String,
+        body: Box<Expr>,
+    },
     BinaryOp {
         op: Op,
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    /// Unary operation → `(OP expr)` or `(expr OP)` for postfix ops
-    /// Prefix: `NOT active` → `(NOT t.active)`
-    /// Postfix: `IS NULL` → `(t.deleted_at IS NULL)`
-    UnaryOp { op: Op, expr: Box<Expr> },
-    /// Subquery IN check → `expr IN (SELECT column FROM cte_name)`
+    UnaryOp {
+        op: Op,
+        expr: Box<Expr>,
+    },
     /// Used for SIP pre-filtering: materialize IDs in a CTE, then filter
     /// multiple tables against the same set.
     InSubquery {
@@ -49,19 +48,18 @@ pub enum Expr {
         cte_name: String,
         column: String,
     },
-    /// Inline subquery IN check → `expr IN (SELECT ...)`
     /// Like InSubquery but embeds the query directly instead of referencing
     /// a CTE. Used for narrowing when CTE references would trigger
     /// ClickHouse's correlated subquery rejection in parameterized mode.
-    InSelect { expr: Box<Expr>, query: Box<Query> },
-    /// Wildcard → `*`
+    InSelect {
+        expr: Box<Expr>,
+        query: Box<Query>,
+    },
     Star,
 }
 
-/// SQL operators for expressions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub enum Op {
-    // Comparison
     #[strum(serialize = "=")]
     Eq,
     #[strum(serialize = "!=")]
@@ -78,56 +76,39 @@ pub enum Op {
     In,
     #[strum(serialize = "LIKE")]
     Like,
-    // Logical
     #[strum(serialize = "AND")]
     And,
     #[strum(serialize = "OR")]
     Or,
     #[strum(serialize = "NOT")]
     Not,
-    // Null checks
     #[strum(serialize = "IS NULL")]
     IsNull,
     #[strum(serialize = "IS NOT NULL")]
     IsNotNull,
-    // Arithmetic
     #[strum(serialize = "+")]
     Add,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Table references
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Source of rows in a FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TableRef {
-    /// Read from a physical table → `table AS alias [FINAL]`
     Scan {
         table: String,
         alias: String,
         final_: bool,
     },
-    /// Combine two sources → `left JOIN_TYPE JOIN right ON condition`
     Join {
         join_type: JoinType,
         left: Box<TableRef>,
         right: Box<TableRef>,
         on: Expr,
     },
-    /// Union of queries as a derived table → `(SELECT ... UNION ALL SELECT ...) AS alias`
     /// Used for multi-hop traversals with unrolled joins.
     Union { queries: Vec<Query>, alias: String },
-    /// Derived table from a subquery → `(SELECT ...) AS alias`
     /// Used internally for deduplication of aggregation queries.
     Subquery { query: Box<Query>, alias: String },
 }
 
-/// SQL JOIN types.
-/// - Inner: only matching rows from both sides
-/// - Left: all rows from left, matching from right (NULLs if no match)
-/// - Right: all rows from right, matching from left
-/// - Cross: cartesian product, no ON condition
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
@@ -136,11 +117,6 @@ pub enum JoinType {
     Cross,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Query structures
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Expression in SELECT clause → `expr AS alias` or just `expr`
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectExpr {
     pub expr: Expr,
@@ -155,7 +131,6 @@ impl SelectExpr {
         }
     }
 
-    /// `alias.col AS col` — select a column aliased as its own name.
     pub fn col(alias: impl Into<String>, col: impl Into<String>) -> Self {
         let col = col.into();
         Self::new(Expr::col(alias, &col), col)
@@ -169,7 +144,6 @@ impl SelectExpr {
     }
 }
 
-/// Ordering specification → `expr ASC` or `expr DESC`
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderExpr {
     pub expr: Expr,
@@ -186,7 +160,6 @@ impl OrderExpr {
     }
 }
 
-/// Named Common Table Expression (CTE) for WITH clauses.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cte {
     pub name: String,
@@ -220,7 +193,6 @@ impl Cte {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub ctes: Vec<Cte>,
-    /// When true, emit `SELECT DISTINCT` instead of `SELECT`.
     pub distinct: bool,
     pub select: Vec<SelectExpr>,
     pub from: TableRef,
@@ -231,7 +203,7 @@ pub struct Query {
     /// `LIMIT n BY col1, col2` — ClickHouse per-group limit (applied after ORDER BY).
     pub limit_by: Option<(u32, Vec<Expr>)>,
     pub limit: Option<u32>,
-    /// Additional queries to UNION ALL with this one (for recursive CTEs).
+    /// UNION ALL with this query, used for recursive CTEs.
     pub union_all: Vec<Query>,
 }
 
@@ -257,12 +229,9 @@ impl Default for Query {
     }
 }
 
-/// SQL identifier pattern: ASCII letter or underscore, then alphanumerics/underscores.
 static SAFE_IDENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("valid regex"));
 
-/// `INSERT INTO table (cols) VALUES (row1), (row2), ...`
-///
 /// Table and column names are interpolated as raw identifiers (not parameterized),
 /// so they are validated at construction time via [`Insert::new`]. Fields are
 /// private to enforce this — use the constructor.
@@ -306,16 +275,11 @@ impl Insert {
     }
 }
 
-/// Top-level AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     Query(Box<Query>),
     Insert(Box<Insert>),
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Builder helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 impl Expr {
     pub fn col(table: impl Into<String>, column: impl Into<String>) -> Self {

@@ -1,5 +1,3 @@
-//! Scope-key derivation for traversal-path resolution.
-//!
 //! The querying pipeline's path-resolution stage uses these to read which
 //! Project/Group scope a node pins (by id or full_path), look the tight
 //! traversal_path prefix up in the graph DB, and attach it to the
@@ -311,8 +309,6 @@ mod tests {
         assert!(scope_keys(&node, ANCHOR_FKS).is_empty());
     }
 
-    // scope_edges resolves each relationship's endpoint entity kinds from the
-    // query's nodes so the ontology can pick the exact scope-preserving variant.
     #[test]
     fn scope_edges_carries_endpoint_entity_kinds() {
         let input = crate::parse_input(

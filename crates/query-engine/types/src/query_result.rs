@@ -1,5 +1,3 @@
-//! Type-safe result schema for redaction processing.
-
 use std::collections::{HashMap, HashSet};
 
 use arrow::datatypes::Int64Type;
@@ -100,7 +98,6 @@ impl QueryResultRow {
         Some(NodeRef::new(self.get_id(node)?, self.get_type(node)?))
     }
 
-    /// For path finding queries, returns all nodes in the path.
     pub fn path_nodes(&self) -> &[NodeRef] {
         &self.dynamic_nodes
     }
@@ -165,7 +162,6 @@ impl QueryResultRow {
     }
 }
 
-/// Type-safe wrapper around Arrow RecordBatch results for redaction processing.
 #[derive(Debug, Clone)]
 pub struct QueryResult {
     rows: Vec<QueryResultRow>,
@@ -265,7 +261,6 @@ impl QueryResult {
         self.rows.iter()
     }
 
-    /// Collect all resource IDs that need authorization, grouped by (resource_type, ability).
     pub fn resource_checks(&self) -> Vec<ResourceCheck> {
         let mut ids: HashMap<(&str, &str), HashSet<i64>> = HashMap::new();
 

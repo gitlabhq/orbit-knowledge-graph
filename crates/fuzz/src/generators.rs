@@ -1,5 +1,3 @@
-//! Structured generators for fuzz testing.
-//!
 //! Generates JSON query strings that conform to (or partially conform to)
 //! the GKG query DSL schema, allowing fuzzing to reach deeper compiler logic
 //! beyond initial JSON parsing.
@@ -25,7 +23,6 @@ fn ontology_edge_names() -> &'static Vec<String> {
     NAMES.get_or_init(|| ontology().edge_names().map(String::from).collect())
 }
 
-/// Pick a random item from a slice using the bolero driver.
 fn pick<'a, T>(driver: &mut impl Driver, items: &'a [T]) -> Option<&'a T> {
     if items.is_empty() {
         return None;
@@ -34,7 +31,6 @@ fn pick<'a, T>(driver: &mut impl Driver, items: &'a [T]) -> Option<&'a T> {
     Some(&items[idx as usize % items.len()])
 }
 
-/// Pick either a valid ontology name or a random garbage string.
 fn pick_entity_name(driver: &mut impl Driver) -> Option<String> {
     let use_valid: bool = driver.produce()?;
     if use_valid {
@@ -165,7 +161,6 @@ fn gen_aggregation(driver: &mut impl Driver, node_id: &str) -> Option<Value> {
     Some(Value::Object(agg))
 }
 
-/// A generated JSON query string for the GKG query DSL.
 #[derive(Debug, Clone)]
 pub struct FuzzQuery {
     pub json: String,

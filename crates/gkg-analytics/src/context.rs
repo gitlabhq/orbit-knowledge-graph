@@ -14,10 +14,6 @@ use labkit_events::SnowplowContext;
 
 include!(concat!(env!("OUT_DIR"), "/iglu_schemas.rs"));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// orbit_common
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct OrbitCommonContext {
     pub data: orbit_common::OrbitCommon,
@@ -39,10 +35,6 @@ impl SnowplowContext for OrbitCommonContext {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// orbit_query
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct OrbitQueryContext {
     pub data: orbit_query::OrbitQuery,
@@ -63,10 +55,6 @@ impl SnowplowContext for OrbitQueryContext {
         serde_json::to_value(&self.data).expect("generated OrbitQuery is always serializable")
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// orbit_sdlc_indexing
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct OrbitSdlcIndexingContext {
@@ -90,10 +78,6 @@ impl SnowplowContext for OrbitSdlcIndexingContext {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// orbit_code_indexing
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct OrbitCodeIndexingContext {
     pub data: orbit_code_indexing::OrbitCodeIndexing,
@@ -116,11 +100,8 @@ impl SnowplowContext for OrbitCodeIndexingContext {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Schema URIs (re-exported for callers that need the bare URI string,
-// e.g. assertions in observer and integration tests).
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Re-exported for callers that need the bare URI string, e.g. assertions in
+// observer and integration tests.
 pub const ORBIT_COMMON_SCHEMA: &str = orbit_common::SCHEMA_URI;
 pub const ORBIT_QUERY_SCHEMA: &str = orbit_query::SCHEMA_URI;
 pub const ORBIT_SDLC_INDEXING_SCHEMA: &str = orbit_sdlc_indexing::SCHEMA_URI;

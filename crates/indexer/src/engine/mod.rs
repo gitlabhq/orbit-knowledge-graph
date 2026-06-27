@@ -52,18 +52,14 @@ use metrics::EngineMetrics;
 use types::{Envelope, Subscription};
 use worker_pool::WorkerPool;
 
-/// Errors that can occur during engine operation.
 #[derive(Debug, Error)]
 pub enum EngineError {
-    /// An error from the NATS broker.
     #[error("NATS error: {0}")]
     Nats(#[from] NatsError),
 
-    /// An error from a message handler.
     #[error("handler error: {0}")]
     Handler(#[from] HandlerError),
 
-    /// Invalid engine configuration.
     #[error("invalid config: {0}")]
     InvalidConfig(String),
 }
@@ -168,8 +164,6 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Starts the engine and processes messages until stopped.
-    ///
     /// Returns when stopped via [`Engine::stop`] or when all subscriptions end.
     pub async fn run(&self, configuration: &EngineConfiguration) -> Result<(), EngineError> {
         let subscriptions = self.registry.subscriptions();
@@ -279,8 +273,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Signals the engine to stop processing.
-    ///
     /// In-flight messages will complete before shutdown.
     pub fn stop(&self) {
         self.cancel.cancel();
@@ -395,8 +387,6 @@ async fn process_message(
     );
 }
 
-/// Runs all handlers concurrently and aggregates their outcomes.
-///
 /// Precedence: Exhausted > Dropped > RetryRequested > TransientError > Success.
 /// Retry policy (max_attempts, retry_interval) is read from the subscription,
 /// not from individual handlers.
@@ -964,7 +954,6 @@ mod tests {
             ..Default::default()
         });
 
-        // Exhaust the single worker pool permit.
         let _blocker = runtime
             .worker_pool
             .acquire_handler_slot(None)
@@ -976,7 +965,6 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
         let envelope = TestEnvelopeFactory::simple("payload");
 
-        // Must complete despite the pool being fully consumed.
         let outcome = tokio::time::timeout(
             Duration::from_secs(2),
             run_handlers(

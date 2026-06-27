@@ -63,9 +63,6 @@ pub fn group_parseable_inventory(
     (groups, parsed_file_languages)
 }
 
-/// Build the structural graph: one node per inventory entry, labeled with the
-/// language it was parsed as (if any) and the reason it did not index cleanly
-/// (if any).
 pub fn build_file_inventory_graph(
     root: &Path,
     inventory: &[FileInventoryEntry],

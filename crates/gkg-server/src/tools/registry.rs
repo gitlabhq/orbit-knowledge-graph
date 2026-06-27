@@ -68,7 +68,27 @@ pub(super) mod params {
         json!({
             "type": "array",
             "items": { "type": "string" },
-            "description": "Node types to expand with properties and relationships."
+            "description": "Entity types to expand with their properties and relationships. Pass the names you intend to query (e.g. [\"MergeRequest\", \"User\"]) to get their filterable fields and types."
+        })
+    }
+
+    pub fn entity_types() -> Value {
+        json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Alias for expand_nodes. Entity types to expand with their properties and relationships."
+        })
+    }
+
+    pub fn get_graph_schema_parameters() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "expand_nodes": expand_nodes(),
+                "entity_types": entity_types(),
+                "format": format()
+            },
+            "additionalProperties": false
         })
     }
 
@@ -137,17 +157,11 @@ impl ToolRegistry {
         ToolDefinition {
             name: "get_graph_schema".into(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
-                          and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types."
+                          and edges with their source/target types. Pass expand_nodes (or its \
+                          alias entity_types) with specific type names to get their filterable \
+                          properties and types before composing a query_graph call."
                 .into(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "expand_nodes": params::expand_nodes(),
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
+            parameters: params::get_graph_schema_parameters(),
         }
     }
 
@@ -458,6 +472,15 @@ mod tests {
         assert!(!props.contains_key("include"));
         assert!(props.contains_key("expand_nodes"));
         assert!(props.contains_key("format"));
+    }
+
+    #[test]
+    fn get_graph_schema_advertises_entity_types_alias() {
+        let tool = find_command("get_graph_schema");
+        assert!(
+            tool.parameters["properties"]["entity_types"].is_object(),
+            "entity_types alias should be advertised so agents that reach for it self-correct"
+        );
     }
 
     #[test]

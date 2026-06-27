@@ -1,3 +1,42 @@
+## [0.82.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.81.0...v0.82.0) (2026-06-26)
+
+### Features
+
+* **indexer:** dispatch sdlc indexing on namespace enable ([10417d1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10417d16617606a2dcbfe07d1dfc47a9ceb7bc50)) by Jean-Gabriel Doyon
+* **ontology:** add reindex source metadata ([60edfdb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/60edfdb3c92f6883495c6fe793dd8517fb05a69f)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **indexer:** exclude non-top-level namespaces from migration completion gate ([01e9fb3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/01e9fb34b906a9e2404b5d6ebf9877133ee7f02a)) by michaelangeloio
+* **indexer:** scope coverage telemetry to top-level namespaces and log gate skips ([3ffac29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3ffac29ab26256a74fd6da1a685416cb7f29baec)) by Michael Angelo Rivera
+
+### Other
+
+* add data retention and deletion section to how-it-works ([3e2902e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e2902eb6756ef487619dc29934deb01ead1e3a9)) by Michael Angelo Rivera
+* **adr:** add orbit monetization engineering (ADR 007) ([63d2beb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/63d2bebda86be15df1e086f11563c7c5b0588805)) by Michael Angelo Rivera
+* fix orbit-query fence tags and add Definition.content example ([9f6efd1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f6efd1e9d2eb590195aa25de9ef41153cfc9ace)) by Michael Angelo Rivera
+
+## [0.81.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.80.0...v0.81.0) (2026-06-26)
+
+### Features
+
+* **indexer:** support targeted SDLC indexing requests ([f7a9e8e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f7a9e8e14180f1a0cc125e5edd15d24728b8b22d)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **code-graph:** resolve Python source-root imports ([64c123f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/64c123fc78e2e51e7ae77b42e40db132eeb7429d)) by Michael Angelo Rivera
+
+### Performance
+
+* **compiler:** dedup edges and filter-only nodes with FINAL ([9d89c02](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9d89c02266d192ed8afaa94404c93797bbb0376c)) by Michael Usachenko
+
+### Other
+
+* **agents:** add ontology single-source-of-truth and generic-hook rules ([f029dc2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f029dc22443ca259abe5ef776d0bb951e4703e7a)) by Dmitry Gruzd
+* **ci:** add warning-mode narration + MR-description lint gates ([1e5c301](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1e5c301d99f14e32dd6d844452d95c650924df02)) by Dmitry Gruzd
+* **cookbook:** add fetch source code recipes for File.content and Definition.content ([ffcfdc8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ffcfdc85cbab23b542ab97f93cfce7b32076db01)) by Eszter Kovacs
+* **e2e:** bump siphon and gitlab pins to current ([c1d1807](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c1d18074c5a24d3aff03413b8462fb5da6760d24)) by Michael Angelo Rivera
+
 ## [0.80.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.79.0...v0.80.0) (2026-06-25)
 
 ### Features

@@ -20,8 +20,6 @@ use smallvec::SmallVec;
 
 use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
 
-// ── Node + Edge types ───────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub enum GraphNode {
     Directory(CanonicalDirectory),
@@ -106,12 +104,6 @@ impl GraphOutput {
     }
 }
 
-// ── CodeGraph ───────────────────────────────────────────────────
-
-/// The complete code graph. No lifetime parameter.
-///
-/// All definition/import strings live in the owned [`StringPool`].
-/// Access strings via `self.str(id)`.
 /// Precomputed include-graph lookup tables for C/C++ resolution.
 /// Built once before Phase 2 resolve, shared across all file resolvers.
 #[derive(Default)]
@@ -162,17 +154,53 @@ impl IncludeIndex {
     }
 }
 
+/// Language-agnostic re-export lookup; a language hook decides what counts as a
+/// re-export. `named`: `module -> { bound_name -> (target_module, target_name) }`.
+/// `wildcard`: `module -> [starred source modules]`.
+#[derive(Default)]
+pub struct ReexportIndex {
+    named: rustc_hash::FxHashMap<String, rustc_hash::FxHashMap<String, (String, String)>>,
+    wildcard: rustc_hash::FxHashMap<String, Vec<String>>,
+}
+
+impl ReexportIndex {
+    pub fn add_named(
+        &mut self,
+        module: String,
+        bound: String,
+        target_module: String,
+        target_name: String,
+    ) {
+        self.named
+            .entry(module)
+            .or_default()
+            .insert(bound, (target_module, target_name));
+    }
+
+    pub fn add_wildcard(&mut self, module: String, source_module: String) {
+        self.wildcard.entry(module).or_default().push(source_module);
+    }
+
+    pub fn named(&self, module: &str, name: &str) -> Option<(&str, &str)> {
+        self.named
+            .get(module)
+            .and_then(|names| names.get(name))
+            .map(|(module, name)| (module.as_str(), name.as_str()))
+    }
+
+    pub fn wildcard_sources(&self, module: &str) -> &[String] {
+        self.wildcard.get(module).map_or(&[], Vec::as_slice)
+    }
+}
+
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
     pub defs: Vec<GraphDef>,
     pub imports: Vec<GraphImport>,
-    /// All strings for defs/imports. Owned, dropped with the graph.
     pub strings: StringPool,
     pub indexes: GraphIndexes,
     pub root_path: String,
     pub output: GraphOutput,
-    /// Language-specific resolution rules (spec, separator, hooks, settings).
-    /// Set once at construction via `with_rules()`.
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
 
@@ -212,13 +240,11 @@ impl CodeGraph {
         self.rules.as_ref().map(|r| r.fqn_separator).unwrap_or(".")
     }
 
-    /// Resolve a StrId to its string.
     #[inline]
     pub fn str(&self, id: StrId) -> &str {
         self.strings.get(id)
     }
 
-    /// Add a single file's parsed defs and imports to the graph.
     pub fn add_file(
         &mut self,
         path: &str,
@@ -298,7 +324,6 @@ impl CodeGraph {
             );
         }
 
-        // Convert canonical defs → pool-backed GraphDefs.
         let def_base = self.defs.len() as u32;
         let mut def_nodes = Vec::with_capacity(definitions.len());
         let mut definition_ranges = Vec::with_capacity(definitions.len());
@@ -339,7 +364,6 @@ impl CodeGraph {
             DefinitionRangeIndex::from_ranges(definition_ranges),
         );
 
-        // Containment edges.
         for (i, gdef) in graph_defs.iter().enumerate() {
             let fqn_str = self.strings.get(gdef.fqn);
             let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
@@ -363,7 +387,6 @@ impl CodeGraph {
 
         self.defs.extend(graph_defs);
 
-        // Convert canonical imports → pool-backed GraphImports.
         let mut import_nodes = Vec::with_capacity(imports.len());
         let import_base = self.imports.len() as u32;
         let graph_imports: Vec<GraphImport> = imports
@@ -569,8 +592,6 @@ impl CodeGraph {
         map
     }
 
-    // ── Resolution lookups ──────────────────────────────────
-
     pub fn lookup_nested_with_hierarchy(
         &self,
         scope_fqn: &str,
@@ -765,31 +786,25 @@ impl CodeGraph {
         })
     }
 
-    /// Returns the definition name as `&str`.
     #[inline]
     pub fn def_name(&self, idx: NodeIndex) -> &str {
         self.strings.get(self.def(idx).name)
     }
 
-    /// Returns the FQN as `&str`.
     #[inline]
     pub fn def_fqn(&self, idx: NodeIndex) -> &str {
         self.strings.get(self.def(idx).fqn)
     }
 
-    /// Returns the def kind.
     #[inline]
     pub fn def_kind(&self, idx: NodeIndex) -> crate::v2::types::DefKind {
         self.def(idx).kind
     }
 
-    /// Returns the ancestor chain for a node, if any.
     #[inline]
     pub fn ancestors(&self, idx: NodeIndex) -> Option<&[NodeIndex]> {
         self.indexes.ancestors.get(&idx).map(|v| v.as_slice())
     }
-
-    // ── Iterators ───────────────────────────────────────────
 
     pub fn directories(&self) -> impl Iterator<Item = (NodeIndex, &CanonicalDirectory)> {
         self.graph
@@ -827,12 +842,9 @@ impl CodeGraph {
         value.filter(|v| !v.is_empty())
     }
 
-    /// Build `"key:value"` tag tokens for every node in the graph.
-    /// Returns a vec indexed by `NodeIndex`, so callers can look up
-    /// tags by the same indices used in the edge list.
-    ///
-    /// `tag_properties` maps node kind name (e.g. `"File"`) to a list
-    /// of `(tag_key, property_name)` pairs, typically built from
+    /// Returns a vec indexed by `NodeIndex`, so callers can look up tags by the
+    /// same indices used in the edge list. `tag_properties` maps node kind
+    /// name (e.g. `"File"`) to `(tag_key, property_name)` pairs, typically from
     /// `ontology.denormalized_properties()`.
     pub fn build_node_tags(
         &self,
@@ -895,8 +907,6 @@ impl CodeGraph {
         self.graph.edge_count()
     }
 
-    // ── Internal ────────────────────────────────────────────
-
     fn link_extends(&mut self, tracer: &crate::v2::trace::Tracer) {
         let mut edges = Vec::new();
 
@@ -920,10 +930,7 @@ impl CodeGraph {
                             let b_fqn = self.def_fqn(b);
                             let a_nested = a_fqn.starts_with(&child_prefix);
                             let b_nested = b_fqn.starts_with(&child_prefix);
-                            // Non-nested before nested
                             a_nested.cmp(&b_nested).then_with(|| {
-                                // Among non-nested: longest common prefix with
-                                // child_fqn wins (closer scope)
                                 let a_common = common_prefix_len(a_fqn, &child_fqn);
                                 let b_common = common_prefix_len(b_fqn, &child_fqn);
                                 b_common.cmp(&a_common)
@@ -967,9 +974,6 @@ impl CodeGraph {
         }
     }
 
-    /// Resolve a type name to graph nodes. Tries FQN index first, then
-    /// name index, then qualified name resolution (split on the def's own
-    /// FQN separator and resolve via nested index).
     pub fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
         let by_fqn = self
             .indexes
@@ -1022,7 +1026,7 @@ impl CodeGraph {
     }
 
     /// Compute stable IDs for all nodes. Returns a dense Vec indexed by
-    /// `NodeIndex::index()` — O(1) lookup, ~3x smaller than FxHashMap.
+    /// `NodeIndex::index()` — O(1) lookup, more compact than FxHashMap.
     pub fn assign_ids(&self, project_id: i64, branch: &str) -> Vec<i64> {
         use std::fmt::Write as _;
         let pid = project_id.to_string();
@@ -1079,8 +1083,6 @@ impl Default for CodeGraph {
     }
 }
 
-// ── Graph construction helpers ──────────────────────────────────
-
 fn dir_to_string(dir: &Path) -> String {
     if dir.as_os_str().is_empty() {
         ".".to_string()
@@ -1095,8 +1097,6 @@ fn compute_id(components: &[&str]) -> i64 {
     // Mask clears the sign bit so the result is always a positive i64.
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
-
-// ── Arrow serialization ─────────────────────────────────────────
 
 pub struct RowContext<'a> {
     pub project_id: i64,
@@ -1195,8 +1195,6 @@ impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
     }
 }
 
-/// Definition row for Arrow serialization. Needs the StringPool to
-/// resolve StrIds.
 pub struct DefinitionRow<'a> {
     pub file_path: &'a str,
     pub def: &'a GraphDef,
@@ -1216,7 +1214,6 @@ impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     }
 }
 
-/// Import row for Arrow serialization.
 pub struct ImportRow<'a> {
     pub file_path: &'a str,
     pub import: &'a GraphImport,
@@ -1258,8 +1255,6 @@ impl AsRecordBatch for EdgeRow<'_> {
         Ok(())
     }
 }
-
-// ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

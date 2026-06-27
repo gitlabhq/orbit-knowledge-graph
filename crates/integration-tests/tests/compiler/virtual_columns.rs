@@ -1,5 +1,3 @@
-//! Virtual column handling: SQL stripping, hydration plans, depends_on injection.
-
 use ontology::Ontology;
 use query_engine::compiler::{HydrationPlan, SecurityContext, compile};
 
@@ -60,7 +58,6 @@ fn search_with_content_produces_hydration_plan() {
                     t.columns.contains(&dep.to_string()),
                     "depends_on column '{dep}' should be in search hydration plan"
                 );
-                // User only asked for ["id", "name", "content"], so deps are injected
                 assert!(
                     t.injected_columns.contains(&dep.to_string()),
                     "'{dep}' should be in injected_columns"

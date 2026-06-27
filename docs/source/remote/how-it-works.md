@@ -95,3 +95,9 @@ All queries go through the same path:
 You can request the compiled SQL in query responses by setting `options.include_debug_sql: true`.
 This field is only populated for instance administrators and direct GitLab organization members
 with Reporter or higher access.
+
+## Data retention and deletion
+
+When you disable Orbit on a group, your indexed data is not deleted immediately. Orbit keeps it for 30 days so you can re-enable without losing your graph history. After the grace period, all graph data for that group, including all nodes, edges, and indexing checkpoints, is permanently deleted.
+
+If you re-enable Orbit before the 30 days are up, deletion is canceled and indexing resumes from where it left off.

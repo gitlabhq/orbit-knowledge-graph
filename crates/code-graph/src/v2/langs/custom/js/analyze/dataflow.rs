@@ -1,11 +1,7 @@
 //! JS-side control-flow + dataflow visitor that produces call edges.
 //!
-//! The underlying SSA mechanism lives in `v2::dsl::ssa`. This file
-//! builds a CFG on top of that engine by walking the OXC AST, seals
-//! blocks as it goes, reads reaching definitions when it hits an
-//! invocation, and emits `JsCallEdge` / `JsPendingLocalCall` records.
-//! Named "dataflow" rather than "ssa" because SSA is the tool; this
-//! file is the analysis.
+//! The underlying SSA mechanism lives in `v2::dsl::ssa`; this file is
+//! the analysis built on top of it.
 
 use std::collections::HashMap;
 

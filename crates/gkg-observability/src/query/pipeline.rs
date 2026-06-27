@@ -93,7 +93,6 @@ pub const BATCHES: MetricSpec = MetricSpec::histogram_u64(
     DOMAIN,
 );
 
-// Renamed from `gkg.query.pipeline.redacted.count` for the same reason.
 pub const REDACTIONS: MetricSpec = MetricSpec::histogram_u64(
     "gkg.query.pipeline.redactions",
     "Number of rows redacted per query.",

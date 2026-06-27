@@ -262,6 +262,38 @@
       "additionalProperties": false
     },
 
+    "reindexSourceDefinition": {
+      "type": "object",
+      "description": "A datalake table whose Siphon changes mean this entity's root namespace must be re-indexed. Use a bare string instead when the traversal_path is a plain column.",
+      "properties": {
+        "table": {
+          "type": "string",
+          "description": "Datalake table to inspect for changed rows."
+        },
+        "traversal_path": {
+          "type": "object",
+          "description": "How to resolve a changed row to a traversal_path. Defaults to column: traversal_path.",
+          "properties": {
+            "column": {
+              "type": "string",
+              "description": "Traversal path column on the source table."
+            },
+            "dictionary": {
+              "type": "string",
+              "description": "ClickHouse dictionary that maps the key column to traversal_path."
+            },
+            "key_column": {
+              "type": "string",
+              "description": "Column on the source table used as the dictionary key."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["table"],
+      "additionalProperties": false
+    },
+
     "etlConfig": {
       "type": "object",
       "description": "ETL configuration for indexing this entity from source tables.",
@@ -292,6 +324,12 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$",
               "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
+            },
+            "reindex_on": {
+              "type": "array",
+              "description": "Datalake tables whose Siphon changes mean this entity's root namespace must be re-indexed. Each item is a bare table name, or an object for dictionary-resolved paths. Defaults to the primary source table.",
+              "items": { "oneOf": [ { "type": "string" }, { "$ref": "#/definitions/reindexSourceDefinition" } ] },
+              "minItems": 1
             },
             "edges": {
               "type": "object",
@@ -395,6 +433,12 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$",
               "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
+            },
+            "reindex_on": {
+              "type": "array",
+              "description": "Datalake tables whose Siphon changes mean this entity's root namespace must be re-indexed. Each item is a bare table name, or an object for dictionary-resolved paths. Defaults to the primary source table.",
+              "items": { "oneOf": [ { "type": "string" }, { "$ref": "#/definitions/reindexSourceDefinition" } ] },
+              "minItems": 1
             },
             "edges": {
               "type": "object",
@@ -1073,6 +1117,12 @@
         "where": {
           "type": "string",
           "description": "Optional extra WHERE predicate pushed into the extraction SQL, ANDed with the watermark/deleted/not-null filters. Lets a standalone edge select a row subset of a shared source table (e.g. one Rails enum value)."
+        },
+        "reindex_on": {
+          "type": "array",
+          "description": "Datalake tables whose Siphon changes mean this entity's root namespace must be re-indexed. Each item is a bare table name, or an object for dictionary-resolved paths. Defaults to the primary source table.",
+          "items": { "oneOf": [ { "type": "string" }, { "$ref": "#/definitions/reindexSourceDefinition" } ] },
+          "minItems": 1
         },
         "from": { "$ref": "#/definitions/edgeEtlEndpoint" },
         "to": { "$ref": "#/definitions/edgeEtlEndpoint" }

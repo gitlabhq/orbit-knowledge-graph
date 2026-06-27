@@ -89,17 +89,11 @@ impl V2CommandRegistry {
     fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: "Return the graph schema. Use expand_nodes for the node types relevant \
-                          to the user's question to include properties and relationships."
+            description: "Return the graph schema. Pass expand_nodes (or its alias entity_types) \
+                          with the node types relevant to the user's question to include their \
+                          properties and relationships."
                 .into(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "expand_nodes": params::expand_nodes(),
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
+            parameters: params::get_graph_schema_parameters(),
         }
     }
 

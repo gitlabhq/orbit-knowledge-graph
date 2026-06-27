@@ -4,12 +4,10 @@ use ontology::{DataType as OntDataType, Ontology};
 
 use crate::error::Result;
 
-/// All converted graph data as `(table_name, batch)` pairs, ready for insert.
 pub struct LocalGraphData {
     pub tables: Vec<(String, RecordBatch)>,
 }
 
-/// Map ontology fields to BatchBuilder column specs.
 /// DuckDB's Appender does not support dictionary-encoded Arrow arrays,
 /// so all string columns use plain Utf8.
 fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
@@ -43,7 +41,6 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         .collect()
 }
 
-/// Convert a v2 `CodeGraph` into `LocalGraphData` ready for DuckDB insert.
 pub fn convert_v2_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     project_id: i64,
@@ -131,7 +128,6 @@ pub fn convert_v2_graph(
         tables.push((dest_table, batch));
     }
 
-    // Edges
     let edge_table = ontology
         .local_edge_table_name()
         .expect("local_db.edge_table.name must be configured")
@@ -171,7 +167,6 @@ pub fn convert_v2_graph(
     Ok(LocalGraphData { tables })
 }
 
-/// `GraphConverter` for DuckDB. Wraps `convert_v2_graph`.
 pub struct DuckDbConverter {
     pub project_id: i64,
     pub branch: String,

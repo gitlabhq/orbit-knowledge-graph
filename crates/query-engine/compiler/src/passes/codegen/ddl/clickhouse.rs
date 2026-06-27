@@ -1,7 +1,3 @@
-//! ClickHouse DDL code generation.
-//!
-//! Emits `CREATE TABLE IF NOT EXISTS` statements from the DDL AST.
-
 use crate::ast::ddl::{
     Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
     ProjectionDef,
@@ -14,7 +10,6 @@ const RESERVED_WORDS: &[&str] = &[
     "when", "order", "table", "database", "select", "from", "where", "group", "having", "limit",
 ];
 
-/// Backtick-quotes an identifier if it is a ClickHouse reserved word.
 /// Escapes any embedded backticks by doubling them (```` → `````````).
 fn quote_ident(name: &str) -> String {
     let bare = name.trim_matches('`').replace('`', "``");
@@ -84,11 +79,9 @@ fn emit_index_type(it: &IndexType) -> String {
     }
 }
 
-/// Emits a complete `CREATE TABLE IF NOT EXISTS` statement for ClickHouse.
 pub fn emit_create_table(table: &CreateTable) -> String {
     let mut parts = Vec::new();
 
-    // Column definitions, indexes, and projections live inside the parens.
     let mut body_items: Vec<String> = Vec::new();
 
     for col in &table.columns {
@@ -135,7 +128,6 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         engine_args,
     ));
 
-    // ORDER BY [PRIMARY KEY]
     // MergeTree-family engines require ORDER BY. Emit `ORDER BY tuple()` as fallback.
     if table.order_by.is_empty() {
         if table.engine.name.contains("MergeTree") {
@@ -146,10 +138,9 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         if let Some(pk) = &table.primary_key {
             let pk_str = format!("PRIMARY KEY ({})", pk.join(", "));
             if pk == &table.order_by {
-                // Same value: emit on one line (matches graph.sql convention)
+                // Match graph.sql convention: emit identical ORDER BY/PRIMARY KEY on one line.
                 parts.push(format!("{order_by} {pk_str}"));
             } else {
-                // Different values: emit on separate lines
                 parts.push(order_by);
                 parts.push(pk_str);
             }
@@ -158,7 +149,6 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         }
     }
 
-    // SETTINGS
     if !table.settings.is_empty() {
         let settings: Vec<String> = table
             .settings
@@ -171,8 +161,6 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     parts.join("\n")
 }
 
-/// Emits a complete `CREATE MATERIALIZED VIEW IF NOT EXISTS` statement for ClickHouse.
-///
 /// The `select_query` must already have `{table_name}` placeholders resolved
 /// (see [`CreateMaterializedView::with_prefix`]).
 pub fn emit_create_materialized_view(mv: &CreateMaterializedView) -> String {
@@ -221,7 +209,6 @@ pub struct DictionarySource<'a> {
     pub password: Option<&'a str>,
 }
 
-/// Escapes a value for a single-quoted ClickHouse string literal.
 fn quote_literal(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }

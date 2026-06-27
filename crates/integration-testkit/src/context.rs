@@ -122,8 +122,7 @@ impl TestContext {
     }
 
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
-    /// every inserted row. Queries `system.tables` for the current database
-    /// and runs `OPTIMIZE TABLE … FINAL` on each table concurrently.
+    /// every inserted row.
     pub async fn optimize_all(&self) {
         let t = std::time::Instant::now();
         let batches = self
@@ -190,7 +189,6 @@ impl TestContext {
         let schema_refs: Vec<&str> = self.schema_sqls.iter().map(|s| s.as_str()).collect();
         Self::run_schema_in(&self.url, name, &schema_refs).await;
 
-        // Copy data from parent into fork for tables that exist in both.
         let src = &self.config.database;
         let batches = self
             .query(&format!(

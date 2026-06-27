@@ -13,10 +13,6 @@ fn enc(response: &crate::graph::GraphResponse) -> String {
     encode(response, &version())
 }
 
-// ---------------------------------------------------------------------------
-// Header + section structure
-// ---------------------------------------------------------------------------
-
 #[test]
 fn header_emits_query_type_and_counts() {
     let r = traversal_response();
@@ -73,10 +69,6 @@ fn no_hints_section_is_emitted() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Node rendering
-// ---------------------------------------------------------------------------
-
 #[test]
 fn nodes_grouped_by_type_with_count_header() {
     let out = enc(&traversal_response());
@@ -117,10 +109,6 @@ fn null_and_empty_properties_are_skipped() {
     assert!(!out.contains(" email="), "empty email leaked: {out}");
     assert!(out.contains("username=a"), "username missing: {out}");
 }
-
-// ---------------------------------------------------------------------------
-// Quoting + escaping
-// ---------------------------------------------------------------------------
 
 #[test]
 fn values_with_spaces_are_quoted() {
@@ -263,10 +251,6 @@ fn other_control_chars_are_dropped() {
     assert!(!out.contains('\u{0001}'));
 }
 
-// ---------------------------------------------------------------------------
-// Datetime normalization
-// ---------------------------------------------------------------------------
-
 #[test]
 fn space_separated_datetime_is_converted_to_t_form() {
     let r = response(
@@ -297,10 +281,6 @@ fn t_separated_datetime_passes_through_bare() {
     assert!(enc(&r).contains("created_at=2026-05-08T22:55:58Z"));
 }
 
-// ---------------------------------------------------------------------------
-// Truncation
-// ---------------------------------------------------------------------------
-
 #[test]
 fn long_text_keys_truncate_at_200_and_emit_breadcrumb() {
     let body: String = "x".repeat(500);
@@ -327,10 +307,6 @@ fn unknown_long_key_truncates_at_hard_limit() {
     assert!(out.contains("ref_name_len=2000"));
     assert!(out.matches('y').count() <= 1000);
 }
-
-// ---------------------------------------------------------------------------
-// Numeric handling
-// ---------------------------------------------------------------------------
 
 #[test]
 fn nan_and_infinity_are_dropped() {
@@ -376,10 +352,6 @@ fn boolean_renders_lowercase() {
     assert!(out.contains("draft=true"));
     assert!(out.contains("merged=false"));
 }
-
-// ---------------------------------------------------------------------------
-// Edges + dedup + ordering
-// ---------------------------------------------------------------------------
 
 #[test]
 fn edges_grouped_by_type_with_arrow_notation() {
@@ -427,10 +399,6 @@ fn shuffled_edges_produce_identical_output() {
     assert_eq!(enc(&a), enc(&b));
 }
 
-// ---------------------------------------------------------------------------
-// Path-finding
-// ---------------------------------------------------------------------------
-
 #[test]
 fn path_finding_emits_paths_section_not_edges() {
     let r = response(
@@ -464,10 +432,6 @@ fn path_step_tie_is_stable_across_input_order() {
     let b = response("path_finding", nodes, vec![e2, e1]);
     assert_eq!(enc(&a), enc(&b));
 }
-
-// ---------------------------------------------------------------------------
-// Aggregation
-// ---------------------------------------------------------------------------
 
 #[test]
 fn aggregation_function_appears_in_header() {
@@ -550,7 +514,6 @@ fn property_group_with_alias_surfaces_underlying_property() {
 
 #[test]
 fn property_group_omits_property_when_alias_matches() {
-    // No alias drift — keep the line terse rather than repeating.
     let mut r = response("aggregation", vec![], vec![]);
     r.columns = Some(vec![aggregation_column("count", "count")]);
     r.group_columns = Some(vec![property_group("severity", "v", "severity")]);
@@ -638,7 +601,6 @@ fn variable_length_traversal_edges_carry_depth() {
 
 #[test]
 fn fixed_traversal_edges_omit_depth_field() {
-    // Single-hop traversal: depth is None. We must not write `depth=`.
     let r = response(
         "traversal",
         vec![node("User", 1, &[]), node("Group", 100, &[])],
@@ -754,13 +716,10 @@ fn ungrouped_aggregation_emits_single_row() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // traversal_path is excluded structurally (the GraphFormatter filter handles
 // reserved keys; we trust GraphResponse here). We only assert the encoder
 // doesn't accidentally surface internal property names that ARE in
 // GraphResponse like `depth`.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn edge_depth_does_not_leak_into_node_rows() {
     let out = enc(&traversal_response());

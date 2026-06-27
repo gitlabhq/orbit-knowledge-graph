@@ -1,5 +1,3 @@
-//! Shared vocabulary for the JS/TS pipeline.
-//!
 //! Every token list used by more than one module lives here so adding a
 //! new extension, manifest file, or Vue lifecycle hook is a single-site
 //! edit.

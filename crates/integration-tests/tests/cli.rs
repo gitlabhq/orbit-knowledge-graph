@@ -1,11 +1,3 @@
-//! CLI integration tests.
-//!
-//! Spawns real `orbit` processes (separate PIDs, separate DuckDB
-//! connections) to validate indexing, schema introspection, worktree
-//! support, and concurrent access — all driven through raw SQL.
-//!
-//! Run with: `cargo nextest run --test cli`
-
 use std::collections::BTreeSet;
 
 use integration_testkit::cli::{
@@ -17,8 +9,6 @@ use serde_json::{Value, json};
 const FILES_FULL: &str = "SELECT id, name, path, branch, commit_sha FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
 const FILES_SIMPLE: &str =
     "SELECT id, name, path FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
-
-// ── Worktree ────────────────────────────────────────────────────
 
 #[test]
 fn worktree_tracking() {
@@ -87,8 +77,6 @@ fn worktree_tracking() {
         "expected at least one DEFINES edge"
     );
 }
-
-// ── Concurrency ─────────────────────────────────────────────────
 
 #[test]
 fn concurrent_readers() {
@@ -299,8 +287,6 @@ fn sequential_read_consistency() {
     }
 }
 
-// ── Nested repos ────────────────────────────────────────────────
-
 #[test]
 fn nested_repos_indexed_separately() {
     let data_dir = tempfile::TempDir::new().unwrap();
@@ -395,8 +381,6 @@ fn reindex_nested_doesnt_affect_parent() {
         "new nested file missing"
     );
 }
-
-// ── Schema introspection ────────────────────────────────────────
 
 fn run_cmd(args: &[&str], data_dir: &std::path::Path) -> (String, String, bool) {
     let out = orbit_cmd()
@@ -523,8 +507,6 @@ fn schema_unknown_table_exits_with_error() {
         "expected suggestion to run orbit schema: {stderr}"
     );
 }
-
-// ── MCP server ──────────────────────────────────────────────────
 
 #[test]
 fn mcp_tools_mirror_cli_surface() {

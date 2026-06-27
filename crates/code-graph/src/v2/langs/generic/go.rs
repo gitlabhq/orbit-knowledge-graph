@@ -99,14 +99,11 @@ impl DslLanguage for GoDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Method call: svc.Log("hello") — name from selector_expression's field
             reference("call_expression")
                 .name_from(field_chain(&["function", "field"]))
                 .when(field_kind("function", &["selector_expression"]))
                 .receiver_chain(&["function", "operand"]),
-            // Simple call: Log("hello") — name from function field directly
             reference("call_expression").name_from(field("function")),
-            // Bare type references: declarations, type assertions.
             // Skip inside composite_literal (already tracked via chain_config.constructor).
             reference("type_identifier")
                 .name_from(text())
@@ -246,8 +243,6 @@ fn go_import_rules() -> Vec<rw::Rule> {
         rw::rename("import_spec", "__aliased_go_import").when(has_child(&["package_identifier"])),
     ]
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct GoRules;
 

@@ -1,5 +1,3 @@
-//! Checkpoint storage for tracking code indexing state.
-
 use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};

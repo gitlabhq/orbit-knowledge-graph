@@ -1,9 +1,3 @@
-//! Schema version tracking with table prefix support.
-//!
-//! Loads the schema version from `config/SCHEMA_VERSION` (embedded at compile
-//! time via `include_str!`) and persists it in the `gkg_schema_version`
-//! ClickHouse control table.
-//!
 //! Table prefix derivation maps a version number to the string prepended to
 //! graph table names. Version 0 uses no prefix (backward compatible); version N
 //! uses `vN_`.
@@ -141,13 +135,10 @@ pub fn table_prefix(schema_version: u32) -> String {
     }
 }
 
-/// Returns the fully-qualified (prefixed) table name for the given schema version.
 pub fn prefixed_table_name(table: &str, schema_version: u32) -> String {
     format!("{}{}", table_prefix(schema_version), table)
 }
 
-/// Creates the `gkg_schema_version` control table if it does not exist.
-///
 /// This table is never prefixed or dropped across schema versions — it is the
 /// single source of truth for which version is active.
 pub async fn ensure_version_table(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
@@ -180,7 +171,6 @@ pub async fn read_active_version(
     Ok(None)
 }
 
-/// Records the given version as the active version in ClickHouse.
 pub async fn write_schema_version(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -245,7 +235,6 @@ pub async fn read_migrating_version(
     Ok(None)
 }
 
-/// Schema version entry with its status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionEntry {
     pub version: u32,
@@ -272,7 +261,6 @@ pub async fn read_all_versions(
     Ok(entries)
 }
 
-/// Marks a schema version as `active` in ClickHouse.
 pub async fn mark_version_active(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -285,7 +273,6 @@ pub async fn mark_version_active(
     Ok(())
 }
 
-/// Marks a schema version as `retired` in ClickHouse.
 pub async fn mark_version_retired(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -298,7 +285,6 @@ pub async fn mark_version_retired(
     Ok(())
 }
 
-/// Marks a schema version as `dropped` in ClickHouse.
 pub async fn mark_version_dropped(
     graph: &ArrowClickHouseClient,
     version: u32,

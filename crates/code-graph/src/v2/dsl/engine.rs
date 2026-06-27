@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::types::{LanguageSpec, Rule};
+use super::types::{ImportRewriter, LanguageSpec, Rule};
 use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
@@ -16,7 +16,11 @@ use treesitter_visit::syntax_tree::SyntaxTree;
 use treesitter_visit::{Axis, Match};
 use treesitter_visit::{Node, Root};
 
-/// Result of a defs-only parse. Just definitions and imports.
+#[derive(Default)]
+pub(crate) struct ParseFullOptions<'a> {
+    pub import_rewriter: Option<&'a ImportRewriter>,
+}
+
 pub struct ParsedDefs {
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
@@ -37,10 +41,12 @@ fn import_scope_name(
     hooks: &super::types::LanguageHooks,
     imp: &CanonicalImport,
     sep: &str,
+    scope_name_override: Option<&str>,
 ) -> Option<String> {
-    hooks
-        .import_scope_name
-        .and_then(|f| f(imp, sep))
+    imp.alias
+        .clone()
+        .or_else(|| scope_name_override.map(ToString::to_string))
+        .or_else(|| hooks.import_scope_name.and_then(|f| f(imp, sep)))
         .or_else(|| default_import_scope_name(imp, sep))
 }
 
@@ -184,8 +190,6 @@ impl LanguageSpec {
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
         let name = rule.extract().apply(node)?;
 
-        // Build expression chain if the rule declares an object field
-        // and the spec has a ChainConfig
         let expression = rule
             .receiver_extract
             .as_ref()
@@ -233,9 +237,6 @@ impl LanguageSpec {
             let kind: String = current.kind().to_string();
             let kind_ref: &str = &kind;
 
-            // ── Terminal cases (base of the chain) ──
-
-            // Identifier base
             if cc.ident_kinds.contains(&kind_ref) {
                 let text = current.text().to_string();
                 trace!(
@@ -250,7 +251,6 @@ impl LanguageSpec {
                 break;
             }
 
-            // this/self
             if cc.this_kinds.contains(&kind_ref) {
                 trace!(
                     tracer,
@@ -264,7 +264,6 @@ impl LanguageSpec {
                 break;
             }
 
-            // super
             if cc.super_kinds.contains(&kind_ref) {
                 trace!(
                     tracer,
@@ -278,7 +277,6 @@ impl LanguageSpec {
                 break;
             }
 
-            // Qualified type reference (e.g. Outer.Inner as receiver in new Outer.Inner()).
             if cc.qualified_type_kinds.contains(&kind_ref) {
                 let mut segments = current.children().filter(|c| c.is_named());
                 if let Some(first) = segments.next() {
@@ -309,7 +307,6 @@ impl LanguageSpec {
                 break;
             }
 
-            // Constructor (new Foo() or new Outer.Inner())
             let mut matched_ctor = false;
             for &(ctor_kind, type_field) in cc.constructor {
                 if kind_ref == ctor_kind {
@@ -357,9 +354,6 @@ impl LanguageSpec {
                 break;
             }
 
-            // ── Recursive cases (defer step, advance inward) ──
-
-            // Field access (obj.field) — defer the Field step, advance to obj
             let mut matched_fa = false;
             for fa in &cc.field_access {
                 if kind_ref == fa.kind {
@@ -385,7 +379,6 @@ impl LanguageSpec {
                 continue;
             }
 
-            // Call expression — defer the Call step, advance to receiver
             if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
                 let rule = &self.refs[rule_idx];
                 if let Some(name) = rule.extract().apply(&current) {
@@ -405,11 +398,9 @@ impl LanguageSpec {
                     current = recv;
                     continue;
                 }
-                // No receiver — this call is the base
                 break;
             }
 
-            // Fallback: treat as identifier
             let text = current.text().to_string();
             if !text.is_empty() {
                 trace!(
@@ -434,8 +425,6 @@ impl LanguageSpec {
         node: &Node<'_, SyntaxTree>,
         node_kind: &str,
         imports: &mut Vec<CanonicalImport>,
-        module_scope: Option<&str>,
-        sep: &str,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -453,14 +442,7 @@ impl LanguageSpec {
         let mode = rule.mode;
 
         if let Some(child_kinds) = rule.multi_child_kinds {
-            let raw_path = rule.extract().apply(node).unwrap_or_default();
-            let base_path = if let Some(resolve) = self.hooks.resolve_import_path
-                && let Some(ms) = module_scope
-            {
-                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
-            } else {
-                raw_path
-            };
+            let base_path = rule.extract().apply(node).unwrap_or_default();
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -540,13 +522,7 @@ impl LanguageSpec {
                 }
             }
         } else if let Some(raw_path) = rule.extract().apply(node) {
-            let full_path = if let Some(resolve) = self.hooks.resolve_import_path
-                && let Some(ms) = module_scope
-            {
-                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
-            } else {
-                raw_path
-            };
+            let full_path = raw_path;
             let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
             // in `import com.example.*`) or the always_wildcard flag (e.g. C#
@@ -601,15 +577,6 @@ impl LanguageSpec {
         }
     }
 
-    // ── parse_full_and_resolve: single walk with SSA + inline callback ──
-
-    /// Parse source with SSA, then call `on_ref` for each resolved reference.
-    /// No intermediate collections — each ref is dispatched as soon as its
-    /// reaching defs are computed.
-    ///
-    /// When `graph` is provided, constructor chains (e.g. `Parent.Child.Foo()`)
-    /// are resolved eagerly after sealing, and the resolved types are written
-    /// back to SSA so subsequent bindings can use them.
     /// Parse the full AST: defs, imports, SSA, refs. Returns collected
     /// refs with reaching values resolved from SSA, but NOT cross-file
     /// resolved. Source bytes can be dropped after this returns.
@@ -621,6 +588,25 @@ impl LanguageSpec {
         language: Language,
         tracer: &Tracer,
         timeouts: PhaseTimeouts,
+    ) -> Result<ParseFullResult, ParseFullError> {
+        self.parse_full_collect_with_options(
+            source,
+            file_path,
+            language,
+            tracer,
+            timeouts,
+            ParseFullOptions::default(),
+        )
+    }
+
+    pub(crate) fn parse_full_collect_with_options(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+        tracer: &Tracer,
+        timeouts: PhaseTimeouts,
+        options: ParseFullOptions<'_>,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
@@ -638,7 +624,13 @@ impl LanguageSpec {
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path, timeouts.walk);
+        let mut state = WalkFullState::new(
+            &arena,
+            tracer,
+            file_path,
+            timeouts.walk,
+            options.import_rewriter,
+        );
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -681,14 +673,12 @@ impl LanguageSpec {
         let walk_cpu = walk_start.elapsed();
 
         let ssa_start = cpu_time::ThreadTime::now();
-        // Arm the SSA budget at the start of reaching-def resolution.
         state.ssa.set_budget(timeouts.ssa);
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
 
         let pending_refs: Vec<_> = state.pending_refs.drain(..).collect();
 
-        // Pass 1: infer return types from bare-call / bare-identifier return refs.
         for pending in &pending_refs {
             if !pending.is_return || pending.chain.is_some() {
                 continue;
@@ -744,8 +734,7 @@ impl LanguageSpec {
             }
         }
 
-        // Pass 1.5: detect unresolved SSA aliases. These are alias
-        // targets that have no SSA value — they need the cross-file
+        // Unresolved alias targets have no SSA value — they need the cross-file
         // graph to resolve (e.g. `service = AuthService` where
         // `AuthService` is defined in another file).
         let mut needed: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
@@ -794,7 +783,6 @@ impl LanguageSpec {
             }
         }
 
-        // Collect inferred return types
         let inferred_returns: Vec<(u32, String)> = state
             .defs
             .iter()
@@ -808,7 +796,6 @@ impl LanguageSpec {
             })
             .collect();
 
-        // Pass 2: resolve SSA reaching values → CollectedRef (no callback)
         let refs = state.collect_refs(&pending_refs);
         if state.ssa.timed_out() {
             return Err(ParseFullError::Aborted {
@@ -865,7 +852,6 @@ impl LanguageSpec {
         let nk = node_kind.as_ref();
         let mut pushed_scope = false;
 
-        // Package node
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
             && nk == pkg_kind
             && let Some(name) = pkg_extract.apply(node)
@@ -873,7 +859,6 @@ impl LanguageSpec {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
 
-        // Scope matching → push def + optional SSA self/super writes
         if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
@@ -933,7 +918,6 @@ impl LanguageSpec {
                 is_top_level,
                 metadata: m.metadata,
             });
-            // Emit def discovered with index for cross-referencing
             let last_def = &state.defs[def_index as usize];
             trace!(
                 state.tracer,
@@ -959,7 +943,6 @@ impl LanguageSpec {
                 super::ssa::SsaValue::LocalDef(def_index),
             );
 
-            // Write self/this/super SSA variables for type scopes
             if is_type_scope {
                 let scope_fqn = {
                     let parts: Vec<&str> = state.scope_stack.iter().map(|s| s.as_ref()).collect();
@@ -989,7 +972,6 @@ impl LanguageSpec {
                 }
             }
 
-            // Track enclosing def for references
             if m.creates_scope {
                 state.enclosing_def_stack.push(def_index);
 
@@ -1028,7 +1010,6 @@ impl LanguageSpec {
             }
         }
 
-        // Custom scope handling (e.g. Ruby attr_accessor)
         let custom_handled = self
             .hooks
             .on_scope
@@ -1067,20 +1048,24 @@ impl LanguageSpec {
                 return;
             }
 
-            // Import handling → also write to SSA
             let import_count_before = state.imports.len();
             let handled = self
                 .hooks
                 .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
-                let ms = state.scope_stack.first().map(|s| s.as_ref());
-                self.evaluate_imports(node, nk, &mut state.imports, ms, sep);
+                self.evaluate_imports(node, nk, &mut state.imports);
             }
+            let module_scope = state.scope_stack.first().map(ToString::to_string);
+            let module_scope = module_scope.as_deref();
+            let import_rewriter = state.import_rewriter;
             for idx in import_count_before..state.imports.len() {
+                let scope_override = import_rewriter
+                    .and_then(|rewrite| rewrite(&mut state.imports[idx], module_scope, sep));
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
-                let effective_name = import_scope_name(&self.hooks, imp, sep);
+                let effective_name =
+                    import_scope_name(&self.hooks, imp, sep, scope_override.as_deref());
                 trace!(
                     state.tracer,
                     ImportRecorded {
@@ -1113,7 +1098,6 @@ impl LanguageSpec {
                 }
             }
 
-            // Binding handling → SSA write
             if let Some(&rule_idx) = self.binding_dispatch.get(nk).and_then(|v| v.first()) {
                 let rule = &self.bindings[rule_idx];
                 let names = rule.extract_names(node);
@@ -1188,14 +1172,13 @@ impl LanguageSpec {
                                 .write_variable(compound_key, target_block, val.clone());
                         }
                     }
-                } // end for name in names
+                }
             }
 
             if is_expression_body {
                 state.in_return = true;
             }
 
-            // Track return statement context + infer return type from bare identifiers
             if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
                 state.in_return = true;
 
@@ -1240,7 +1223,6 @@ impl LanguageSpec {
                 }
             }
 
-            // Reference handling → SSA read → PendingRef
             let ref_result = self.evaluate_reference(
                 node,
                 nk,
@@ -1249,7 +1231,6 @@ impl LanguageSpec {
                 sep,
                 state.tracer,
             );
-            // Trace ref evaluation (only when we have a dispatch entry for this node kind)
             if self.ref_dispatch.contains_key(nk) {
                 trace!(
                     state.tracer,
@@ -1316,12 +1297,10 @@ impl LanguageSpec {
             }
         }
 
-        // Recurse children
         for child in node.children() {
             self.walk_full(&child, state, sep, module_prefix);
         }
 
-        // Clear return context after children
         if (!self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk))
             || is_expression_body
         {
@@ -1363,7 +1342,6 @@ impl LanguageSpec {
             }
         );
 
-        // Walk condition in pre-branch block
         if let Some(cond_field) = rule.condition_field
             && let Some(cond_node) = node.field(cond_field)
         {
@@ -1396,7 +1374,6 @@ impl LanguageSpec {
                     }
                 );
 
-                // Walk arm contents
                 for arm_child in child.children() {
                     self.walk_full(&arm_child, state, sep, module_prefix);
                 }
@@ -1414,7 +1391,6 @@ impl LanguageSpec {
             }
         }
 
-        // Join block
         let join = state.ssa.add_block();
         for &end in &end_blocks {
             state.ssa.add_predecessor(join, end);
@@ -1444,7 +1420,6 @@ impl LanguageSpec {
         let rule = &self.loops[rule_idx];
         let pre_block = state.current_block;
 
-        // Walk iteration expression in pre-loop block
         if let Some(iter_field) = rule.iter_field
             && let Some(iter_node) = node.field(iter_field)
         {
@@ -1456,7 +1431,6 @@ impl LanguageSpec {
         state.ssa.add_predecessor(header, pre_block);
         state.current_block = header;
 
-        // Body block
         let body = state.ssa.add_block();
         state.ssa.add_predecessor(body, header);
         state.ssa.seal_block(body);
@@ -1470,21 +1444,17 @@ impl LanguageSpec {
             }
         );
 
-        // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
             self.walk_full(&body_node, state, sep, module_prefix);
         } else {
-            // No explicit body field — walk all children
             for child in node.children() {
                 self.walk_full(&child, state, sep, module_prefix);
             }
         }
 
-        // Back edge + seal header
         state.ssa.add_predecessor(header, state.current_block);
         state.ssa.seal_block(header);
 
-        // Exit block
         let exit = state.ssa.add_block();
         state.ssa.add_predecessor(exit, header);
         state.ssa.seal_block(exit);
@@ -1492,8 +1462,6 @@ impl LanguageSpec {
         state.current_block = exit;
     }
 }
-
-// ── Walk state for parse_full ───────────────────────────────────
 
 /// A reference whose SSA reaching defs haven't been resolved yet.
 /// Stored during the walk, resolved after seal_remaining().
@@ -1503,7 +1471,6 @@ struct PendingRef<'a> {
     ssa_key: &'a str,
     block: super::ssa::BlockId,
     enclosing_def: Option<u32>,
-    /// True if this ref is inside a return statement.
     is_return: bool,
 }
 
@@ -1518,6 +1485,7 @@ struct WalkFullState<'a> {
     pending_refs: Vec<PendingRef<'a>>,
     saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
+    import_rewriter: Option<&'a ImportRewriter>,
     top_level_depth: usize,
     in_return: bool,
     tracer: &'a Tracer,
@@ -1532,6 +1500,7 @@ impl<'a> WalkFullState<'a> {
         tracer: &'a Tracer,
         file_path: &'a str,
         budget: Option<std::time::Duration>,
+        import_rewriter: Option<&'a ImportRewriter>,
     ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
@@ -1548,6 +1517,7 @@ impl<'a> WalkFullState<'a> {
             pending_refs: Vec::new(),
             saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
+            import_rewriter,
             top_level_depth: 0,
             in_return: false,
             tracer,
@@ -1557,9 +1527,7 @@ impl<'a> WalkFullState<'a> {
         }
     }
 
-    /// Resolve SSA reaching values for all pending refs and return
-    /// owned `CollectedRef`s. Handles compound key rewrite for
-    /// instance attribute chains (self.x, @x).
+    /// Handles compound key rewrite for instance attribute chains (self.x, @x).
     fn collect_refs(&mut self, pending_refs: &[PendingRef<'a>]) -> Vec<CollectedRef> {
         let mut collected = Vec::with_capacity(pending_refs.len());
         for pending in pending_refs {

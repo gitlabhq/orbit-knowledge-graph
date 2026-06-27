@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
+use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
 use query_engine::compiler::{
@@ -55,35 +56,27 @@ SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
 
-/// Count enabled namespaces from the datalake.
-static COUNT_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
+/// Enabled namespaces (id + traversal path) from the datalake.
+static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
-        "SELECT count(DISTINCT root_namespace_id) AS ns_count \
+        "SELECT DISTINCT root_namespace_id, traversal_path \
          FROM siphon_knowledge_graph_enabled_namespaces \
          WHERE {del} = false"
     )
 });
 
-/// Count code-eligible projects: projects belonging to any enabled namespace.
+/// Count distinct projects whose top-level namespace is enabled.
 static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
+    let top = gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
     format!(
         "SELECT count(DISTINCT p.id) AS ns_count \
          FROM project_namespace_traversal_paths AS p \
-         INNER JOIN siphon_knowledge_graph_enabled_namespaces AS enabled \
-         ON startsWith(p.traversal_path, enabled.traversal_path) \
-         WHERE p.deleted = false AND enabled.{del} = false"
-    )
-});
-
-/// Fetch enabled namespaces' traversal paths for cross-DB parameter bridging.
-static FETCH_ENABLED_TRAVERSAL_PATHS: LazyLock<String> = LazyLock::new(|| {
-    let del = ontology::siphon_deleted_column();
-    format!(
-        "SELECT DISTINCT traversal_path \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {del} = false"
+         WHERE p.deleted = false \
+           AND extract(p.traversal_path, '{top}') IN (\
+               SELECT traversal_path FROM siphon_knowledge_graph_enabled_namespaces \
+               WHERE {del} = false AND match(traversal_path, '{top}$'))"
     )
 });
 
@@ -321,11 +314,13 @@ impl MigrationCompletionChecker {
     async fn is_migration_complete(&self, version: u32) -> Result<bool, String> {
         let prefix = table_prefix(version);
 
-        // Count enabled namespaces from the datalake (the reference set).
-        let enabled_count = self
-            .count_datalake_namespaces(&COUNT_ENABLED_NAMESPACES)
+        // Enabled top-level namespaces (the reference set). Subgroup paths are
+        // dropped and logged in fetch_top_level_enabled; they are never
+        // dispatched, so counting them would wedge the gate forever.
+        let (enabled_count, enabled_paths) = self
+            .fetch_top_level_enabled()
             .await
-            .map_err(|e| format!("count enabled namespaces: {e}"))?;
+            .map_err(|e| format!("fetch enabled namespaces: {e}"))?;
 
         if enabled_count == 0 {
             warn!(
@@ -352,7 +347,7 @@ impl MigrationCompletionChecker {
         // the "migration completion status" log line to track progress.
         let code_table = format!("{prefix}code_indexing_checkpoint");
         let (eligible_projects, indexed_projects, coverage) = self
-            .compute_code_coverage(&code_table)
+            .compute_code_coverage(&code_table, &enabled_paths)
             .await
             .map_err(|e| format!("compute code coverage: {e}"))?;
 
@@ -409,19 +404,18 @@ impl MigrationCompletionChecker {
     /// the given checkpoint table. Used for telemetry only — the migration
     /// promotion predicate does not gate on coverage. See [`is_migration_complete`]
     /// for the rationale.
-    async fn compute_code_coverage(&self, code_table: &str) -> Result<(u64, u64, f64), String> {
+    async fn compute_code_coverage(
+        &self,
+        code_table: &str,
+        enabled_paths: &[String],
+    ) -> Result<(u64, u64, f64), String> {
         let eligible_projects = self
-            .count_datalake_namespaces(&COUNT_CODE_ELIGIBLE_PROJECTS)
+            .count_eligible_projects()
             .await
             .map_err(|e| format!("count code-eligible projects: {e}"))?;
 
-        let enabled_paths = self
-            .fetch_enabled_traversal_paths()
-            .await
-            .map_err(|e| format!("fetch enabled traversal paths: {e}"))?;
-
         let indexed_projects = self
-            .count_scoped_checkpoint_projects(code_table, &enabled_paths)
+            .count_scoped_checkpoint_projects(code_table, enabled_paths)
             .await
             .map_err(|e| format!("count code-indexed projects: {e}"))?;
 
@@ -449,10 +443,33 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    async fn count_datalake_namespaces(&self, query: &str) -> Result<u64, String> {
+    async fn fetch_top_level_enabled(&self) -> Result<(u64, Vec<String>), String> {
         let batches = self
             .datalake
-            .query_arrow(query)
+            .query(&FETCH_ENABLED_NAMESPACES)
+            .fetch_arrow()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let ids = i64::extract_column(&batches, 0).map_err(|e| e.to_string())?;
+        let paths = String::extract_column(&batches, 1).map_err(|e| e.to_string())?;
+
+        let split = gkg_utils::traversal_path::split_top_level(ids, paths);
+        if !split.skipped.is_empty() {
+            warn!(
+                skipped = ?split.skipped,
+                reason = "traversal_path is not a top-level org/namespace path",
+                "excluding enabled namespaces from migration completion gate"
+            );
+        }
+        Ok((split.count, split.paths))
+    }
+
+    async fn count_eligible_projects(&self) -> Result<u64, String> {
+        let batches = self
+            .datalake
+            .query(&COUNT_CODE_ELIGIBLE_PROJECTS)
+            .fetch_arrow()
             .await
             .map_err(|e| e.to_string())?;
 
@@ -460,20 +477,6 @@ impl MigrationCompletionChecker {
             .first()
             .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
             .ok_or_else(|| "no ns_count in result".to_string())
-    }
-
-    /// Pulls the (small) set of enabled-namespace traversal paths from the
-    /// datalake. The cluster boundary forces this to be a separate query
-    /// from the checkpoint count.
-    async fn fetch_enabled_traversal_paths(&self) -> Result<Vec<String>, String> {
-        let batches = self
-            .datalake
-            .query(&FETCH_ENABLED_TRAVERSAL_PATHS)
-            .fetch_arrow()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        clickhouse_client::FromArrowColumn::extract_column(&batches, 0).map_err(|e| e.to_string())
     }
 
     /// Counts distinct projects in `code_table` whose `traversal_path` falls
@@ -700,8 +703,14 @@ mod tests {
     }
 
     #[test]
-    fn count_enabled_namespaces_query_filters_deleted() {
-        assert!(COUNT_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
+    fn fetch_enabled_namespaces_query_filters_deleted() {
+        assert!(FETCH_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
+    }
+
+    #[test]
+    fn fetch_enabled_namespaces_query_selects_id_and_path() {
+        assert!(FETCH_ENABLED_NAMESPACES.contains("root_namespace_id"));
+        assert!(FETCH_ENABLED_NAMESPACES.contains("traversal_path"));
     }
 
     #[test]
@@ -712,7 +721,6 @@ mod tests {
     #[test]
     fn count_code_eligible_projects_query_filters_deleted() {
         assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("p.deleted = false"));
-        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("enabled._siphon_deleted = false"));
     }
 
     #[test]
@@ -721,13 +729,16 @@ mod tests {
     }
 
     #[test]
-    fn count_code_eligible_projects_uses_traversal_path_join() {
+    fn count_code_eligible_projects_scoped_to_top_level() {
         assert!(
-            COUNT_CODE_ELIGIBLE_PROJECTS
-                .contains("startsWith(p.traversal_path, enabled.traversal_path)"),
-            "eligible-projects must join via traversal_path, not splitByChar"
+            COUNT_CODE_ELIGIBLE_PROJECTS.contains("match(traversal_path, '^[0-9]+/[0-9]+/$')"),
+            "eligible-projects must scope to top-level enabled namespaces so a moved subgroup \
+             cannot deflate coverage"
         );
-        assert!(!COUNT_CODE_ELIGIBLE_PROJECTS.contains("splitByChar"));
+        assert!(
+            COUNT_CODE_ELIGIBLE_PROJECTS.contains("extract(p.traversal_path, '^[0-9]+/[0-9]+/')")
+        );
+        assert!(!COUNT_CODE_ELIGIBLE_PROJECTS.contains("arrayExists"));
     }
 
     #[test]
@@ -745,12 +756,6 @@ mod tests {
              without it, leftover checkpoint rows from disabled namespaces inflate coverage"
         );
         assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("arrayExists"));
-    }
-
-    #[test]
-    fn fetch_enabled_traversal_paths_query_filters_deleted() {
-        assert!(FETCH_ENABLED_TRAVERSAL_PATHS.contains("_siphon_deleted = false"));
-        assert!(FETCH_ENABLED_TRAVERSAL_PATHS.contains("DISTINCT traversal_path"));
     }
 
     /// Coverage math is informational (the predicate doesn't gate on it),

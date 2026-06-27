@@ -222,7 +222,6 @@ pub(in crate::modules::sdlc) struct CursorFilter<'a> {
 }
 
 impl Filter for CursorFilter<'_> {
-    // Empty values → no-op (first page).
     fn condition(&self) -> String {
         if self.values.is_empty() {
             return String::new();
@@ -237,6 +236,7 @@ impl Filter for CursorFilter<'_> {
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
+    pub target: String,
     pub extract_template: String,
     pub watermark_column: String,
     pub deleted_column: String,
@@ -375,6 +375,7 @@ mod tests {
         let sort_key_sql = sort_key.join(", ");
         Plan {
             name: "Test".to_string(),
+            target: "Test".to_string(),
             extract_template: format!(
                 "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
@@ -390,8 +391,6 @@ mod tests {
             transform: TransformSpec::DataFusion(vec![]),
         }
     }
-
-    // ── Cursor tests ────────────────────────────────────────────────
 
     #[test]
     fn first_page_cursor_is_first_page() {
@@ -446,8 +445,6 @@ mod tests {
         );
     }
 
-    // ── CursorFilter tests ──────────────────────────────────────────
-
     #[test]
     fn cursor_filter_single_column() {
         let sort_key = vec!["id".to_string()];
@@ -497,8 +494,6 @@ mod tests {
         );
     }
 
-    // ── CompositeRangeFilter tests ──────────────────────────────────
-
     #[test]
     fn composite_range_filter_emits_both_edges_as_dnf() {
         let columns = vec!["traversal_path".to_string(), "id".to_string()];
@@ -534,8 +529,6 @@ mod tests {
         assert_eq!(sql, "(((id < '500')))");
     }
 
-    // ── PreparedQuery tests ─────────────────────────────────────────
-
     #[test]
     fn first_page_sql_replaces_template_markers() {
         let plan = test_plan(vec!["traversal_path", "id"], 1000);
@@ -544,7 +537,6 @@ mod tests {
         assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
         assert!(!sql.contains("{{filters}}"), "sql: {sql}");
         assert!(!sql.contains("{{batch_size}}"), "sql: {sql}");
-        // No filters → no `AND` added to the bare `WHERE 1=1`.
         assert!(!sql.contains("WHERE 1=1 AND"), "sql: {sql}");
     }
 
@@ -637,7 +629,6 @@ mod tests {
             })
             .with(TraversalPathFilter { path: "1/2/" })
             .to_sql();
-        // Both filter conditions appear, wrapped in parens and AND-joined.
         assert!(sql.contains(" AND ("), "sql: {sql}");
         assert!(sql.contains("startsWith(traversal_path,"), "sql: {sql}");
         assert!(sql.contains("_siphon_watermark >"), "sql: {sql}");

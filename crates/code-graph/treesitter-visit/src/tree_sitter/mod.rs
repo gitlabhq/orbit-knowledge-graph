@@ -16,7 +16,6 @@ pub use tree_sitter::Language as TSLanguage;
 use tree_sitter::{Node, Parser, Tree};
 pub use tree_sitter::{Point as TSPoint, Range as TSRange};
 
-/// Represents tree-sitter related error
 #[derive(Debug, Error)]
 pub enum TSParseError {
     #[error("incompatible `Language` is assigned to a `Parser`.")]
@@ -39,7 +38,6 @@ fn parse_lang(
     }
 }
 
-/// A document backed by a String with a tree-sitter parse tree.
 #[derive(Clone)]
 pub struct StrDoc<L: LanguageExt> {
     pub src: String,
@@ -63,7 +61,6 @@ pub struct CpuBudget {
 }
 
 impl CpuBudget {
-    /// Begin a budget on the current thread.
     pub fn start(budget: Duration) -> Self {
         Self {
             start: ThreadTime::now(),
@@ -118,14 +115,12 @@ impl<L: LanguageExt> StrDoc<L> {
                 let last_offset = AtomicU64::new(u64::MAX);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
-                    // Per-thread CPU budget.
                     if let Some(budget) = budget
                         && budget.expired()
                     {
                         tracing::warn!("tree-sitter parse aborted: CPU budget exceeded");
                         return ControlFlow::Break(());
                     }
-                    // Stall detection: no forward progress for too long.
                     let offset = state.current_byte_offset() as u64;
                     if offset == last_offset.load(Ordering::Relaxed) {
                         if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
@@ -375,14 +370,11 @@ impl<'r> SgNode<'r> for Node<'r> {
     }
 }
 
-/// Tree-sitter specific language trait
 pub trait LanguageExt: Language {
-    /// Create a [`Root`] instance for the language
     fn ast_grep<S: AsRef<str>>(&self, source: S) -> crate::Root<StrDoc<Self>> {
         crate::Root::new(source, self.clone())
     }
 
-    /// tree sitter language to parse the source
     fn get_ts_language(&self) -> TSLanguage;
 
     /// Grammar node-kind names indexed by `kind_id`. Implementations should
@@ -423,7 +415,6 @@ mod tests {
     use std::ops::ControlFlow;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    /// Verify the stall-detection logic directly, independent of tree-sitter's build-varying internals.
     #[test]
     fn test_stall_detection_logic() {
         let max_stall: u64 = 3;
@@ -442,26 +433,25 @@ mod tests {
             ControlFlow::Continue(())
         };
 
-        // Advancing offsets: never stalls
         assert_eq!(check(0), ControlFlow::Continue(()));
         assert_eq!(check(1), ControlFlow::Continue(()));
         assert_eq!(check(2), ControlFlow::Continue(()));
 
-        // Stall at offset 5: fetch_add returns previous value, >= fires after max_stall increments
-        assert_eq!(check(5), ControlFlow::Continue(())); // first visit, sets last_offset=5
-        assert_eq!(check(5), ControlFlow::Continue(())); // count: 0 -> 1
-        assert_eq!(check(5), ControlFlow::Continue(())); // count: 1 -> 2
-        assert_eq!(check(5), ControlFlow::Continue(())); // count: 2 -> 3
-        assert_eq!(check(5), ControlFlow::Break(())); // count: 3 >= 3, abort
+        // fetch_add returns the previous value, so with max_stall=3 the >= check
+        // only fires on the 4th increment (the 5th visit to the same offset).
+        assert_eq!(check(5), ControlFlow::Continue(()));
+        assert_eq!(check(5), ControlFlow::Continue(()));
+        assert_eq!(check(5), ControlFlow::Continue(()));
+        assert_eq!(check(5), ControlFlow::Continue(()));
+        assert_eq!(check(5), ControlFlow::Break(()));
 
-        // After advancing, counter resets
         stall_count.store(0, Ordering::Relaxed);
         assert_eq!(check(10), ControlFlow::Continue(()));
-        assert_eq!(check(11), ControlFlow::Continue(())); // advance resets count
-        assert_eq!(check(11), ControlFlow::Continue(())); // count: 0 -> 1
-        assert_eq!(check(11), ControlFlow::Continue(())); // count: 1 -> 2
-        assert_eq!(check(11), ControlFlow::Continue(())); // count: 2 -> 3
-        assert_eq!(check(11), ControlFlow::Break(())); // count: 3 >= 3, abort
+        assert_eq!(check(11), ControlFlow::Continue(()));
+        assert_eq!(check(11), ControlFlow::Continue(()));
+        assert_eq!(check(11), ControlFlow::Continue(()));
+        assert_eq!(check(11), ControlFlow::Continue(()));
+        assert_eq!(check(11), ControlFlow::Break(()));
     }
 
     #[cfg(feature = "builtin-parser")]
@@ -484,7 +474,6 @@ mod tests {
     fn zero_cpu_budget_aborts_large_parse() {
         use super::ParseGuard;
         use std::time::Duration;
-        // Large enough that tree-sitter invokes the progress callback.
         let src = "def f(x):\n    return x + 1\n".repeat(50_000);
         let guard = ParseGuard::default().with_budget(Duration::ZERO);
         let result = StrDoc::try_new(&src, crate::SupportLang::Python, &guard);

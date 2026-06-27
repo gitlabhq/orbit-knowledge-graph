@@ -18,7 +18,6 @@ pub enum LanguageFamily {
     /// Java and Kotlin compile to the same bytecode and share
     /// package-based FQN resolution. Fully bidirectional.
     Jvm,
-    /// Standalone language: gets its own isolated CodeGraph.
     Standalone(Language),
 }
 
@@ -32,8 +31,6 @@ impl std::fmt::Display for LanguageFamily {
     }
 }
 
-// Declares the Language enum and all per-variant property methods from
-// a single declarative table.
 macro_rules! define_languages {
     ($(
         $variant:ident => {
@@ -75,13 +72,10 @@ macro_rules! define_languages {
                 }
             }
 
-            /// Returns the [`LanguageFamily`] this language belongs to.
-            /// Languages in the same family share a `CodeGraph` during
-            /// pipeline processing and can resolve symbols across each other.
             pub const fn family(&self) -> LanguageFamily {
                 match self {
                     Self::C | Self::Cpp => LanguageFamily::CFamily,
-                    Self::Java | Self::Kotlin => LanguageFamily::Jvm,
+                    Self::Java | Self::Kotlin | Self::Scala => LanguageFamily::Jvm,
                     _ => LanguageFamily::Standalone(*self),
                 }
             }
@@ -179,6 +173,12 @@ define_languages! {
         extensions: ["kt", "kts"],
         separator: ".",
         names: ["kotlin"],
+    },
+    Scala => {
+        support_lang: Scala,
+        extensions: ["scala", "sc"],
+        separator: ".",
+        names: ["scala"],
     },
     CSharp => {
         support_lang: CSharp,

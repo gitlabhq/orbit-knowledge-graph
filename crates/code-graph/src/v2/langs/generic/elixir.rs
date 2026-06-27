@@ -350,8 +350,6 @@ fn rewrite_elixir_imports(tree: &mut SyntaxTree) {
     }
 }
 
-// ── Resolution rules ────────────────────────────────────────────
-
 pub struct ElixirRules;
 
 impl HasRules for ElixirRules {

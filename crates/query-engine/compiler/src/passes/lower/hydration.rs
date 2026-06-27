@@ -49,8 +49,6 @@ impl HydrationPathFilterContext {
     }
 }
 
-// ─── Emit ────────────────────────────────────────────────────────────────────
-
 pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool) -> Result<Node> {
     let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic));
     let mut first = arms
@@ -85,7 +83,6 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
 
     let mut scan_where = Vec::new();
 
-    // Narrow scan via traversal_path when base query provided TPs.
     if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths, is_dynamic) {
         scan_where.push(tp_filter);
     }
@@ -489,7 +486,6 @@ mod tests {
 
     #[test]
     fn dynamic_leaf_pruning_drops_broad_prefix() {
-        // 1/9970/ is a prefix of 1/9970/100/, should be dropped from the OR
         let node = emit_dynamic(
             &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
             10,
@@ -508,7 +504,6 @@ mod tests {
 
     #[test]
     fn static_leaf_pruning_drops_broad_prefix() {
-        // 1/9970/ is a prefix of 1/9970/100/, should be dropped from the OR
         let node = emit_static(
             &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
             10,

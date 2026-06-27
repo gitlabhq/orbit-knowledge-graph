@@ -40,8 +40,7 @@ struct Case {
     edge_table: &'static str,
     source_kind: &'static str,
     target_kind: &'static str,
-    /// `true` when the owner is the edge source (outgoing), `false` when it is
-    /// the target (incoming) — i.e. which endpoint the FK value occupies.
+    /// Which endpoint the owner's FK value occupies: `true` = source, `false` = target.
     owner_is_source: bool,
     current_fk: i64,
     stale_fk: i64,

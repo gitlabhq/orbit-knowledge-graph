@@ -15,7 +15,6 @@ use std::sync::LazyLock;
 use super::lower::{self, DeletionStatement};
 use crate::checkpoint::namespace_position_key;
 
-/// Check whether a namespace is still deleted via argMax dedup against the datalake.
 static IS_NAMESPACE_STILL_DELETED: LazyLock<String> = LazyLock::new(|| {
     let (wm, del) = (
         ontology::siphon_watermark_column(),
@@ -28,7 +27,6 @@ static IS_NAMESPACE_STILL_DELETED: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Fetch traversal paths for all currently-enabled namespaces.
 static ENABLED_NAMESPACE_ROOTS_QUERY: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
@@ -46,7 +44,6 @@ SELECT DISTINCT traversal_path FROM namespace_traversal_paths FINAL
 WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-/// Fetch namespaces deleted within a watermark window from the datalake.
 static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
     let (wm, del) = (
         ontology::siphon_watermark_column(),

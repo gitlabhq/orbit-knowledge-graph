@@ -179,9 +179,6 @@ mod tests {
             &errs,
             GraphStatsCounters::new(&dirs, &files_count, &d, &i, &e),
         );
-        // We expect this not to return Err — at least one file must be
-        // analyzable so the pipeline produces a graph and reaches the
-        // skip recording path.
         let _ = JsPipeline::process_files(files, ctx, &btx);
     }
 

@@ -209,10 +209,8 @@ mod tests {
         let events = tracker.drain();
         assert_eq!(events.len(), 1);
         let data = &events[0].contexts()[1].data;
-        // QueryInfo fields.
         assert_eq!(data["query_type"], "traversal");
         assert_eq!(data["is_search"], true);
-        // Exec metrics.
         assert_eq!(data["compile_ms"], 5);
         assert_eq!(data["execute_ms"], 50);
         assert_eq!(data["authorization_ms"], 10);

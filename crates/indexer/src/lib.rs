@@ -67,7 +67,7 @@ use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
 use orchestrator::Trigger;
-use orchestrator::dispatch::CodeBackfill;
+use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::scheduled::{
     CodeBackfillSweep, GlobalDispatcher, MigrationCompletionChecker, NamespaceDeletionScheduler,
     NamespaceDispatcher, Scheduled, StaleEdgeReconciliation, TableCleanup,
@@ -77,7 +77,6 @@ use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route,
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-/// Runs the indexer until completion or until the token is cancelled.
 pub async fn run(
     config: &IndexerConfig,
     ontology: Arc<ontology::Ontology>,
@@ -248,7 +247,6 @@ pub async fn run(
     result
 }
 
-/// Runs the dispatcher (scheduled task loops + health server) until shutdown.
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     ontology: &ontology::Ontology,
@@ -376,7 +374,10 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             metrics.clone(),
         )),
-        Arc::new(EnabledNamespacesRoute::new(backfill.clone())),
+        Arc::new(EnabledNamespacesRoute::new(
+            NamespaceIndexingDispatch::new(services.nats.clone()),
+            backfill.clone(),
+        )),
     ];
 
     let scheduled = Scheduled::new(tasks, lock_service);

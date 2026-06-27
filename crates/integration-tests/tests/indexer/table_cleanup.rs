@@ -4,8 +4,7 @@ use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 
-// Verifies that OPTIMIZE TABLE ... FINAL CLEANUP is valid for every ontology table.
-// Tables need allow_experimental_replacing_merge_with_cleanup enabled for this to work.
+// FINAL CLEANUP needs allow_experimental_replacing_merge_with_cleanup enabled per table.
 #[tokio::test]
 async fn cleanup_succeeds_on_all_tables() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;

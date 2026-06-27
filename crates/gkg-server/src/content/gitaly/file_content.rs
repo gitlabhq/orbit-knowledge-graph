@@ -12,10 +12,8 @@ use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext
 
 use crate::content::metrics;
 
-/// Gitaly-specific parameters extracted from a hydrated entity row.
-///
-/// `revision` is the git ref used in `<revision>:<path>` for `list_blobs`.
-/// Prefers `commit_sha` (immutable) over `branch` (can advance).
+/// `revision` is the git ref used in `<revision>:<path>` for `list_blobs`;
+/// prefers `commit_sha` (immutable) over `branch` (can advance).
 #[derive(Debug, Clone)]
 pub struct GitalyBlobRequest {
     pub project_id: i64,
@@ -25,12 +23,8 @@ pub struct GitalyBlobRequest {
     pub end_byte: Option<i64>,
 }
 
-/// File identity key for deduplicating Gitaly fetches.
 type FileKey = (i64, String, String); // (project_id, revision, file_path)
 
-/// Resolves file content by calling the GitLab internal API's `list_blobs`
-/// endpoint, which streams blobs from Gitaly via Workhorse.
-///
 /// Requests are grouped by `project_id` and deduplicated by file identity.
 /// Multiple definitions in the same file share the fetched content and
 /// only receive their byte-range slice.
@@ -54,8 +48,6 @@ impl ColumnResolver for GitalyContentService {
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
         let mut timer = metrics::start_resolve(rows.len());
 
-        // Pre-compute keys alongside requests so they can be reused for
-        // deduplication and final lookup without cloning strings twice.
         let requests: Vec<Option<(GitalyBlobRequest, FileKey)>> = rows
             .iter()
             .map(|props| {
@@ -65,11 +57,8 @@ impl ColumnResolver for GitalyContentService {
             })
             .collect();
 
-        // Deduplicate: each unique (project_id, revision, file_path) is
-        // fetched once via list_blobs.
         let mut file_cache: HashMap<FileKey, Option<String>> = HashMap::new();
 
-        // Group unique file keys by project_id for batched Gitaly calls.
         let mut by_project: HashMap<i64, Vec<FileKey>> = HashMap::new();
         for (req, key) in requests.iter().flatten() {
             if !file_cache.contains_key(key) {
@@ -81,8 +70,6 @@ impl ColumnResolver for GitalyContentService {
             }
         }
 
-        // Fetch and drain all project blob streams concurrently.
-        // Each future returns (blobs, had_error) so we can track partial failures.
         let futures = by_project.iter().map(|(&project_id, keys)| {
             let client = Arc::clone(&self.client);
             let revisions: Vec<String> = keys
@@ -139,11 +126,8 @@ impl ColumnResolver for GitalyContentService {
 
         timer.set_outcome(if had_errors { "error" } else { "gitaly_direct" });
 
-        // For each row, look up cached content and extract the byte-range slice.
-        // Non-UTF-8 blobs were already filtered during fetch, so their cache
-        // entries remain None and resolve to None here.
-        // `slice_content` returns a &str into the cached String, so only the
-        // extracted range is copied into the ColumnValue.
+        // Non-UTF-8 blobs were filtered during fetch, so their cache entries
+        // remain None and resolve to None here.
         Ok(requests
             .iter()
             .map(|entry| {
@@ -158,12 +142,9 @@ impl ColumnResolver for GitalyContentService {
 }
 
 impl GitalyContentService {
-    /// Extract a [`GitalyBlobRequest`] from a hydrated property map.
-    ///
-    /// Builds the `revision` from `commit_sha` (preferred) or `branch`
-    /// (fallback). Expects `project_id` and either `path` (File) or
-    /// `file_path` (Definition). Returns `None` if any required field
-    /// is missing or byte ranges are invalid.
+    /// Expects `project_id` and either `path` (File) or `file_path`
+    /// (Definition). Returns `None` if any required field is missing or byte
+    /// ranges are invalid.
     pub fn build_request(props: &HashMap<String, ColumnValue>) -> Option<GitalyBlobRequest> {
         let project_id: i64 = props.get("project_id").and_then(|v| v.coerce())?;
 
@@ -284,8 +265,6 @@ mod tests {
         assert!(GitalyContentService::build_request(&props).is_some());
     }
 
-    // ── slice_content ───────────────────────────────────────────────────
-
     #[test]
     fn slice_full_when_no_range() {
         assert_eq!(slice_content("hello world", None, None), "hello world");
@@ -312,11 +291,7 @@ mod tests {
         assert_eq!(slice_content("é", Some(0), Some(1)), "");
     }
 
-    // ── resolve_batch ───────────────────────────────────────────────────
-    // Integration tests for resolve_batch require a running GitlabClient
-    // and are covered in the integration-tests crate.
-
-    // ── helpers ─────────────────────────────────────────────────────────
+    // resolve_batch is covered in the integration-tests crate (needs a live GitlabClient).
 
     fn definition_props(start: i64, end: i64) -> HashMap<String, ColumnValue> {
         let mut props = HashMap::new();

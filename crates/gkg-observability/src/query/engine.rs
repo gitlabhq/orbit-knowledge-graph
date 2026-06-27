@@ -1,5 +1,3 @@
-//! Query engine compiler counters fired during query compilation.
-
 use crate::MetricSpec;
 
 pub mod labels {

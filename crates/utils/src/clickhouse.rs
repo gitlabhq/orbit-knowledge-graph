@@ -4,7 +4,6 @@ use std::fmt;
 
 use serde_json::Value;
 
-/// ClickHouse scalar types for parameterized query placeholders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
 pub enum ChScalar {
     String,
@@ -14,7 +13,6 @@ pub enum ChScalar {
 }
 
 impl ChScalar {
-    /// Infer scalar type from a JSON value.
     pub fn from_value(v: Option<&Value>) -> Self {
         match v {
             Some(Value::Number(n)) if n.is_i64() => ChScalar::Int64,
@@ -25,7 +23,6 @@ impl ChScalar {
     }
 }
 
-/// ClickHouse types used in parameterized query placeholders (`{pN:Type}`).
 /// `Array(ChScalar)` maps to `Array(T)` for any scalar `T`, used in `IN`
 /// clauses with multiple values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,7 +62,6 @@ impl From<ChScalar> for ChType {
 }
 
 impl ChType {
-    /// Infer ClickHouse type from a JSON value.
     /// For arrays, inspects the first element to determine the element type.
     pub fn from_value(v: &Value) -> Self {
         match v {
@@ -77,7 +73,6 @@ impl ChType {
         }
     }
 
-    /// Promote a scalar type to its array equivalent.
     pub fn to_array(self) -> Self {
         match self {
             ChType::String | ChType::DateTime64 => ChType::Array(ChScalar::String),
@@ -89,7 +84,6 @@ impl ChType {
     }
 }
 
-/// A query parameter with its ClickHouse type and JSON value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamValue {
     pub ch_type: ChType,
@@ -97,7 +91,6 @@ pub struct ParamValue {
 }
 
 impl ParamValue {
-    /// Render as a ClickHouse SQL literal for debugging/observability.
     /// DateTime types are wrapped in toDateTime64() for direct SQL use.
     pub fn render_literal(&self) -> String {
         match (&self.ch_type, &self.value) {
@@ -111,7 +104,6 @@ impl ParamValue {
         }
     }
 
-    /// Render as a ClickHouse HTTP query parameter value.
     /// Unlike `render_literal`, strings are NOT quoted — ClickHouse handles
     /// typing via the `{name:Type}` placeholder in the SQL.
     pub fn render_http_param(&self) -> String {
@@ -119,7 +111,6 @@ impl ParamValue {
     }
 }
 
-/// Render a JSON value as a ClickHouse SQL literal.
 pub fn render_value(value: &Value) -> String {
     fn quote(s: &str) -> String {
         format!("'{}'", s.replace('\'', "''"))

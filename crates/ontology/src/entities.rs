@@ -1,24 +1,15 @@
-//! Data model definitions for ontology entities.
-
 use std::{collections::BTreeMap, fmt};
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::etl::EtlConfig;
 use serde::Deserialize;
 
-/// A column in the unified edge table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeColumn {
     pub name: String,
     pub data_type: DataType,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Storage metadata — ClickHouse DDL definitions
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// A column as it appears in `CREATE TABLE` DDL. Fully explicit: the YAML
-/// specifies the exact ClickHouse type, codec, and default. No auto-derivation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageColumn {
     pub name: String,
@@ -50,17 +41,14 @@ pub struct NodeStorage {
     pub settings: BTreeMap<String, String>,
 }
 
-/// An index definition from storage metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageIndex {
     pub name: String,
     pub column: String,
-    /// e.g. `"minmax"`, `"set(10)"`, `"bloom_filter(0.01)"`
     pub index_type: String,
     pub granularity: u32,
 }
 
-/// A projection definition from storage metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageProjection {
     Reorder {
@@ -81,7 +69,6 @@ pub enum StorageProjection {
     },
 }
 
-/// Storage config for edge tables (in schema.yaml).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeTableStorage {
     pub index_granularity: Option<u32>,
@@ -108,14 +95,11 @@ pub struct MaterializedViewDefinition {
     pub to_table: Option<String>,
     /// The `SELECT ...` query. Table references use `{table_name}` placeholders.
     pub select_query: String,
-    /// Engine name for implicit storage (e.g. `"AggregatingMergeTree"`).
     /// Ignored when `to_table` is set.
     pub engine: Option<String>,
-    /// Engine arguments (e.g. `["_version"]`).
     pub engine_args: Vec<String>,
-    /// ORDER BY columns for implicit storage. Ignored when `to_table` is set.
+    /// Ignored when `to_table` is set.
     pub order_by: Vec<String>,
-    /// Whether to backfill the view with existing data on creation.
     pub populate: bool,
 }
 
@@ -129,36 +113,25 @@ pub struct MaterializedViewDefinition {
 ///   filterable: false / virtual        →  skipped
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatisticsConfig {
-    /// AggregatingMergeTree table for per-value frequency stats (categorical).
     pub stats_table: String,
-    /// AggregatingMergeTree table for histogram bucket states (continuous).
     pub histogram_table: String,
-    /// AggregatingMergeTree table for token frequency states (text).
     pub token_table: String,
-    /// ClickHouse dictionary for fast stats lookups.
     pub dictionary: String,
-    /// Dictionary refresh interval.
     pub lifetime_min: u32,
     pub lifetime_max: u32,
-    /// Number of histogram buckets for continuous/numerical columns.
     pub histogram_buckets: u16,
-    /// Number of top-K tokens to track per token column.
     pub top_k_tokens: u16,
-    /// Column used to partition stats by namespace. Entities without this
-    /// column get global stats (empty partition key).
+    /// Entities without this column get global stats (empty partition key).
     pub partition_key: String,
-    /// Columns to exclude from statistics collection.
     pub exclude: Vec<StatisticsExclude>,
 }
 
-/// Exclude specific columns from statistics collection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatisticsExclude {
     pub node: String,
     pub columns: Vec<String>,
 }
 
-/// A non-ontology auxiliary table definition (checkpoint, etc.).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryTable {
     pub name: String,
@@ -171,7 +144,6 @@ pub struct AuxiliaryTable {
     pub projections: Vec<StorageProjection>,
 }
 
-/// A column in an auxiliary table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryColumn {
     pub name: String,
@@ -300,38 +272,27 @@ impl RedactionConfig {
     }
 }
 
-/// A node entity representing a record or row in the knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeEntity {
-    /// The name of the entity (e.g., "User", "Project").
     pub name: String,
     pub domain: String,
     pub description: String,
     pub label: String,
-    /// The fields that make up this entity.
     pub fields: Vec<Field>,
-    /// The field names that form the primary key.
     pub primary_keys: Vec<String>,
-    /// The destination table name for this entity.
     pub destination_table: String,
-    /// Columns returned by default when this node appears in dynamic query results.
     /// If empty, all columns are returned.
     pub default_columns: Vec<String>,
-    /// ClickHouse ORDER BY columns for this node's destination table.
-    /// Used as the deduplication key for ReplacingMergeTree.
+    /// ClickHouse ORDER BY columns; used as the deduplication key for ReplacingMergeTree.
     pub sort_key: Vec<String>,
-    /// ETL configuration for indexing this entity.
     pub etl: Option<EtlConfig>,
-    /// Redaction configuration for permission checks.
     /// If `None`, this entity does not require redaction validation.
     pub redaction: Option<RedactionConfig>,
     pub style: NodeStyle,
-    /// Whether this entity's table has a `traversal_path` column.
     /// Derived from the declared fields during ontology loading.
     pub has_traversal_path: bool,
     /// Non-namespaced global hub (e.g. User, Runner), declared `global: true`.
     pub global: bool,
-    /// ClickHouse-specific storage metadata for DDL generation.
     pub storage: NodeStorage,
 }
 
@@ -384,20 +345,14 @@ impl EdgeVariantScope {
     }
 }
 
-/// An edge entity representing a relationship between nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeEntity {
-    /// The name of the relationship (e.g., "AUTHORED", "CONTAINS").
     pub relationship_kind: String,
-    /// The field containing the source node identifier.
     pub source: String,
-    /// The kind of the source node.
     pub source_kind: String,
-    /// The field containing the target node identifier.
     pub target: String,
-    /// The kind of the target node.
     pub target_kind: String,
-    /// ClickHouse table that stores this edge (defaults to the global edge table).
+    /// Defaults to the global edge table.
     pub destination_table: String,
     /// Foreign key column on one of the two node tables that encodes this
     /// relationship (e.g. "project_id", "author_id"). When present, the
@@ -410,13 +365,9 @@ pub struct EdgeEntity {
 /// ETL configuration for edges sourced from join tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeSourceEtlConfig {
-    /// Whether this is global or namespaced.
     pub scope: crate::etl::EtlScope,
-    /// Source table name.
     pub source: String,
-    /// Column name for watermark (version tracking).
     pub watermark: String,
-    /// Column name for soft delete flag.
     pub deleted: String,
     /// Columns for ORDER BY in extract queries and cursor-based pagination.
     pub order_by: Vec<String>,
@@ -425,9 +376,8 @@ pub struct EdgeSourceEtlConfig {
     /// select a row subset of a shared source table (e.g. one Rails enum value)
     /// without a dedicated source table or a Rust transform.
     pub filter: Option<String>,
-    /// Source endpoint configuration.
+    pub reindex_on: Vec<crate::etl::ReindexSource>,
     pub from: EdgeEndpoint,
-    /// Target endpoint configuration.
     pub to: EdgeEndpoint,
 }
 
@@ -441,12 +391,9 @@ pub struct DerivedEntity {
     pub etl: EtlConfig,
 }
 
-/// Configuration for an edge endpoint (source or target).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeEndpoint {
-    /// Column containing the ID of the node.
     pub id_column: String,
-    /// How the node type is determined.
     pub node_type: EdgeEndpointType,
     /// Columns to enrich from this endpoint's node datalake table via LEFT
     /// JOIN at extract time. Makes node properties available in the MemTable
@@ -454,19 +401,15 @@ pub struct EdgeEndpoint {
     pub enrich: Vec<String>,
 }
 
-/// How an edge endpoint's node type is determined.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EdgeEndpointType {
-    /// A fixed node type (e.g., "Label").
     Literal(String),
-    /// Type read from a column at runtime (e.g., "target_type").
     Column {
         column: String,
         type_mapping: std::collections::BTreeMap<String, String>,
     },
 }
 
-/// Which side of an edge a denormalized property belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DenormDirection {
     Source,
@@ -476,20 +419,14 @@ pub enum DenormDirection {
 /// A node property denormalized onto an edge table for query optimization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DenormalizedProperty {
-    /// The relationship kind this was declared on (e.g. "IN_PROJECT").
     pub relationship_kind: String,
-    /// Entity kind (e.g. "Pipeline").
     pub node_kind: String,
-    /// Property name on the node (e.g. "status").
     pub property_name: String,
-    /// Which side of the edge this entity sits on.
     pub direction: DenormDirection,
     /// Array column on the edge table: `"source_tags"` or `"target_tags"`.
     pub edge_column: String,
-    /// Tag key inside the array (e.g. `"status"`, `"state"`).
     /// Values are stored as `"key:value"` tokens in the array.
     pub tag_key: String,
-    /// Enum value mapping if the property is an int-based enum.
     pub enum_values: Option<BTreeMap<i64, String>>,
 }
 
@@ -503,21 +440,15 @@ impl fmt::Display for EdgeEntity {
     }
 }
 
-/// Where a field's data comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldSource {
-    /// Backed by a ClickHouse column.
     DatabaseColumn(String),
-    /// Resolved at query time from a remote service.
     Virtual(VirtualSource),
 }
 
-/// Configuration for a field resolved from a remote service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VirtualSource {
-    /// Logical service name (e.g. "gitaly").
     pub service: String,
-    /// Logical operation name (e.g. "blob_content").
     pub lookup: String,
     /// When true, the field is declared in the ontology but not yet resolvable.
     /// The compiler will exclude it from hydration plans.
@@ -567,20 +498,15 @@ pub struct TraversalPathLookup {
     pub key_column: String,
 }
 
-/// A field definition within an entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
-    /// The name of the field.
     pub name: String,
-    /// Where this field's data comes from.
     pub source: FieldSource,
-    /// The data type of the field.
     pub data_type: DataType,
-    /// Whether the field can contain null values.
     pub nullable: bool,
     /// Integer value to string label mapping for int-based enum types.
     pub enum_values: Option<BTreeMap<i64, String>>,
-    /// How the enum is stored in the source (int or string). Defaults to Int.
+    /// Defaults to Int.
     pub enum_type: EnumType,
     /// Whether LIKE-based filter operators (contains, starts_with, ends_with)
     /// are allowed on this field. Defaults to true. Set to false for sensitive
@@ -598,10 +524,8 @@ pub struct Field {
     /// High-selectivity columns (IDs, paths, names) narrow effectively.
     /// Derived automatically from `data_type` unless overridden in YAML.
     pub selectivity: FieldSelectivity,
-    /// Human-readable description of this field from the ontology YAML.
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
-    /// Whether this field can change after creation.
     pub mutable: bool,
     /// For enum fields, values that once reached never change (absorbing states).
     pub terminal_values: Option<Vec<String>>,
@@ -638,7 +562,6 @@ impl Field {
         }
     }
 
-    /// Whether this field is resolved from a remote service rather than a DB column.
     pub fn is_virtual(&self) -> bool {
         matches!(self.source, FieldSource::Virtual(_))
     }
@@ -651,24 +574,15 @@ impl fmt::Display for Field {
     }
 }
 
-/// Supported data types for entity fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataType {
-    /// A UTF-8 string.
     String,
-    /// A 64-bit signed integer.
     Int,
-    /// A 64-bit floating point number.
     Float,
-    /// A boolean value.
     Bool,
-    /// A date value (no time component).
     Date,
-    /// A date and time value.
     DateTime,
-    /// Enum
     Enum,
-    /// A UUID value.
     Uuid,
 }
 
@@ -684,7 +598,6 @@ pub enum FieldSelectivity {
 }
 
 impl FieldSelectivity {
-    /// Derive selectivity from data type when not explicitly set.
     pub fn from_data_type(dt: DataType) -> Self {
         match dt {
             DataType::Enum | DataType::Bool => Self::Low,
@@ -728,7 +641,6 @@ impl<'de> Deserialize<'de> for DataType {
     }
 }
 
-/// Enum storage type - how the enum is stored in the source database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EnumType {
@@ -755,7 +667,6 @@ impl fmt::Display for DataType {
 }
 
 impl DataType {
-    /// Convert to JSON Schema type string.
     #[must_use]
     pub fn to_json_schema_type(self) -> &'static str {
         match self {

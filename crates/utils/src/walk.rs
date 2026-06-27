@@ -1,6 +1,5 @@
-//! Directory walk as a [`FileStreamHooks`] source: enumerate a checked-out repo
-//! with git's listing semantics and run each file through the hooks. Files are
-//! already on disk, so nothing is written — the walk only classifies.
+//! Directory walk as a [`FileStreamHooks`] source. Files are already on disk, so
+//! nothing is written — the walk only classifies.
 
 use std::io::Read;
 use std::path::Path;
@@ -38,7 +37,6 @@ pub fn walk_dir<H: FileStreamHooks>(
         let file_type = dir_entry.file_type();
         let is_file = file_type.is_some_and(|t| t.is_file());
         let is_symlink = file_type.is_some_and(|t| t.is_symlink());
-        // Directories (and other non-regular, non-symlink entries) are not nodes.
         if !is_file && !is_symlink {
             continue;
         }
@@ -54,7 +52,7 @@ pub fn walk_dir<H: FileStreamHooks>(
         };
 
         // A symlink has no content to sniff and is never a parse candidate; the
-        // hooks settle it (and record why), same as the tar source.
+        // hooks settle it, same as the tar source.
         meta.decision = if is_symlink {
             hooks.on_non_regular(&meta)
         } else {
@@ -169,8 +167,6 @@ mod tests {
         let inv = walk_dir(root, &mut TestFilter).unwrap();
         let by_path = |p: &str| inv.iter().find(|e| e.path == p);
 
-        // Routed through on_non_regular (default ListOnly), not read as content —
-        // so the `.rs` symlink is a node, not a parse candidate.
         assert_eq!(by_path("link.rs").unwrap().decision, Decision::ListOnly);
         assert_eq!(by_path("src/lib.rs").unwrap().decision, Decision::Parse);
     }

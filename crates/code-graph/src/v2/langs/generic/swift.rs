@@ -196,8 +196,6 @@ impl DslLanguage for SwiftDsl {
     }
 }
 
-// ── Resolution rules ────────────────────────────────────────────
-
 pub struct SwiftRules;
 
 impl HasRules for SwiftRules {

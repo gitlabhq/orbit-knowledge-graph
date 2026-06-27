@@ -8,9 +8,6 @@ use query_engine::compiler::ExecMetrics;
 
 use crate::auth::{Claims, SourceType};
 
-/// Map any `Display`-able conversion error to [`LabkitError::Validation`]
-/// tagged with the schema field that produced it. Used by the typify-generated
-/// bounded newtype `TryFrom` impls below.
 fn validation<E: std::fmt::Display>(field: &'static str) -> impl FnOnce(E) -> LabkitError {
     move |e| LabkitError::Validation {
         field,
@@ -216,8 +213,6 @@ fn apply_metrics(
 }
 
 /// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
-///
-/// Walks relationships in order, resolving `from`/`to` to entity types.
 /// Returns `None` for search queries (no relationships).
 fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
     if input.relationships.is_empty() {
@@ -251,10 +246,8 @@ const RAW_OUTPUT_FORMAT_VERSION: &str =
 const GOON_OUTPUT_FORMAT_VERSION: &str =
     include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
 
-/// Parse an optional `Claims` string into one of the orbit_common bounded
-/// newtypes. The bounds are 255 chars for instance/host fields; if the
-/// claim ever exceeds that, surface as a typed validation error rather
-/// than truncate silently.
+/// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
+/// typed validation error rather than truncating silently.
 fn parse_opt<T>(value: &Option<String>, field: &'static str) -> Result<Option<T>, LabkitError>
 where
     T: std::str::FromStr,
@@ -473,8 +466,6 @@ mod tests {
 
     #[test]
     fn build_common_rejects_oversized_instance_id() {
-        // The Iglu maxLength=255 bound is enforced by the typify-generated
-        // newtype, surfaced as labkit_events::Error::Validation.
         let mut claims = claims_with_paths(vec![]);
         claims.instance_id = Some("x".repeat(256));
         let err = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap_err();
@@ -489,8 +480,6 @@ mod tests {
             "expected Validation(instance_id), got: {err:?}"
         );
     }
-
-    // ── Iglu schema validation ──────────────────────────────────────────
 
     mod iglu {
         use super::*;

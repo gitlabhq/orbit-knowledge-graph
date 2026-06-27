@@ -355,8 +355,6 @@ mod tests {
         assert_eq!(tracker.count(), 1);
     }
 
-    // Smoke test: verifies no panic when billing is disabled (tracker is None).
-    // No assertion — the observable behaviour is that finish() silently skips.
     #[test]
     fn billing_observer_skips_when_tracker_none() {
         let mut obs = BillingObserver::new(None, test_inputs());

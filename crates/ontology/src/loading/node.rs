@@ -4,21 +4,23 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
+use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::entities::{
     DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
     RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookupSpec,
     VirtualSource,
 };
-use crate::etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+use crate::etl::{
+    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
+    ReindexSource,
+};
 
 use super::EtlSettings;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct NodeYaml {
-    /// Canonical entity name (e.g. `Project`, `MergeRequest`). Mirrors the
-    /// `schema.yaml` registry key the loader actually reads for node identity;
-    /// kept here as human-facing self-documentation so each node file states
-    /// which entity it defines without cross-referencing `schema.yaml`.
+    /// Mirrors the `schema.yaml` registry key, which is the value the loader
+    /// actually reads for node identity; this field is documentation only.
     #[expect(
         dead_code,
         reason = "human-facing self-documentation; the entity name is read from the schema.yaml registry key, this field mirrors it for readability in the node file"
@@ -63,6 +65,8 @@ pub(crate) enum EtlYaml {
         #[serde(default)]
         transform: Option<String>,
         #[serde(default)]
+        reindex_on: Vec<ReindexOnYaml>,
+        #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
     #[serde(rename = "query")]
@@ -87,8 +91,34 @@ pub(crate) enum EtlYaml {
         #[serde(default)]
         transform: Option<String>,
         #[serde(default)]
+        reindex_on: Vec<ReindexOnYaml>,
+        #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum ReindexOnYaml {
+    Bare(String),
+    Detailed(DetailedReindexYaml),
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct DetailedReindexYaml {
+    table: String,
+    #[serde(default)]
+    traversal_path: Option<PathResolutionYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PathResolutionYaml {
+    #[serde(default)]
+    column: Option<String>,
+    #[serde(default)]
+    dictionary: Option<String>,
+    #[serde(default)]
+    key_column: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -371,7 +401,6 @@ impl NodeYaml {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Reject field names that collide with the internal redaction column prefix.
         for field in &fields {
             if field.name.starts_with(internal_column_prefix) {
                 return Err(OntologyError::Validation(format!(
@@ -404,8 +433,6 @@ impl NodeYaml {
             }
         }
 
-        // Validate that every depends_on entry on a virtual field references
-        // an existing database-backed column on this same node.
         for field in &fields {
             if let FieldSource::Virtual(vs) = &field.source {
                 for dep in &vs.depends_on {
@@ -562,6 +589,63 @@ fn convert_edge_mappings(
         .collect()
 }
 
+pub(crate) fn convert_reindex_on(
+    entity_name: &str,
+    raw: Vec<ReindexOnYaml>,
+    default_table: Option<&str>,
+) -> Result<Vec<ReindexSource>, OntologyError> {
+    let raw = if raw.is_empty() {
+        default_table
+            .map(|table| vec![ReindexOnYaml::Bare(table.to_string())])
+            .unwrap_or_default()
+    } else {
+        raw
+    };
+
+    raw.into_iter()
+        .map(|entry| match entry {
+            ReindexOnYaml::Bare(table) => Ok(ReindexSource {
+                table,
+                traversal_path: PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string()),
+            }),
+            ReindexOnYaml::Detailed(detailed) => Ok(ReindexSource {
+                table: detailed.table,
+                traversal_path: convert_path_resolution(entity_name, detailed.traversal_path)?,
+            }),
+        })
+        .collect()
+}
+
+fn convert_path_resolution(
+    entity_name: &str,
+    raw: Option<PathResolutionYaml>,
+) -> Result<PathResolution, OntologyError> {
+    let Some(raw) = raw else {
+        return Ok(PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string()));
+    };
+
+    match (raw.column, raw.dictionary, raw.key_column) {
+        (Some(column), None, None) => Ok(PathResolution::Column(column)),
+        (None, Some(dictionary), Some(key_column)) => Ok(PathResolution::Dictionary {
+            dictionary,
+            key_column,
+        }),
+        (Some(_), Some(_), _) => Err(OntologyError::Validation(format!(
+            "{entity_name}: reindex_on.traversal_path must use column or dictionary, not both"
+        ))),
+        (None, Some(_), None) => Err(OntologyError::Validation(format!(
+            "{entity_name}: reindex_on.traversal_path.dictionary requires key_column"
+        ))),
+        (None, None, Some(_)) => Err(OntologyError::Validation(format!(
+            "{entity_name}: reindex_on.traversal_path.key_column requires dictionary"
+        ))),
+        (Some(_), None, Some(_)) => Err(OntologyError::Validation(format!(
+            "{entity_name}: reindex_on.traversal_path.column cannot use key_column"
+        ))),
+        (None, None, None) => Ok(PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string())),
+    }
+}
+
 /// Replaces `{{watermark_column}}` and `{{deleted_column}}` placeholders with
 /// the configured column names, rejecting ETL SQL that hardcodes either literal.
 ///
@@ -625,6 +709,7 @@ impl EtlYaml {
                 deleted,
                 order_by,
                 transform: _,
+                reindex_on,
                 edges,
             } => {
                 let watermark = match watermark {
@@ -635,12 +720,18 @@ impl EtlYaml {
                     Some(d) => render_etl_placeholders(entity_name, "deleted", &d, wm, del)?,
                     None => del.clone(),
                 };
+                let reindex_on = convert_reindex_on(
+                    entity_name,
+                    reindex_on,
+                    (scope == EtlScope::Namespaced).then_some(source.as_str()),
+                )?;
                 Ok(EtlConfig::Table {
                     scope,
                     source,
                     watermark,
                     deleted,
                     order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
+                    reindex_on,
                     edges: convert_edge_mappings(edges)?,
                 })
             }
@@ -656,6 +747,7 @@ impl EtlYaml {
                 table_alias,
                 page_join,
                 transform: _,
+                reindex_on,
                 edges,
             } => {
                 let select = render_etl_placeholders(entity_name, "select", &select, wm, del)?;
@@ -708,6 +800,11 @@ impl EtlYaml {
                         }))
                     })
                     .transpose()?;
+                let reindex_on = convert_reindex_on(
+                    entity_name,
+                    reindex_on,
+                    (scope == EtlScope::Namespaced).then_some(source.as_str()),
+                )?;
 
                 Ok(EtlConfig::Query {
                     scope,
@@ -718,6 +815,7 @@ impl EtlYaml {
                     watermark,
                     deleted,
                     order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
+                    reindex_on,
                     traversal_path_filter,
                     table_alias,
                     page_join,
@@ -825,9 +923,7 @@ mod tests {
 
     #[test]
     fn embedded_ontology_depends_on_references_are_valid() {
-        // The real ontology should pass all validation including depends_on.
         let ontology = Ontology::load_embedded().expect("embedded ontology should load");
-        // File.content has depends_on -- verify the field exists and has deps.
         let file = ontology.get_node("File").expect("File node should exist");
         let content = file.fields.iter().find(|f| f.name == "content");
         assert!(content.is_some(), "File should have a content field");
@@ -839,6 +935,57 @@ mod tests {
                 "File.content should have depends_on"
             );
         }
+    }
+
+    #[test]
+    fn every_namespaced_entity_declares_reindex_on() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
+        let missing_node_sources: Vec<&str> = ontology
+            .nodes()
+            .filter_map(|node| {
+                let etl = node.etl.as_ref()?;
+                (etl.scope() == EtlScope::Namespaced && etl.reindex_on().is_empty())
+                    .then_some(node.name.as_str())
+            })
+            .collect();
+        assert!(missing_node_sources.is_empty(), "{missing_node_sources:?}");
+
+        let missing_derived_sources: Vec<&str> = ontology
+            .derived_entities()
+            .filter_map(|entity| {
+                (entity.etl.scope() == EtlScope::Namespaced && entity.etl.reindex_on().is_empty())
+                    .then_some(entity.name.as_str())
+            })
+            .collect();
+        assert!(
+            missing_derived_sources.is_empty(),
+            "{missing_derived_sources:?}"
+        );
+
+        let missing_edge_sources: Vec<&str> = ontology
+            .edge_etl_configs()
+            .filter_map(|(relationship_kind, config)| {
+                (config.scope == EtlScope::Namespaced && config.reindex_on.is_empty())
+                    .then_some(relationship_kind)
+            })
+            .collect();
+        assert!(missing_edge_sources.is_empty(), "{missing_edge_sources:?}");
+
+        let system_note = ontology
+            .derived_entities()
+            .find(|entity| entity.name == "SystemNote")
+            .expect("SystemNote derived entity");
+        let system_note_tables: Vec<&str> = system_note
+            .etl
+            .reindex_on()
+            .iter()
+            .map(|source_table| source_table.table.as_str())
+            .collect();
+        assert!(system_note_tables.contains(&"siphon_notes"));
+        assert!(system_note_tables.contains(&"siphon_system_note_metadata"));
+
+        let has_label = ontology.get_edge_etl("HAS_LABEL").unwrap();
+        assert_eq!(has_label[0].reindex_on[0].table, "siphon_label_links");
     }
 
     fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
@@ -1010,6 +1157,128 @@ mod tests {
     fn parse_etl_yaml(yaml: &str) -> Result<EtlConfig, OntologyError> {
         let node = parse_test_node(yaml)?;
         Ok(node.etl.expect("etl block expected"))
+    }
+
+    #[test]
+    fn reindex_on_defaults_to_primary_source_and_traversal_path_column() {
+        let etl = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              source: source_table
+            "#,
+        )
+        .expect("source table should default from etl source");
+
+        let [source_table] = etl.reindex_on() else {
+            panic!("expected one source table");
+        };
+        assert_eq!(source_table.table, "source_table");
+        assert_eq!(
+            source_table.traversal_path,
+            PathResolution::Column("traversal_path".to_string())
+        );
+    }
+
+    #[test]
+    fn reindex_on_accepts_bare_table_names() {
+        let etl = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              source: merge_requests
+              reindex_on: [merge_requests, siphon_merge_request_metrics]
+            "#,
+        )
+        .expect("bare table names should parse");
+
+        let tables: Vec<&str> = etl
+            .reindex_on()
+            .iter()
+            .map(|source| source.table.as_str())
+            .collect();
+        assert_eq!(tables, ["merge_requests", "siphon_merge_request_metrics"]);
+        assert!(
+            etl.reindex_on().iter().all(|source| source.traversal_path
+                == PathResolution::Column("traversal_path".to_string()))
+        );
+    }
+
+    #[test]
+    fn reindex_on_accepts_dictionary_traversal_path() {
+        let etl = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              source: project_namespace_traversal_paths
+              select: "id, traversal_path"
+              from: "project_namespace_traversal_paths"
+              reindex_on:
+                - table: siphon_projects
+                  traversal_path:
+                    dictionary: project_traversal_paths_dict
+                    key_column: id
+            "#,
+        )
+        .expect("dictionary source table should parse");
+
+        let [source_table] = etl.reindex_on() else {
+            panic!("expected one source table");
+        };
+        assert_eq!(
+            source_table.traversal_path,
+            PathResolution::Dictionary {
+                dictionary: "project_traversal_paths_dict".to_string(),
+                key_column: "id".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn reindex_on_rejects_ambiguous_traversal_path() {
+        let result = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              source: source_table
+              reindex_on:
+                - table: source_table
+                  traversal_path:
+                    column: traversal_path
+                    dictionary: traversal_paths_dict
+                    key_column: id
+            "#,
+        );
+        let err = result.expect_err("ambiguous traversal path should fail");
+        assert!(err.to_string().contains("column or dictionary"));
     }
 
     const FK_NODE_HEADER: &str = r#"

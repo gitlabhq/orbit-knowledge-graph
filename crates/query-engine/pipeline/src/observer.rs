@@ -3,7 +3,6 @@ use std::time::Duration;
 use crate::error::PipelineError;
 use compiler::CompiledQueryContext;
 
-/// Trait for observing pipeline stage timings and outcomes.
 pub trait PipelineObserver: Send {
     fn set_query_type(&mut self, query_type: &'static str);
     /// Called once after successful compilation with the full compiled context.
@@ -16,14 +15,11 @@ pub trait PipelineObserver: Send {
     /// Called for each ClickHouse query execution (base and hydration queries).
     fn query_executed(&mut self, _label: &str, _read_rows: u64, _read_bytes: u64, _memory: i64) {}
 
-    /// Record an error that occurred during pipeline execution.
     fn record_error(&self, error: &PipelineError);
 
-    /// Record all metrics for a successful pipeline run.
     fn finish(&self, row_count: usize, redacted_count: usize);
 }
 
-/// No-op observer for local/CLI usage that doesn't need metrics.
 pub struct NoOpObserver;
 
 impl PipelineObserver for NoOpObserver {
@@ -36,10 +32,8 @@ impl PipelineObserver for NoOpObserver {
     fn finish(&self, _row_count: usize, _redacted_count: usize) {}
 }
 
-/// Observer that forwards every callback to a list of inner observers.
-///
-/// Use this to run multiple independent observers (e.g. OTel metrics +
-/// billing events) against the same pipeline without coupling them.
+/// Run multiple independent observers (e.g. OTel metrics + billing events)
+/// against the same pipeline without coupling them.
 pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn PipelineObserver>;
 
 impl PipelineObserver for MultiObserver {
@@ -226,7 +220,6 @@ mod tests {
 
     #[test]
     fn multi_observer_empty_is_valid_noop() {
-        // Passes if forwarded methods don't panic on an empty observer list.
         let mut obs = MultiObserver::new(vec![]);
         obs.set_query_type("traversal");
         obs.compiled(Duration::from_millis(1));

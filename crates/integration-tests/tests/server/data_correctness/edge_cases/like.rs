@@ -1,10 +1,4 @@
-//! LIKE operator data correctness: verify that LIKE filters with valid
-//! patterns return the right rows from ClickHouse, and that metacharacter
-//! escaping prevents wildcard expansion.
-
 use super::super::helpers::*;
-
-// ── contains ────────────────────────────────────────────────────────
 
 pub(crate) async fn like_contains_returns_matching_rows(ctx: &TestContext) {
     let resp = run_query(
@@ -63,8 +57,6 @@ pub(crate) async fn like_contains_no_match_returns_empty(ctx: &TestContext) {
     resp.assert_node_count(0);
 }
 
-// ── starts_with ─────────────────────────────────────────────────────
-
 pub(crate) async fn like_starts_with_returns_matching_rows(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -103,8 +95,6 @@ pub(crate) async fn like_starts_with_no_match(ctx: &TestContext) {
     resp.assert_node_count(0);
 }
 
-// ── ends_with ───────────────────────────────────────────────────────
-
 pub(crate) async fn like_ends_with_returns_matching_rows(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -123,8 +113,6 @@ pub(crate) async fn like_ends_with_returns_matching_rows(ctx: &TestContext) {
         n.prop_str("username").is_some_and(|u| u.ends_with("ice"))
     });
 }
-
-// ── metacharacter escaping ──────────────────────────────────────────
 
 pub(crate) async fn like_percent_matched_literally(ctx: &TestContext) {
     let resp = run_query(
@@ -164,12 +152,9 @@ pub(crate) async fn like_underscore_matched_literally(ctx: &TestContext) {
     resp.assert_node_count(0);
 }
 
-// ── equality on like_allowed:false fields ───────────────────────────
-
 pub(crate) async fn like_equality_on_email_returns_correct_row(ctx: &TestContext) {
-    // User.email is admin_only, so both the test and the production callers
-    // need an admin context to reach this code path. The point of this test
-    // is that `like_allowed: false` does not block exact equality.
+    // User.email is admin_only, so an admin context is required; this verifies
+    // `like_allowed: false` does not block exact equality.
     let resp = run_query_with_security(
         ctx,
         r#"{
@@ -190,8 +175,6 @@ pub(crate) async fn like_equality_on_email_returns_correct_row(ctx: &TestContext
 }
 
 pub(crate) async fn like_in_filter_on_email_works(ctx: &TestContext) {
-    // Same reasoning as above: admin context exercises the equality/in path
-    // without being blocked by admin_only.
     let resp = run_query_with_security(
         ctx,
         r#"{

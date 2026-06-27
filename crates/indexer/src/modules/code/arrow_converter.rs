@@ -1,10 +1,3 @@
-//! Convert a v2 `CodeGraph` directly to Arrow batches for ClickHouse.
-//!
-//! Uses the shared row types from code-graph with an `IndexerEnvelope`
-//! that adds `traversal_path`, `_version`, and `_deleted` columns.
-//! Column schemas are driven by the ontology — the source of truth
-//! for what columns each entity table has.
-
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
@@ -17,8 +10,6 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-/// ClickHouse row envelope. Adds `traversal_path`, `_version`, `_deleted`
-/// around the core node columns.
 pub struct IndexerEnvelope {
     pub traversal_path: String,
     pub project_id: i64,
@@ -64,7 +55,6 @@ impl RowEnvelope for IndexerEnvelope {
     }
 }
 
-/// All Arrow batches produced from a `CodeGraph`, ready for ClickHouse.
 pub struct ConvertedGraphData {
     pub branch: RecordBatch,
     pub directories: RecordBatch,
@@ -74,8 +64,6 @@ pub struct ConvertedGraphData {
     pub edges: RecordBatch,
 }
 
-/// Convert a v2 `CodeGraph` to Arrow batches with ClickHouse envelope columns.
-/// Column schemas are derived from the ontology.
 pub fn convert_code_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     envelope: &IndexerEnvelope,
@@ -120,7 +108,6 @@ fn convert_semantic_graph(
     })
 }
 
-/// Collect LowCardinality column names from ClickHouse storage metadata.
 fn low_cardinality_columns(storage_columns: &[ontology::StorageColumn]) -> HashSet<String> {
     storage_columns
         .iter()
@@ -163,7 +150,6 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     specs
 }
 
-/// Ontology-driven specs for edges, plus infrastructure columns.
 fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
     let dict_fields: HashSet<String> = ontology
         .edge_tables()
@@ -227,8 +213,6 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
     specs
 }
 
-/// Generic entity converter. Uses precomputed specs, builds rows
-/// via the provided closure, and produces a RecordBatch.
 fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &[i64],
@@ -686,7 +670,6 @@ impl ConverterSpecs {
     }
 }
 
-/// `GraphConverter` for the ClickHouse indexer. Wraps `convert_code_graph`.
 pub struct IndexerConverter {
     pub envelope: IndexerEnvelope,
     pub table_names: Arc<super::config::CodeTableNames>,
@@ -725,7 +708,6 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             ),
         ];
 
-        // Route edges to ontology-resolved tables by relationship_kind.
         if data.edges.num_rows() > 0 {
             use arrow::array::AsArray;
             use std::collections::HashMap;
@@ -785,8 +767,6 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     }
 }
 
-/// Remove named columns from a RecordBatch (for routing edge sub-batches
-/// to tables that don't have gl_code_edge-specific columns).
 fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
     let schema = batch.schema();
     let mut indices: Vec<usize> = Vec::new();

@@ -2,9 +2,6 @@ use crate::v2::types::ImportBindingKind;
 use treesitter_visit::Node;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
-/// Resolve a bare or dotted type name to its FQN using import_map,
-/// separator-based splitting, and module_prefix fallback.
-///
 /// Resolution order:
 /// 1. Direct import_map lookup for the full name
 /// 2. Split on separator, resolve first segment via imports, append rest

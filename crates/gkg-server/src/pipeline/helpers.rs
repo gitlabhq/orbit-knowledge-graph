@@ -112,11 +112,8 @@ fn sanitize_error_message(error: &PipelineError) -> String {
     }
 }
 
-/// Classify ClickHouse execution errors into actionable diagnostic messages.
-///
-/// Parses `Code: NNN` from the error string. No internal details (table
-/// names, SQL, infrastructure) are exposed — only the failure class and
-/// generic suggestions for refining the query.
+/// No internal details (table names, SQL, infrastructure) are exposed — only
+/// the failure class and generic suggestions for refining the query.
 fn classify_execution_error(msg: &str) -> String {
     let code = extract_ch_error_code(msg);
     match code {
@@ -169,7 +166,6 @@ fn classify_execution_error(msg: &str) -> String {
     }
 }
 
-/// Extract ClickHouse error code from an error string.
 /// Matches patterns like "Code: 241." or "Code: 241,".
 fn extract_ch_error_code(error: &str) -> Option<u32> {
     let start = error.find("Code: ")?;

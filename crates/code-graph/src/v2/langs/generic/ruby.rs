@@ -102,13 +102,9 @@ impl DslLanguage for RubyDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // obj.method or method(args) — explicit call node
             reference("call")
                 .name_from(field("method"))
                 .receiver("receiver"),
-            // Qualified constant reference: Foo::Bar::Baz used as a value
-            // (not as a scope definition). The full text is the ref name,
-            // resolved via scope_fqn_walk or GlobalName.
             reference("scope_resolution")
                 .name_from(text())
                 .when(!parent_is("scope_resolution").and(!parent_is("call"))),
@@ -199,7 +195,6 @@ impl DslLanguage for RubyDsl {
                 .branches(&["then", "else"])
                 .condition("condition"),
             branch("case").branches(&["when", "else"]),
-            // Ruby 3+ pattern matching: case x; in pattern; end
             branch("case_match").branches(&["in_clause", "else"]),
             branch("ternary")
                 .branches(&["consequence", "alternative"])
@@ -509,8 +504,6 @@ fn ruby_require_paths_match(import_path: &str, expected_path: &str) -> bool {
             .is_some_and(|prefix| prefix.ends_with('/'))
 }
 
-// ── Resolution rules ────────────────────────────────────────────
-
 pub struct RubyRules;
 
 impl HasRules for RubyRules {
@@ -725,7 +718,6 @@ mod tests {
             ["Lambda"],
             "TRIPLE must not also be a Constant"
         );
-        // A plain value constant still falls through to the Constant rule.
         assert_eq!(kinds("MAX"), ["Constant"]);
         // `Widget.new` is an ordinary constructor, not `Proc.new`.
         assert_eq!(kinds("BUILDER"), ["Constant"]);
@@ -760,12 +752,10 @@ mod tests {
             count_max, 2,
             "expected 2 MAX refs (RHS of `OTHER = MAX + 1`, and `@value < MAX`), got {count_max}: {ref_names:?}"
         );
-        // RHS Foo of `X = Foo` should produce a ref.
         assert!(
             ref_names.contains(&"Foo"),
             "RHS of `X = Foo` should ref Foo: {ref_names:?}"
         );
-        // Definitional positions must not show up as refs.
         let lhs_count = ref_names
             .iter()
             .filter(|n| **n == "OTHER" || **n == "X")

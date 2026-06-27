@@ -28,9 +28,6 @@ use crate::node::{Axis, Match, Node};
 use crate::source::Doc;
 use smallvec::SmallVec;
 
-// ── Core types ──────────────────────────────────────────────────
-
-/// A single navigation step: `(Axis, Match)`, required or optional.
 #[derive(Clone)]
 pub enum Step {
     /// Must succeed or pipeline returns None.
@@ -45,12 +42,9 @@ pub enum Step {
     Nth(Axis<'static>, Match<'static>, isize),
 }
 
-/// How to produce a string from the final node.
 #[derive(Clone)]
 pub enum Emit {
-    /// The node's full text.
     Text,
-    /// Nothing — used for navigation-only extracts (via `navigate()`).
     None,
     /// Try `field("name")`, then first child matching these kinds.
     Name(&'static [&'static str]),
@@ -61,7 +55,6 @@ pub enum Emit {
     /// For each outermost descendant matching `m`, run the inner pipeline.
     /// DFS stops recursing into a subtree once a node matches `m`.
     EachDescendant(Match<'static>, Box<Extract>),
-    /// A fixed constant string, ignoring the node.
     Const(&'static str),
     /// Evaluate each part against the origin node, drop empty results, and join
     /// survivors with `sep`. Assembles one string from several navigated values;
@@ -94,15 +87,12 @@ pub const IDENT_KINDS: &[&str] = &[
     "property_identifier",
 ];
 
-/// A pipeline: navigation steps + terminal extraction + text transforms.
 #[derive(Clone)]
 pub struct Extract {
     steps: SmallVec<[Step; 4]>,
     emit: Emit,
     transforms: SmallVec<[TextTransform; 1]>,
 }
-
-// ── Constructors ────────────────────────────────────────────────
 
 pub fn field(name: &'static str) -> Extract {
     Extract::from_step(Step::Nav(Axis::Field(name), Match::Any))
@@ -132,7 +122,6 @@ pub fn text() -> Extract {
     Extract::terminal(Emit::Text)
 }
 
-/// Always returns a fixed string, regardless of the node.
 pub fn constant(s: &'static str) -> Extract {
     Extract::terminal(Emit::Const(s))
 }
@@ -156,8 +145,6 @@ pub fn name_or_ident(ident_kinds: &'static [&'static str]) -> Extract {
     Extract::terminal(Emit::Name(ident_kinds))
 }
 
-// ── Chaining ────────────────────────────────────────────────────
-
 impl Extract {
     fn from_step(step: Step) -> Self {
         Self {
@@ -167,7 +154,6 @@ impl Extract {
         }
     }
 
-    /// Start a pipeline with a single required navigation step.
     pub fn one(axis: Axis<'static>, m: Match<'static>) -> Self {
         Self::from_step(Step::Nav(axis, m))
     }
@@ -185,7 +171,6 @@ impl Extract {
         self
     }
 
-    // Required steps
     pub fn field(self, name: &'static str) -> Self {
         self.push(Step::Nav(Axis::Field(name), Match::Any))
     }
@@ -218,7 +203,6 @@ impl Extract {
         self.push(Step::Nth(axis, m, n))
     }
 
-    // Optional steps (stay at current node on failure)
     pub fn try_field(self, name: &'static str) -> Self {
         self.push(Step::Try(Axis::Field(name), Match::Any))
     }
@@ -232,7 +216,6 @@ impl Extract {
         self.push(Step::Try(axis, m))
     }
 
-    // Filter (validate current node without navigating)
     pub fn where_(self, m: Match<'static>) -> Self {
         self.push(Step::Where(m))
     }
@@ -242,7 +225,6 @@ impl Extract {
         self.push(Step::WherePred(Box::new(p)))
     }
 
-    // Emit control
     pub fn or_default_name(mut self) -> Self {
         self.emit = Emit::Name(IDENT_KINDS);
         self
@@ -337,7 +319,6 @@ impl Extract {
         Extract::terminal(Emit::OrElse(Box::new(self), Box::new(alt)))
     }
 
-    // Composition
     pub fn inner(self, container: &'static str, target: &'static str) -> Self {
         self.try_child(container).try_descendant(target)
     }
@@ -348,8 +329,6 @@ impl Extract {
         self
     }
 }
-
-// ── Execution ───────────────────────────────────────────────────
 
 impl Extract {
     fn apply_tx(&self, mut s: String) -> String {
@@ -397,6 +376,8 @@ impl Extract {
         if s.is_empty() { None } else { Some(s) }
     }
 
+    /// The transform receives the *origin* node (not the navigated target),
+    /// so it can walk ancestors for scope or siblings for decorators.
     pub fn apply_with<D: Doc>(
         &self,
         node: &Node<'_, D>,
@@ -600,7 +581,6 @@ mod tests {
             .find(Axis::Descendant, Match::Kind("function_definition"))
             .unwrap();
 
-        // Extract the method name, then compute FQN from ancestors
         let fqn = field("name").apply_with(&method, |name, origin| {
             let mut scope = Vec::new();
             for ancestor in origin.parent_chain() {
@@ -671,7 +651,6 @@ mod tests {
         let root = SupportLang::Python.ast_grep(code);
         let cls = root.root().children().next().unwrap();
 
-        // Collect all function_definition names from the class body
         let methods = field("body")
             .collect(Match::Kind("function_definition"))
             .apply_all(&cls);
@@ -691,7 +670,6 @@ mod tests {
             .collect(Match::Kind("function_definition"))
             .apply_all_with(&cls, |method_text, origin| {
                 let cls_name = origin.field("name").unwrap().text().to_string();
-                // Just extract function name from the full text
                 let fn_name = method_text
                     .split('(')
                     .next()

@@ -31,6 +31,8 @@ pub struct GlobalIndexingRequest {
     pub dispatch_id: Uuid,
     #[serde(default)]
     pub campaign_id: Option<String>,
+    #[serde(default)]
+    pub targets: Vec<String>,
 }
 
 impl Event for GlobalIndexingRequest {
@@ -48,6 +50,8 @@ pub struct NamespaceIndexingRequest {
     pub dispatch_id: Uuid,
     #[serde(default)]
     pub campaign_id: Option<String>,
+    #[serde(default)]
+    pub targets: Vec<String>,
 }
 
 impl NamespaceIndexingRequest {
@@ -104,8 +108,6 @@ impl Event for CodeIndexingTaskRequest {
         Subscription::new(INDEXER_STREAM, CODE_INDEXING_TASK_SUBJECT_PATTERN)
     }
 }
-
-// --- Namespace deletion ---
 
 pub const NAMESPACE_DELETION_SUBJECT_PREFIX: &str = "sdlc.namespace.deletion.requested";
 pub const NAMESPACE_DELETION_SUBJECT_PATTERN: &str = "sdlc.namespace.deletion.requested.*";
