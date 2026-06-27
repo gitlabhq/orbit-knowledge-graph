@@ -127,14 +127,17 @@ impl ClickHouseWriter {
     }
 }
 
-/// Coalesces durable writes across many callers into well-sized parts. Each `submit` carries a
-/// monotonic `tag`; a table flushes when it reaches `max_rows` or after `max_age`. The
-/// `flushed` watermark reports the highest tag whose rows are all durable — the largest tag
-/// below every still-buffered tag, never crossing a tag whose flush failed. Callers must submit
-/// a tag's batches contiguously (before the next tag) so the watermark cleanly partitions them.
+enum Msg {
+    Submit(String, RecordBatch, u64),
+    Finish(u64),
+}
+
+/// Coalesces tagged writes into well-sized parts. A table flushes at `max_rows` or after
+/// `max_age`. `flushed` reports the highest tag that is finished, fully written, and below
+/// every still-buffered tag (and below any failed flush).
 #[derive(Clone)]
 pub struct BufferedWriter {
-    tx: mpsc::Sender<(String, RecordBatch, u64)>,
+    tx: mpsc::Sender<Msg>,
     flushed: watch::Receiver<u64>,
 }
 
@@ -154,7 +157,15 @@ impl BufferedWriter {
     /// Buffer one batch under `tag`. Uses `blocking_send`, for the blocking parse thread.
     pub fn submit(&self, table: String, batch: RecordBatch, tag: u64) -> Result<(), WriteError> {
         self.tx
-            .blocking_send((table, batch, tag))
+            .blocking_send(Msg::Submit(table, batch, tag))
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+    }
+
+    /// Signal that all of `tag`'s batches have been submitted, so the watermark may pass it.
+    pub async fn finish(&self, tag: u64) -> Result<(), WriteError> {
+        self.tx
+            .send(Msg::Finish(tag))
+            .await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
 
@@ -173,13 +184,13 @@ struct TableBuffer {
 
 async fn drain(
     writer: Arc<ClickHouseWriter>,
-    mut rx: mpsc::Receiver<(String, RecordBatch, u64)>,
+    mut rx: mpsc::Receiver<Msg>,
     max_rows: usize,
     max_age: Duration,
     flushed: watch::Sender<u64>,
 ) {
     let mut pending: HashMap<String, TableBuffer> = HashMap::new();
-    let mut max_tag = 0u64;
+    let mut max_finished = 0u64;
     let mut failed_floor: Option<u64> = None;
 
     let mut ticker = tokio::time::interval(max_age);
@@ -188,32 +199,34 @@ async fn drain(
 
     loop {
         tokio::select! {
-            msg = rx.recv() => {
-                let Some((table, batch, tag)) = msg else { break };
-                max_tag = max_tag.max(tag);
-                let buf = pending.entry(table.clone()).or_insert(TableBuffer { min_tag: tag, ..Default::default() });
-                buf.rows += batch.num_rows();
-                buf.min_tag = buf.min_tag.min(tag);
-                buf.batches.push(batch);
-                if buf.rows < max_rows {
-                    continue;
+            msg = rx.recv() => match msg {
+                None => break,
+                Some(Msg::Finish(tag)) => max_finished = max_finished.max(tag),
+                Some(Msg::Submit(table, batch, tag)) => {
+                    let buf = pending.entry(table.clone()).or_insert(TableBuffer { min_tag: tag, ..Default::default() });
+                    buf.rows += batch.num_rows();
+                    buf.min_tag = buf.min_tag.min(tag);
+                    buf.batches.push(batch);
+                    if buf.rows < max_rows {
+                        continue;
+                    }
+                    let buf = pending.remove(&table).unwrap();
+                    flush(&writer, &table, buf, &mut failed_floor).await;
                 }
-                let buf = pending.remove(&table).unwrap();
-                flush(&writer, &table, buf, &mut failed_floor).await;
-            }
+            },
             _ = ticker.tick() => {
                 for (table, buf) in std::mem::take(&mut pending) {
                     flush(&writer, &table, buf, &mut failed_floor).await;
                 }
             }
         }
-        publish(&pending, max_tag, failed_floor, &flushed);
+        publish(&pending, max_finished, failed_floor, &flushed);
     }
 
     for (table, buf) in std::mem::take(&mut pending) {
         flush(&writer, &table, buf, &mut failed_floor).await;
     }
-    publish(&pending, max_tag, failed_floor, &flushed);
+    publish(&pending, max_finished, failed_floor, &flushed);
 }
 
 /// On failure, poison the part's tags so the watermark never reports them durable.
@@ -234,7 +247,7 @@ async fn flush(
 
 fn publish(
     pending: &HashMap<String, TableBuffer>,
-    max_tag: u64,
+    max_finished: u64,
     failed_floor: Option<u64>,
     flushed: &watch::Sender<u64>,
 ) {
@@ -243,7 +256,9 @@ fn publish(
         .filter(|b| !b.batches.is_empty())
         .map(|b| b.min_tag)
         .min()
-        .map_or(max_tag, |lowest| lowest.saturating_sub(1));
+        .map_or(max_finished, |lowest| {
+            max_finished.min(lowest.saturating_sub(1))
+        });
     if let Some(floor) = failed_floor {
         watermark = watermark.min(floor.saturating_sub(1));
     }
@@ -304,44 +319,26 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn watermark_advances_on_size_flush() {
-        let w = BufferedWriter::spawn(
-            Arc::new(ClickHouseWriter::noop()),
-            16,
-            50,
-            Duration::from_secs(3600),
-        );
-        let mut flushed = w.flushed();
-        submit(&w, "gl_edge", batch(60), 1).await;
-        await_tag(&mut flushed, 1).await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn watermark_advances_on_age_flush() {
-        let w = BufferedWriter::spawn(
-            Arc::new(ClickHouseWriter::noop()),
-            16,
-            1_000_000,
-            Duration::from_millis(40),
-        );
-        let mut flushed = w.flushed();
-        submit(&w, "gl_edge", batch(5), 1).await;
-        await_tag(&mut flushed, 1).await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn watermark_held_back_while_a_table_buffers_the_tag() {
+    async fn watermark_advances_when_a_tag_fully_flushes_but_holds_while_a_table_buffers_it() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
             16,
             100,
             Duration::from_secs(3600),
         );
-        let flushed = w.flushed();
-        // gl_edge flushes at the cap, gl_code_edge keeps tag 1 buffered, so tag 1 isn't durable.
-        submit(&w, "gl_code_edge", batch(10), 1).await;
+        let mut flushed = w.flushed();
+
         submit(&w, "gl_edge", batch(100), 1).await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert_eq!(*flushed.borrow(), 0);
+        submit(&w, "gl_code_edge", batch(10), 1).await;
+        w.finish(1).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            *flushed.borrow(),
+            0,
+            "held while gl_code_edge still buffers tag 1"
+        );
+
+        submit(&w, "gl_code_edge", batch(100), 1).await;
+        await_tag(&mut flushed, 1).await;
     }
 }

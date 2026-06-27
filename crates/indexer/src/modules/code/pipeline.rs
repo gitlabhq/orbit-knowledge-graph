@@ -255,7 +255,7 @@ impl CodeIndexingPipeline {
 
         let seq = indexing_result?;
 
-        // Registered, not written: the durable-checkpoint task writes it once seq's flush lands.
+        // Insert before finish() so the watermark can't pass seq before its checkpoint is mapped.
         self.checkpoints.lock().insert(
             seq,
             CodeIndexingCheckpoint {
@@ -267,6 +267,10 @@ impl CodeIndexingPipeline {
                 indexed_at,
             },
         );
+        self.writer
+            .finish(seq)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("buffered writer closed: {e}")))?;
 
         Ok(IndexOutcome::Indexed)
     }
