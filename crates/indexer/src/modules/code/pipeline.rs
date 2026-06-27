@@ -156,6 +156,7 @@ impl CodeIndexingPipeline {
             pipeline_config.write_channel_capacity,
             pipeline_config.write_slice_rows,
             pipeline_config.write_buffer_age(),
+            pipeline_config.write_max_concurrent,
         );
         Self {
             resolver,

@@ -8,6 +8,7 @@ use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tracing::warn;
 
 use crate::durability::WriteDurability;
@@ -158,9 +159,16 @@ impl BufferedWriter {
         channel_capacity: usize,
         max_rows: usize,
         max_age: Duration,
+        max_concurrent: usize,
     ) -> Self {
         let (tx, rx) = mpsc::channel(channel_capacity.max(1));
-        tokio::spawn(drain(writer, rx, max_rows.max(1), max_age));
+        tokio::spawn(drain(
+            writer,
+            rx,
+            max_rows.max(1),
+            max_age,
+            max_concurrent.max(1),
+        ));
         Self { tx }
     }
 
@@ -203,8 +211,14 @@ async fn drain(
     mut rx: mpsc::Receiver<Msg>,
     max_rows: usize,
     max_age: Duration,
+    max_concurrent: usize,
 ) {
     let mut pending: HashMap<String, TableBuffer> = HashMap::new();
+    let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+    // Parts write concurrently and may land out of order. That is safe: the edge tables are
+    // ReplacingMergeTree keyed by row identity + `_version`, and stale cleanup keys on
+    // `indexed_at`, so neither correctness nor dedup depends on insert order.
+    let mut writes = JoinSet::new();
 
     let mut ticker = tokio::time::interval(max_age);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -216,8 +230,9 @@ async fn drain(
                 None => break,
                 Some(Msg::Flush(ack)) => {
                     for (table, buf) in std::mem::take(&mut pending) {
-                        write_part(&writer, &table, buf).await;
+                        spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
+                    while writes.join_next().await.is_some() {}
                     let _ = ack.send(());
                 }
                 Some(Msg::Submit(table, batch, token)) => {
@@ -227,21 +242,42 @@ async fn drain(
                     buf.tokens.push(token);
                     if buf.rows >= max_rows {
                         let buf = pending.remove(&table).unwrap();
-                        write_part(&writer, &table, buf).await;
+                        spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
                 }
             },
             _ = ticker.tick() => {
                 for (table, buf) in std::mem::take(&mut pending) {
-                    write_part(&writer, &table, buf).await;
+                    spawn_write(&mut writes, &sem, &writer, table, buf);
                 }
             }
+            // Reap finished writes so the JoinSet does not grow unbounded between flushes.
+            Some(_) = writes.join_next(), if !writes.is_empty() => {}
         }
     }
 
     for (table, buf) in std::mem::take(&mut pending) {
-        write_part(&writer, &table, buf).await;
+        spawn_write(&mut writes, &sem, &writer, table, buf);
     }
+    while writes.join_next().await.is_some() {}
+}
+
+/// Spawn one coalesced part write, bounded by `sem` to `max_concurrent` in flight.
+fn spawn_write(
+    writes: &mut JoinSet<()>,
+    sem: &Arc<tokio::sync::Semaphore>,
+    writer: &Arc<ClickHouseWriter>,
+    table: String,
+    buf: TableBuffer,
+) {
+    let (writer, sem) = (writer.clone(), sem.clone());
+    writes.spawn(async move {
+        let _permit = sem
+            .acquire_owned()
+            .await
+            .expect("write semaphore never closes");
+        write_part(&writer, &table, buf).await;
+    });
 }
 
 /// Write one coalesced part, then notify every batch's token of the outcome. A single part can
@@ -319,6 +355,7 @@ mod tests {
             16,
             100,
             Duration::from_secs(3600),
+            1,
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -332,6 +369,27 @@ mod tests {
         // An explicit flush drains gl_code_edge, notifying the second batch.
         w.flush().await.unwrap();
         assert_eq!(token.flushed.load(Ordering::SeqCst), 2);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn flush_waits_for_concurrent_in_flight_writes() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            64,
+            100,
+            Duration::from_secs(3600),
+            4,
+        );
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+
+        // Each batch crosses max_rows on its own table, so all four spawn concurrent writes.
+        for table in ["a", "b", "c", "d"] {
+            submit(&w, table, batch(100), token.clone()).await;
+        }
+
+        w.flush().await.unwrap();
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 4);
         assert_eq!(token.failed.load(Ordering::SeqCst), 0);
     }
 }

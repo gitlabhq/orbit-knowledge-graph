@@ -83,6 +83,7 @@
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
               "write_channel_capacity": 8,
+              "write_max_concurrent": 4,
               "write_slice_rows": 500000
             }
           },
@@ -515,6 +516,13 @@
           "default": 8,
           "minimum": 0
         },
+        "write_max_concurrent": {
+          "description": "Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput. Defaults to 4.",
+          "type": "integer",
+          "format": "uint",
+          "default": 4,
+          "minimum": 0
+        },
         "write_slice_rows": {
           "description": "Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.",
           "type": "integer",
@@ -548,6 +556,7 @@
             "worker_threads": 0,
             "write_buffer_age_secs": 60,
             "write_channel_capacity": 8,
+            "write_max_concurrent": 4,
             "write_slice_rows": 500000
           }
         }
@@ -650,6 +659,7 @@
                 "worker_threads": 0,
                 "write_buffer_age_secs": 60,
                 "write_channel_capacity": 8,
+                "write_max_concurrent": 4,
                 "write_slice_rows": 500000
               }
             },
@@ -902,6 +912,7 @@
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
               "write_channel_capacity": 8,
+              "write_max_concurrent": 4,
               "write_slice_rows": 500000
             }
           }
