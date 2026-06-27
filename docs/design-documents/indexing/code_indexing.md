@@ -284,7 +284,7 @@ The graph is converted to Apache Arrow record batches and written to six ClickHo
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
-##### Cross-project write coalescing (backfill)
+##### Cross-project write coalescing
 
 The edge tables (`gl_code_edge`, `gl_edge`) are unpartitioned `ReplacingMergeTree`s, so every project's inserts share one part budget. During a full reindex the long tail of tiny repositories (most projects emit fewer than 500 edges) would otherwise produce one small part per table per project, outrunning ClickHouse merges until part-count backpressure throttles inserts.
 
@@ -292,7 +292,7 @@ To avoid this, all code jobs stream their edges into one process-wide write sink
 
 Concurrency is split into two lanes by post-filter file count: a wide lane (`small_indexing_slots`, default 6) for the small-repo tail and a reserved lane (`big_indexing_slots`, default 2) so a flood of small repositories cannot starve monorepos.
 
-A project's rows are durable only once the coalescer flushes them. After each successful flush the coalescer advances a watermark to the highest seq with no row still buffered; the handler waits for the watermark to reach its seq before checkpointing. While waiting it heartbeats the NATS lease and renews its per-project lock every `write_buffer_heartbeat_secs` (default 90), both safely below `nats.ack_wait_secs`. This wait sits outside the per-job wall-clock timeout, since flush latency depends on other projects rather than this job's own work. A failed flush never advances the watermark, so the contributing projects do not checkpoint and are redelivered independently.
+The sink owns checkpointing. A handler streams its batches, hands the sink its checkpoint, and returns — it does not wait for the write. The sink writes a project's checkpoint only after the flush that makes the project's rows durable across every table it touched, tracked by the lowest sequence number still buffered. If the process dies before that flush, the project is simply never checkpointed, and the once-a-minute backfill sweep re-dispatches it (re-indexing is idempotent). A failed flush is logged and the checkpoint is likewise never written, so the project is re-indexed. This trades a small window of redone work on a crash for a far simpler write path: no durability handshake, no lease heartbeat, no lock renewal.
 
 Parts that span many namespaces are safe to query: the edge sort key is `(traversal_path, relationship_kind, …)`, so ClickHouse still prunes by primary key within a mixed part.
 

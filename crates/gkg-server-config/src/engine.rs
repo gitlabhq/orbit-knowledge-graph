@@ -275,10 +275,6 @@ fn default_code_indexing_write_buffer_age_secs() -> u64 {
     60
 }
 
-fn default_code_indexing_write_buffer_heartbeat_secs() -> u64 {
-    90
-}
-
 fn default_code_indexing_small_repo_max_files() -> usize {
     650
 }
@@ -341,11 +337,6 @@ pub struct CodeIndexingPipelineConfig {
     /// stay below `nats.ack_wait_secs`. Defaults to 60.
     #[serde(default = "default_code_indexing_write_buffer_age_secs")]
     pub write_buffer_age_secs: u64,
-    /// While a project waits for its flush, the handler heartbeats the NATS lease and renews
-    /// its per-project lock on this interval. Must stay below `nats.ack_wait_secs`. Defaults
-    /// to 90.
-    #[serde(default = "default_code_indexing_write_buffer_heartbeat_secs")]
-    pub write_buffer_heartbeat_secs: u64,
     /// Post-filter file-count cutoff: a repository with at most this many indexed files runs
     /// on the wide small lane, above it on the reserved big lane. Defaults to 650.
     #[serde(default = "default_code_indexing_small_repo_max_files")]
@@ -377,7 +368,6 @@ impl Default for CodeIndexingPipelineConfig {
             write_channel_capacity: default_code_indexing_write_channel_capacity(),
             write_slice_rows: default_code_indexing_write_slice_rows(),
             write_buffer_age_secs: default_code_indexing_write_buffer_age_secs(),
-            write_buffer_heartbeat_secs: default_code_indexing_write_buffer_heartbeat_secs(),
             small_repo_max_files: default_code_indexing_small_repo_max_files(),
             small_indexing_slots: default_code_indexing_small_indexing_slots(),
             big_indexing_slots: default_code_indexing_big_indexing_slots(),
@@ -393,10 +383,6 @@ impl CodeIndexingPipelineConfig {
 
     pub fn write_buffer_age(&self) -> Duration {
         Duration::from_secs(self.write_buffer_age_secs.max(1))
-    }
-
-    pub fn write_buffer_heartbeat(&self) -> Duration {
-        Duration::from_secs(self.write_buffer_heartbeat_secs.max(1))
     }
 }
 

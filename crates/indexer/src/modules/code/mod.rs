@@ -15,6 +15,7 @@ pub mod repository;
 mod stale_data_cleaner;
 #[cfg(test)]
 pub(crate) mod test_helpers;
+mod write_sink;
 
 use std::sync::Arc;
 
@@ -31,6 +32,7 @@ use metrics::CodeMetrics;
 use repository::RepositoryResolver;
 
 pub use checkpoint::ClickHouseCodeCheckpointStore;
+pub(crate) use checkpoint::CodeCheckpointStore;
 pub use handler::CodeIndexingTaskHandler;
 pub use pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use repository::{
@@ -38,6 +40,7 @@ pub use repository::{
     RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
+pub use write_sink::CodeWriteSink;
 
 pub async fn register_handlers(
     registry: &HandlerRegistry,
@@ -93,8 +96,9 @@ pub async fn register_handlers(
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
     let pipeline_config = code_indexing_task_config.pipeline.clone();
-    let sink = crate::clickhouse::CodeWriteSink::new(
+    let sink = write_sink::CodeWriteSink::new(
         writer,
+        Arc::clone(&checkpoint_store),
         pipeline_config.write_channel_capacity,
         pipeline_config.write_slice_rows,
         pipeline_config.write_buffer_age(),
@@ -125,7 +129,6 @@ pub async fn register_handlers(
         Arc::clone(&checkpoint_store),
         metrics,
         config.nats.ack_wait(),
-        code_indexing_task_config.pipeline.write_buffer_heartbeat(),
         subscription,
         analytics,
     )));

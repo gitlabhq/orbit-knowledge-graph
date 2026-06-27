@@ -82,7 +82,6 @@
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
-              "write_buffer_heartbeat_secs": 90,
               "write_channel_capacity": 8,
               "write_slice_rows": 500000
             }
@@ -509,13 +508,6 @@
           "default": 60,
           "minimum": 0
         },
-        "write_buffer_heartbeat_secs": {
-          "description": "While a project waits for its flush, the handler heartbeats the NATS lease and renews\nits per-project lock on this interval. Must stay below `nats.ack_wait_secs`. Defaults\nto 90.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 90,
-          "minimum": 0
-        },
         "write_channel_capacity": {
           "description": "In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.",
           "type": "integer",
@@ -555,7 +547,6 @@
             "small_repo_max_files": 650,
             "worker_threads": 0,
             "write_buffer_age_secs": 60,
-            "write_buffer_heartbeat_secs": 90,
             "write_channel_capacity": 8,
             "write_slice_rows": 500000
           }
@@ -658,7 +649,6 @@
                 "small_repo_max_files": 650,
                 "worker_threads": 0,
                 "write_buffer_age_secs": 60,
-                "write_buffer_heartbeat_secs": 90,
                 "write_channel_capacity": 8,
                 "write_slice_rows": 500000
               }
@@ -911,7 +901,6 @@
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
-              "write_buffer_heartbeat_secs": 90,
               "write_channel_capacity": 8,
               "write_slice_rows": 500000
             }

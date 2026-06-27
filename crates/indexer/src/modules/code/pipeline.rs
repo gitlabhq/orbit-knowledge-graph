@@ -28,10 +28,9 @@ pub struct IndexingRequest {
 
 /// Terminal outcome of `CodeIndexingPipeline::index_project`.
 pub enum IndexOutcome {
-    /// Repository parsed and buffered into the shared coalescer. Rows are durable only once
-    /// the flush watermark reaches `seq`; the handler awaits that (heartbeating the lease,
-    /// renewing the lock) before writing `checkpoint`.
-    Indexed(PendingFlush),
+    /// Repository parsed and streamed into the shared write sink. Its checkpoint is handed to
+    /// the sink and written once the flush makes its rows durable; the handler does not wait.
+    Indexed,
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
 }
@@ -39,22 +38,15 @@ pub enum IndexOutcome {
 impl IndexOutcome {
     pub fn metric_label(&self) -> &'static str {
         match self {
-            IndexOutcome::Indexed(_) => "indexed",
+            IndexOutcome::Indexed => "indexed",
             IndexOutcome::EmptyRepository => "empty_repository",
         }
     }
 }
 
-/// A project waiting for its shared-buffer flush to make its rows durable.
-pub struct PendingFlush {
-    pub seq: u64,
-    pub watermark: tokio::sync::watch::Receiver<u64>,
-    pub checkpoint: CodeIndexingCheckpoint,
-}
-
 pub struct CodeIndexingPipeline {
     resolver: RepositoryResolver,
-    sink: Arc<crate::clickhouse::CodeWriteSink>,
+    sink: Arc<super::write_sink::CodeWriteSink>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -75,7 +67,7 @@ impl CodeIndexingPipeline {
     )]
     pub fn new(
         resolver: RepositoryResolver,
-        sink: Arc<crate::clickhouse::CodeWriteSink>,
+        sink: Arc<super::write_sink::CodeWriteSink>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
@@ -178,15 +170,20 @@ impl CodeIndexingPipeline {
                 self.metrics
                     .record_empty_repository(reason.as_metric_label());
                 self.metrics.record_fetch_duration(fetch_start.elapsed());
-                self.set_checkpoint(&CodeIndexingCheckpoint {
-                    traversal_path: request.traversal_path.clone(),
-                    project_id: request.project_id,
-                    branch: request.branch.clone(),
-                    last_task_id: request.task_id,
-                    last_commit: None,
-                    indexed_at: Utc::now(),
-                })
-                .await?;
+                // No rows to flush, so the checkpoint is durable immediately and written here
+                // rather than through the sink.
+                self.checkpoint_store
+                    .set_checkpoint(&CodeIndexingCheckpoint {
+                        traversal_path: request.traversal_path.clone(),
+                        project_id: request.project_id,
+                        branch: request.branch.clone(),
+                        last_task_id: request.task_id,
+                        last_commit: None,
+                        indexed_at: Utc::now(),
+                    })
+                    .await
+                    .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
+                    .record_error_stage(&self.metrics, "checkpoint")?;
                 return Ok(IndexOutcome::EmptyRepository);
             }
             Err(ResolveError::Other(err)) => {
@@ -242,41 +239,25 @@ impl CodeIndexingPipeline {
 
         let seq = indexing_result?;
 
-        Ok(IndexOutcome::Indexed(PendingFlush {
-            seq,
-            watermark: self.sink.subscribe(),
-            checkpoint: CodeIndexingCheckpoint {
-                traversal_path: request.traversal_path.clone(),
-                project_id: request.project_id,
-                branch: request.branch.clone(),
-                last_task_id: request.task_id,
-                last_commit: request.commit_sha.clone(),
-                indexed_at,
-            },
-        }))
-    }
-
-    /// Write a checkpoint after a project's rows are durable. Exposed so the handler can
-    /// checkpoint buffered projects once the flush watermark passes their seq.
-    pub async fn set_checkpoint(
-        &self,
-        checkpoint: &CodeIndexingCheckpoint,
-    ) -> Result<(), HandlerError> {
-        self.checkpoint_store
-            .set_checkpoint(checkpoint)
+        // Hand the checkpoint to the sink; it is written once the flush makes this project's
+        // rows durable. The handler does not wait — on a crash before flush the project is
+        // simply never checkpointed and the backfill sweep re-indexes it.
+        self.sink
+            .finish(
+                seq,
+                CodeIndexingCheckpoint {
+                    traversal_path: request.traversal_path.clone(),
+                    project_id: request.project_id,
+                    branch: request.branch.clone(),
+                    last_task_id: request.task_id,
+                    last_commit: request.commit_sha.clone(),
+                    indexed_at,
+                },
+            )
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
-            .record_error_stage(&self.metrics, "checkpoint")?;
+            .map_err(|e| HandlerError::Processing(format!("code write sink closed: {e}")))?;
 
-        info!(
-            project_id = checkpoint.project_id,
-            branch = %checkpoint.branch,
-            commit = ?checkpoint.last_commit,
-            task_id = checkpoint.last_task_id,
-            "completed code indexing"
-        );
-
-        Ok(())
+        Ok(IndexOutcome::Indexed)
     }
 
     #[allow(
