@@ -20,6 +20,7 @@ use crate::v2::langs::generic::lua::{LuaDsl, LuaRules};
 use crate::v2::langs::generic::php::{PhpDsl, PhpRules};
 use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
+use crate::v2::langs::generic::scala::{ScalaDsl, ScalaRules};
 use crate::v2::langs::generic::swift::{SwiftDsl, SwiftRules};
 use std::sync::Arc;
 
@@ -107,6 +108,7 @@ register_v2_pipelines! {
     Python  => [GenericPipeline<PythonDsl, PythonRules>],
     Java    => [GenericPipeline<JavaDsl, JavaRules>],
     Kotlin  => [GenericPipeline<KotlinDsl, KotlinRules>],
+    Scala   => [GenericPipeline<ScalaDsl, ScalaRules>],
     CSharp  => [GenericPipeline<CSharpDsl, CSharpRules>],
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Elixir  => [GenericPipeline<ElixirDsl, ElixirRules>],
