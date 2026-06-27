@@ -298,5 +298,6 @@ async fn data_correctness() {
         traversal_scoping::multiple_anchors_apply_distinct_traversal_paths,
         traversal_scoping::scope_implied_container_elision_star_counts_authored_mrs,
         traversal_scoping::scope_implied_container_elision_chain_counts_diff_files,
+        traversal_scoping::code_intel_calls_scoped_traversal_is_lossless,
     );
 }

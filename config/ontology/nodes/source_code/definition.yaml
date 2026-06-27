@@ -24,6 +24,10 @@ properties:
     nullable: false
     mutable: false
     description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_definition
+      key_column: id
 
   traversal_path:
     type: string

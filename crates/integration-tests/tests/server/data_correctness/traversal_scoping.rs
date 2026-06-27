@@ -342,3 +342,55 @@ pub(super) async fn cross_namespace_has_label_returns_cross_group_label(ctx: &Te
     resp.assert_edge_set("HAS_LABEL", &[(4000, 7000), (4000, 7001), (4001, 7002)]);
     resp.assert_referential_integrity();
 }
+
+const CODE_CALLS_CHAIN: &str = r#"{
+    "query_type": "traversal",
+    "nodes": [
+        {"id": "caller", "entity": "Definition"},
+        {"id": "def", "entity": "Definition", "node_ids": [12000]}
+    ],
+    "relationships": [{"type": "CALLS", "from": "caller", "to": "def"}],
+    "limit": 50
+}"#;
+
+fn assert_code_calls_chain(resp: &ResponseView) {
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Definition", &[12000, 12001]);
+    resp.assert_edge_set("CALLS", &[(12001, 12000)]);
+    resp.assert_referential_integrity();
+}
+
+pub(super) async fn code_intel_calls_scoped_traversal_is_lossless(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
+         (12000, '1/100/1000/', 1000, 'main', 'abc', 'src/a.rs', 'A#callee', 'callee', 'Method', 10, 12, 0, 0, 0, 0),
+         (12001, '1/100/1000/', 1000, 'main', 'abc', 'src/b.rs', 'B#caller', 'caller', 'Method', 20, 25, 0, 0, 0, 0)",
+        t("gl_definition")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1000/', 1000, 'main', 12001, 'Definition', 'CALLS', 12000, 'Definition', [], [])",
+        t("gl_code_edge")
+    ))
+    .await;
+    ctx.optimize_all().await;
+
+    let broad = run_query_with_security(
+        ctx,
+        CODE_CALLS_CHAIN,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+    )
+    .await;
+    assert_code_calls_chain(&broad);
+
+    let scoped_resp = run_query_with_security(
+        ctx,
+        CODE_CALLS_CHAIN,
+        &allow_all(),
+        scoped("1/", &[("caller", "1/100/1000/"), ("def", "1/100/1000/")]),
+    )
+    .await;
+    assert_code_calls_chain(&scoped_resp);
+}

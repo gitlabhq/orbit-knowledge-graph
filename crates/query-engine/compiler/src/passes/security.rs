@@ -78,12 +78,21 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
             let min_role = ontology
                 .min_access_level_for_table(table)
                 .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-            let broad = build_path_filter(alias, &ctx.paths_at_least(min_role));
+            let eligible = ctx.paths_at_least(min_role);
+            // Inject the resolved scope prefix as the alias's authorization filter
+            // when it sits within an eligible path; otherwise the broad path set.
             match ctx.scope_prefixes.get(alias) {
-                Some(prefix) if ontology.is_table_path_scopable(table) => {
-                    Expr::and(broad, starts_with_expr(alias, prefix))
+                Some(prefix)
+                    if ontology.is_table_path_scopable(table)
+                        && eligible.iter().any(|p| prefix.starts_with(p)) =>
+                {
+                    starts_with_expr(alias, prefix)
                 }
-                _ => broad,
+                Some(prefix) if ontology.is_table_path_scopable(table) => Expr::and(
+                    build_path_filter(alias, &eligible),
+                    starts_with_expr(alias, prefix),
+                ),
+                _ => build_path_filter(alias, &eligible),
             }
         });
         q.where_clause = Expr::and_all(
@@ -862,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_prefix_ands_tight_filter_on_scoped_alias_only() {
+    fn scope_prefix_replaces_broad_on_scoped_alias() {
         let mut prefixes = std::collections::HashMap::new();
         prefixes.insert("p".to_string(), "1/24/23/".to_string());
         let ctx = SecurityContext::new(1, vec!["1/".into()])
@@ -893,13 +902,43 @@ mod tests {
         let where_clause = q.where_clause.as_ref().unwrap();
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "p"),
-            vec!["1/".to_string(), "1/24/23/".to_string()],
-            "scoped alias keeps broad authz AND the tight prefix"
+            vec!["1/24/23/".to_string()],
+            "scoped alias is injected with the tight prefix as its only auth filter"
         );
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "wi"),
             vec!["1/".to_string()],
-            "neighbor alias gets broad authz only, never the tight prefix"
+            "unscoped alias gets the broad authz set"
+        );
+    }
+
+    #[test]
+    fn scope_prefix_below_role_floor_keeps_broad() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let mut prefixes = std::collections::HashMap::new();
+        prefixes.insert("v".to_string(), "1/100/200/".to_string());
+        let ctx = SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)])
+            .unwrap()
+            .with_scope_prefixes(prefixes);
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("v", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_vulnerability", "v"),
+            limit: Some(10),
+            ..Default::default()
+        }));
+        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let where_sql = format!("{:?}", q.where_clause);
+        assert!(
+            where_sql.contains("Bool") && where_sql.contains("false"),
+            "a prefix below the entity role floor must keep the role-filtered (dead) broad filter: {where_sql}"
         );
     }
 

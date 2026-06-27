@@ -113,17 +113,16 @@ fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> 
             if !has_column {
                 return false;
             }
-            // The path literal must be a prefix of at least one SecurityContext path.
-            // This covers both exact paths ("42/43/") and the lowest-common-prefix ("42/").
+            // Accept a path that is a prefix of (broad/LCP) or a descendant of
+            // (tight scope prefix) an authorized path; both stay within scope.
             args.iter().any(|a| match a {
                 Expr::Literal(Value::String(path))
                 | Expr::Param {
                     value: Value::String(path),
                     ..
-                } => ctx
-                    .traversal_paths
-                    .iter()
-                    .any(|tp| tp.path.starts_with(path.as_str())),
+                } => ctx.traversal_paths.iter().any(|tp| {
+                    tp.path.starts_with(path.as_str()) || path.starts_with(tp.path.as_str())
+                }),
                 _ => false,
             })
         }
