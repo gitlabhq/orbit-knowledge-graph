@@ -401,10 +401,9 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let sink = crate::testkit::test_write_sink(checkpoint_store.clone());
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
-                sink,
+                crate::testkit::test_writer(),
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),

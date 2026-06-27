@@ -1,10 +1,13 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use parking_lot::Mutex;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
@@ -14,6 +17,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
+use crate::clickhouse::{BufferedWriter, ClickHouseWriter};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -45,7 +49,9 @@ impl IndexOutcome {
 
 pub struct CodeIndexingPipeline {
     resolver: RepositoryResolver,
-    sink: Arc<super::write_sink::CodeWriteSink>,
+    writer: BufferedWriter,
+    seq: AtomicU64,
+    checkpoints: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -66,7 +72,7 @@ impl CodeIndexingPipeline {
     )]
     pub fn new(
         resolver: RepositoryResolver,
-        sink: Arc<super::write_sink::CodeWriteSink>,
+        writer: Arc<ClickHouseWriter>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
@@ -77,9 +83,23 @@ impl CodeIndexingPipeline {
         let fc = pipeline_config.fetch_concurrency;
         let small = pipeline_config.small_indexing_slots;
         let big = pipeline_config.big_indexing_slots;
+        let writer = BufferedWriter::spawn(
+            writer,
+            pipeline_config.write_channel_capacity,
+            pipeline_config.write_slice_rows,
+            pipeline_config.write_buffer_age(),
+        );
+        let checkpoints = Arc::new(Mutex::new(BTreeMap::new()));
+        tokio::spawn(write_durable_checkpoints(
+            writer.flushed(),
+            checkpoints.clone(),
+            checkpoint_store.clone(),
+        ));
         Self {
             resolver,
-            sink,
+            writer,
+            seq: AtomicU64::new(1),
+            checkpoints,
             checkpoint_store,
             stale_data_cleaner,
             metrics,
@@ -235,21 +255,18 @@ impl CodeIndexingPipeline {
 
         let seq = indexing_result?;
 
-        // The sink writes this checkpoint after the flush makes the rows durable; we don't wait.
-        self.sink
-            .finish(
-                seq,
-                CodeIndexingCheckpoint {
-                    traversal_path: request.traversal_path.clone(),
-                    project_id: request.project_id,
-                    branch: request.branch.clone(),
-                    last_task_id: request.task_id,
-                    last_commit: request.commit_sha.clone(),
-                    indexed_at,
-                },
-            )
-            .await
-            .map_err(|e| HandlerError::Processing(format!("code write sink closed: {e}")))?;
+        // Registered, not written: the durable-checkpoint task writes it once seq's flush lands.
+        self.checkpoints.lock().insert(
+            seq,
+            CodeIndexingCheckpoint {
+                traversal_path: request.traversal_path.clone(),
+                project_id: request.project_id,
+                branch: request.branch.clone(),
+                last_task_id: request.task_id,
+                last_commit: request.commit_sha.clone(),
+                indexed_at,
+            },
+        );
 
         Ok(IndexOutcome::Indexed)
     }
@@ -355,8 +372,8 @@ impl CodeIndexingPipeline {
             self.table_names.clone(),
         ));
 
-        let seq = self.sink.next_seq();
-        let sink = self.sink.clone();
+        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        let writer = self.writer.clone();
         let max_rows = self.pipeline_config.write_slice_rows.max(1);
         let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new(
             move |table: &str, batch: arrow::record_batch::RecordBatch| {
@@ -364,7 +381,8 @@ impl CodeIndexingPipeline {
                 let mut offset = 0;
                 while offset < batch.num_rows() {
                     let len = (batch.num_rows() - offset).min(max_rows);
-                    sink.submit(table.clone(), batch.slice(offset, len), seq)
+                    writer
+                        .submit(table.clone(), batch.slice(offset, len), seq)
                         .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
                     offset += len;
                 }
@@ -538,6 +556,43 @@ impl CodeIndexingPipeline {
     }
 }
 
+/// Writes each registered checkpoint once the buffered-writer watermark reaches its seq, so a
+/// project is only checkpointed after its rows are durable.
+async fn write_durable_checkpoints(
+    mut flushed: watch::Receiver<u64>,
+    checkpoints: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
+    store: Arc<dyn CodeCheckpointStore>,
+) {
+    loop {
+        let watermark = *flushed.borrow_and_update();
+        loop {
+            let next = {
+                let mut map = checkpoints.lock();
+                match map.keys().next().copied() {
+                    Some(seq) if seq <= watermark => map.remove(&seq),
+                    _ => None,
+                }
+            };
+            let Some(checkpoint) = next else { break };
+            match store.set_checkpoint(&checkpoint).await {
+                Ok(()) => info!(
+                    project_id = checkpoint.project_id,
+                    task_id = checkpoint.last_task_id,
+                    "completed code indexing"
+                ),
+                Err(e) => warn!(
+                    project_id = checkpoint.project_id,
+                    error = %e,
+                    "failed to checkpoint code indexing; project will be re-indexed",
+                ),
+            }
+        }
+        if flushed.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
 fn sem(n: usize) -> Option<Arc<Semaphore>> {
     (n > 0).then(|| Arc::new(Semaphore::new(n)))
 }
@@ -554,5 +609,67 @@ async fn acquire(
             .map(Some)
             .map_err(|e| HandlerError::Processing(format!("{name} slot closed: {e}"))),
         None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modules::code::checkpoint::test_utils::MockCodeCheckpointStore;
+    use chrono::Utc;
+    use std::time::Duration;
+
+    fn checkpoint(project_id: i64) -> CodeIndexingCheckpoint {
+        CodeIndexingCheckpoint {
+            traversal_path: format!("1/{project_id}/"),
+            project_id,
+            branch: "main".into(),
+            last_task_id: project_id,
+            last_commit: None,
+            indexed_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn checkpoints_only_seqs_at_or_below_the_watermark() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let checkpoints = Arc::new(Mutex::new(BTreeMap::new()));
+        checkpoints.lock().insert(1, checkpoint(1));
+        checkpoints.lock().insert(2, checkpoint(2));
+        let (tx, rx) = watch::channel(0u64);
+        let task = tokio::spawn(write_durable_checkpoints(rx, checkpoints, store.clone()));
+
+        tx.send(1).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while store
+                .get_checkpoint("1/1/", 1, "main")
+                .await
+                .unwrap()
+                .is_none()
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            store
+                .get_checkpoint("1/2/", 2, "main")
+                .await
+                .unwrap()
+                .is_none(),
+            "seq 2 is above the watermark and must wait",
+        );
+
+        tx.send(2).unwrap();
+        drop(tx);
+        task.await.unwrap();
+        assert!(
+            store
+                .get_checkpoint("1/2/", 2, "main")
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 }

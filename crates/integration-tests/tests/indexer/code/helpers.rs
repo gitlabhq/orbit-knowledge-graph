@@ -80,17 +80,10 @@ impl CodeIndexingDeps {
             )
             .expect("writer must build"),
         );
-        let sink = indexer::modules::code::CodeWriteSink::new(
-            writer,
-            Arc::clone(&checkpoint_store) as _,
-            pipeline_config.write_channel_capacity,
-            pipeline_config.write_slice_rows,
-            pipeline_config.write_buffer_age(),
-        );
 
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
-            sink,
+            writer,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
@@ -132,16 +125,9 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
         let config = CodeIndexingPipelineConfig::default();
-        let sink = indexer::modules::code::CodeWriteSink::new(
-            writer,
-            Arc::clone(&self.checkpoint_store) as _,
-            config.write_channel_capacity,
-            config.write_slice_rows,
-            config.write_buffer_age(),
-        );
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
-            sink,
+            writer,
             Arc::clone(&self.checkpoint_store) as _,
             stale_data_cleaner,
             self.metrics.clone(),

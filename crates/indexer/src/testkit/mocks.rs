@@ -126,18 +126,6 @@ pub fn test_writer() -> Arc<crate::clickhouse::ClickHouseWriter> {
     Arc::new(crate::clickhouse::ClickHouseWriter::noop())
 }
 
-pub fn test_write_sink(
-    checkpoint_store: Arc<dyn crate::modules::code::CodeCheckpointStore>,
-) -> Arc<crate::modules::code::CodeWriteSink> {
-    crate::modules::code::CodeWriteSink::new(
-        test_writer(),
-        checkpoint_store,
-        8,
-        500_000,
-        std::time::Duration::from_secs(60),
-    )
-}
-
 /// Mock handler for testing.
 pub struct MockHandler {
     name: String,
