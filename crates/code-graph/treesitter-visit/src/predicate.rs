@@ -97,6 +97,20 @@ pub fn has_child_text(text: &'static str) -> Pred {
     exists(extract::child_of_text(text))
 }
 
+/// True when the node's own text equals `text`.
+pub fn text_is(text: &'static str) -> Pred {
+    check(Match::Text(text))
+}
+
+/// True when the node's own text equals any of `texts`.
+pub fn text_in(texts: &'static [&'static str]) -> Pred {
+    texts
+        .iter()
+        .map(|&t| text_is(t))
+        .reduce(Pred::or)
+        .unwrap_or_else(|| exists(extract::field("\0")))
+}
+
 pub fn field_kind(field: &'static str, kinds: &'static [&'static str]) -> Pred {
     check_at(Axis::Field(field), Match::AnyKind(kinds))
 }

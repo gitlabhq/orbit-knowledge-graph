@@ -63,6 +63,12 @@ pub enum Emit {
     EachDescendant(Match<'static>, Box<Extract>),
     /// A fixed constant string, ignoring the node.
     Const(&'static str),
+    /// Evaluate each part against the origin node, drop empty results, and join
+    /// survivors with `sep`. Assembles one string from several navigated values;
+    /// use `constant(...)` parts for literals.
+    Join(&'static str, Vec<Extract>),
+    /// Try the first pipeline; if it yields nothing, fall back to the second.
+    OrElse(Box<Extract>, Box<Extract>),
 }
 
 #[derive(Clone)]
@@ -76,9 +82,6 @@ pub enum TextTransform {
     SplitLast(&'static str),
     /// Split on separator, take everything before the last segment.
     SplitInit(&'static str),
-    /// Render the current string into the `{}` slot of a template.
-    /// e.g. `Template("locals.{}")` turns `region` into `locals.region`.
-    Template(&'static str),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -132,6 +135,13 @@ pub fn text() -> Extract {
 /// Always returns a fixed string, regardless of the node.
 pub fn constant(s: &'static str) -> Extract {
     Extract::terminal(Emit::Const(s))
+}
+
+/// Assemble one string from several sub-pipelines evaluated against the same
+/// origin node. Empty parts are dropped before joining with `sep`. Use
+/// `constant(...)` parts for literal text.
+pub fn join(sep: &'static str, parts: Vec<Extract>) -> Extract {
+    Extract::terminal(Emit::Join(sep, parts))
 }
 
 pub fn no_extract() -> Extract {
@@ -322,10 +332,9 @@ impl Extract {
         self
     }
 
-    /// Render the emitted string into the `{}` slot of `tpl`.
-    pub fn template(mut self, tpl: &'static str) -> Self {
-        self.transforms.push(TextTransform::Template(tpl));
-        self
+    /// Try this pipeline; if it produces nothing, fall back to `alt`.
+    pub fn or_else(self, alt: Extract) -> Self {
+        Extract::terminal(Emit::OrElse(Box::new(self), Box::new(alt)))
     }
 
     // Composition
@@ -376,9 +385,6 @@ impl Extract {
                     } else {
                         s = String::new();
                     }
-                }
-                TextTransform::Template(tpl) => {
-                    s = tpl.replacen("{}", &s, 1);
                 }
             }
         }
@@ -475,6 +481,11 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
         }
         Emit::Each(_) | Emit::EachDescendant(..) => emit_all(mode, node).into_iter().next(),
         Emit::Const(s) => Some(s.to_string()),
+        Emit::Join(sep, parts) => {
+            let pieces: Vec<String> = parts.iter().filter_map(|p| p.apply(node)).collect();
+            (!pieces.is_empty()).then(|| pieces.join(sep))
+        }
+        Emit::OrElse(a, b) => a.apply(node).or_else(|| b.apply(node)),
     }
 }
 
@@ -622,6 +633,35 @@ mod tests {
                 .collect_shallow(Match::Kind("identifier"))
                 .apply_all(&cls),
             vec!["Bar", "Baz"],
+        );
+    }
+
+    #[test]
+    fn join_splices_multiple_sources() {
+        let root = SupportLang::Python.ast_grep("class Foo(Bar): pass");
+        let cls = root.root().children().next().unwrap();
+        assert_eq!(
+            join(".", vec![constant("pkg"), field("name")]).apply(&cls),
+            Some("pkg.Foo".to_string()),
+        );
+        // empty parts drop out, leaving no dangling separator
+        assert_eq!(
+            join(".", vec![field("name"), field("nonexistent")]).apply(&cls),
+            Some("Foo".to_string()),
+        );
+    }
+
+    #[test]
+    fn or_else_falls_back() {
+        let root = SupportLang::Python.ast_grep("def foo(): pass");
+        let func = root.root().children().next().unwrap();
+        assert_eq!(
+            field("nonexistent").or_else(field("name")).apply(&func),
+            Some("foo".to_string()),
+        );
+        assert_eq!(
+            field("name").or_else(constant("fallback")).apply(&func),
+            Some("foo".to_string()),
         );
     }
 

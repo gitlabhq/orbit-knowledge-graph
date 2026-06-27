@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{DefKind, Fqn};
-use treesitter_visit::extract::{child_of_kind, text};
+use treesitter_visit::extract::{Extract, child_of_kind, text};
 use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{
@@ -159,8 +159,8 @@ impl DslLanguage for HclDsl {
                 "__local",
             )
             .when(has_child_text("locals")),
-            rw::custom(hcl_ref_rewrite),
         ]);
+        tree.apply_rewrites(&hcl_ref_rules());
     }
 
     fn hooks() -> LanguageHooks {
@@ -210,47 +210,47 @@ fn hcl_reanchor_var_module(
 }
 
 const TF_BUILTIN_NAMESPACES: &[&str] = &["each", "self", "count", "path", "terraform"];
+const TF_HANDLED_NAMESPACES: &[&str] = &["var", "module", "local", "data"];
 
-fn get_attr_ident(tree: &SyntaxTree, get_attr: u32) -> Option<String> {
-    tree.children_of_kind(get_attr, "identifier")
-        .next()
-        .map(|id| tree.text(id).to_string())
+/// Identifier of the `n`-th `get_attr` sibling of a `variable_expr`. The
+/// `get_attr`s sit under the shared `expression` parent, after the
+/// `variable_expr`, e.g. `data.aws_ami.ubuntu` → variable_expr("data") followed
+/// by get_attr("aws_ami"), get_attr("ubuntu").
+fn sibling_attr(n: isize) -> Extract {
+    text()
+        .parent()
+        .nth(Child, Kind("get_attr"), n)
+        .child_of_kind("identifier")
 }
 
-fn hcl_ref_rewrite(tree: &mut SyntaxTree) {
-    let mut text_rewrites: Vec<(u32, String)> = Vec::new();
-    for var_expr in tree.nodes_of_kind("variable_expr").collect::<Vec<_>>() {
-        let name = tree.text(var_expr).to_string();
-        if TF_BUILTIN_NAMESPACES.contains(&name.as_str()) {
-            continue;
-        }
-        let Some(parent) = tree.parent(var_expr) else {
-            continue;
-        };
-        if tree.kind(parent) != "expression" {
-            continue;
-        }
-        let get_attrs: Vec<_> = tree.children_of_kind(parent, "get_attr").collect();
-        let Some(first_attr) = get_attrs.first().and_then(|&ga| get_attr_ident(tree, ga)) else {
-            continue;
-        };
-        let new_text = match name.as_str() {
-            "var" | "module" => first_attr,
-            "local" => format!("locals.{first_attr}"),
-            "data" => {
-                if let Some(second) = get_attrs.get(1).and_then(|&ga| get_attr_ident(tree, ga)) {
-                    format!("{first_attr}.{second}")
-                } else {
-                    continue;
-                }
-            }
-            _ => format!("{name}.{first_attr}"),
-        };
-        text_rewrites.push((var_expr, new_text));
-    }
-    for (id, text) in text_rewrites {
-        tree.set_text(id, &text);
-    }
+/// Rewrite Terraform reference expressions to their resolvable target name.
+/// `var.x`/`module.x` → bare name, `local.x` → `locals.x`, `data.t.n` → `t.n`,
+/// and `resource_type.name` → `resource_type.name`.
+fn hcl_ref_rules() -> Vec<rw::Rule> {
+    use treesitter_visit::extract::{constant, join};
+    // The reference rule reads the name from the `identifier` child, so the
+    // rewritten text is written there, not onto the `variable_expr` node.
+    let ident = || child_of_kind("identifier");
+    vec![
+        rw::set_text("variable_expr", sibling_attr(0))
+            .onto(ident())
+            .when(text_in(&["var", "module"])),
+        rw::set_text(
+            "variable_expr",
+            join("", vec![constant("locals."), sibling_attr(0)]),
+        )
+        .onto(ident())
+        .when(text_is("local")),
+        rw::set_text(
+            "variable_expr",
+            join(".", vec![sibling_attr(0), sibling_attr(1)]),
+        )
+        .onto(ident())
+        .when(text_is("data")),
+        rw::set_text("variable_expr", join(".", vec![text(), sibling_attr(0)]))
+            .onto(ident())
+            .when((!text_in(TF_BUILTIN_NAMESPACES)).and(!text_in(TF_HANDLED_NAMESPACES))),
+    ]
 }
 
 // ── Resolution rules ────────────────────────────────────────────

@@ -6,7 +6,7 @@ use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::Node;
 use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
-use treesitter_visit::predicate::has_child_text;
+use treesitter_visit::predicate::{has_child_text, text_in, text_is};
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
@@ -92,7 +92,7 @@ impl DslLanguage for PhpDsl {
         let mut rules = php_supertype_rules();
         // Strip leading `\` from fully-qualified names.
         rules.push(rw::set_text("qualified_name", text().strip_prefix("\\")));
-        rules.push(rw::custom(rewrite_php_self_static_parent));
+        rules.extend(php_self_static_parent_rules());
         rules.push(rw::custom(rewrite_php_imports));
         tree.apply_rewrites(&rules);
     }
@@ -383,57 +383,36 @@ fn php_on_scope(
 /// Resolve `self`/`static`/`parent` keywords to the enclosing class name.
 /// Needs an ancestor walk with a `parent` → base-clause special case, so it
 /// stays imperative.
-fn rewrite_php_self_static_parent(tree: &mut SyntaxTree) {
-    let mut rewrites: Vec<(u32, String)> = Vec::new();
-    let ref_contexts = [
-        "object_creation_expression",
-        "class_constant_access_expression",
-    ];
-    for ctx_kind in ref_contexts {
-        for node in tree.nodes_of_kind(ctx_kind).collect::<Vec<_>>() {
-            let Some(fc) = tree.children(node).first().copied() else {
-                continue;
-            };
-            let text = tree.text(fc);
-            if !matches!(text, "self" | "static" | "parent") {
-                continue;
-            }
-            if let Some(name) = find_enclosing_class_name(tree, node, text) {
-                rewrites.push((fc, name));
-            }
-        }
-    }
-    for (id, text) in rewrites {
-        tree.set_text(id, &text);
-    }
-}
+const RELATIVE_SCOPE_KINDS: &[&str] = &["name", "relative_scope"];
 
-fn find_enclosing_class_name(tree: &SyntaxTree, start: u32, keyword: &str) -> Option<String> {
-    let mut cur = tree.parent(start);
-    while let Some(p) = cur {
-        match tree.kind(p) {
-            "class_declaration" => {
-                if keyword == "parent" {
-                    let base = tree.children_of_kind(p, "base_clause").next()?;
-                    let sup = tree
-                        .children(base)
-                        .iter()
-                        .copied()
-                        .find(|&c| matches!(tree.kind(c), "name" | "qualified_name"))?;
-                    return Some(tree.text(sup).trim_start_matches('\\').to_string());
-                }
-                return tree.field_text(p, "name").map(|s| s.to_string());
-            }
-            "enum_declaration" => {
-                return (keyword != "parent")
-                    .then(|| tree.field_text(p, "name").map(|s| s.to_string()))
-                    .flatten();
-            }
-            _ => {}
-        }
-        cur = tree.parent(p);
-    }
-    None
+/// Resolve `self`/`static`/`parent` in `new self()` / `self::CONST` to the
+/// enclosing class name. The keyword is the first child of the creation /
+/// constant-access node, a `name` (object creation) or `relative_scope`
+/// (constant access). self/static → enclosing class or enum name; parent →
+/// the base clause's superclass name.
+fn php_self_static_parent_rules() -> Vec<rw::Rule> {
+    let enclosing_name = || {
+        Extract::one(
+            Ancestor,
+            AnyKind(&["class_declaration", "enum_declaration"]),
+        )
+        .field("name")
+    };
+    let parent_name = || {
+        Extract::one(Ancestor, Kind("class_declaration"))
+            .child_of_kind("base_clause")
+            .nav(Child, AnyKind(&["name", "qualified_name"]))
+            .strip_prefix("\\")
+    };
+    RELATIVE_SCOPE_KINDS
+        .iter()
+        .flat_map(|&kind| {
+            [
+                rw::set_text(kind, enclosing_name()).when(text_in(&["self", "static"])),
+                rw::set_text(kind, parent_name()).when(text_is("parent")),
+            ]
+        })
+        .collect()
 }
 
 fn rewrite_php_imports(tree: &mut SyntaxTree) {
