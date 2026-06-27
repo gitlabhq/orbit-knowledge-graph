@@ -7,7 +7,7 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 use thiserror::Error;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use tracing::warn;
 
 use crate::durability::WriteDurability;
@@ -127,19 +127,29 @@ impl ClickHouseWriter {
     }
 }
 
+/// A per-submission completion hook. The buffered writer calls exactly one of these for every
+/// batch once that batch's part lands (or fails). The producer uses it to learn durability
+/// without the writer knowing anything about what the batch represents.
+pub trait FlushToken: Send + Sync {
+    /// This batch's part was written durably.
+    fn on_flushed(self: Arc<Self>);
+    /// This batch's part failed to write.
+    fn on_failed(self: Arc<Self>);
+}
+
+type Token = Arc<dyn FlushToken>;
+
 enum Msg {
-    Submit(String, RecordBatch, u64),
-    Finish(u64),
+    Submit(String, RecordBatch, Token),
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
 /// Coalesces tagged writes into well-sized parts. A table flushes at `max_rows` or after
-/// `max_age`. `flushed` reports the highest tag that is finished, fully written, and below
-/// every still-buffered tag (and below any failed flush).
+/// `max_age`. Each batch carries a [`FlushToken`] the writer notifies once the batch's part is
+/// durable or has failed, so a producer can finalize work (checkpointing) per part.
 #[derive(Clone)]
 pub struct BufferedWriter {
     tx: mpsc::Sender<Msg>,
-    flushed: watch::Receiver<u64>,
 }
 
 impl BufferedWriter {
@@ -150,23 +160,20 @@ impl BufferedWriter {
         max_age: Duration,
     ) -> Self {
         let (tx, rx) = mpsc::channel(channel_capacity.max(1));
-        let (flushed_tx, flushed) = watch::channel(0u64);
-        tokio::spawn(drain(writer, rx, max_rows.max(1), max_age, flushed_tx));
-        Self { tx, flushed }
+        tokio::spawn(drain(writer, rx, max_rows.max(1), max_age));
+        Self { tx }
     }
 
-    /// Buffer one batch under `tag`. Uses `blocking_send`, for the blocking parse thread.
-    pub fn submit(&self, table: String, batch: RecordBatch, tag: u64) -> Result<(), WriteError> {
+    /// Buffer one batch with its completion `token`. Uses `blocking_send`, for the blocking
+    /// parse thread.
+    pub fn submit(
+        &self,
+        table: String,
+        batch: RecordBatch,
+        token: Token,
+    ) -> Result<(), WriteError> {
         self.tx
-            .blocking_send(Msg::Submit(table, batch, tag))
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
-    }
-
-    /// Signal that all of `tag`'s batches have been submitted, so the watermark may pass it.
-    pub async fn finish(&self, tag: u64) -> Result<(), WriteError> {
-        self.tx
-            .send(Msg::Finish(tag))
-            .await
+            .blocking_send(Msg::Submit(table, batch, token))
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
 
@@ -182,18 +189,13 @@ impl BufferedWriter {
         rx.await
             .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
     }
-
-    /// Highest fully-durable tag. Watch it to learn when a tag's rows have landed.
-    pub fn flushed(&self) -> watch::Receiver<u64> {
-        self.flushed.clone()
-    }
 }
 
 #[derive(Default)]
 struct TableBuffer {
     batches: Vec<RecordBatch>,
+    tokens: Vec<Token>,
     rows: usize,
-    min_tag: u64,
 }
 
 async fn drain(
@@ -201,11 +203,8 @@ async fn drain(
     mut rx: mpsc::Receiver<Msg>,
     max_rows: usize,
     max_age: Duration,
-    flushed: watch::Sender<u64>,
 ) {
     let mut pending: HashMap<String, TableBuffer> = HashMap::new();
-    let mut max_finished = 0u64;
-    let mut failed_floor: Option<u64> = None;
 
     let mut ticker = tokio::time::interval(max_age);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -215,82 +214,49 @@ async fn drain(
         tokio::select! {
             msg = rx.recv() => match msg {
                 None => break,
-                Some(Msg::Finish(tag)) => max_finished = max_finished.max(tag),
                 Some(Msg::Flush(ack)) => {
                     for (table, buf) in std::mem::take(&mut pending) {
-                        flush(&writer, &table, buf, &mut failed_floor).await;
+                        flush(&writer, &table, buf).await;
                     }
-                    publish(&pending, max_finished, failed_floor, &flushed);
                     let _ = ack.send(());
-                    continue;
                 }
-                Some(Msg::Submit(table, batch, tag)) => {
-                    let buf = pending.entry(table.clone()).or_insert(TableBuffer { min_tag: tag, ..Default::default() });
+                Some(Msg::Submit(table, batch, token)) => {
+                    let buf = pending.entry(table.clone()).or_default();
                     buf.rows += batch.num_rows();
-                    buf.min_tag = buf.min_tag.min(tag);
                     buf.batches.push(batch);
-                    if buf.rows < max_rows {
-                        continue;
+                    buf.tokens.push(token);
+                    if buf.rows >= max_rows {
+                        let buf = pending.remove(&table).unwrap();
+                        flush(&writer, &table, buf).await;
                     }
-                    let buf = pending.remove(&table).unwrap();
-                    flush(&writer, &table, buf, &mut failed_floor).await;
                 }
             },
             _ = ticker.tick() => {
                 for (table, buf) in std::mem::take(&mut pending) {
-                    flush(&writer, &table, buf, &mut failed_floor).await;
+                    flush(&writer, &table, buf).await;
                 }
             }
         }
-        publish(&pending, max_finished, failed_floor, &flushed);
     }
 
     for (table, buf) in std::mem::take(&mut pending) {
-        flush(&writer, &table, buf, &mut failed_floor).await;
+        flush(&writer, &table, buf).await;
     }
-    publish(&pending, max_finished, failed_floor, &flushed);
 }
 
-/// On failure, poison the part's tags so the watermark never reports them durable.
-async fn flush(
-    writer: &ClickHouseWriter,
-    table: &str,
-    buf: TableBuffer,
-    failed_floor: &mut Option<u64>,
-) {
-    if let Err(e) = writer
+/// Write one part, then notify every batch's token of the outcome. A single part can hold
+/// batches from many producers; each is told precisely whether its rows landed.
+async fn flush(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
+    let durable = writer
         .write(table, buf.batches, Some(WriteDurability::Durable))
-        .await
-    {
-        warn!(table, error = %e, "buffered write flush failed");
-        *failed_floor = Some(failed_floor.map_or(buf.min_tag, |f| f.min(buf.min_tag)));
-    }
-}
-
-fn publish(
-    pending: &HashMap<String, TableBuffer>,
-    max_finished: u64,
-    failed_floor: Option<u64>,
-    flushed: &watch::Sender<u64>,
-) {
-    let mut watermark = pending
-        .values()
-        .filter(|b| !b.batches.is_empty())
-        .map(|b| b.min_tag)
-        .min()
-        .map_or(max_finished, |lowest| {
-            max_finished.min(lowest.saturating_sub(1))
-        });
-    if let Some(floor) = failed_floor {
-        watermark = watermark.min(floor.saturating_sub(1));
-    }
-    flushed.send_if_modified(|cur| {
-        let advance = watermark > *cur;
-        if advance {
-            *cur = watermark;
+        .await;
+    match durable {
+        Ok(_) => buf.tokens.into_iter().for_each(|t| t.on_flushed()),
+        Err(e) => {
+            warn!(table, error = %e, "buffered write flush failed");
+            buf.tokens.into_iter().for_each(|t| t.on_failed());
         }
-        advance
-    });
+    }
 }
 
 #[cfg(test)]
@@ -315,52 +281,57 @@ mod tests {
 
     use arrow::array::Int64Array;
     use arrow::datatypes::{DataType, Field, Schema};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn batch(rows: usize) -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
         RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![0i64; rows]))]).unwrap()
     }
 
-    async fn submit(w: &BufferedWriter, table: &str, batch: RecordBatch, tag: u64) {
+    #[derive(Default)]
+    struct CountToken {
+        flushed: AtomicUsize,
+        failed: AtomicUsize,
+    }
+
+    impl FlushToken for CountToken {
+        fn on_flushed(self: Arc<Self>) {
+            self.flushed.fetch_add(1, Ordering::SeqCst);
+        }
+        fn on_failed(self: Arc<Self>) {
+            self.failed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    async fn submit(w: &BufferedWriter, table: &str, batch: RecordBatch, token: Token) {
         let w = w.clone();
         let table = table.to_string();
-        tokio::task::spawn_blocking(move || w.submit(table, batch, tag))
+        tokio::task::spawn_blocking(move || w.submit(table, batch, token))
             .await
             .unwrap()
             .unwrap();
     }
 
-    async fn await_tag(rx: &mut watch::Receiver<u64>, want: u64) {
-        tokio::time::timeout(Duration::from_secs(2), async {
-            while *rx.borrow() < want {
-                rx.changed().await.unwrap();
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("watermark stuck at {}", *rx.borrow()));
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn watermark_advances_when_a_tag_fully_flushes_but_holds_while_a_table_buffers_it() {
+    async fn size_flush_notifies_each_batch_token_once_its_part_lands() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
             16,
             100,
             Duration::from_secs(3600),
         );
-        let mut flushed = w.flushed();
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
 
-        submit(&w, "gl_edge", batch(100), 1).await;
-        submit(&w, "gl_code_edge", batch(10), 1).await;
-        w.finish(1).await.unwrap();
+        // One batch in each of two tables. gl_edge crosses max_rows and flushes immediately;
+        // gl_code_edge stays buffered, so only one notification has fired.
+        submit(&w, "gl_edge", batch(100), token.clone()).await;
+        submit(&w, "gl_code_edge", batch(10), token.clone()).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(
-            *flushed.borrow(),
-            0,
-            "held while gl_code_edge still buffers tag 1"
-        );
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
 
-        submit(&w, "gl_code_edge", batch(100), 1).await;
-        await_tag(&mut flushed, 1).await;
+        // An explicit flush drains gl_code_edge, notifying the second batch.
+        w.flush().await.unwrap();
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 2);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
     }
 }

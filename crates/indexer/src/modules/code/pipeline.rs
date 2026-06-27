@@ -1,13 +1,11 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
-use parking_lot::Mutex;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
@@ -17,7 +15,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use crate::clickhouse::{BufferedWriter, ClickHouseWriter};
+use crate::clickhouse::{BufferedWriter, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -47,13 +45,83 @@ impl IndexOutcome {
     }
 }
 
+/// Tracks one project's buffered rows across every table they span. The pipeline holds a +1
+/// sentinel and increments `remaining` per submitted batch; the writer decrements via
+/// [`FlushToken`] as each part lands. Whichever decrement reaches zero finalizes the project:
+/// stale-clean its prior version then checkpoint, unless any part failed (then the sweep and
+/// NATS redelivery retry it). This makes the checkpoint the single durable record, with no
+/// watermark to track.
+struct ProjectCommit {
+    remaining: AtomicUsize,
+    failed: AtomicBool,
+    checkpoint: CodeIndexingCheckpoint,
+    store: Arc<dyn CodeCheckpointStore>,
+    cleaner: Arc<dyn StaleDataCleaner>,
+    inflight: Arc<AtomicUsize>,
+}
+
+impl ProjectCommit {
+    fn release(self: Arc<Self>) {
+        if self.remaining.fetch_sub(1, Ordering::AcqRel) != 1 {
+            return;
+        }
+        tokio::spawn(async move {
+            self.finalize().await;
+            self.inflight.fetch_sub(1, Ordering::AcqRel);
+        });
+    }
+
+    async fn finalize(&self) {
+        if self.failed.load(Ordering::Acquire) {
+            warn!(
+                project_id = self.checkpoint.project_id,
+                "a buffered write failed; skipping checkpoint so the project is re-indexed",
+            );
+            return;
+        }
+        let cp = &self.checkpoint;
+        if let Err(error) = self
+            .cleaner
+            .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
+            .await
+        {
+            warn!(
+                project_id = cp.project_id,
+                %error,
+                "failed to delete stale data, will retry on next indexing"
+            );
+        }
+        match self.store.set_checkpoint(cp).await {
+            Ok(()) => info!(
+                project_id = cp.project_id,
+                task_id = cp.last_task_id,
+                "completed code indexing"
+            ),
+            Err(e) => warn!(
+                project_id = cp.project_id,
+                error = %e,
+                "failed to checkpoint code indexing; project will be re-indexed",
+            ),
+        }
+    }
+}
+
+impl FlushToken for ProjectCommit {
+    fn on_flushed(self: Arc<Self>) {
+        self.release();
+    }
+    fn on_failed(self: Arc<Self>) {
+        self.failed.store(true, Ordering::Release);
+        self.release();
+    }
+}
+
 pub struct CodeIndexingPipeline {
     resolver: RepositoryResolver,
     writer: BufferedWriter,
-    seq: AtomicU64,
-    completions: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
-    completed: watch::Receiver<u64>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
+    stale_data_cleaner: Arc<dyn StaleDataCleaner>,
+    inflight: Arc<AtomicUsize>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
@@ -89,22 +157,12 @@ impl CodeIndexingPipeline {
             pipeline_config.write_slice_rows,
             pipeline_config.write_buffer_age(),
         );
-        let completions = Arc::new(Mutex::new(BTreeMap::new()));
-        let (completed_tx, completed) = watch::channel(0u64);
-        tokio::spawn(complete_durable(
-            writer.flushed(),
-            completions.clone(),
-            checkpoint_store.clone(),
-            stale_data_cleaner.clone(),
-            completed_tx,
-        ));
         Self {
             resolver,
             writer,
-            seq: AtomicU64::new(1),
-            completions,
-            completed,
             checkpoint_store,
+            stale_data_cleaner,
+            inflight: Arc::new(AtomicUsize::new(0)),
             metrics,
             table_names,
             ontology,
@@ -134,20 +192,16 @@ impl CodeIndexingPipeline {
         self.pipeline_config.job_timeout()
     }
 
-    /// Flush all buffered writes and wait until the completion task has cleaned and
-    /// checkpointed everything they made durable. For tests and shutdown; steady state relies
-    /// on the size/age flush and the completion task.
+    /// Flush all buffered writes and wait until every project they made durable has been
+    /// stale-cleaned and checkpointed. For tests and shutdown; steady state relies on the
+    /// size/age flush and the per-project commit tokens.
     pub async fn flush(&self) -> Result<(), HandlerError> {
         self.writer
             .flush()
             .await
             .map_err(|e| HandlerError::Processing(format!("flush failed: {e}")))?;
-        let target = *self.writer.flushed().borrow();
-        let mut completed = self.completed.clone();
-        while *completed.borrow_and_update() < target {
-            if completed.changed().await.is_err() {
-                break;
-            }
+        while self.inflight.load(Ordering::Acquire) > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         Ok(())
     }
@@ -274,24 +328,11 @@ impl CodeIndexingPipeline {
             self.metrics.record_cleanup("success");
         }
 
-        let seq = indexing_result?;
+        let commit = indexing_result?;
 
-        // Insert before finish() so the watermark can't pass seq before its completion is mapped.
-        self.completions.lock().insert(
-            seq,
-            CodeIndexingCheckpoint {
-                traversal_path: request.traversal_path.clone(),
-                project_id: request.project_id,
-                branch: request.branch.clone(),
-                last_task_id: request.task_id,
-                last_commit: request.commit_sha.clone(),
-                indexed_at,
-            },
-        );
-        self.writer
-            .finish(seq)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("buffered writer closed: {e}")))?;
+        // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
+        // is the decrement that finalizes; otherwise the writer's last flush will.
+        commit.release();
 
         Ok(IndexOutcome::Indexed)
     }
@@ -308,10 +349,10 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-    ) -> Result<u64, HandlerError> {
+    ) -> Result<Arc<ProjectCommit>, HandlerError> {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel);
-        let (result, seq) = self
+        let (result, commit) = self
             .build_code_graph(request, repository, indexed_at, config)
             .await?;
 
@@ -322,6 +363,10 @@ impl CodeIndexingPipeline {
         self.record_indexing_results(&result, observer, request, indexing_start);
 
         if let Some(error) = result.errors.iter().find(|error| error.fatal) {
+            // Some batches may already have flushed; mark the commit failed and drop the
+            // sentinel so it never checkpoints and the project is re-indexed.
+            commit.failed.store(true, Ordering::Release);
+            commit.release();
             return Err(HandlerError::Permanent {
                 message: format!(
                     "fatal code indexing pipeline error during {} for {}: {}",
@@ -332,7 +377,7 @@ impl CodeIndexingPipeline {
         }
 
         context.progress.notify_in_progress().await;
-        Ok(seq)
+        Ok(commit)
     }
 
     fn build_pipeline_config(
@@ -372,14 +417,14 @@ impl CodeIndexingPipeline {
         }
     }
 
-    /// Parse the repository, stream its batches to the sink under one project seq, return it.
+    /// Parse the repository, stream its batches to the writer under one project commit, return it.
     async fn build_code_graph(
         &self,
         request: &IndexingRequest,
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         config: PipelineConfig,
-    ) -> Result<(code_graph::v2::PipelineResult, u64), HandlerError> {
+    ) -> Result<(code_graph::v2::PipelineResult, Arc<ProjectCommit>), HandlerError> {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -395,17 +440,38 @@ impl CodeIndexingPipeline {
             self.table_names.clone(),
         ));
 
-        let seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so
+        // the commit can't finalize mid-stream even if every flushed part drains first.
+        self.inflight.fetch_add(1, Ordering::AcqRel);
+        let commit = Arc::new(ProjectCommit {
+            remaining: AtomicUsize::new(1),
+            failed: AtomicBool::new(false),
+            checkpoint: CodeIndexingCheckpoint {
+                traversal_path: request.traversal_path.clone(),
+                project_id: request.project_id,
+                branch: request.branch.clone(),
+                last_task_id: request.task_id,
+                last_commit: request.commit_sha.clone(),
+                indexed_at,
+            },
+            store: self.checkpoint_store.clone(),
+            cleaner: self.stale_data_cleaner.clone(),
+            inflight: self.inflight.clone(),
+        });
+
         let writer = self.writer.clone();
         let max_rows = self.pipeline_config.write_slice_rows.max(1);
+        let token = commit.clone();
         let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new(
             move |table: &str, batch: arrow::record_batch::RecordBatch| {
                 let table = table.to_string();
                 let mut offset = 0;
                 while offset < batch.num_rows() {
                     let len = (batch.num_rows() - offset).min(max_rows);
+                    token.remaining.fetch_add(1, Ordering::AcqRel);
+                    let token: Arc<dyn FlushToken> = token.clone();
                     writer
-                        .submit(table.clone(), batch.slice(offset, len), seq)
+                        .submit(table.clone(), batch.slice(offset, len), token)
                         .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
                     offset += len;
                 }
@@ -417,7 +483,7 @@ impl CodeIndexingPipeline {
         let repo_dir = repository.path.clone();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let parsed = tokio::task::spawn_blocking(move || {
             Pipeline::run_with_tracer(
                 &repo_dir,
                 file_inventory,
@@ -428,14 +494,25 @@ impl CodeIndexingPipeline {
                 on_batch,
             )
         })
-        .await
-        .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
+        .await;
+        let result = match parsed {
+            Ok(result) => result,
+            Err(e) => {
+                // The parse thread panicked; drop the sentinel so the leaked commit can finalize
+                // (as failed) instead of pinning the inflight count forever.
+                commit.failed.store(true, Ordering::Release);
+                commit.release();
+                return Err(HandlerError::Processing(format!(
+                    "pipeline thread panicked: {e}"
+                )));
+            }
+        };
         info!(
             duration_ms = code_graph_start.elapsed().as_millis() as u64,
             "code-graph building completed"
         );
 
-        Ok((result, seq))
+        Ok((result, commit))
     }
 
     fn record_indexing_results(
@@ -534,74 +611,6 @@ impl CodeIndexingPipeline {
     }
 }
 
-/// Completes each project once the buffered-writer watermark reaches its seq, so stale cleanup
-/// and checkpointing only happen after its rows are durable.
-async fn complete_durable(
-    mut flushed: watch::Receiver<u64>,
-    completions: Arc<Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>>,
-    store: Arc<dyn CodeCheckpointStore>,
-    cleaner: Arc<dyn StaleDataCleaner>,
-    completed: watch::Sender<u64>,
-) {
-    loop {
-        let watermark = *flushed.borrow_and_update();
-        complete_up_to(&completions, &store, &cleaner, watermark).await;
-        let _ = completed.send(watermark);
-        if flushed.changed().await.is_err() {
-            return;
-        }
-    }
-}
-
-/// For each project at or below `watermark`: tombstone its prior version's stale rows (now safe,
-/// since the new rows are durable), then checkpoint it.
-async fn complete_up_to(
-    completions: &Mutex<BTreeMap<u64, CodeIndexingCheckpoint>>,
-    store: &Arc<dyn CodeCheckpointStore>,
-    cleaner: &Arc<dyn StaleDataCleaner>,
-    watermark: u64,
-) {
-    loop {
-        let next = {
-            let mut map = completions.lock();
-            match map.keys().next().copied() {
-                Some(seq) if seq <= watermark => map.remove(&seq),
-                _ => None,
-            }
-        };
-        let Some(checkpoint) = next else { break };
-
-        if let Err(error) = cleaner
-            .delete_stale_data(
-                &checkpoint.traversal_path,
-                checkpoint.project_id,
-                &checkpoint.branch,
-                checkpoint.indexed_at,
-            )
-            .await
-        {
-            warn!(
-                project_id = checkpoint.project_id,
-                %error,
-                "failed to delete stale data, will retry on next indexing"
-            );
-        }
-
-        match store.set_checkpoint(&checkpoint).await {
-            Ok(()) => info!(
-                project_id = checkpoint.project_id,
-                task_id = checkpoint.last_task_id,
-                "completed code indexing"
-            ),
-            Err(e) => warn!(
-                project_id = checkpoint.project_id,
-                error = %e,
-                "failed to checkpoint code indexing; project will be re-indexed",
-            ),
-        }
-    }
-}
-
 fn sem(n: usize) -> Option<Arc<Semaphore>> {
     (n > 0).then(|| Arc::new(Semaphore::new(n)))
 }
@@ -625,69 +634,92 @@ async fn acquire(
 mod tests {
     use super::*;
     use crate::modules::code::checkpoint::test_utils::MockCodeCheckpointStore;
+    use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use chrono::Utc;
     use std::time::Duration;
 
-    fn checkpoint(project_id: i64) -> CodeIndexingCheckpoint {
-        CodeIndexingCheckpoint {
-            traversal_path: format!("1/{project_id}/"),
-            project_id,
-            branch: "main".into(),
-            last_task_id: project_id,
-            last_commit: None,
-            indexed_at: Utc::now(),
-        }
+    fn commit(
+        store: Arc<dyn CodeCheckpointStore>,
+        cleaner: Arc<dyn StaleDataCleaner>,
+        inflight: Arc<AtomicUsize>,
+        batches: usize,
+    ) -> Arc<ProjectCommit> {
+        inflight.fetch_add(1, Ordering::AcqRel);
+        Arc::new(ProjectCommit {
+            remaining: AtomicUsize::new(1 + batches),
+            failed: AtomicBool::new(false),
+            checkpoint: CodeIndexingCheckpoint {
+                traversal_path: "1/7/".into(),
+                project_id: 7,
+                branch: "main".into(),
+                last_task_id: 7,
+                last_commit: None,
+                indexed_at: Utc::now(),
+            },
+            store,
+            cleaner,
+            inflight,
+        })
     }
 
-    #[tokio::test]
-    async fn checkpoints_only_seqs_at_or_below_the_watermark() {
-        let store = Arc::new(MockCodeCheckpointStore::new());
-        let cleaner =
-            Arc::new(super::super::stale_data_cleaner::test_utils::MockStaleDataCleaner::default());
-        let completions = Arc::new(Mutex::new(BTreeMap::new()));
-        completions.lock().insert(1, checkpoint(1));
-        completions.lock().insert(2, checkpoint(2));
-        let (tx, rx) = watch::channel(0u64);
-        let (completed_tx, _completed) = watch::channel(0u64);
-        let task = tokio::spawn(complete_durable(
-            rx,
-            completions,
-            store.clone(),
-            cleaner,
-            completed_tx,
-        ));
-
-        tx.send(1).unwrap();
+    async fn settle(inflight: &AtomicUsize) {
         tokio::time::timeout(Duration::from_secs(1), async {
-            while store
-                .get_checkpoint("1/1/", 1, "main")
-                .await
-                .unwrap()
-                .is_none()
-            {
+            while inflight.load(Ordering::Acquire) > 0 {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .unwrap();
+        .expect("commit finalize stuck");
+    }
+
+    #[tokio::test]
+    async fn checkpoints_once_every_batch_and_the_sentinel_release() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store.clone(), cleaner, inflight.clone(), 2);
+
+        commit.clone().release();
+        commit.clone().release();
         assert!(
             store
-                .get_checkpoint("1/2/", 2, "main")
+                .get_checkpoint("1/7/", 7, "main")
                 .await
                 .unwrap()
                 .is_none(),
-            "seq 2 is above the watermark and must wait",
+            "two batches drained but the sentinel still holds the commit",
         );
 
-        tx.send(2).unwrap();
-        drop(tx);
-        task.await.unwrap();
+        commit.release();
+        settle(&inflight).await;
         assert!(
             store
-                .get_checkpoint("1/2/", 2, "main")
+                .get_checkpoint("1/7/", 7, "main")
                 .await
                 .unwrap()
-                .is_some()
+                .is_some(),
+            "sentinel release was the last decrement and must checkpoint",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_batch_skips_the_checkpoint() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store.clone(), cleaner, inflight.clone(), 1);
+
+        commit.failed.store(true, Ordering::Release);
+        commit.clone().release();
+        commit.release();
+        settle(&inflight).await;
+        assert!(
+            store
+                .get_checkpoint("1/7/", 7, "main")
+                .await
+                .unwrap()
+                .is_none(),
+            "a failed flush must leave the project un-checkpointed for re-indexing",
         );
     }
 }

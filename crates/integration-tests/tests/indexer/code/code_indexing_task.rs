@@ -623,8 +623,8 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
     let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
     let (context, _indexing_status) = handler_context_with_status();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
-    // Writes are buffered, so the handler acks; the deferred flush fails, the project's seq is
-    // poisoned (never checkpointed), and the backfill sweep re-indexes it.
+    // Writes are buffered, so the handler acks; the deferred flush fails, the project's commit is
+    // marked failed (never checkpointed), and the backfill sweep re-indexes it.
     failing_handler
         .handle(context, envelope)
         .await
