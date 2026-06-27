@@ -465,6 +465,11 @@ impl CodeIndexingPipeline {
         let token = commit.clone();
         let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new(
             move |table: &str, batch: arrow::record_batch::RecordBatch| {
+                // The converter emits zero-row node tables for ParsedOnly graphs; skip them so we
+                // never buffer an empty part or add a phantom commit token.
+                if batch.num_rows() == 0 {
+                    return Ok(());
+                }
                 let table = table.to_string();
                 let mut offset = 0;
                 while offset < batch.num_rows() {
