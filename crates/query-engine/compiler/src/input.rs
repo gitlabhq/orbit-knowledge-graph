@@ -899,22 +899,21 @@ impl<'de> Deserialize<'de> for InputOrderBy {
         D: Deserializer<'de>,
     {
         let spec = String::deserialize(deserializer)?;
-        let (direction, body) = match spec.strip_prefix('-') {
-            Some(rest) => (OrderDirection::Desc, rest),
-            None => (OrderDirection::Asc, spec.as_str()),
-        };
-
-        let (node, property) = body
-            .split_once('.')
-            .filter(|(n, p)| !n.is_empty() && !p.is_empty() && !p.contains('.'))
+        let caps = crate::passes::validate::order_by_regex()
+            .captures(&spec)
             .ok_or_else(|| {
                 serde::de::Error::custom(format!(
                     "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
                 ))
             })?;
+        let direction = if caps.name("descending").is_some() {
+            OrderDirection::Desc
+        } else {
+            OrderDirection::Asc
+        };
         Ok(InputOrderBy {
-            node: node.to_string(),
-            property: property.to_string(),
+            node: caps["node"].to_owned(),
+            property: caps["property"].to_owned(),
             direction,
         })
     }
@@ -967,12 +966,26 @@ mod tests {
 
     #[test]
     fn order_by_requires_node_and_property() {
-        for malformed in ["merged_at", "-mr.", ".merged_at", "-", "a.b.c"] {
+        for malformed in [
+            "merged_at",
+            "-mr.",
+            ".merged_at",
+            "-",
+            "a.b.c",
+            "1mr.merged_at",
+            "mr.1merged_at",
+        ] {
             assert!(
                 serde_json::from_str::<InputOrderBy>(&format!("\"{malformed}\"")).is_err(),
                 "{malformed:?} should not parse"
             );
         }
+
+        let over_length = "a".repeat(65);
+        assert!(
+            serde_json::from_str::<InputOrderBy>(&format!("\"{over_length}.prop\"")).is_err(),
+            "identifier longer than 64 chars should not parse"
+        );
     }
 
     #[test]
