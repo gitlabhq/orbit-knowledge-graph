@@ -86,14 +86,7 @@ pub async fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-    let concurrency_limit = config
-        .engine
-        .topics
-        .get(CODE_INDEXING_TASK_TOPIC)
-        .and_then(|t| t.concurrency_group.as_deref())
-        .and_then(|g| config.engine.concurrency_groups.get(g).copied())
-        .unwrap_or(0);
-
+    let pipeline_config = code_indexing_task_config.pipeline.clone();
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
         writer,
@@ -102,8 +95,7 @@ pub async fn register_handlers(
         metrics.clone(),
         table_names,
         Arc::new(ontology.clone()),
-        code_indexing_task_config.pipeline.clone(),
-        concurrency_limit,
+        pipeline_config,
     ));
 
     let mut subscription = CodeIndexingTaskRequest::subscription();

@@ -10,7 +10,7 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
+use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
@@ -44,6 +44,11 @@ pub struct CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
+    /// Flush buffered writes and wait until durable. For tests and shutdown.
+    pub async fn flush(&self) -> Result<(), HandlerError> {
+        self.pipeline.flush().await
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -221,16 +226,12 @@ impl CodeIndexingTaskHandler {
             .await;
 
         let outcome = match &result {
-            Ok(Some(IndexOutcome::Indexed)) => "indexed",
-            Ok(Some(IndexOutcome::EmptyRepository)) => "empty_repository",
+            Ok(Some(label)) => label,
             Ok(None) => "skipped_lock",
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        if matches!(
-            &result,
-            Ok(Some(IndexOutcome::Indexed | IndexOutcome::EmptyRepository))
-        ) {
+        if matches!(&result, Ok(Some(_))) {
             self.metrics.record_repository_indexed(outcome);
         }
         self.metrics.record_handler_duration(started_at);
@@ -254,7 +255,7 @@ impl CodeIndexingTaskHandler {
         had_prior_checkpoint: bool,
         started_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
-    ) -> Result<Option<IndexOutcome>, HandlerError> {
+    ) -> Result<Option<&'static str>, HandlerError> {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
@@ -312,6 +313,8 @@ impl CodeIndexingTaskHandler {
             },
             None => work.await,
         };
+
+        let result = result.map(|outcome| outcome.metric_label());
 
         context
             .indexing_status
@@ -403,17 +406,15 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let writer = crate::testkit::test_writer();
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
-                writer,
+                crate::testkit::test_writer(),
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
                 gkg_server_config::CodeIndexingPipelineConfig::default(),
-                0,
             ));
 
             let handler = CodeIndexingTaskHandler::new(
@@ -662,14 +663,14 @@ mod tests {
         assert_eq!(checkpoint.last_task_id, 7);
     }
 
-    #[test]
-    fn handler_name() {
+    #[tokio::test]
+    async fn handler_name() {
         let ctx = TestContext::new();
         assert_eq!(ctx.handler.name(), "code_indexing_task");
     }
 
-    #[test]
-    fn handler_subscription_matches_request_subscription() {
+    #[tokio::test]
+    async fn handler_subscription_matches_request_subscription() {
         let ctx = TestContext::new();
         let subscription = ctx.handler.subscription();
         let expected = CodeIndexingTaskRequest::subscription();
