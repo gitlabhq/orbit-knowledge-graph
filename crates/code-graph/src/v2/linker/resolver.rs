@@ -96,6 +96,7 @@ impl<'a> FileResolver<'a> {
             inferred_returns: FxHashMap::default(),
             include_index: None,
             include_reachable: None,
+            reexport_index: None,
         };
         Self {
             ctx,
@@ -107,6 +108,10 @@ impl<'a> FileResolver<'a> {
 
     pub fn set_include_index(&mut self, idx: std::sync::Arc<super::graph::IncludeIndex>) {
         self.ctx.include_index = Some(idx);
+    }
+
+    pub fn set_reexport_index(&mut self, idx: std::sync::Arc<super::graph::ReexportIndex>) {
+        self.ctx.reexport_index = Some(idx);
     }
 
     pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
@@ -327,6 +332,9 @@ struct ResolveCtx<'a> {
     /// Cached BFS result: paths of files reachable via transitive includes
     /// from this file. Computed once on first IncludeGraph resolve call.
     include_reachable: Option<rustc_hash::FxHashSet<String>>,
+    /// Precomputed symbol re-export index. Shared across resolvers, set before
+    /// Phase 2 when the language provides a builder hook.
+    reexport_index: Option<std::sync::Arc<super::graph::ReexportIndex>>,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -358,6 +366,7 @@ impl<'a> ResolveCtx<'a> {
             inferred_returns: FxHashMap::default(),
             include_index: None,
             include_reachable: None,
+            reexport_index: None,
         }
     }
 
@@ -388,6 +397,7 @@ impl<'a> ResolveCtx<'a> {
             settings: self.settings,
             include_index: self.include_index.as_deref(),
             include_reachable: &mut self.include_reachable,
+            reexport_index: self.reexport_index.as_deref(),
         }
     }
 

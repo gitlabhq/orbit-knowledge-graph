@@ -134,6 +134,9 @@ pub struct ImportedSymbolFallbackContext<'a> {
 pub type ImportedSymbolFallbackCandidatesHook =
     fn(&CodeGraph, &[NodeIndex], ImportedSymbolFallbackContext<'_>) -> Vec<NodeIndex>;
 
+/// Build the language's symbol re-export index from the linked graph.
+pub type ReexportIndexBuilder = fn(&CodeGraph, &str) -> super::graph::ReexportIndex;
+
 /// Language-specific resolver behavior. All fields default to `None`.
 #[derive(Default)]
 pub struct ResolverHooks {
@@ -161,6 +164,9 @@ pub struct ResolverHooks {
     /// `Model` is a constant with no SSA write. Ruby uses this to
     /// look up constants as class names in the graph.
     pub resolve_ident_type: Option<fn(&super::CodeGraph, &str) -> Option<String>>,
+    /// Build the language's re-export index; when set, callers bind through
+    /// re-exports to the concrete definition instead of an `ImportedSymbol`.
+    pub reexport_index_builder: Option<ReexportIndexBuilder>,
 }
 
 pub struct ResolutionRules {

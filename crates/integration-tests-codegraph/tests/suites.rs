@@ -190,6 +190,10 @@ yaml_test!(
     python_imported_symbol_fallback_matrix,
     "python/imported_symbol_fallback_matrix.yaml"
 );
+yaml_test!(
+    python_reexport_resolution,
+    "python/reexport_resolution.yaml"
+);
 
 // Java
 yaml_test!(java_records, "java/records.yaml");

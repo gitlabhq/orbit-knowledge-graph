@@ -1355,6 +1355,18 @@ impl FamilyPipeline {
             None
         };
 
+        let reexport_builders: Vec<_> = member_ctxs
+            .values()
+            .filter_map(|lc| lc.rules.hooks.reexport_index_builder)
+            .collect();
+        assert!(
+            reexport_builders.len() <= 1,
+            "FamilyPipeline supports at most one reexport_index_builder per family"
+        );
+        let shared_reexport_index = reexport_builders
+            .first()
+            .map(|build| Arc::new(build(&graph, expected_sep)));
+
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
@@ -1395,6 +1407,9 @@ impl FamilyPipeline {
                 resolver.set_inferred_returns(&fwr.inferred_returns);
                 if let Some(idx) = &shared_include_index {
                     resolver.set_include_index(Arc::clone(idx));
+                }
+                if let Some(idx) = &shared_reexport_index {
+                    resolver.set_reexport_index(Arc::clone(idx));
                 }
 
                 let t_resolve = std::time::Instant::now();
@@ -1522,6 +1537,9 @@ impl FamilyPipeline {
                     );
                     if let Some(idx) = &shared_include_index {
                         resolver.set_include_index(Arc::clone(idx));
+                    }
+                    if let Some(idx) = &shared_reexport_index {
+                        resolver.set_reexport_index(Arc::clone(idx));
                     }
                     let mut edges = Vec::new();
                     for failed in failed_chains {

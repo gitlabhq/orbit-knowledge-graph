@@ -58,6 +58,7 @@ pub(crate) struct ImportResolver<'a> {
     pub settings: &'a ResolveSettings,
     pub include_index: Option<&'a super::graph::IncludeIndex>,
     pub include_reachable: &'a mut Option<rustc_hash::FxHashSet<String>>,
+    pub reexport_index: Option<&'a super::graph::ReexportIndex>,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -148,7 +149,65 @@ impl<'a> ImportResolver<'a> {
                 return by_path.to_vec();
             }
         }
+
+        // `from pkg import Foo` where `pkg` only re-exports `Foo`: follow the
+        // re-export chain to the defining module.
+        if let Some(reexport) = self.reexport_index
+            && !imp_path.is_empty()
+        {
+            let resolved = self.follow_reexport(reexport, imp_path, symbol_name);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
         vec![]
+    }
+
+    fn follow_reexport(
+        &self,
+        reexport: &super::graph::ReexportIndex,
+        module: &str,
+        name: &str,
+    ) -> Vec<NodeIndex> {
+        const MAX_REEXPORT_DEPTH: usize = 16;
+        let sep = self.sep();
+        let mut visited: rustc_hash::FxHashSet<(String, String)> = rustc_hash::FxHashSet::default();
+        let mut stack = vec![(module.to_string(), name.to_string(), 0usize)];
+        let mut out: Vec<NodeIndex> = Vec::new();
+        while let Some((module, name, depth)) = stack.pop() {
+            if depth > MAX_REEXPORT_DEPTH || !visited.insert((module.clone(), name.clone())) {
+                continue;
+            }
+            // An explicit `from M import name` wins; otherwise the name may come
+            // from any `from M import *` source.
+            let next: Vec<(String, String)> = match reexport.named(&module, &name) {
+                Some((m, n)) => vec![(m.to_string(), n.to_string())],
+                None => reexport
+                    .wildcard_sources(&module)
+                    .iter()
+                    .map(|m| (m.clone(), name.clone()))
+                    .collect(),
+            };
+            for (m, n) in next {
+                let key = format!("{m}{sep}{n}");
+                let found = self
+                    .graph
+                    .indexes
+                    .by_fqn
+                    .lookup(&key, |idx| self.graph.def_fqn(idx) == key);
+                if found.is_empty() {
+                    stack.push((m, n, depth + 1));
+                } else {
+                    out.extend(found.to_vec());
+                }
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        // Bind only on a unique definition. No match (not re-exported here) and
+        // several distinct matches (ambiguous wildcard) both fall through to the
+        // ImportedSymbol fallback.
+        if out.len() == 1 { out } else { Vec::new() }
     }
 
     fn scope_fqn_walk(&mut self, name: &str) -> Vec<NodeIndex> {
