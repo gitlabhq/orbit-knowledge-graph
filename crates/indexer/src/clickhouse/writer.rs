@@ -280,17 +280,38 @@ fn spawn_write(
     });
 }
 
+/// Notifies every held token of failure when dropped, unless `disarm`ed first. Guarantees a part
+/// that unwinds (a panic in `write`) still releases its tokens, so a project can never be stranded
+/// with an un-decremented commit (which would hang `flush()` on the inflight count forever).
+struct NotifyOnDrop(Vec<Token>);
+
+impl NotifyOnDrop {
+    fn disarm(mut self) -> Vec<Token> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+impl Drop for NotifyOnDrop {
+    fn drop(&mut self) {
+        std::mem::take(&mut self.0)
+            .into_iter()
+            .for_each(|t| t.on_failed());
+    }
+}
+
 /// Write one coalesced part, then notify every batch's token of the outcome. A single part can
 /// hold batches from many producers; each is told precisely whether its rows landed.
 async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
+    let guard = NotifyOnDrop(buf.tokens);
     let durable = writer
         .write(table, buf.batches, Some(WriteDurability::Durable))
         .await;
+    let tokens = guard.disarm();
     match durable {
-        Ok(_) => buf.tokens.into_iter().for_each(|t| t.on_flushed()),
+        Ok(_) => tokens.into_iter().for_each(|t| t.on_flushed()),
         Err(e) => {
             warn!(table, error = %e, "buffered write flush failed");
-            buf.tokens.into_iter().for_each(|t| t.on_failed());
+            tokens.into_iter().for_each(|t| t.on_failed());
         }
     }
 }
@@ -390,6 +411,25 @@ mod tests {
 
         w.flush().await.unwrap();
         assert_eq!(token.flushed.load(Ordering::SeqCst), 4);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn notify_on_drop_fails_tokens_when_not_disarmed() {
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+        let guard = NotifyOnDrop(vec![token.clone()]);
+        drop(guard);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 1);
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn notify_on_drop_is_silent_once_disarmed() {
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+        let guard = NotifyOnDrop(vec![token.clone()]);
+        let tokens = guard.disarm();
+        tokens.into_iter().for_each(|t| t.on_flushed());
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
         assert_eq!(token.failed.load(Ordering::SeqCst), 0);
     }
 }
