@@ -284,6 +284,18 @@ The graph is converted to Apache Arrow record batches and written to six ClickHo
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
+##### Cross-project write coalescing
+
+The edge tables (`gl_code_edge`, `gl_edge`) are unpartitioned `ReplacingMergeTree`s, so every project's inserts share one part budget. During a full reindex the long tail of tiny repositories (most projects emit fewer than 500 edges) would otherwise produce one small part per table per project, outrunning ClickHouse merges until part-count backpressure throttles inserts.
+
+To avoid this, all code jobs stream their edges into one process-wide `BufferedWriter` (a coalescing layer over `ClickHouseWriter`). A table flushes when it reaches `write_slice_rows` (default 500k) or after `write_buffer_age_secs` (default 60), so the long tail coalesces into well-sized parts while big repositories (which cross the row cap on their own) still flush promptly. Each submitted batch carries a `FlushToken` the writer invokes once that batch's part lands (or fails), so a producer learns durability per part without the writer knowing what the rows mean. Up to `write_max_concurrent` (default 4) parts are written to ClickHouse at once; they may land out of order, which is safe because the edge tables are `ReplacingMergeTree`s keyed by row identity + `_version` and stale cleanup keys on `indexed_at`, so nothing depends on insert order. The bound trades memory (that many `write_slice_rows`-sized parts in flight) for write throughput.
+
+Concurrency is split into two lanes by post-filter file count: a wide lane (`small_indexing_slots`, default 6) for the small-repo tail and a reserved lane (`big_indexing_slots`, default 2) so a flood of small repositories cannot starve monorepos.
+
+A project is checkpointed only after its rows are durable. The handler attaches a per-project `ProjectCommit` token to every batch it submits and holds a `+1` sentinel; the writer decrements the token as each part lands, and whichever decrement reaches zero (a flushed part, or the sentinel the pipeline drops after the parse finishes) finalizes the project: it tombstones the prior version's stale rows, then writes the checkpoint. If any of the project's parts failed to flush, the token is marked failed and the checkpoint is skipped, so the once-a-minute backfill sweep re-dispatches it and NATS redelivery bounds the retries (re-indexing is idempotent). A crash before a part lands has the same effect. This keeps the checkpoint the single durable record: no watermark, no durability handshake, no lease heartbeat, no lock renewal.
+
+Parts that span many namespaces are safe to query: the edge sort key is `(traversal_path, relationship_kind, …)`, so ClickHouse still prunes by primary key within a mixed part.
+
 #### Checkpoint tracking
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits.

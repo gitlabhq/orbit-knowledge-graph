@@ -271,8 +271,24 @@ fn default_code_indexing_write_slice_rows() -> usize {
     500_000
 }
 
-fn default_code_indexing_write_max_concurrent_writes() -> usize {
-    8
+fn default_code_indexing_write_buffer_age_secs() -> u64 {
+    60
+}
+
+fn default_code_indexing_write_max_concurrent() -> usize {
+    4
+}
+
+fn default_code_indexing_small_repo_max_files() -> usize {
+    650
+}
+
+fn default_code_indexing_small_indexing_slots() -> usize {
+    6
+}
+
+fn default_code_indexing_big_indexing_slots() -> usize {
+    2
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -320,9 +336,21 @@ pub struct CodeIndexingPipelineConfig {
     /// Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.
     #[serde(default = "default_code_indexing_write_slice_rows")]
     pub write_slice_rows: usize,
-    /// Concurrent in-flight inserts from the streaming sink. Defaults to 8.
-    #[serde(default = "default_code_indexing_write_max_concurrent_writes")]
-    pub write_max_concurrent_writes: usize,
+    /// Flush the write coalescer after this many seconds even below `write_slice_rows`, bounding latency. Keep below `nats.ack_wait_secs`. Defaults to 60.
+    #[serde(default = "default_code_indexing_write_buffer_age_secs")]
+    pub write_buffer_age_secs: u64,
+    /// Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput. Defaults to 4.
+    #[serde(default = "default_code_indexing_write_max_concurrent")]
+    pub write_max_concurrent: usize,
+    /// Post-filter file count at or below which a repository runs on the small lane. Defaults to 650.
+    #[serde(default = "default_code_indexing_small_repo_max_files")]
+    pub small_repo_max_files: usize,
+    /// Concurrent indexing slots for small repositories. Defaults to 6.
+    #[serde(default = "default_code_indexing_small_indexing_slots")]
+    pub small_indexing_slots: usize,
+    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.
+    #[serde(default = "default_code_indexing_big_indexing_slots")]
+    pub big_indexing_slots: usize,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -342,7 +370,11 @@ impl Default for CodeIndexingPipelineConfig {
             fetch_concurrency: default_fetch_concurrency(),
             write_channel_capacity: default_code_indexing_write_channel_capacity(),
             write_slice_rows: default_code_indexing_write_slice_rows(),
-            write_max_concurrent_writes: default_code_indexing_write_max_concurrent_writes(),
+            write_buffer_age_secs: default_code_indexing_write_buffer_age_secs(),
+            write_max_concurrent: default_code_indexing_write_max_concurrent(),
+            small_repo_max_files: default_code_indexing_small_repo_max_files(),
+            small_indexing_slots: default_code_indexing_small_indexing_slots(),
+            big_indexing_slots: default_code_indexing_big_indexing_slots(),
         }
     }
 }
@@ -351,6 +383,10 @@ impl CodeIndexingPipelineConfig {
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
+    }
+
+    pub fn write_buffer_age(&self) -> Duration {
+        Duration::from_secs(self.write_buffer_age_secs.max(1))
     }
 }
 

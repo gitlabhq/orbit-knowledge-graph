@@ -90,7 +90,6 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             pipeline_config,
-            0,
         ));
 
         Self {
@@ -125,6 +124,7 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
+        let config = CodeIndexingPipelineConfig::default();
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
             writer,
@@ -133,8 +133,7 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
             table_names,
             Arc::new(ontology),
-            CodeIndexingPipelineConfig::default(),
-            0,
+            config,
         ));
         CodeIndexingTaskHandler::new(
             pipeline,

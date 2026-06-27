@@ -1,10 +1,15 @@
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::sync::Arc;
+use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 use thiserror::Error;
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
+use tracing::warn;
 
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
@@ -54,6 +59,7 @@ impl ClickHouseWriter {
         })
     }
 
+    /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
         Self {
@@ -120,48 +126,193 @@ impl ClickHouseWriter {
             bytes,
         })
     }
+}
 
-    pub async fn write_batches_stream(
-        self: &Arc<Self>,
-        mut rx: tokio::sync::mpsc::Receiver<(String, RecordBatch)>,
+/// A per-submission completion hook. The buffered writer calls exactly one of these for every
+/// batch once that batch's part lands (or fails). The producer uses it to learn durability
+/// without the writer knowing anything about what the batch represents.
+pub trait FlushToken: Send + Sync {
+    /// This batch's part was written durably.
+    fn on_flushed(self: Arc<Self>);
+    /// This batch's part failed to write.
+    fn on_failed(self: Arc<Self>);
+}
+
+type Token = Arc<dyn FlushToken>;
+
+enum Msg {
+    Submit(String, RecordBatch, Token),
+    Flush(tokio::sync::oneshot::Sender<()>),
+}
+
+/// Coalesces tagged writes into well-sized parts. A table flushes at `max_rows` or after
+/// `max_age`. Each batch carries a [`FlushToken`] the writer notifies once the batch's part is
+/// durable or has failed, so a producer can finalize work (checkpointing) per part.
+#[derive(Clone)]
+pub struct BufferedWriter {
+    tx: mpsc::Sender<Msg>,
+}
+
+impl BufferedWriter {
+    pub fn spawn(
+        writer: Arc<ClickHouseWriter>,
+        channel_capacity: usize,
         max_rows: usize,
+        max_age: Duration,
         max_concurrent: usize,
-    ) -> Result<Vec<WriteReport>, WriteError> {
-        let max_rows = max_rows.max(1);
-        let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1)));
-        let mut set = tokio::task::JoinSet::new();
-        let mut pending: std::collections::HashMap<String, (Vec<RecordBatch>, usize)> =
-            std::collections::HashMap::new();
+    ) -> Self {
+        let (tx, rx) = mpsc::channel(channel_capacity.max(1));
+        tokio::spawn(drain(
+            writer,
+            rx,
+            max_rows.max(1),
+            max_age,
+            max_concurrent.max(1),
+        ));
+        Self { tx }
+    }
 
-        while let Some((table, batch)) = rx.recv().await {
-            let entry = pending.entry(table.clone()).or_default();
-            entry.1 += batch.num_rows();
-            entry.0.push(batch);
-            if entry.1 >= max_rows {
-                let (batches, _) = pending.remove(&table).unwrap();
-                let (w, p) = (self.clone(), sem.clone());
-                set.spawn(async move {
-                    let _permit = p.acquire_owned().await.expect("write semaphore closed");
-                    w.write(&table, batches, Some(WriteDurability::Durable))
-                        .await
-                });
+    /// Buffer one batch with its completion `token`. Uses `blocking_send`, for the blocking
+    /// parse thread.
+    pub fn submit(
+        &self,
+        table: String,
+        batch: RecordBatch,
+        token: Token,
+    ) -> Result<(), WriteError> {
+        self.tx
+            .blocking_send(Msg::Submit(table, batch, token))
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+    }
+
+    /// Flush all buffered rows now and wait until they are written. Used to make writes
+    /// synchronously visible (tests, shutdown); the steady-state path relies on the size/age
+    /// flush instead.
+    pub async fn flush(&self) -> Result<(), WriteError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tx
+            .send(Msg::Flush(tx))
+            .await
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))?;
+        rx.await
+            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
+    }
+}
+
+#[derive(Default)]
+struct TableBuffer {
+    batches: Vec<RecordBatch>,
+    tokens: Vec<Token>,
+    rows: usize,
+}
+
+async fn drain(
+    writer: Arc<ClickHouseWriter>,
+    mut rx: mpsc::Receiver<Msg>,
+    max_rows: usize,
+    max_age: Duration,
+    max_concurrent: usize,
+) {
+    let mut pending: HashMap<String, TableBuffer> = HashMap::new();
+    let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+    // Parts write concurrently and may land out of order. That is safe: the edge tables are
+    // ReplacingMergeTree keyed by row identity + `_version`, and stale cleanup keys on
+    // `indexed_at`, so neither correctness nor dedup depends on insert order.
+    let mut writes = JoinSet::new();
+
+    let mut ticker = tokio::time::interval(max_age);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker.tick().await;
+
+    loop {
+        tokio::select! {
+            msg = rx.recv() => match msg {
+                None => break,
+                Some(Msg::Flush(ack)) => {
+                    for (table, buf) in std::mem::take(&mut pending) {
+                        spawn_write(&mut writes, &sem, &writer, table, buf);
+                    }
+                    while writes.join_next().await.is_some() {}
+                    let _ = ack.send(());
+                }
+                Some(Msg::Submit(table, batch, token)) => {
+                    let buf = pending.entry(table.clone()).or_default();
+                    buf.rows += batch.num_rows();
+                    buf.batches.push(batch);
+                    buf.tokens.push(token);
+                    if buf.rows >= max_rows {
+                        let buf = pending.remove(&table).unwrap();
+                        spawn_write(&mut writes, &sem, &writer, table, buf);
+                    }
+                }
+            },
+            _ = ticker.tick() => {
+                for (table, buf) in std::mem::take(&mut pending) {
+                    spawn_write(&mut writes, &sem, &writer, table, buf);
+                }
             }
+            // Reap finished writes so the JoinSet does not grow unbounded between flushes.
+            Some(_) = writes.join_next(), if !writes.is_empty() => {}
         }
+    }
 
-        for (table, (batches, _)) in pending {
-            let (w, p) = (self.clone(), sem.clone());
-            set.spawn(async move {
-                let _permit = p.acquire_owned().await.expect("write semaphore closed");
-                w.write(&table, batches, Some(WriteDurability::Durable))
-                    .await
-            });
-        }
+    for (table, buf) in std::mem::take(&mut pending) {
+        spawn_write(&mut writes, &sem, &writer, table, buf);
+    }
+    while writes.join_next().await.is_some() {}
+}
 
-        let mut reports = Vec::new();
-        while let Some(r) = set.join_next().await {
-            reports.push(r.map_err(|e| WriteError::Write(format!("join: {e}"), None))??);
+/// Spawn one coalesced part write, bounded by `sem` to `max_concurrent` in flight.
+fn spawn_write(
+    writes: &mut JoinSet<()>,
+    sem: &Arc<tokio::sync::Semaphore>,
+    writer: &Arc<ClickHouseWriter>,
+    table: String,
+    buf: TableBuffer,
+) {
+    let (writer, sem) = (writer.clone(), sem.clone());
+    writes.spawn(async move {
+        let _permit = sem
+            .acquire_owned()
+            .await
+            .expect("write semaphore never closes");
+        write_part(&writer, &table, buf).await;
+    });
+}
+
+/// Notifies every held token of failure when dropped, unless `disarm`ed first. Guarantees a part
+/// that unwinds (a panic in `write`) still releases its tokens, so a project can never be stranded
+/// with an un-decremented commit (which would hang `flush()` on the inflight count forever).
+struct NotifyOnDrop(Vec<Token>);
+
+impl NotifyOnDrop {
+    fn disarm(mut self) -> Vec<Token> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+impl Drop for NotifyOnDrop {
+    fn drop(&mut self) {
+        std::mem::take(&mut self.0)
+            .into_iter()
+            .for_each(|t| t.on_failed());
+    }
+}
+
+/// Write one coalesced part, then notify every batch's token of the outcome. A single part can
+/// hold batches from many producers; each is told precisely whether its rows landed.
+async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
+    let guard = NotifyOnDrop(buf.tokens);
+    let durable = writer
+        .write(table, buf.batches, Some(WriteDurability::Durable))
+        .await;
+    let tokens = guard.disarm();
+    match durable {
+        Ok(_) => tokens.into_iter().for_each(|t| t.on_flushed()),
+        Err(e) => {
+            warn!(table, error = %e, "buffered write flush failed");
+            tokens.into_iter().for_each(|t| t.on_failed());
         }
-        Ok(reports)
     }
 }
 
@@ -183,5 +334,102 @@ mod tests {
             insert_overrides(WriteDurability::FireAndForget),
             &[("async_insert", "1"), ("wait_for_async_insert", "0")]
         );
+    }
+
+    use arrow::array::Int64Array;
+    use arrow::datatypes::{DataType, Field, Schema};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn batch(rows: usize) -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
+        RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![0i64; rows]))]).unwrap()
+    }
+
+    #[derive(Default)]
+    struct CountToken {
+        flushed: AtomicUsize,
+        failed: AtomicUsize,
+    }
+
+    impl FlushToken for CountToken {
+        fn on_flushed(self: Arc<Self>) {
+            self.flushed.fetch_add(1, Ordering::SeqCst);
+        }
+        fn on_failed(self: Arc<Self>) {
+            self.failed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    async fn submit(w: &BufferedWriter, table: &str, batch: RecordBatch, token: Token) {
+        let w = w.clone();
+        let table = table.to_string();
+        tokio::task::spawn_blocking(move || w.submit(table, batch, token))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn size_flush_notifies_each_batch_token_once_its_part_lands() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            16,
+            100,
+            Duration::from_secs(3600),
+            1,
+        );
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+
+        // One batch in each of two tables. gl_edge crosses max_rows and flushes immediately;
+        // gl_code_edge stays buffered, so only one notification has fired.
+        submit(&w, "gl_edge", batch(100), token.clone()).await;
+        submit(&w, "gl_code_edge", batch(10), token.clone()).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
+
+        // An explicit flush drains gl_code_edge, notifying the second batch.
+        w.flush().await.unwrap();
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 2);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn flush_waits_for_concurrent_in_flight_writes() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            64,
+            100,
+            Duration::from_secs(3600),
+            4,
+        );
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+
+        // Each batch crosses max_rows on its own table, so all four spawn concurrent writes.
+        for table in ["a", "b", "c", "d"] {
+            submit(&w, table, batch(100), token.clone()).await;
+        }
+
+        w.flush().await.unwrap();
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 4);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn notify_on_drop_fails_tokens_when_not_disarmed() {
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+        let guard = NotifyOnDrop(vec![token.clone()]);
+        drop(guard);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 1);
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn notify_on_drop_is_silent_once_disarmed() {
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+        let guard = NotifyOnDrop(vec![token.clone()]);
+        let tokens = guard.disarm();
+        tokens.into_iter().for_each(|t| t.on_flushed());
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
     }
 }
