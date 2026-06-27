@@ -324,6 +324,7 @@ impl HasRules for PythonRules {
         )
         .with_hooks(ResolverHooks {
             call_method: Some("__call__"),
+            reexport_index_builder: Some(build_python_reexport_index),
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
             excluded_ambient_imported_symbol_names: &[
                 "abs",
@@ -443,6 +444,43 @@ impl PythonImportRewriter {
 fn build_python_import_rewriter(paths: &[&str], sep: &str) -> Box<ImportRewriter> {
     let rewriter = PythonImportRewriter::from_paths(paths.iter().copied(), sep);
     Box::new(move |import, module_scope, sep| rewriter.rewrite(import, module_scope, sep))
+}
+
+/// Index every `from M import ...` (named or `import *`) keyed by the declaring
+/// module, so callers of a re-exported name bind to the concrete definition.
+fn build_python_reexport_index(
+    graph: &crate::v2::linker::CodeGraph,
+    sep: &str,
+) -> crate::v2::linker::graph::ReexportIndex {
+    let mut index = crate::v2::linker::graph::ReexportIndex::default();
+    for (_node, file_path, imp) in graph.imports_iter() {
+        if imp.import_type == "FutureImport" {
+            continue;
+        }
+        let Some(module) = python_module_from_path(file_path.as_ref(), sep) else {
+            continue;
+        };
+        let target_module = graph.str(imp.path);
+        if target_module.is_empty() {
+            continue;
+        }
+        if imp.wildcard {
+            index.add_wildcard(module, target_module.to_string());
+        } else if let Some(name_id) = imp.name {
+            let target_name = graph.str(name_id);
+            if target_name.is_empty() {
+                continue;
+            }
+            let bound = imp.alias.map(|a| graph.str(a)).unwrap_or(target_name);
+            index.add_named(
+                module,
+                bound.to_string(),
+                target_module.to_string(),
+                target_name.to_string(),
+            );
+        }
+    }
+    index
 }
 
 fn insert_importable_path_prefixes(

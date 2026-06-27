@@ -154,6 +154,49 @@ impl IncludeIndex {
     }
 }
 
+/// Language-agnostic re-export lookup; a language hook decides what counts as a
+/// re-export. `named`: `module -> { bound_name -> (target_module, target_name) }`.
+/// `wildcard`: `module -> [starred source modules]`.
+#[derive(Default)]
+pub struct ReexportIndex {
+    named: rustc_hash::FxHashMap<String, rustc_hash::FxHashMap<String, (String, String)>>,
+    wildcard: rustc_hash::FxHashMap<String, Vec<String>>,
+}
+
+impl ReexportIndex {
+    pub fn add_named(
+        &mut self,
+        module: String,
+        bound: String,
+        target_module: String,
+        target_name: String,
+    ) {
+        self.named
+            .entry(module)
+            .or_default()
+            .insert(bound, (target_module, target_name));
+    }
+
+    pub fn add_wildcard(&mut self, module: String, source_module: String) {
+        self.wildcard.entry(module).or_default().push(source_module);
+    }
+
+    pub fn named(&self, module: &str, name: &str) -> Option<(&str, &str)> {
+        self.named
+            .get(module)
+            .and_then(|names| names.get(name))
+            .map(|(module, name)| (module.as_str(), name.as_str()))
+    }
+
+    pub fn wildcard_sources(&self, module: &str) -> &[String] {
+        self.wildcard.get(module).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.named.is_empty() && self.wildcard.is_empty()
+    }
+}
+
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
     pub defs: Vec<GraphDef>,

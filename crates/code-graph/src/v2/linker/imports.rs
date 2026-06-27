@@ -58,6 +58,7 @@ pub(crate) struct ImportResolver<'a> {
     pub settings: &'a ResolveSettings,
     pub include_index: Option<&'a super::graph::IncludeIndex>,
     pub include_reachable: &'a mut Option<rustc_hash::FxHashSet<String>>,
+    pub reexport_index: Option<&'a super::graph::ReexportIndex>,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -148,7 +149,76 @@ impl<'a> ImportResolver<'a> {
                 return by_path.to_vec();
             }
         }
+
+        // `from pkg import Foo` where `pkg` only re-exports `Foo` (so `pkg.Foo`
+        // is no definition): follow the re-export to the defining module.
+        if let Some(reexport) = self.reexport_index
+            && !imp_path.is_empty()
+            && !symbol_name.is_empty()
+        {
+            let resolved = self.follow_reexport(reexport, imp_path, symbol_name);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
         vec![]
+    }
+
+    fn follow_reexport(
+        &self,
+        reexport: &super::graph::ReexportIndex,
+        module: &str,
+        name: &str,
+    ) -> Vec<NodeIndex> {
+        const MAX_REEXPORT_DEPTH: usize = 16;
+        let sep = self.sep();
+        let mut visited: rustc_hash::FxHashSet<(String, String)> = rustc_hash::FxHashSet::default();
+        let mut stack: Vec<(String, String, usize)> =
+            vec![(module.to_string(), name.to_string(), 0)];
+        let mut out: Vec<NodeIndex> = Vec::new();
+
+        while let Some((module, name, depth)) = stack.pop() {
+            if depth > MAX_REEXPORT_DEPTH || !visited.insert((module.clone(), name.clone())) {
+                continue;
+            }
+            let probe = |module: &str, target: &str, out: &mut Vec<NodeIndex>| -> bool {
+                let key = format!("{module}{sep}{target}");
+                let found = self
+                    .graph
+                    .indexes
+                    .by_fqn
+                    .lookup(&key, |idx| self.graph.def_fqn(idx) == key);
+                if found.is_empty() {
+                    false
+                } else {
+                    out.extend(found.to_vec());
+                    true
+                }
+            };
+            // An explicit `from M import name` re-export wins over wildcards.
+            if let Some((target_module, target_name)) = reexport.named(&module, &name) {
+                if !probe(target_module, target_name, &mut out) {
+                    stack.push((
+                        target_module.to_string(),
+                        target_name.to_string(),
+                        depth + 1,
+                    ));
+                }
+                continue;
+            }
+            // `from M import *`: the name may be defined in any starred module.
+            for src in reexport.wildcard_sources(&module) {
+                if !probe(src, &name, &mut out) {
+                    stack.push((src.clone(), name.clone(), depth + 1));
+                }
+            }
+        }
+
+        out.sort_unstable();
+        out.dedup();
+        // A name re-exported from several modules with distinct definitions is
+        // ambiguous; leave it unresolved rather than bind arbitrarily.
+        if out.len() == 1 { out } else { Vec::new() }
     }
 
     fn scope_fqn_walk(&mut self, name: &str) -> Vec<NodeIndex> {

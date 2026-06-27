@@ -1,0 +1,252 @@
+name: "Python: symbol re-export resolution"
+fixtures:
+  # Wildcard re-export through a package __init__. Mirrors ai_gateway exactly:
+  # BasePromptRegistry is defined in prompts/base.py and surfaced by
+  # `prompts/__init__.py` via `from prompts.base import *`, so callers write
+  # `from prompts import BasePromptRegistry`.
+  - path: prompts/base.py
+    content: |
+      class BasePromptRegistry:
+          def get(self):
+              pass
+
+  - path: prompts/__init__.py
+    content: |
+      from prompts.base import *
+
+  - path: api/handler.py
+    content: |
+      from prompts import BasePromptRegistry
+
+      def build_registry():
+          return BasePromptRegistry()
+
+  # Direct module import of the same class must keep resolving (regression
+  # guard): callers importing from the defining module bind directly.
+  - path: api/monitoring.py
+    content: |
+      from prompts.base import BasePromptRegistry
+
+      def build_registry_direct():
+          return BasePromptRegistry()
+
+  # Named re-export with a rename: the package binds a different local name
+  # than the underlying definition.
+  - path: selection/impl.py
+    content: |
+      class RealConfig:
+          pass
+
+  - path: selection/__init__.py
+    content: |
+      from selection.impl import RealConfig as ModelSelectionConfig
+
+  - path: selection/caller.py
+    content: |
+      from selection import ModelSelectionConfig
+
+      def load_config():
+          return ModelSelectionConfig()
+
+  # Sibling-module re-export: ops.py re-exports a name defined in typing.py.
+  - path: processing/typing.py
+    content: |
+      class LanguageId:
+          pass
+
+  - path: processing/ops.py
+    content: |
+      from processing.typing import LanguageId
+
+  - path: processing/caller.py
+    content: |
+      from processing.ops import LanguageId
+
+      def make_language_id():
+          return LanguageId()
+
+  # Multi-hop re-export chain: impl -> mid -> __init__.
+  - path: deep/impl.py
+    content: |
+      class Deep:
+          pass
+
+  - path: deep/mid.py
+    content: |
+      from deep.impl import Deep
+
+  - path: deep/__init__.py
+    content: |
+      from deep.mid import Deep
+
+  - path: deep/caller.py
+    content: |
+      from deep import Deep
+
+      def make_deep():
+          return Deep()
+
+  # External symbol with no local definition must stay an ImportedSymbol.
+  - path: ext/caller.py
+    content: |
+      from thirdparty import Widget
+
+      def build_widget():
+          return Widget()
+
+  # A package that does not re-export the requested name must not bind it
+  # (over-resolution guard): empty_pkg re-exports `Present`, not `Absent`.
+  - path: empty_pkg/real.py
+    content: |
+      class Present:
+          pass
+
+  - path: empty_pkg/__init__.py
+    content: |
+      from empty_pkg.real import Present
+
+  - path: empty_pkg/caller.py
+    content: |
+      from empty_pkg import Absent
+
+      def use_absent():
+          return Absent()
+
+  # Same name re-exported from two starred modules is ambiguous and must not
+  # bind to either definition.
+  - path: amb/a.py
+    content: |
+      class Thing:
+          pass
+
+  - path: amb/b.py
+    content: |
+      class Thing:
+          pass
+
+  - path: amb/__init__.py
+    content: |
+      from amb.a import *
+      from amb.b import *
+
+  - path: amb/caller.py
+    content: |
+      from amb import Thing
+
+      def make_thing():
+          return Thing()
+
+tests:
+  - name: "wildcard __init__ re-export resolves to the defining module"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'api.handler.build_registry'
+            AND callee.fqn = 'prompts.base.BasePromptRegistry'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'api.handler.build_registry'
+            AND sym.name = 'BasePromptRegistry'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller
+        assert:
+          - { empty: true }
+
+  - name: "direct module import still binds (no regression)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'api.monitoring.build_registry_direct'
+        AND callee.fqn = 'prompts.base.BasePromptRegistry'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "renaming named re-export resolves to the underlying definition"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'selection.caller.load_config'
+        AND callee.fqn = 'selection.impl.RealConfig'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "sibling-module re-export resolves to the defining module"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'processing.caller.make_language_id'
+        AND callee.fqn = 'processing.typing.LanguageId'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "multi-hop re-export chain resolves to the defining module"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'deep.caller.make_deep'
+        AND callee.fqn = 'deep.impl.Deep'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "external import without a local definition stays an ImportedSymbol"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'ext.caller.build_widget'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'ext.caller.build_widget'
+            AND sym.path = 'thirdparty'
+            AND sym.name = 'Widget'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller
+        assert:
+          - { row_count: 1 }
+
+  - name: "name a package does not re-export is not bound to a definition"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'empty_pkg.caller.use_absent'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'empty_pkg.caller.use_absent'
+            AND sym.name = 'Absent'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller
+        assert:
+          - { row_count: 1 }
+
+  - name: "ambiguous wildcard re-export does not bind arbitrarily"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'amb.caller.make_thing'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'amb.caller.make_thing'
+            AND sym.name = 'Thing'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller
+        assert:
+          - { row_count: 1 }
