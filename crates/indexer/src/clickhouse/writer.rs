@@ -216,7 +216,7 @@ async fn drain(
                 None => break,
                 Some(Msg::Flush(ack)) => {
                     for (table, buf) in std::mem::take(&mut pending) {
-                        flush(&writer, &table, buf).await;
+                        write_part(&writer, &table, buf).await;
                     }
                     let _ = ack.send(());
                 }
@@ -227,26 +227,26 @@ async fn drain(
                     buf.tokens.push(token);
                     if buf.rows >= max_rows {
                         let buf = pending.remove(&table).unwrap();
-                        flush(&writer, &table, buf).await;
+                        write_part(&writer, &table, buf).await;
                     }
                 }
             },
             _ = ticker.tick() => {
                 for (table, buf) in std::mem::take(&mut pending) {
-                    flush(&writer, &table, buf).await;
+                    write_part(&writer, &table, buf).await;
                 }
             }
         }
     }
 
     for (table, buf) in std::mem::take(&mut pending) {
-        flush(&writer, &table, buf).await;
+        write_part(&writer, &table, buf).await;
     }
 }
 
-/// Write one part, then notify every batch's token of the outcome. A single part can hold
-/// batches from many producers; each is told precisely whether its rows landed.
-async fn flush(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
+/// Write one coalesced part, then notify every batch's token of the outcome. A single part can
+/// hold batches from many producers; each is told precisely whether its rows landed.
+async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
     let durable = writer
         .write(table, buf.batches, Some(WriteDurability::Durable))
         .await;
