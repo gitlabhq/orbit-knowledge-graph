@@ -3,6 +3,7 @@ use std::collections::BTreeSet;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
+use gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 use ontology::{PathResolution, ReindexSource};
 
 use super::DispatchNamespace;
@@ -10,7 +11,6 @@ use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::orchestrator::scheduled::TaskError;
 
 const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
-const ROOT_NAMESPACE_PATH_PATTERN: &str = "^[0-9]+/[0-9]+/";
 
 const CHANGE_QUERY_SQL: &str = r#"WITH
   enabled AS (
@@ -142,10 +142,7 @@ fn render_change_branch(source_table: &ReindexSource) -> String {
         .replace("{{table}}", &source_table.table)
         .replace("{{watermark_column}}", ontology::siphon_watermark_column())
         .replace("{{path}}", &path)
-        .replace(
-            "{{root_namespace_path_pattern}}",
-            ROOT_NAMESPACE_PATH_PATTERN,
-        )
+        .replace("{{root_namespace_path_pattern}}", TOP_LEVEL_PREFIX_REGEX)
 }
 
 fn path_expression(resolution: &PathResolution) -> String {
@@ -201,7 +198,7 @@ mod tests {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
         assert!(query.sql.contains("splitByChar('/', traversal_path)[1]"));
         assert!(query.sql.contains("splitByChar('/', traversal_path)[2]"));
-        assert!(query.sql.contains(ROOT_NAMESPACE_PATH_PATTERN));
+        assert!(query.sql.contains(TOP_LEVEL_PREFIX_REGEX));
     }
 
     #[test]
