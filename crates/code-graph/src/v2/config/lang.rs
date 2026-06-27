@@ -81,7 +81,7 @@ macro_rules! define_languages {
             pub const fn family(&self) -> LanguageFamily {
                 match self {
                     Self::C | Self::Cpp => LanguageFamily::CFamily,
-                    Self::Java | Self::Kotlin => LanguageFamily::Jvm,
+                    Self::Java | Self::Kotlin | Self::Scala => LanguageFamily::Jvm,
                     _ => LanguageFamily::Standalone(*self),
                 }
             }
@@ -177,6 +177,12 @@ define_languages! {
         extensions: ["kt", "kts"],
         separator: ".",
         names: ["kotlin"],
+    },
+    Scala => {
+        support_lang: Scala,
+        extensions: ["scala", "sc"],
+        separator: ".",
+        names: ["scala"],
     },
     CSharp => {
         support_lang: CSharp,

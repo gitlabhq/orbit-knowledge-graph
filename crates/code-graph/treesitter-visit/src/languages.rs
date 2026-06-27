@@ -23,6 +23,7 @@ pub enum SupportLang {
     CSharp,
     Kotlin,
     Rust,
+    Scala,
     Php,
     Hcl,
     Swift,
@@ -115,6 +116,11 @@ impl LanguageExt for SupportLang {
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-rust"))]
             Self::Rust => panic!("tree-sitter-rust feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-scala")]
+            Self::Scala => tree_sitter_scala::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-scala"))]
+            Self::Scala => panic!("tree-sitter-scala feature not enabled"),
 
             #[cfg(feature = "tree-sitter-php")]
             Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
