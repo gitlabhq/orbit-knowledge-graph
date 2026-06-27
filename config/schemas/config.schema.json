@@ -404,7 +404,7 @@
       "type": "object",
       "properties": {
         "big_indexing_slots": {
-          "description": "Concurrent indexing+write slots reserved for big repositories so a flood of\nsmall repos cannot starve monorepos. Defaults to 2.",
+          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.",
           "type": "integer",
           "format": "uint",
           "default": 2,
@@ -482,14 +482,14 @@
           "minimum": 0
         },
         "small_indexing_slots": {
-          "description": "Concurrent indexing+write slots for small repositories. Defaults to 6.",
+          "description": "Concurrent indexing slots for small repositories. Defaults to 6.",
           "type": "integer",
           "format": "uint",
           "default": 6,
           "minimum": 0
         },
         "small_repo_max_files": {
-          "description": "Post-filter file-count cutoff: a repository with at most this many indexed files runs\non the wide small lane, above it on the reserved big lane. Defaults to 650.",
+          "description": "Post-filter file count at or below which a repository runs on the small lane. Defaults to 650.",
           "type": "integer",
           "format": "uint",
           "default": 650,
@@ -502,7 +502,7 @@
           "minimum": 0
         },
         "write_buffer_age_secs": {
-          "description": "Flush the shared write coalescer after this many seconds even if no table reached\n`write_slice_rows`, so a trickle of small repos still lands with bounded latency. Must\nstay below `nats.ack_wait_secs`. Defaults to 60.",
+          "description": "Flush the write coalescer after this many seconds even below `write_slice_rows`, bounding latency. Keep below `nats.ack_wait_secs`. Defaults to 60.",
           "type": "integer",
           "format": "uint64",
           "default": 60,

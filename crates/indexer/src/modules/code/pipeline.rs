@@ -28,8 +28,7 @@ pub struct IndexingRequest {
 
 /// Terminal outcome of `CodeIndexingPipeline::index_project`.
 pub enum IndexOutcome {
-    /// Repository parsed and streamed into the shared write sink. Its checkpoint is handed to
-    /// the sink and written once the flush makes its rows durable; the handler does not wait.
+    /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
     Indexed,
     /// Archive endpoint signalled no repository content (404 or 5xx); already checkpointed.
     EmptyRepository,
@@ -170,8 +169,7 @@ impl CodeIndexingPipeline {
                 self.metrics
                     .record_empty_repository(reason.as_metric_label());
                 self.metrics.record_fetch_duration(fetch_start.elapsed());
-                // No rows to flush, so the checkpoint is durable immediately and written here
-                // rather than through the sink.
+                // No rows to flush, so checkpoint directly rather than through the sink.
                 self.checkpoint_store
                     .set_checkpoint(&CodeIndexingCheckpoint {
                         traversal_path: request.traversal_path.clone(),
@@ -203,10 +201,8 @@ impl CodeIndexingPipeline {
         // start its Gitaly download while we wait for an indexing slot.
         drop(_fetch_slot);
 
-        // Phase 2: Process. The post-filter file count picks the concurrency lane only —
-        // a wide lane for the small-repo tail, a reserved lane so big repos never starve.
-        // Every job streams into the shared coalescer; big repos cross the row cap and flush
-        // promptly, small repos coalesce.
+        // Phase 2: Process. File count picks the lane only; a reserved big lane keeps a flood
+        // of small repos from starving monorepos.
         let lane = if repository.file_inventory.len() <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
@@ -239,9 +235,7 @@ impl CodeIndexingPipeline {
 
         let seq = indexing_result?;
 
-        // Hand the checkpoint to the sink; it is written once the flush makes this project's
-        // rows durable. The handler does not wait — on a crash before flush the project is
-        // simply never checkpointed and the backfill sweep re-indexes it.
+        // The sink writes this checkpoint after the flush makes the rows durable; we don't wait.
         self.sink
             .finish(
                 seq,
@@ -338,8 +332,7 @@ impl CodeIndexingPipeline {
         }
     }
 
-    /// Parse the repository and stream its batches into the shared coalescer under one
-    /// project seq, returning that seq so the caller can await its flush.
+    /// Parse the repository, stream its batches to the sink under one project seq, return it.
     async fn build_code_graph(
         &self,
         request: &IndexingRequest,
@@ -459,9 +452,7 @@ impl CodeIndexingPipeline {
         observer.nodes_indexed("imported_symbol", result.stats.imports_count as u64);
         observer.nodes_indexed("edge", result.stats.edges_count as u64);
 
-        // Rows are written asynchronously by the shared coalescer, so the count comes from
-        // the parse result rather than write reports. Byte size is reported by the writer's
-        // own ClickHouse metrics.
+        // Writes are deferred to the sink, so row count comes from the parse result, not writes.
         let rows_written = (result.stats.directories_indexed
             + result.stats.files_indexed
             + result.stats.definitions_count

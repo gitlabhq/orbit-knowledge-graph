@@ -10,23 +10,14 @@ use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use crate::clickhouse::{ClickHouseWriter, WriteError};
 use crate::durability::WriteDurability;
 
-/// A project's batches stream in under its `seq`; `Done` carries the checkpoint to write once
-/// the project's rows are durable.
 enum Msg {
     Batch(String, RecordBatch, u64),
     Done(u64, Box<CodeIndexingCheckpoint>),
 }
 
-/// Process-wide ClickHouse write sink shared by every code-indexing job. Coalesces the long
-/// tail of tiny projects into well-sized parts instead of one small part each, and owns
-/// checkpointing: a project is checkpointed only after the flush that makes its rows durable.
-///
-/// A handler takes a seq from [`next_seq`], streams its batches in with that seq, calls
-/// [`finish`] with its checkpoint, and returns — it does not wait for the write. If the
-/// process dies before the flush, the project is simply never checkpointed and the
-/// once-a-minute backfill sweep re-dispatches it (re-indexing is idempotent). Big projects
-/// cross the row cap and flush promptly; a failed flush is logged and the project's
-/// checkpoint is never written, so it is re-indexed.
+/// Coalesces the long tail of tiny projects into well-sized ClickHouse parts and owns
+/// checkpointing: a project is checkpointed only after the flush makes its rows durable, so a
+/// crash before flush leaves it un-checkpointed and the backfill sweep re-indexes it.
 pub struct CodeWriteSink {
     tx: tokio::sync::mpsc::Sender<Msg>,
     seq: AtomicU64,
@@ -54,23 +45,19 @@ impl CodeWriteSink {
         })
     }
 
-    /// Reserve a seq for one project. All of that project's batches must be submitted with
-    /// this seq and contiguously (before [`finish`]), so the durability watermark cleanly
-    /// separates flushed projects from buffered ones.
+    /// A project's batches must all be submitted under this seq and contiguously, so the
+    /// durability watermark cleanly separates flushed projects from buffered ones.
     pub fn next_seq(&self) -> u64 {
         self.seq.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Buffer one batch from the blocking parse thread, backpressuring the parser when the
-    /// shared channel is full.
+    /// Called from the blocking parse thread; `blocking_send` backpressures the parser.
     pub fn submit(&self, table: String, batch: RecordBatch, seq: u64) -> Result<(), WriteError> {
         self.tx
             .blocking_send(Msg::Batch(table, batch, seq))
             .map_err(|_| WriteError::Write("code write sink drain closed".into(), None))
     }
 
-    /// Hand the sink the project's checkpoint. It is written once the project's rows are
-    /// durable; the caller does not wait.
     pub async fn finish(
         &self,
         seq: u64,
@@ -83,7 +70,6 @@ impl CodeWriteSink {
     }
 }
 
-/// Per-table accumulator: buffered batches, row count, and the lowest seq still buffered.
 #[derive(Default)]
 struct Table {
     batches: Vec<RecordBatch>,
@@ -101,8 +87,7 @@ async fn drain(
     let mut pending: HashMap<String, Table> = HashMap::new();
     let mut checkpoints: BTreeMap<u64, CodeIndexingCheckpoint> = BTreeMap::new();
     let mut max_seq = 0u64;
-    // Lowest seq whose flush failed. Every project at or above it is unproven, so the
-    // watermark never passes it and those projects re-index on the next sweep.
+    // Lowest seq whose flush failed; the watermark never passes it, so those projects re-index.
     let mut failed_floor: Option<u64> = None;
 
     let mut ticker = tokio::time::interval(max_buffer_age);
@@ -116,8 +101,7 @@ async fn drain(
                 Some(Msg::Done(seq, checkpoint)) => {
                     max_seq = max_seq.max(seq);
                     checkpoints.insert(seq, *checkpoint);
-                    // A project that produced no batches (parsed clean but emitted nothing) is
-                    // durable immediately; recheck the checkpoint set so it isn't stranded.
+                    // Recheck so a project that emitted no batches isn't stranded uncheckpointed.
                     true
                 }
                 Some(Msg::Batch(table, batch, seq)) => {
@@ -167,8 +151,7 @@ async fn drain(
     .await;
 }
 
-/// Write one table's coalesced batches as a durable part. On failure, poison every seq the
-/// part carried so those projects never checkpoint and are re-indexed.
+/// On failure, poison the part's seqs so those projects never checkpoint and are re-indexed.
 async fn flush(writer: &ClickHouseWriter, table: &str, t: Table, failed_floor: &mut Option<u64>) {
     if let Err(e) = writer
         .write(table, t.batches, Some(WriteDurability::Durable))
@@ -179,9 +162,8 @@ async fn flush(writer: &ClickHouseWriter, table: &str, t: Table, failed_floor: &
     }
 }
 
-/// Write the checkpoint of every project whose rows are now durable: all seqs at or below the
-/// lowest still-buffered seq (or the highest accepted seq when nothing is buffered), but never
-/// at or above a seq whose flush failed.
+/// Checkpoint every project at or below the lowest still-buffered seq, but never at or above a
+/// failed-flush seq.
 async fn checkpoint_durable(
     store: &Arc<dyn CodeCheckpointStore>,
     pending: &HashMap<String, Table>,
@@ -312,8 +294,7 @@ mod tests {
             Duration::from_secs(3600),
         );
         let seq = sink.next_seq();
-        // gl_edge crosses the cap and flushes, but gl_code_edge stays buffered, so the
-        // project is not yet durable and must not checkpoint.
+        // gl_edge flushes at the cap but gl_code_edge stays buffered, so seq isn't durable.
         submit(&sink, "gl_code_edge", batch(10), seq).await;
         submit(&sink, "gl_edge", batch(100), seq).await;
         sink.finish(seq, checkpoint(11)).await.unwrap();

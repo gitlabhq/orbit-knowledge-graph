@@ -332,20 +332,16 @@ pub struct CodeIndexingPipelineConfig {
     /// Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.
     #[serde(default = "default_code_indexing_write_slice_rows")]
     pub write_slice_rows: usize,
-    /// Flush the shared write coalescer after this many seconds even if no table reached
-    /// `write_slice_rows`, so a trickle of small repos still lands with bounded latency. Must
-    /// stay below `nats.ack_wait_secs`. Defaults to 60.
+    /// Flush the write coalescer after this many seconds even below `write_slice_rows`, bounding latency. Keep below `nats.ack_wait_secs`. Defaults to 60.
     #[serde(default = "default_code_indexing_write_buffer_age_secs")]
     pub write_buffer_age_secs: u64,
-    /// Post-filter file-count cutoff: a repository with at most this many indexed files runs
-    /// on the wide small lane, above it on the reserved big lane. Defaults to 650.
+    /// Post-filter file count at or below which a repository runs on the small lane. Defaults to 650.
     #[serde(default = "default_code_indexing_small_repo_max_files")]
     pub small_repo_max_files: usize,
-    /// Concurrent indexing+write slots for small repositories. Defaults to 6.
+    /// Concurrent indexing slots for small repositories. Defaults to 6.
     #[serde(default = "default_code_indexing_small_indexing_slots")]
     pub small_indexing_slots: usize,
-    /// Concurrent indexing+write slots reserved for big repositories so a flood of
-    /// small repos cannot starve monorepos. Defaults to 2.
+    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.
     #[serde(default = "default_code_indexing_big_indexing_slots")]
     pub big_indexing_slots: usize,
 }
