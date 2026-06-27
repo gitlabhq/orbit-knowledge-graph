@@ -10,8 +10,6 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct BashDsl;
 
@@ -81,8 +79,6 @@ fn bash_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
 fn strip_quotes(s: &str) -> &str {
     s.trim_matches(|c| c == '"' || c == '\'')
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct BashRules;
 

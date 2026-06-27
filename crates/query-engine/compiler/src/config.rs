@@ -1,11 +1,6 @@
-//! Compiler pipeline configuration via `define_compiler_ctx!`.
-//!
-//! This is the SSOT declaration for the compiler's env fields, state fields,
-//! phase grants, and pipeline presets. The macro generates the `CompilerCtx`
-//! trait, per-pipeline context structs, and runner functions.
-//!
-//! Phase functions live below the macro invocation. Each takes
-//! `&mut impl CompilerCtx` and delegates to the existing pass interiors.
+//! SSOT declaration for the compiler's env fields, state fields, phase grants,
+//! and pipeline presets. The macro generates the `CompilerCtx` trait,
+//! per-pipeline context structs, and runner functions.
 
 use std::sync::Arc;
 
@@ -30,7 +25,6 @@ use crate::passes::{
 };
 use crate::types::SecurityContext;
 
-/// Unwrap an `Option<T>` from ctx, returning `PipelineInvariant` if `None`.
 fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
     opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
 }
@@ -117,10 +111,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Phase functions
-// ─────────────────────────────────────────────────────────────────────────────
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
     let json = require(ctx.take_json(), "json")?;

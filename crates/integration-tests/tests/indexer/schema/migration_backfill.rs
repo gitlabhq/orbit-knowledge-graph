@@ -152,7 +152,6 @@ impl TestContext {
 async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     let context = TestContext::new().await;
 
-    // Seed: two namespaces with projects.
     common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
     common::create_namespace(&context.clickhouse, 200, None, 20, "1/200/").await;
     common::create_project(&context.clickhouse, 10, 100, 1, 20, "1/100/10/").await;
@@ -160,7 +159,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     common::create_project(&context.clickhouse, 21, 200, 1, 20, "1/200/21/").await;
     context.given_enabled_namespaces([100, 200]).await;
 
-    // Put a migrating version into gkg_schema_version.
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
     write_schema_version(&graph, 0).await.unwrap();
@@ -170,7 +168,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         .await
         .unwrap();
 
-    // Open the campaign for the migrating version, as the orchestrator does.
     let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
     campaign.set(indexer::campaign::campaign_id_for_version(1));
 
@@ -187,7 +184,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         .await
         .unwrap();
 
-    // Verify: code indexing tasks dispatched for all 3 projects.
     let requests = context.consume_code_indexing_requests().await;
     let project_ids: HashSet<i64> = requests.iter().map(|r| r.project_id).collect();
 
@@ -197,7 +193,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         "expected backfill for all projects in enabled namespaces"
     );
 
-    // All backfill requests should have task_id=0 (backfill marker).
     assert!(
         requests.iter().all(|r| r.task_id == 0),
         "migration backfill requests should use task_id=0"
@@ -219,7 +214,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
 async fn backfill_skips_projects_with_existing_checkpoints() {
     let context = TestContext::new().await;
 
-    // Seed: one namespace with three projects (10, 11, 12).
     common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
     common::create_project(&context.clickhouse, 10, 100, 1, 20, "1/100/10/").await;
     common::create_project(&context.clickhouse, 11, 100, 1, 20, "1/100/11/").await;
@@ -233,9 +227,6 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         .await
         .unwrap();
 
-    // Insert a checkpoint row for project 11 in the current-version table:
-    // simulates a prior successful indexing run that the dispatcher must not
-    // re-dispatch.
     let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
     context
         .clickhouse
@@ -263,8 +254,6 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         .await
         .unwrap();
 
-    // Project 11 was already checkpointed, so only 10 and 12 should be
-    // dispatched.
     let requests = context.consume_code_indexing_requests().await;
     let project_ids: HashSet<i64> = requests.iter().map(|r| r.project_id).collect();
     assert_eq!(

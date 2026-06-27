@@ -1,6 +1,3 @@
-//! Metrics emitted by the ETL engine (NATS dispatch, handler execution,
-//! worker pool, ClickHouse writes).
-
 use crate::MetricSpec;
 use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
 

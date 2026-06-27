@@ -99,10 +99,6 @@ fn estimate_capacity(response: &GraphResponse) -> usize {
     128 + response.nodes.len() * 96 + response.edges.len() * 48 + row_count * 64
 }
 
-// ---------------------------------------------------------------------------
-// Sections
-// ---------------------------------------------------------------------------
-
 fn write_header(
     out: &mut String,
     response: &GraphResponse,
@@ -336,10 +332,6 @@ fn write_paths(out: &mut String, response: &GraphResponse) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Ordering
-// ---------------------------------------------------------------------------
-
 fn group_node_refs<'a>(
     nodes: &'a [&'a GraphNode],
     preserve_order: bool,
@@ -418,10 +410,6 @@ fn ordered_pairs(props: &Map<String, Value>) -> Vec<(&str, &Value)> {
     });
     pairs
 }
-
-// ---------------------------------------------------------------------------
-// Value formatting
-// ---------------------------------------------------------------------------
 
 fn format_value(value: &Value, key: &str) -> String {
     match value {

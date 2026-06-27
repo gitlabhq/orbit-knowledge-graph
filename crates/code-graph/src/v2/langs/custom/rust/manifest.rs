@@ -1581,8 +1581,6 @@ mod tests {
         let temp = tempdir().unwrap();
         let root = std::fs::canonicalize(temp.path()).unwrap();
         let manifest = root.join("Cargo.toml");
-        // Write a manifest whose bytes exceed MAX_MANIFEST_BYTES with filler in
-        // a comment so the TOML grammar would otherwise be valid.
         let padding = "#".repeat((MAX_MANIFEST_BYTES + 1) as usize);
         std::fs::write(
             &manifest,

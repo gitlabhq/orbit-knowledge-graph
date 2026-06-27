@@ -1,9 +1,7 @@
-// ENFORCEMENT CONSTANTS
-
 // Re-export so existing `crate::constants::` paths keep working.
 pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 
-/// Internal column prefix, loaded once from ontology YAML at startup.
+/// Loaded once at startup from the embedded ontology YAML.
 pub fn internal_column_prefix() -> &'static str {
     use std::sync::OnceLock;
     static PREFIX: OnceLock<String> = OnceLock::new();
@@ -15,7 +13,6 @@ pub fn internal_column_prefix() -> &'static str {
     })
 }
 
-/// Define a prefixed internal column name, loaded once at startup.
 macro_rules! internal_col {
     ($fn_name:ident, $suffix:literal) => {
         pub fn $fn_name() -> &'static str {
@@ -93,44 +90,30 @@ pub const EDGE_ALIAS_SUFFIXES: &[&str] = &[
     EDGE_DST_TYPE_SUFFIX,
 ];
 
-// ─── CTE and internal column names ──────────────────────────────────────────
-
-/// Internal CTE column for hop depth (used in path-finding and multi-hop traversal).
 pub(crate) const DEPTH_COLUMN: &str = "depth";
 
-/// Internal CTE column for accumulated path node tuples.
 pub(crate) const PATH_NODES_COLUMN: &str = "path_nodes";
 
-/// Internal CTE column for accumulated edge relationship kinds per hop.
-/// Named distinctly from `EDGE_KINDS_COLUMN` (`_gkg_edge_kinds`) which is the
-/// output alias — this is the raw CTE-internal column before projection.
+/// Raw CTE-internal column before projection; distinct from `EDGE_KINDS_COLUMN`
+/// (`_gkg_edge_kinds`), which is the output alias.
 pub(crate) const FRONTIER_EDGE_KINDS_COLUMN: &str = "edge_kinds";
 
-/// Internal CTE column for the frontier anchor node ID.
 pub(crate) const ANCHOR_ID_COLUMN: &str = "anchor_id";
 
-/// Internal CTE column for the frontier end node ID.
 pub(crate) const END_ID_COLUMN: &str = "end_id";
 
-/// Internal CTE column for the frontier end node type.
 pub(crate) const END_KIND_COLUMN: &str = "end_kind";
 
-/// CTE name for forward frontier in path-finding.
 pub(crate) const FORWARD_CTE: &str = "forward";
 
-/// CTE name for backward frontier in path-finding.
 pub(crate) const BACKWARD_CTE: &str = "backward";
 
-/// Table alias for the forward frontier CTE.
 pub(crate) const FORWARD_ALIAS: &str = "f";
 
-/// Table alias for the backward frontier CTE.
 pub(crate) const BACKWARD_ALIAS: &str = "b";
 
-/// Table alias for the combined paths UNION ALL subquery.
 pub(crate) const PATHS_ALIAS: &str = "paths";
 
-/// CTE name prefix for node-filter CTEs in edge-centric traversal.
 const NODE_FILTER_CTE_PREFIX: &str = "_nf_";
 
 /// CTE name for a node-filter: `_nf_{alias}`.

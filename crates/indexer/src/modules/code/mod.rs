@@ -1,9 +1,3 @@
-//! Code Indexing Module
-//!
-//! This module processes code indexing tasks from the Siphon CDC stream,
-//! fetches repository code from Gitaly, runs the code-graph, and
-//! writes the resulting graph data to ClickHouse.
-
 mod arrow_converter;
 mod checkpoint;
 pub mod config;

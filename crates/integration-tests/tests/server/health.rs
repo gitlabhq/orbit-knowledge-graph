@@ -94,10 +94,6 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
     assert!(components.contains(&"clickhouse_graph".to_string()));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GitLab readiness probe
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn unreachable_gitlab_client() -> Arc<GitlabClient> {
     Arc::new(
         GitlabClient::new(GitlabClientConfiguration {

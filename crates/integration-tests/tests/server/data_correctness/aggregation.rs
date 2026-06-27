@@ -338,8 +338,6 @@ pub(super) async fn aggregation_multiple_functions_in_one_query(ctx: &TestContex
     resp.assert_group_row_value_i64("g", "Group", 101, "min_id", 3);
 }
 
-// ── Traversal path authorization ────────────────────────────────────────────
-
 pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
     // Security context limited to 1/100/ — only Group 100 and its descendants
     // (Groups 200/300, Projects 1000/1002) are visible. Groups 101, 102 are
@@ -667,12 +665,9 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
     );
 }
 
-// ── Default alias (no user-supplied alias) ──────────────────────────────────
-//
 // When the query omits `alias`, the column `name` in the formatted response
 // MUST equal the function name ("count", "sum", etc.). Regression guard for
 // the v2 compiler bug where the default was "agg_result".
-
 pub(super) async fn aggregation_no_alias_defaults_to_function_name(ctx: &TestContext) {
     let resp = run_query(
         ctx,

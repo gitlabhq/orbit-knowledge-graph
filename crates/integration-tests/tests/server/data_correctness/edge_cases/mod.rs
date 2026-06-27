@@ -74,9 +74,6 @@ pub(super) async fn sql_injection_string_preserved(ctx: &TestContext) {
     });
 }
 
-/// SIP (Sideways Information Passing) pre-filter fires when the root node has
-/// node_ids and there are relationships. Verify that the CTE uses the correct
-/// id column from the root node's `id_property` and returns correct results.
 pub(super) async fn sip_prefilter_with_node_ids_returns_correct_results(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -100,8 +97,6 @@ pub(super) async fn sip_prefilter_with_node_ids_returns_correct_results(ctx: &Te
     resp.assert_referential_integrity();
 }
 
-/// SIP also fires when the root node has filters. Verify the CTE correctly
-/// narrows the edge scan and returns only matching rows.
 pub(super) async fn sip_prefilter_with_filter_returns_correct_results(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -129,8 +124,6 @@ pub(super) async fn sip_prefilter_with_filter_returns_correct_results(ctx: &Test
     resp.assert_referential_integrity();
 }
 
-/// SIP with node_ids on a multi-hop variable-length traversal. The CTE should
-/// push root IDs into the first edge scan of each UNION ALL arm.
 pub(super) async fn sip_prefilter_multi_hop_returns_correct_results(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -154,10 +147,6 @@ pub(super) async fn sip_prefilter_multi_hop_returns_correct_results(ctx: &TestCo
     resp.assert_referential_integrity();
 }
 
-/// Target-side SIP for aggregation queries. When the aggregation target has
-/// filters (e.g. `mr.state = 'opened'`), the optimizer materializes matching
-/// target IDs in a CTE and narrows the edge scan from the target side.
-/// Verify the aggregation results are numerically correct with SIP active.
 pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -176,18 +165,13 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
     )
     .await;
 
-    // Aggregation results don't include target node rows, so the filter on
-    // mr.state is verified indirectly through the count values.
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
 
-    // alice authored MR 2000 (opened) and 2001 (opened) = 2
     resp.assert_group_node_property_str("u", "User", 1, "username", "alice");
     resp.assert_group_row_value_i64("u", "User", 1, "open_mr_count", 2);
-    // bob authored MR 2002 (merged), not opened = should not appear
     resp.assert_group_node_absent("u", "User", 2);
-    // charlie authored MR 2003 (closed), not opened = should not appear
     resp.assert_group_node_absent("u", "User", 3);
 }
 
@@ -214,14 +198,12 @@ pub(super) async fn cross_namespace_user_authors_mr_in_different_group(ctx: &Tes
 
     resp.assert_node_count(2);
 
-    // User 2 (bob) authored MR 2002 in ns 1/101/1001/ — must be visible
     resp.assert_node("User", 2, |n| n.prop_str("username") == Some("bob"));
     resp.assert_node("MergeRequest", 2002, |n| {
         n.prop_str("title") == Some("Refactor C")
     });
     resp.assert_edge_exists("User", 2, "MergeRequest", 2002, "AUTHORED");
 
-    // User 1's AUTHORED edges are in ns 1/100/1000/ — must NOT appear
     resp.assert_node_absent("User", 1);
     resp.assert_node_absent("MergeRequest", 2000);
     resp.assert_node_absent("MergeRequest", 2001);
@@ -229,10 +211,6 @@ pub(super) async fn cross_namespace_user_authors_mr_in_different_group(ctx: &Tes
     resp.assert_referential_integrity();
 }
 
-/// Cross-namespace: Group 100 (ns `1/100/`) CONTAINS subgroup 200 (edge ns
-/// `1/100/200/`) and subgroup 200 CONTAINS subgroup 300 (edge ns
-/// `1/100/200/300/`). All containment edges must be visible when scoped to
-/// the parent namespace `1/100/`.
 pub(super) async fn cross_namespace_group_containment_across_depth(ctx: &TestContext) {
     let ctx_100 = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
     let resp = run_query_with_security(
@@ -253,17 +231,12 @@ pub(super) async fn cross_namespace_group_containment_across_depth(ctx: &TestCon
 
     resp.assert_node_count(3);
 
-    // Group 100 contains Group 200 (edge ns 1/100/200/)
     resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
-    // Group 200 contains Group 300 (edge ns 1/100/200/300/)
     resp.assert_edge_exists("Group", 200, "Group", 300, "CONTAINS");
 
     resp.assert_referential_integrity();
 }
 
-/// Cross-namespace isolation: scoped to `1/101/` should NOT see edges from
-/// `1/100/` or `1/102/`. User 1's AUTHORED MRs in `1/100/1000/` and
-/// User 3's MR in `1/102/1004/` must be invisible.
 pub(super) async fn cross_namespace_isolation_no_leakage(ctx: &TestContext) {
     let ctx_101 = SecurityContext::new(1, vec!["1/101/".into()]).unwrap();
     let resp = run_query_with_security(
@@ -284,21 +257,16 @@ pub(super) async fn cross_namespace_isolation_no_leakage(ctx: &TestContext) {
 
     resp.assert_node_count(2);
 
-    // Only MR 2002 is in ns 1/101/ — authored by User 2
     resp.assert_node_ids("MergeRequest", &[2002]);
     resp.assert_edge_set("AUTHORED", &[(2, 2002)]);
 
-    // MRs from other namespaces must not leak
-    resp.assert_node_absent("MergeRequest", 2000); // ns 1/100/1000/
-    resp.assert_node_absent("MergeRequest", 2001); // ns 1/100/1000/
-    resp.assert_node_absent("MergeRequest", 2003); // ns 1/102/1004/
+    resp.assert_node_absent("MergeRequest", 2000);
+    resp.assert_node_absent("MergeRequest", 2001);
+    resp.assert_node_absent("MergeRequest", 2003);
 
     resp.assert_referential_integrity();
 }
 
-/// Cross-namespace: narrow scope `1/100/1000/` sees AUTHORED edges in that
-/// project's namespace. The source User has no traversal_path filter — they
-/// come from any namespace. Only edges with matching traversal_path appear.
 pub(super) async fn cross_namespace_narrow_scope_returns_all_authors(ctx: &TestContext) {
     let ctx_project = SecurityContext::new(1, vec!["1/100/1000/".into()]).unwrap();
     let resp = run_query_with_security(
@@ -319,20 +287,15 @@ pub(super) async fn cross_namespace_narrow_scope_returns_all_authors(ctx: &TestC
 
     resp.assert_node_count(3);
 
-    // Both MRs 2000 and 2001 are in 1/100/1000/, authored by User 1
     resp.assert_node_ids("MergeRequest", &[2000, 2001]);
     resp.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
     resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001)]);
 
-    // User 2's MR 2002 is in 1/101/ — must not appear
     resp.assert_node_absent("MergeRequest", 2002);
 
     resp.assert_referential_integrity();
 }
 
-/// Cross-namespace aggregation: scoped to `1/100/`, count projects per group.
-/// Group 100 CONTAINS projects 1000 and 1002 via edges in `1/100/` subtree.
-/// Projects in `1/101/` and `1/102/` must not appear.
 pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext) {
     let ctx_100 = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
     let resp = run_query_with_security(
@@ -353,22 +316,14 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
     )
     .await;
 
-    // Group 100 CONTAINS projects 1000 (edge ns 1/100/1000/) and 1002
-    // (edge ns 1/100/1002/) — both in the 1/100/ subtree.
-    // Group 200 CONTAINS Project 1010 (edge ns 1/100/200/1010/) — also in scope.
     resp.assert_group_node_count("g", 2);
     resp.assert_group_row_value_i64("g", "Group", 100, "project_count", 2);
     resp.assert_group_row_value_i64("g", "Group", 200, "project_count", 1);
 
-    // Groups 101 and 102 have CONTAINS edges outside 1/100/ — must not appear
     resp.assert_group_node_absent("g", "Group", 101);
     resp.assert_group_node_absent("g", "Group", 102);
 }
 
-/// Cross-namespace neighbors isolation: scoped to `1/101/`, neighbors of
-/// Group 101 must only include entities connected via edges in the `1/101/`
-/// subtree. Users with MEMBER_OF edges in other namespaces and projects
-/// contained in other groups must not leak into the result.
 pub(super) async fn neighbors_cross_namespace_no_false_positives(ctx: &TestContext) {
     let ctx_101 = SecurityContext::new(1, vec!["1/101/".into()]).unwrap();
     let resp = run_query_with_security(
@@ -383,38 +338,30 @@ pub(super) async fn neighbors_cross_namespace_no_false_positives(ctx: &TestConte
     )
     .await;
 
-    // Group 101 has incoming MEMBER_OF from Users 3, 4, 5, 6 (edges in 1/101/),
-    // outgoing CONTAINS to Projects 1001, 1003 (edges in 1/101/1001/ and 1/101/1003/),
-    // and incoming IN_GROUP from WorkItem 4002 (edge in 1/101/).
     resp.assert_node_count(8);
     resp.assert_node_ids("Group", &[101]);
     resp.assert_node_ids("User", &[3, 4, 5, 6]);
     resp.assert_node_ids("Project", &[1001, 1003]);
     resp.assert_node_ids("WorkItem", &[4002]);
 
-    // MEMBER_OF edges from 1/101/
     resp.assert_edge_exists("User", 3, "Group", 101, "MEMBER_OF");
     resp.assert_edge_exists("User", 4, "Group", 101, "MEMBER_OF");
     resp.assert_edge_exists("User", 5, "Group", 101, "MEMBER_OF");
     resp.assert_edge_exists("User", 6, "Group", 101, "MEMBER_OF");
 
-    // CONTAINS edges from 1/101/ subtree
     resp.assert_edge_exists("Group", 101, "Project", 1001, "CONTAINS");
     resp.assert_edge_exists("Group", 101, "Project", 1003, "CONTAINS");
 
-    // IN_GROUP edge from 1/101/
     resp.assert_edge_exists("WorkItem", 4002, "Group", 101, "IN_GROUP");
 
-    // Users whose MEMBER_OF edges are only in other namespaces must not appear
-    resp.assert_node_absent("User", 1); // MEMBER_OF Group 100 (1/100/) and Group 102 (1/102/)
-    resp.assert_node_absent("User", 2); // MEMBER_OF Group 100 (1/100/)
+    resp.assert_node_absent("User", 1);
+    resp.assert_node_absent("User", 2);
 
-    // Projects and groups from other namespaces must not leak
     resp.assert_node_absent("Group", 100);
     resp.assert_node_absent("Group", 200);
-    resp.assert_node_absent("Project", 1000); // in 1/100/1000/
-    resp.assert_node_absent("Project", 1002); // in 1/100/1002/
-    resp.assert_node_absent("Project", 1004); // in 1/102/1004/
+    resp.assert_node_absent("Project", 1000);
+    resp.assert_node_absent("Project", 1002);
+    resp.assert_node_absent("Project", 1004);
 
     resp.assert_referential_integrity();
 }
@@ -464,10 +411,9 @@ pub(super) async fn non_default_redaction_id_entity_traversal(ctx: &TestContext)
 }
 
 pub(super) async fn non_default_redaction_id_denies_unauthorized(ctx: &TestContext) {
-    // Redaction for MergeRequestDiff checks merge_request_id against
-    // the merge_request resource type. Only allow MR 2001 — diffs
-    // 5000/5001 have merge_request_id=2000 (denied), diff 5002 has
-    // merge_request_id=2001 (allowed).
+    // Redaction for MergeRequestDiff checks merge_request_id against the
+    // merge_request resource type. Diffs 5000/5001 have merge_request_id=2000,
+    // diff 5002 has merge_request_id=2001.
     let mut svc = MockRedactionService::new();
     svc.allow("merge_request", &[2001]);
 
@@ -486,7 +432,6 @@ pub(super) async fn non_default_redaction_id_denies_unauthorized(ctx: &TestConte
     )
     .await;
 
-    // MR 2000 is denied, MR 2001 is allowed. Diff 5002 (MR 2001) is allowed.
     resp.assert_node_ids("MergeRequest", &[2001]);
     resp.assert_node_ids("MergeRequestDiff", &[5002]);
     resp.assert_edge_set("HAS_DIFF", &[(2001, 5002)]);
@@ -497,8 +442,6 @@ pub(super) async fn non_default_redaction_id_denies_unauthorized(ctx: &TestConte
 }
 
 pub(super) async fn non_default_redaction_id_with_multiple_mrs(ctx: &TestContext) {
-    // Allow both MR 2000 and 2001. All diffs should be authorized
-    // via their merge_request_id.
     let resp = run_query(
         ctx,
         r#"{

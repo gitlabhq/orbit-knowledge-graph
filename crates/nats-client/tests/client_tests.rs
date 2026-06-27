@@ -1,6 +1,3 @@
-//! Integration tests for `NatsClient` KV operations against a real NATS server
-//! (testcontainers; requires Docker).
-
 use std::time::Duration;
 
 use bytes::Bytes;

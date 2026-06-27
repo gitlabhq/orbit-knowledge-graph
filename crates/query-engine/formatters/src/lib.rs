@@ -40,9 +40,8 @@ pub trait ResultFormatter: Send + Sync {
     fn format_version(&self) -> Option<&Version>;
     fn format(&self, output: &PipelineOutput) -> Value;
 
-    /// Format the output and return it alongside the stamped version string
-    /// and format name. Callers use this to build transport metadata without
-    /// re-querying the trait for each field separately.
+    /// Stamps the formatted output with its version string and format name so
+    /// callers build transport metadata in one call.
     fn format_stamped(&self, output: &PipelineOutput) -> (Value, String, FormatName) {
         let formatted = self.format(output);
         let version = self

@@ -1,9 +1,6 @@
-//! Schema introspection: generate an LLM- or user-readable description of the
-//! nodes and edges defined in an [`Ontology`].
-//!
-//! This module is consumed by both the `gkg-server` MCP `get_graph_schema`
-//! tool (full ontology) and the local `orbit` CLI `schema` subcommand
-//! (filtered to entities present in the local DuckDB graph).
+//! Consumed by both the `gkg-server` MCP `get_graph_schema` tool (full
+//! ontology) and the local `orbit` CLI `schema` subcommand (filtered to
+//! entities present in the local DuckDB graph).
 
 use std::collections::BTreeMap;
 
@@ -11,35 +8,26 @@ use serde::Serialize;
 
 use crate::{EdgeEntity, Field, Ontology};
 
-/// Which slice of the ontology to describe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntrospectionScope {
-    /// Every node and edge defined in the ontology.
     #[default]
     All,
-    /// Only entities and edges present in the local DuckDB graph
-    /// (driven by `settings.local_db.entities` in the ontology YAML).
+    /// Driven by `settings.local_db.entities` in the ontology YAML.
     Local,
 }
 
-/// Top-level schema response — a list of domains (each grouping its nodes)
-/// and edge names for orientation. Expand specific nodes to see which types
-/// each edge connects.
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
     pub domains: Vec<SchemaDomain>,
     pub edges: Vec<String>,
 }
 
-/// One domain from the ontology (e.g. `source_code`, `ci`) plus its nodes.
 #[derive(Debug, Serialize)]
 pub struct SchemaDomain {
     pub name: String,
     pub nodes: Vec<SchemaNode>,
 }
 
-/// A node in the schema. Condensed by default (name only); expanded when the
-/// caller passes the node name (or `"*"`) in `expand_nodes`.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum SchemaNode {
@@ -52,10 +40,7 @@ pub enum SchemaNode {
     },
 }
 
-/// Build a schema response for the given ontology and scope.
-///
-/// `expand_nodes` controls which nodes get expanded to props/in/out; pass
-/// `["*"]` to expand everything, or specific names like `["User"]`.
+/// `expand_nodes`: pass `["*"]` to expand every node, or specific names.
 #[must_use]
 pub fn build_schema_response(
     ontology: &Ontology,

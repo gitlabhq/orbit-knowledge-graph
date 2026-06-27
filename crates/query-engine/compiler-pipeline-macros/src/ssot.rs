@@ -1,10 +1,5 @@
 //! `define_compiler_ctx!` proc macro implementation.
 //!
-//! Generates:
-//! - A `CompilerCtx` trait with guarded accessor methods for state fields
-//! - Per-pipeline context structs that implement the trait
-//! - Per-pipeline runner functions that set `current_phase` and call phases
-//!
 //! State fields are private. Access goes through trait methods that assert
 //! the current phase has the required grant. Phase functions take
 //! `&mut impl CompilerCtx`, so they work with any pipeline's ctx.
@@ -15,10 +10,6 @@ use syn::parse::{Parse, ParseStream};
 use syn::{Ident, Result, Token, Type, braced, bracketed};
 
 use crate::to_pascal;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Parsed representation
-// ─────────────────────────────────────────────────────────────────────────────
 
 struct Field {
     name: Ident,
@@ -45,10 +36,6 @@ struct CompilerCtxInput {
     phases: Vec<PhaseDecl>,
     pipelines: Vec<PipelineDecl>,
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Parsing
-// ─────────────────────────────────────────────────────────────────────────────
 
 fn parse_ident_list(input: ParseStream) -> Result<Vec<Ident>> {
     let content;
@@ -188,10 +175,6 @@ impl Parse for CompilerCtxInput {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn find_env_ty(fields: &[Field], name: &Ident) -> Type {
     fields
         .iter()
@@ -230,15 +213,10 @@ fn phases_with_mutate(phases: &[PhaseDecl], field: &Ident) -> Vec<String> {
         .collect()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Codegen
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub fn generate(input: TokenStream) -> TokenStream {
     let ctx = syn::parse_macro_input!(input as CompilerCtxInput);
     let mut out = proc_macro2::TokenStream::new();
 
-    // ── Trait with just signatures ─────────────────────────────────────
     let mut trait_sigs = Vec::new();
 
     for ef in &ctx.env_fields {
@@ -271,12 +249,10 @@ pub fn generate(input: TokenStream) -> TokenStream {
         }
     });
 
-    // ── Per-pipeline ctx structs + trait impls ──────────────────────────
     for pipeline in &ctx.pipelines {
         let ctx_name = format_ident!("{}Ctx", to_pascal(&pipeline.name.to_string()));
         let run_fn = format_ident!("run_{}", pipeline.name);
 
-        // Struct fields
         let env_fields: Vec<_> = pipeline
             .env
             .iter()
@@ -295,7 +271,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             })
             .collect();
 
-        // Constructor
         let ctor_params: Vec<_> = pipeline
             .env
             .iter()
@@ -307,7 +282,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
         let env_names: Vec<_> = pipeline.env.iter().collect();
         let state_names: Vec<_> = pipeline.state.iter().collect();
 
-        // Trait impl: env getters
         let mut trait_impls = Vec::new();
 
         for env_name in &pipeline.env {
@@ -317,7 +291,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             });
         }
 
-        // For env fields the pipeline doesn't have, panic
         for ef in &ctx.env_fields {
             if !pipeline.env.contains(&ef.name) {
                 let name = &ef.name;
@@ -337,7 +310,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             fn set_current_phase(&mut self, phase: &'static str) { self.current_phase = phase; }
         });
 
-        // State accessors with guards
         for sf in &ctx.state_fields {
             let name = &sf.name;
             let ty = &sf.ty;
@@ -391,7 +363,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             };
 
             if pipeline.state.contains(name) {
-                // Pipeline has this state field — generate guarded accessors
                 trait_impls.push(quote! {
                     fn #name(&self) -> &Option<#ty> {
                         if !self.current_phase.is_empty() { #read_guard }
@@ -411,7 +382,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
                     }
                 });
             } else {
-                // Pipeline doesn't have this state field — panic
                 let msg = format!(
                     "pipeline `{}` does not have state field `{}`",
                     pipeline.name, name
@@ -425,7 +395,6 @@ pub fn generate(input: TokenStream) -> TokenStream {
             }
         }
 
-        // Runner
         let phase_calls: Vec<_> = pipeline
             .run
             .iter()

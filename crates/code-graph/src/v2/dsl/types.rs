@@ -15,12 +15,10 @@ pub type ImportRewriter = dyn Fn(&mut crate::v2::types::CanonicalImport, Option<
     + Send
     + Sync;
 
-/// Builds an [`ImportRewriter`] from a parse family's file paths and separator.
 pub type ImportRewriterBuilder = fn(paths: &[&str], sep: &str) -> Box<ImportRewriter>;
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
-/// Shared behavior for scope and reference rules.
 pub trait Rule {
     fn kinds(&self) -> &[&'static str];
     fn condition(&self) -> Option<&Pred>;
@@ -81,7 +79,6 @@ impl ScopeRule {
         self
     }
 
-    /// Try extract first, fall back to a constant default name.
     pub fn name_from_or(mut self, extract: Extract, default: &'static str) -> Self {
         self.name = extract;
         self.default_name = Some(default);
@@ -136,7 +133,6 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
     }
 }
 
-/// Multi-kind scope: same rule matches any of these node kinds.
 pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
     ScopeRule {
         kinds: kinds.to_vec(),
@@ -150,8 +146,6 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
     }
 }
 
-/// Apply a parent/ancestor predicate to a batch of scope rules.
-/// Pure sugar — prepends the predicate to each rule's condition.
 pub fn within(pred: Pred, rules: Vec<ScopeRule>) -> Vec<ScopeRule> {
     rules.into_iter().map(|r| r.when(pred.clone())).collect()
 }
@@ -173,34 +167,21 @@ pub struct ReferenceRule {
     pub(crate) kinds: Vec<&'static str>,
     condition: Option<Pred>,
     name: Extract,
-    /// Extract pipeline to navigate to the receiver node for chain building.
     pub(crate) receiver_extract: Option<Extract>,
 }
 
-/// Describes how to decompose a field-access node into object + member
-/// using treesitter-visit `Extract` pipelines.
 pub struct FieldAccessEntry {
     pub kind: &'static str,
     pub object: Extract,
     pub member: Extract,
 }
 
-/// Per-language configuration for expression chain extraction.
-/// Tells the engine how to recognize identifiers, this/super,
-/// field access, and constructors in the tree-sitter AST.
 pub struct ChainConfig {
-    /// Node kinds that are bare identifiers (e.g. `["identifier"]` for Java).
     pub ident_kinds: &'static [&'static str],
-    /// Node kinds that represent `this` / `self`.
     pub this_kinds: &'static [&'static str],
-    /// Node kinds that represent `super`.
     pub super_kinds: &'static [&'static str],
-    /// Field access node kinds, with Extract-based object/member decomposition.
     pub field_access: Vec<FieldAccessEntry>,
-    /// Constructor node kinds + type_field.
     pub constructor: &'static [(&'static str, &'static str)],
-    /// Type node kinds inside constructors that are qualified (e.g.
-    /// `scoped_type_identifier` for Java's `new Outer.Inner()`).
     /// When the constructor's type field has this kind, decompose it
     /// into chain steps (Ident for the base, Field for nested parts,
     /// New for the final segment) instead of treating it as a single name.
@@ -233,21 +214,16 @@ impl ReferenceRule {
         self
     }
 
-    /// Declare which tree-sitter field holds the receiver expression.
-    /// Set the receiver extraction pipeline. The engine calls
-    /// `extract.navigate(node)` to find the receiver node for chain building.
     pub fn receiver(mut self, field: &'static str) -> Self {
         self.receiver_extract = Some(treesitter_visit::extract::field(field));
         self
     }
 
-    /// Declare a field chain to reach the receiver expression.
     pub fn receiver_chain(mut self, fields: &'static [&'static str]) -> Self {
         self.receiver_extract = Some(treesitter_visit::extract::field_chain(fields));
         self
     }
 
-    /// Locate receiver via an arbitrary Extract pipeline.
     pub fn receiver_via(mut self, extract: Extract) -> Self {
         self.receiver_extract = Some(extract);
         self
@@ -263,7 +239,6 @@ pub fn reference(kind: &'static str) -> ReferenceRule {
     }
 }
 
-/// Multi-kind reference: same rule matches any of these node kinds.
 pub fn references(kinds: &[&'static str]) -> ReferenceRule {
     ReferenceRule {
         kinds: kinds.to_vec(),
@@ -276,11 +251,10 @@ pub fn references(kinds: &[&'static str]) -> ReferenceRule {
 pub struct ImportRule {
     pub(crate) kinds: Vec<&'static str>,
     condition: Option<Pred>,
-    /// Extracts the import source/path (e.g. `<stdio.h>`, `os.path`).
     path: Extract,
-    /// Extracts the imported symbol name. None = whole-module import.
+    /// None = whole-module import.
     symbol: Option<Extract>,
-    /// Extracts the alias. None = no aliasing.
+    /// None = no aliasing.
     alias: Option<Extract>,
     /// Static label for import_type (default: "Import").
     pub(crate) label: &'static str,
@@ -288,17 +262,12 @@ pub struct ImportRule {
     pub(crate) classify: Option<fn(&N<'_>) -> &'static str>,
     /// If set, walk children of these kinds and produce one import per child.
     /// The path is extracted from the parent, name from each child.
-    /// For `aliased_import` children, the alias is extracted from the `alias` field
-    /// and the name from the `name` field.
     pub(crate) multi_child_kinds: Option<&'static [&'static str]>,
-    /// Node kind for aliased children (e.g. "aliased_import").
     /// When a child matches this kind, name comes from `name` field, alias from `alias` field.
     pub(crate) alias_child_kind: Option<&'static str>,
-    /// Node kind for wildcard children (e.g. "wildcard_import", "asterisk").
     /// When a child matches this kind, a wildcard import is emitted with
     /// `wildcard: true` and name from `wildcard_symbol`.
     pub(crate) wildcard_child_kind: Option<&'static str>,
-    /// Symbol name used for wildcard imports (e.g. "*").
     pub(crate) wildcard_symbol: &'static str,
     /// If true, ALL imports from this rule are treated as wildcard
     /// (e.g. C# `using MyApp.Models;` imports all types in the namespace).
@@ -354,33 +323,26 @@ impl ImportRule {
         self
     }
 
-    /// Walk children of these kinds to produce one import per child.
     pub fn multi(mut self, child_kinds: &'static [&'static str]) -> Self {
         self.multi_child_kinds = Some(child_kinds);
         self
     }
 
-    /// Split the extracted path at the last occurrence of `sep` into (path, name).
     pub fn split_last(mut self, sep: &'static str) -> Self {
         self.split_last = Some(sep);
         self
     }
 
-    /// Set the node kind for aliased import children (e.g. "aliased_import").
     pub fn alias_child(mut self, kind: &'static str) -> Self {
         self.alias_child_kind = Some(kind);
         self
     }
 
-    /// Set the node kind for wildcard children (e.g. "wildcard_import", "asterisk").
     pub fn wildcard_child(mut self, kind: &'static str) -> Self {
         self.wildcard_child_kind = Some(kind);
         self
     }
 
-    /// Treat all imports from this rule as wildcard imports.
-    /// Use for languages where `using Foo.Bar;` imports all types
-    /// under the namespace (C#, etc.).
     pub fn always_wildcard(mut self) -> Self {
         self.always_wildcard = true;
         self
@@ -497,8 +459,6 @@ pub trait DslLanguage: Send + Sync + Default {
     }
 }
 
-// ── Binding rules ───────────────────────────────────────────────
-
 pub struct BindingRule {
     pub kinds: Vec<&'static str>,
     pub binding_kind: crate::v2::types::BindingKind,
@@ -509,7 +469,6 @@ pub struct BindingRule {
     /// Alternative to value_field: arbitrary Extract pipeline for RHS value node.
     pub value_extract: Option<Extract>,
     pub instance_attr_prefixes: &'static [&'static str],
-    /// Type extraction config (TypeFlow). Uses Extract for CST navigation.
     pub type_extract: Option<TypeExtract>,
 }
 
@@ -537,7 +496,6 @@ impl BindingRule {
         self
     }
 
-    /// Extract the name using an arbitrary Extract pipeline instead of field chain.
     pub fn name_from_extract(mut self, extract: Extract) -> Self {
         self.name_extract = Some(extract);
         self
@@ -548,7 +506,6 @@ impl BindingRule {
         self
     }
 
-    /// Extract the RHS value using an arbitrary Extract pipeline instead of field name.
     pub fn value_from_extract(mut self, extract: Extract) -> Self {
         self.value_extract = Some(extract);
         self
@@ -572,7 +529,6 @@ impl BindingRule {
         self
     }
 
-    /// Extract the binding name from an AST node.
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
         if let Some(extract) = &self.name_extract {
             return extract.apply(node);
@@ -589,8 +545,6 @@ impl BindingRule {
         if self.name_extract.is_some() {
             return self.extract_name(node).into_iter().collect();
         }
-        // For multi-field names: if the first field has multiple children
-        // with the same field name, collect all of them.
         if let Some(&first_field) = self.name_fields.first() {
             let field_children: Vec<_> = node.field_children(first_field).collect();
             if field_children.len() > 1 && self.name_fields.len() == 1 {
@@ -603,7 +557,6 @@ impl BindingRule {
         self.extract_name(node).into_iter().collect()
     }
 
-    /// Extract a type annotation from the AST node using the configured Extract.
     pub fn extract_type_annotation(&self, node: &N<'_>) -> Option<String> {
         let te = self.type_extract.as_ref()?;
         for extract in &te.extracts {
@@ -646,7 +599,6 @@ impl BindingRule {
         None
     }
 
-    /// Extract the RHS name from a binding's value field.
     /// Returns the callee/identifier/object name for SSA alias chasing.
     pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
         let value_node = if let Some(extract) = &self.value_extract {
@@ -657,19 +609,16 @@ impl BindingRule {
         let vk = value_node.kind();
         let vk_ref = vk.as_ref();
 
-        // Call expression → extract callee name via reference rules.
         if let Some(ref_rule) = spec.refs.iter().find(|r| r.matches(&value_node, vk_ref)) {
             return ref_rule.extract().apply(&value_node);
         }
 
-        // Bare identifier
         if let Some(cc) = &spec.chain_config
             && cc.ident_kinds.contains(&vk_ref)
         {
             return Some(value_node.text().to_string());
         }
 
-        // Field access (e.g. EnumClass.ENUM_VALUE_2) → extract the object name.
         if let Some(cc) = &spec.chain_config {
             for fa in &cc.field_access {
                 if vk_ref == fa.kind
@@ -683,8 +632,6 @@ impl BindingRule {
         None
     }
 }
-
-// ── Branch rules ────────────────────────────────────────────────
 
 pub struct BranchRule {
     pub kinds: Vec<&'static str>,
@@ -719,8 +666,6 @@ impl BranchRule {
     }
 }
 
-// ── Loop rules ──────────────────────────────────────────────────
-
 pub struct LoopRule {
     pub kinds: Vec<&'static str>,
     pub body_field: &'static str,
@@ -747,10 +692,6 @@ impl LoopRule {
     }
 }
 
-// ── SSA config ──────────────────────────────────────────────────
-
-/// Per-language SSA configuration. Tells the SSA engine which variable
-/// names to write when entering a type scope (class/module).
 #[derive(Default)]
 pub struct SsaConfig {
     /// Variable names written as `LocalDef(class_def_idx)` when entering a
@@ -765,9 +706,6 @@ pub struct SsaConfig {
     pub constructor_methods: &'static [&'static str],
 }
 
-// ── Hooks ───────────────────────────────────────────────────────
-
-/// Function type for injecting extra definitions after scope matching.
 pub type ScopeHookFn = fn(
     &N<'_>,
     &mut Vec<crate::v2::types::CanonicalDefinition>,
@@ -781,7 +719,6 @@ pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> 
 /// The engine calls each hook if set, otherwise uses default behavior.
 #[derive(Default)]
 pub struct LanguageHooks {
-    /// Derive a module scope from a file path before walking.
     pub module_scope: Option<fn(&str, &str) -> Option<String>>,
     /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
     pub on_scope: Option<ScopeHookFn>,

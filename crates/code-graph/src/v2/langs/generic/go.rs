@@ -103,14 +103,11 @@ impl DslLanguage for GoDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Method call: svc.Log("hello") — name from selector_expression's field
             reference("call_expression")
                 .name_from(field_chain(&["function", "field"]))
                 .when(field_kind("function", &["selector_expression"]))
                 .receiver_chain(&["function", "operand"]),
-            // Simple call: Log("hello") — name from function field directly
             reference("call_expression").name_from(field("function")),
-            // Bare type references: declarations, type assertions.
             // Skip inside composite_literal (already tracked via chain_config.constructor).
             reference("type_identifier")
                 .name_from(text())
@@ -216,7 +213,6 @@ fn go_embedded_types(node: &N<'_>) -> Vec<String> {
         .filter_map(|fd| {
             fd.field("type").map(|t| {
                 let s = t.text().to_string();
-                // Strip pointer prefix: `*Bar` → `Bar`
                 s.strip_prefix('*')
                     .map(|stripped| stripped.to_string())
                     .unwrap_or(s)
@@ -288,8 +284,6 @@ fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
         wildcard: is_dot,
     });
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct GoRules;
 

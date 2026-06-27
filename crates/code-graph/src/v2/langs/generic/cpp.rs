@@ -9,8 +9,6 @@ use crate::v2::linker::rules::{
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct CppDsl;
 
@@ -32,62 +30,50 @@ impl DslLanguage for CppDsl {
 
     fn scopes() -> Vec<ScopeRule> {
         vec![
-            // Free function: int add(int a, int b) { ... }
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
                 .name_from(field("declarator").field("declarator")),
-            // Class: class Foo { ... };
             scope("class_specifier", "Class")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
-            // Struct (C++ treats as class with public default)
+            // C++ treats a struct as a class with public default.
             scope("struct_specifier", "Struct")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
-            // Enum: enum Color { ... };
             scope("enum_specifier", "Enum")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("enumerator_list")),
-            // Union
             scope("union_specifier", "Union")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
-            // Namespace: namespace foo { ... }
             scope("namespace_definition", "Namespace").def_kind(DefKind::Module),
-            // typedef: typedef struct { ... } Name;
             scope("type_definition", "Typedef")
                 .def_kind(DefKind::Other)
                 .name_from(field("declarator"))
                 .no_scope(),
-            // Enum constants
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
-            // C++20 Concepts
             scope("concept_definition", "Concept")
                 .def_kind(DefKind::Interface)
                 .no_scope(),
-            // Template declarations wrap function/class definitions.
-            // The template itself doesn't create a named scope; the
-            // inner class/function scope handles naming.
+            // Template declarations wrap function/class definitions but
+            // create no named scope; the inner scope handles naming.
         ]
     }
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Qualified call: Ns::func() or Class::static_method()
-            // Must be before direct call — both match call_expression,
-            // but qualified needs field("function").field("name") to
-            // extract just the bare name, not "Ns::func".
+            // Must precede the direct-call rule: both match call_expression,
+            // but qualified needs field("function").field("name") to extract
+            // the bare name, not "Ns::func".
             reference("call_expression")
                 .name_from(field("function").field("name"))
                 .when(has_descendant("qualified_identifier")),
-            // Member call: obj.method() or obj->method()
             reference("call_expression")
                 .name_from(field("function").field("field"))
                 .when(has_descendant("field_expression"))
                 .receiver_via(field("function").field("argument")),
-            // Direct function call: foo()
             reference("call_expression")
                 .name_from(field("function"))
                 .when(!has_descendant("field_expression")),
@@ -95,10 +81,7 @@ impl DslLanguage for CppDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![
-            // #include "header.h" / #include <header.h>
-            import("preproc_include").path_from(field("path")),
-        ]
+        vec![import("preproc_include").path_from(field("path"))]
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -126,15 +109,12 @@ impl DslLanguage for CppDsl {
 
     fn bindings() -> Vec<BindingRule> {
         vec![
-            // Variable declarations: int x = foo();
             binding("init_declarator", BindingKind::Assignment)
                 .name_from(&["declarator"])
                 .value_from("value"),
-            // Parameters: void foo(int x, char *y)
             binding("parameter_declaration", BindingKind::Parameter)
                 .name_from(&["declarator"])
                 .no_value(),
-            // Assignment: x = expr
             binding("assignment_expression", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
@@ -167,8 +147,6 @@ impl DslLanguage for CppDsl {
         }
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct CppRules;
 

@@ -1,5 +1,3 @@
-//! Query evaluation runner.
-
 use super::{ExecutionResult, QueryExecutor, Report, ReportFormat, RunConfig, RunMetadata};
 use crate::synth::clickhouse::check_clickhouse_health;
 use crate::synth::config::Config;
@@ -9,20 +7,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// A query entry from the queries YAML file.
-///
-/// Each entry has a stable key (`q1`..`qN`), a human-readable description,
-/// and the raw GKG query DSL as an inline JSON string.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryEntry {
-    /// Human-readable description of what this query tests.
     pub desc: String,
-    /// Raw JSON query DSL string, passed to the query engine compiler.
     pub query: String,
 }
 
 impl QueryEntry {
-    /// Parse the `query` JSON string into a `serde_json::Value`.
     pub fn parse_query(&self) -> Result<serde_json::Value> {
         serde_json::from_str(&self.query).map_err(Into::into)
     }
@@ -53,14 +44,11 @@ pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryEntry>> {
     Ok(queries)
 }
 
-/// Parameters extracted from a query that need sampling.
 #[derive(Debug, Clone, Default)]
 pub struct QueryParameters {
-    /// Entity type -> list of node_ids fields that need sampling
     pub node_ids: HashMap<String, Vec<String>>,
 }
 
-/// Extract parameters that need sampling from a query's JSON value.
 pub fn extract_parameters(query_value: &serde_json::Value) -> QueryParameters {
     let mut params = QueryParameters::default();
 
@@ -136,7 +124,6 @@ pub async fn run(config_path: &Path, verbose: bool) -> Result<()> {
 
     tracing::info!("Loaded {} queries", queries.len());
 
-    // Check ClickHouse connectivity before proceeding
     tracing::info!(
         "Checking ClickHouse connection at {}...",
         config.clickhouse.url

@@ -1,5 +1,3 @@
-/// A value reachable at a reference point, computed by parser-level SSA.
-///
 /// Uses indices into the file's own def/import arrays — the parser
 /// doesn't see the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

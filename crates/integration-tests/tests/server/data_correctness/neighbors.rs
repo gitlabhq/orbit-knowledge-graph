@@ -151,7 +151,6 @@ pub(super) async fn neighbors_both_fused_scan_returns_complete_bidirectional_set
     resp.assert_node_ids("User", &[1, 2, 6]);
     resp.assert_node_ids("Project", &[1000, 1002]);
 
-    // Incoming arm: User → Group 100. Outgoing arm: Group 100 → target.
     resp.assert_edge_set("MEMBER_OF", &[(1, 100), (2, 100), (6, 100)]);
     resp.assert_edge_set("CONTAINS", &[(100, 200), (100, 1000), (100, 1002)]);
 }
@@ -196,7 +195,6 @@ pub(super) async fn neighbors_dynamic_columns_all_returns_properties(ctx: &TestC
     resp.assert_node_ids("Group", &[100, 102]);
     resp.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 102)]);
 
-    // With dynamic_columns: "*", neighbor nodes should have all ontology columns.
     resp.assert_node("Group", 100, |n| {
         n.prop_str("name") == Some("Public Group")
             && n.prop_str("visibility_level") == Some("public")
@@ -224,14 +222,12 @@ pub(super) async fn neighbors_center_node_properties_hydrated(ctx: &TestContext)
     resp.assert_node_ids("Group", &[100, 102]);
     resp.assert_referential_integrity();
 
-    // Center node must have its requested columns hydrated.
     resp.assert_node("User", 1, |n| {
         n.prop_str("username") == Some("alice")
             && n.prop_str("name") == Some("Alice Admin")
             && n.prop_str("state") == Some("active")
     });
 
-    // Neighbor nodes should also be hydrated with default columns.
     resp.assert_node("Group", 100, |n| n.prop_str("name") == Some("Public Group"));
     resp.assert_node("Group", 102, |n| {
         n.prop_str("name") == Some("Internal Group")
@@ -327,9 +323,6 @@ pub(super) async fn neighbors_non_default_pk_redaction_uses_merge_request_id(ctx
 }
 
 pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &TestContext) {
-    // Group 100 has incoming MEMBER_OF from users and outgoing CONTAINS to
-    // projects/subgroups. With direction: "both", edges should preserve their
-    // actual direction (from→to) regardless of how they were discovered.
     let resp = run_query(
         ctx,
         r#"{
@@ -348,22 +341,17 @@ pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &Test
     resp.assert_node_ids("WorkItem", &[4000, 4001]);
     resp.assert_referential_integrity();
 
-    // Incoming MEMBER_OF: User→Group (not reversed)
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 2, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 6, "Group", 100, "MEMBER_OF");
 
-    // Incoming IN_GROUP: WorkItem→Group (not reversed)
     resp.assert_edge_exists("WorkItem", 4000, "Group", 100, "IN_GROUP");
     resp.assert_edge_exists("WorkItem", 4001, "Group", 100, "IN_GROUP");
 
-    // Outgoing CONTAINS: Group→target (not reversed)
     resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
     resp.assert_edge_exists("Group", 100, "Project", 1000, "CONTAINS");
     resp.assert_edge_exists("Group", 100, "Project", 1002, "CONTAINS");
 
-    // No reversed edges: Group 100 should never appear as edge target for MEMBER_OF
-    // or as edge source for an incoming relationship.
     let edges = resp.edges_of_type("MEMBER_OF");
     for edge in edges.iter() {
         assert_ne!(

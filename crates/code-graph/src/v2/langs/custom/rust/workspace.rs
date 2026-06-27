@@ -332,9 +332,7 @@ fn load_workspace_no_watcher(
     let mut vfs = Vfs::default();
     let project_folders = ProjectFolders::new(std::slice::from_ref(&workspace), &[], None);
 
-    // Scope the VFS to files that rust-analyzer's `ProjectFolders` considers
-    // part of this workspace. `repo_rust_files` was already walked by the
-    // pipeline; this is a filter, not a second walk.
+    // `repo_rust_files` was already walked by the pipeline; this is a filter, not a second walk.
     for entry in &project_folders.load {
         seed_vfs_from_known_files(&mut vfs, entry, repo_rust_files);
     }
@@ -420,12 +418,6 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    /// Pins the behavior that we load a workspace without going through
-    /// `ra_ap_load_cargo::load_workspace` (which spawns a `vfs_notify` thread).
-    /// If someone reintroduces that call this test will still pass, but the
-    /// sibling invariant assertion on `ProcMacroServerChoice` and a grep for
-    /// `load_workspace(` in CI should catch it. The primary job here is to
-    /// confirm the no-watcher loader actually produces a populated index.
     #[test]
     fn load_manifest_populates_index_without_watcher() {
         let temp = tempdir().unwrap();
@@ -467,9 +459,6 @@ mod tests {
     /// fail so it can't regress silently.
     #[test]
     fn proc_macro_server_is_disabled() {
-        // Both the `const _` inside `load_workspace_no_watcher` and this match
-        // fail to compile or panic if a new `ProcMacroServerChoice` variant
-        // gets introduced that we don't explicitly reject.
         let choice = ProcMacroServerChoice::None;
         match choice {
             ProcMacroServerChoice::None => {}

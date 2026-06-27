@@ -574,8 +574,6 @@ async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
         last_error: Some("scan failure".to_string()),
     };
 
-    // Seed every namespaced entity as Indexed, then flip one to Error so the
-    // worst-state-wins rule isn't dominated by missing keys.
     let ontology = load_ontology();
     for node in ontology.nodes() {
         let Some(etl) = node.etl.as_ref() else {
@@ -615,7 +613,6 @@ async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &Tes
         last_duration_ms: Some(5000),
         last_error: None,
     };
-    // Seed only one entity, leaving the rest of the namespaced set missing.
     seed_entity_progress(&mock_kv, "1/100/", "MergeRequest", &progress);
 
     let service = build_service_with_indexing_status(ctx, mock_kv);
@@ -746,7 +743,6 @@ async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) 
 async fn definition_count_counts_distinct_ids(ctx: &TestContext) {
     let db = ctx.fork("graph_status_definition_distinct_ids").await;
 
-    // 9002 is inserted twice; uniq(id) dedups the duplicate version.
     db.execute(&format!(
         "INSERT INTO {} (id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char, _version, _deleted) VALUES
          (9001, '1/100/1000/', 1000, 'main', 'sha-a', 'a.rb', 'A#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
@@ -774,7 +770,6 @@ async fn definition_count_counts_distinct_ids(ctx: &TestContext) {
 async fn group_count_excludes_deleted(ctx: &TestContext) {
     let db = ctx.fork("graph_status_group_excludes_deleted").await;
 
-    // 9101 is a tombstone; uniq(id) would still count it as a distinct id.
     db.execute(&format!(
         "INSERT INTO {} (id, name, visibility_level, traversal_path, _version, _deleted) VALUES
          (9100, 'Live Group', 'public', '1/900/9100/', '2024-01-01 00:00:00', false),

@@ -1,5 +1,3 @@
-//! Shared test utilities for code indexing module tests.
-
 use bytes::Bytes;
 use prost::Message;
 use siphon_proto::replication_event::Column;

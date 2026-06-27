@@ -844,7 +844,6 @@ impl JsAnalyzer {
         );
         module_info.cjs_exports = cjs_exports;
 
-        // Ensure Vue SFC default export binding exists and points to the virtual class.
         // OXC's module_record may not include `export default { ... }` for anonymous
         // object expressions, so we synthesize the binding if a Vue virtual class exists.
         if is_vue_like_path(relative_path)
@@ -859,7 +858,6 @@ impl JsAnalyzer {
                         .with_definition_range(Some(vc.range))
                         .with_invocation_support(Some(JsInvocationSupport::class()))
                 });
-            // Also patch existing default binding if it has stale "default" fqn
             if let Some(binding) = module_info.exports.get_mut("default")
                 && binding.local_fqn == "default"
             {

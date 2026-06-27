@@ -1,5 +1,3 @@
-//! Report generation for evaluation results.
-
 use super::ExecutionResult;
 use serde::{Deserialize, Serialize};
 use sqlformat::{FormatOptions, QueryParams};
@@ -7,7 +5,6 @@ use std::time::Duration;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
-/// Output format for reports.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum ReportFormat {
     #[default]
@@ -29,7 +26,6 @@ impl std::str::FromStr for ReportFormat {
     }
 }
 
-/// Summary statistics for a set of query results.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Summary {
     pub total_queries: usize,
@@ -44,7 +40,6 @@ pub struct Summary {
     pub errors_by_category: std::collections::HashMap<String, usize>,
 }
 
-/// Wrapper for Duration to display as seconds.
 struct DurationSecs(Duration);
 
 impl std::fmt::Display for DurationSecs {
@@ -53,7 +48,6 @@ impl std::fmt::Display for DurationSecs {
     }
 }
 
-/// Wrapper for Duration to display as milliseconds.
 struct DurationMs(Duration);
 
 impl std::fmt::Display for DurationMs {
@@ -62,7 +56,6 @@ impl std::fmt::Display for DurationMs {
     }
 }
 
-/// Display row for the summary table.
 #[derive(Tabled)]
 struct SummaryRow {
     total_queries: usize,
@@ -114,7 +107,6 @@ impl Summary {
         let min_time = times.iter().min().copied().unwrap_or(Duration::ZERO);
         let max_time = times.iter().max().copied().unwrap_or(Duration::ZERO);
 
-        // Count errors by category
         let mut errors_by_category = std::collections::HashMap::new();
         for result in results.iter().filter(|r| !r.success) {
             let category = result
@@ -147,7 +139,6 @@ impl Summary {
     }
 }
 
-/// Report containing results and summary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub summary: Summary,
@@ -160,13 +151,11 @@ impl Report {
         Self { summary, results }
     }
 
-    /// Format the report as text.
     pub fn to_text(&self) -> String {
         let mut output = String::new();
 
         output.push_str("QUERY EVALUATION REPORT\n\n");
 
-        // Summary table
         let summary_row = SummaryRow::from_summary(&self.summary);
         let mut table = Table::new(vec![summary_row]);
         table.with(Style::rounded());
@@ -176,7 +165,6 @@ impl Report {
             self.summary.success_rate()
         ));
 
-        // Error breakdown if any failures
         if !self.summary.errors_by_category.is_empty() {
             output.push_str("\nErrors by Category:\n");
             let mut categories: Vec<_> = self.summary.errors_by_category.iter().collect();
@@ -186,7 +174,6 @@ impl Report {
             }
         }
 
-        // Show empty results (potential issues)
         let empty: Vec<_> = self
             .results
             .iter()
@@ -199,7 +186,6 @@ impl Report {
             }
         }
 
-        // Show failed queries with details
         let failed: Vec<_> = self.results.iter().filter(|r| !r.success).collect();
         if !failed.is_empty() {
             output.push_str(&format!("\n✗ {} failed queries:\n", failed.len()));
@@ -218,18 +204,15 @@ impl Report {
         output
     }
 
-    /// Format the report as JSON.
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".to_string())
     }
 
-    /// Format the report as Markdown.
     pub fn to_markdown(&self) -> String {
         let mut output = String::new();
 
         output.push_str("# Query Evaluation Report\n\n");
 
-        // Summary table
         output.push_str("## Summary\n\n");
         output.push_str("| Metric | Value |\n");
         output.push_str("|--------|-------|\n");
@@ -263,7 +246,6 @@ impl Report {
 
         output.push_str("\n## Results\n\n");
 
-        // Results table
         output.push_str("| Query | Status | Rows | Time (ms) |\n");
         output.push_str("|-------|--------|------|----------|\n");
 
@@ -285,7 +267,6 @@ impl Report {
             ));
         }
 
-        // Failed queries details
         let failed: Vec<_> = self.results.iter().filter(|r| !r.success).collect();
         if !failed.is_empty() {
             output.push_str("\n## Failures\n\n");
@@ -300,7 +281,6 @@ impl Report {
         output
     }
 
-    /// Format the report in the specified format.
     pub fn format(&self, format: ReportFormat) -> String {
         match format {
             ReportFormat::Text => self.to_text(),
@@ -310,11 +290,9 @@ impl Report {
     }
 }
 
-/// Format SQL for pretty display.
 fn format_sql(sql: &str) -> String {
     let formatted = sqlformat::format(sql, &QueryParams::None, &FormatOptions::default());
 
-    // Indent each line for display
     formatted
         .lines()
         .map(|line| format!("  {}", line))

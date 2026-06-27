@@ -1,5 +1,3 @@
-//! Test builders for constructing test scenarios.
-
 use std::sync::Arc;
 
 use crate::IndexerConfig;

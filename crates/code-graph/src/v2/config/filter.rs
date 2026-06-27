@@ -277,7 +277,6 @@ mod tests {
             f.on_content(&entry("src/main.rs", 100), b"fn main() {}\n"),
             Decision::Parse
         );
-        // Non-parsable resolver inputs: on disk for resolvers, never parsed.
         assert_eq!(
             f.on_content(&entry("Cargo.toml", 100), b"[package]\n"),
             Decision::Load

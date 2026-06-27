@@ -26,9 +26,8 @@ impl From<clickhouse::error::Error> for DatalakeError {
 
 pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, DatalakeError>>;
 
-/// ClickHouse's storage-scan figures from the `X-ClickHouse-Summary` header
-/// (its `read_rows`/`read_bytes` fields), the query cost. Greater than or equal
-/// to the rows the page actually returned.
+/// Storage-scan figures from the `X-ClickHouse-Summary` header. Greater than or
+/// equal to the rows the page actually returned.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScanStats {
     pub scanned_rows: u64,

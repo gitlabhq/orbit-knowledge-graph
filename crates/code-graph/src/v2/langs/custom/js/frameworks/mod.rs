@@ -1,5 +1,3 @@
-//! Framework-specific hooks plugged into the JS pipeline.
-//!
 //! Anything that requires knowing about Vue/Svelte/Astro before running
 //! the standard JS analyzer lives here. The rest of the pipeline only
 //! calls `has_embedded_scripts` / `extract_scripts` / `combine_scripts`
@@ -22,8 +20,6 @@ pub fn has_embedded_scripts(extension: &str) -> bool {
     is_sfc_extension(extension)
 }
 
-/// Split a Single-File Component (Vue/Svelte/Astro) into its embedded
-/// `<script>` blocks.
 pub fn extract_scripts<'a>(
     source: &'a str,
     extension: &str,

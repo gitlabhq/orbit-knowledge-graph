@@ -232,6 +232,10 @@ yaml_test!(
     "kotlin/imported_symbol_fallback_matrix.yaml"
 );
 
+//Scala
+yaml_test!(scala_call_resolution, "scala_resolution.yaml");
+yaml_test!(scala_definitions, "scala/definitions.yaml");
+
 // Go
 yaml_test!(go_method_call, "go/method_call.yaml");
 yaml_test!(go_struct_embedding, "go/struct_embedding.yaml");

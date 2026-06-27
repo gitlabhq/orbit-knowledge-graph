@@ -159,10 +159,6 @@ impl CodeIndexingDeps {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Mock GitLab server -- serves /api/v4/internal/orbit/project/... endpoints
-// ---------------------------------------------------------------------------
-
 struct MockState {
     projects: Mutex<HashMap<i64, ProjectData>>,
 }
@@ -365,10 +361,6 @@ fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
     encoder.write_all(&tar_bytes).expect("gz write failed");
     encoder.finish().expect("gz finish failed")
 }
-
-// ---------------------------------------------------------------------------
-// Shared test helpers
-// ---------------------------------------------------------------------------
 
 pub fn handler_context() -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());

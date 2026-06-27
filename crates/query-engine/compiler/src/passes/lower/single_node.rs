@@ -1,5 +1,3 @@
-//! Emit: single node (no edges).
-
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 

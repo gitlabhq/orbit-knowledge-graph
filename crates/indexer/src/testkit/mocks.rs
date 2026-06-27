@@ -1,5 +1,3 @@
-//! Mock implementations for testing.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -126,7 +124,6 @@ pub fn test_writer() -> Arc<crate::clickhouse::ClickHouseWriter> {
     Arc::new(crate::clickhouse::ClickHouseWriter::noop())
 }
 
-/// Mock handler for testing.
 pub struct MockHandler {
     name: String,
     subscription: Subscription,

@@ -1,5 +1,3 @@
-//! The [`Route`] contract: one CDC source table mapped to a dispatch action.
-
 use async_trait::async_trait;
 use siphon_proto::LogicalReplicationEvents;
 use uuid::Uuid;

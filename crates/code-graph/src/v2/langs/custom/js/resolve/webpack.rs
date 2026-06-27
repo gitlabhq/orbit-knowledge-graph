@@ -1,11 +1,3 @@
-//! Webpack-specific alias harvest.
-//!
-//! Everything webpack-aware lives here. The [`super::evaluator`] module
-//! is a generic JS config interpreter; this file owns the knowledge of
-//! what a webpack config looks like (`{resolve: {alias: ...}}` or a
-//! bare `alias` field), turns its shape into oxc_resolver alias
-//! entries, and feeds them back to the specifier resolver.
-//!
 //! Config discovery is driven entirely off the indexed file list held
 //! by [`super::super::WorkspaceProbe`]: any file whose basename matches
 //! `webpack.config.{js,cjs,mjs,ts}` in any folder is eligible. No
@@ -18,7 +10,6 @@ use super::evaluator::{
     EvaluatedValue, ModuleEvalCache, contained_repo_path, evaluate_module_exports,
 };
 
-/// Gather resolver aliases from every webpack config the probe found.
 /// Stops at the first config that yields a non-empty alias table — a
 /// deliberate "first win" behaviour matching the pre-split evaluator.
 pub(super) fn load_project_aliases(
@@ -52,8 +43,6 @@ fn load_webpack_aliases(
     aliases
 }
 
-/// Walk an evaluated webpack config and pull alias maps out of
-/// `{resolve: {alias: ...}}` or a bare top-level `alias` field.
 /// Arrays of configs (function-factory or multi-config exports) are
 /// flattened — every entry contributes.
 fn collect_aliases_from_value(
@@ -110,16 +99,13 @@ fn alias_values_from_evaluated(
     match value {
         EvaluatedValue::String(path) => {
             if Path::new(path).is_absolute() || path.starts_with('.') {
-                // Filesystem-shaped value: must resolve to a canonical path
-                // inside the repo. Anything else is dropped silently so a
+                // Dropped silently unless it resolves inside the repo, so a
                 // hostile `webpack.config.js` cannot redirect an alias at
                 // `/etc/...`, a parent-of-repo path, or a Windows absolute.
                 contained_repo_path(root_dir, config_dir, path)
                     .map(|resolved| vec![AliasValue::Path(resolved.to_string_lossy().to_string())])
                     .unwrap_or_default()
             } else if is_safe_package_specifier(path) {
-                // Bare package specifier (`lodash`, `@scope/pkg`). Safe to
-                // hand to the resolver, which searches `node_modules` only.
                 vec![AliasValue::Path(path.clone())]
             } else {
                 // Anything else — `node:child_process`, URLs, paths that
@@ -137,9 +123,9 @@ fn alias_values_from_evaluated(
     }
 }
 
-/// A bare package specifier: ASCII-only, no path separators, no protocol
-/// prefix. Matches `lodash`, `@scope/pkg`, `@scope/pkg/sub` and nothing
-/// that could smuggle in a node built-in (`node:fs`) or filesystem escape.
+/// ASCII-only, no path separators, no protocol prefix: matches `lodash`,
+/// `@scope/pkg/sub` and rejects anything that could smuggle in a node
+/// built-in (`node:fs`) or filesystem escape.
 fn is_safe_package_specifier(value: &str) -> bool {
     if value.is_empty() || value.contains(':') || value.contains('\\') {
         return false;

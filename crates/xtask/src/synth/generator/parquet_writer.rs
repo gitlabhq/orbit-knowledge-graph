@@ -1,5 +1,3 @@
-//! Parquet file writers for generated data.
-
 use super::run::{EdgeRecord, OrganizationNodes};
 use crate::synth::arrow_schema::edge_schema;
 use crate::synth::constants::DEFAULT_EDGE_FLUSH_THRESHOLD;
@@ -15,8 +13,6 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Streaming edge writer that flushes to Parquet incrementally.
-/// Keeps the Parquet writer open and writes row groups as edges accumulate.
 pub struct StreamingEdgeWriter {
     writer: Option<ArrowWriter<BufWriter<File>>>,
     buffer: Vec<EdgeRecord>,
@@ -26,7 +22,6 @@ pub struct StreamingEdgeWriter {
 }
 
 impl StreamingEdgeWriter {
-    /// Create a new streaming edge writer for the given path.
     pub fn new(
         path: &Path,
         flush_threshold: Option<usize>,
@@ -39,7 +34,7 @@ impl StreamingEdgeWriter {
 
         let file = File::create(path)
             .with_context(|| format!("Failed to create edge file: {}", path.display()))?;
-        let buf_writer = BufWriter::with_capacity(8 * 1024 * 1024, file); // 8MB buffer
+        let buf_writer = BufWriter::with_capacity(8 * 1024 * 1024, file);
         let writer = ArrowWriter::try_new(buf_writer, schema.clone(), Some(props))?;
 
         Ok(Self {
@@ -51,7 +46,7 @@ impl StreamingEdgeWriter {
         })
     }
 
-    /// Add an edge to the buffer. Flushes automatically when threshold is reached.
+    /// Flushes automatically when the buffer reaches the threshold.
     #[inline]
     pub fn push(&mut self, edge: EdgeRecord) -> Result<()> {
         self.buffer.push(edge);
@@ -61,7 +56,6 @@ impl StreamingEdgeWriter {
         Ok(())
     }
 
-    /// Add multiple edges. Flushes as needed.
     #[allow(dead_code)]
     pub fn extend(&mut self, edges: impl IntoIterator<Item = EdgeRecord>) -> Result<()> {
         for edge in edges {
@@ -70,7 +64,6 @@ impl StreamingEdgeWriter {
         Ok(())
     }
 
-    /// Flush buffered edges to the Parquet file.
     pub fn flush(&mut self) -> Result<()> {
         if self.buffer.is_empty() {
             return Ok(());
@@ -86,7 +79,6 @@ impl StreamingEdgeWriter {
         Ok(())
     }
 
-    /// Close the writer and finalize the Parquet file.
     pub fn close(mut self) -> Result<usize> {
         self.flush()?;
         if let Some(writer) = self.writer.take() {
@@ -95,12 +87,11 @@ impl StreamingEdgeWriter {
         Ok(self.total_written)
     }
 
-    /// Get the number of edges written so far (including buffered).
+    /// Includes edges still buffered and not yet flushed.
     pub fn count(&self) -> usize {
         self.total_written + self.buffer.len()
     }
 
-    /// Convert edge buffer to Arrow RecordBatch.
     fn edges_to_batch(&self, edges: &[EdgeRecord]) -> Result<RecordBatch> {
         let traversal_path: StringArray = edges.iter().map(|e| Some(&*e.traversal_path)).collect();
         let relationship_kind: StringArray =
@@ -126,7 +117,6 @@ impl StreamingEdgeWriter {
 
 impl Drop for StreamingEdgeWriter {
     fn drop(&mut self) {
-        // Best effort flush on drop
         if !self.buffer.is_empty() {
             let buffer = std::mem::take(&mut self.buffer);
             if let Ok(batch) = self.edges_to_batch(&buffer)
@@ -141,7 +131,6 @@ impl Drop for StreamingEdgeWriter {
     }
 }
 
-/// Writes generated data to Parquet files.
 pub struct ParquetWriter {
     output_dir: PathBuf,
 }
@@ -153,12 +142,10 @@ impl ParquetWriter {
         }
     }
 
-    /// Check if data already exists for the given configuration.
     pub fn data_exists(&self) -> bool {
         self.output_dir.exists() && self.output_dir.join("edges.parquet").exists()
     }
 
-    /// Create a streaming edge writer for an organization.
     pub fn create_edge_writer(
         &self,
         org_id: u32,
@@ -170,7 +157,7 @@ impl ParquetWriter {
         StreamingEdgeWriter::new(&edge_path, None, ontology)
     }
 
-    /// Write only node data to Parquet files (edges written separately via streaming).
+    /// Writes nodes only; edges are written separately via the streaming writer.
     pub fn write_organization_nodes(&self, org_id: u32, nodes: &OrganizationNodes) -> Result<()> {
         let org_dir = self.output_dir.join(format!("org_{}", org_id));
         fs::create_dir_all(&org_dir)?;
@@ -201,7 +188,6 @@ impl ParquetWriter {
         Ok(())
     }
 
-    /// Finalize by writing a manifest file.
     pub fn write_manifest(&self, ontology: &Ontology, num_orgs: u32) -> Result<()> {
         let manifest = Manifest {
             node_types: ontology.nodes().map(|n| n.name.clone()).collect(),

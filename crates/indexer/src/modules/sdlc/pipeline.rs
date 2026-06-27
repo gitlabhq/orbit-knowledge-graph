@@ -367,8 +367,7 @@ impl Pipeline {
         Err(last_error.expect("loop runs once and only exits here after a failure"))
     }
 
-    /// Drives the transform over every block of the page, grouping output rows
-    /// by destination table so each table is written as one bulk insert.
+    /// Groups output rows by destination table so each table is written as one bulk insert.
     async fn transform_page(
         &self,
         transform: &dyn BlockTransform,
@@ -520,7 +519,6 @@ mod tests {
         test_batch_range(1, rows)
     }
 
-    /// A batch of `count` rows with `id` running `start_id..start_id+count`.
     fn test_batch_range(start_id: i64, count: usize) -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("id", ArrowDataType::Int64, false),
@@ -762,10 +760,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Records every `max_block_size` it sees and replays a configurable
-    /// success/failure pattern. Lets us assert that the per-plan override
-    /// flows through and that the adaptive halving on retry halves on each
-    /// attempt.
     struct RecordingDatalake {
         calls: Mutex<Vec<Option<u64>>>,
         responses: Mutex<Vec<Result<Vec<RecordBatch>, &'static str>>>,
@@ -847,10 +841,6 @@ mod tests {
 
     #[tokio::test]
     async fn extract_halves_max_block_size_on_each_retry() {
-        // Three failures then a success on the fourth attempt. The first
-        // attempt uses the datalake default (None). Subsequent attempts seed
-        // at retry_config.halving_initial_block_size (8000 here) and halve
-        // from there: 8000 → 4000 → 2000.
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
             Err("simulated transient failure"),
             Err("simulated transient failure"),
@@ -890,8 +880,6 @@ mod tests {
 
     #[tokio::test]
     async fn extract_halving_respects_min_block_size_floor() {
-        // Halving stops at halving_min_block_size and stays there for
-        // subsequent retries.
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
             Err("simulated transient failure"),
             Err("simulated transient failure"),
@@ -1044,8 +1032,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Returns one page of `rows` plus a fixed `ScanStats` from its summary,
-    /// then nothing.
     struct StatsDatalake {
         rows: usize,
         scan_stats: ScanStats,

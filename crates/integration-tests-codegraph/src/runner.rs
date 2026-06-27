@@ -18,8 +18,6 @@ use super::config::make_graph_config;
 use super::datasets::{LanceDatasets, to_lance_datasets};
 use super::validator::run_suite;
 
-/// Convert an arrow 58 RecordBatch to arrow 56 via IPC roundtrip.
-///
 /// Arrow IPC format is stable across versions — serialize with arrow 58,
 /// deserialize with arrow 56. Zero semantic loss.
 fn arrow58_to_arrow56(
@@ -38,8 +36,7 @@ fn arrow58_to_arrow56(
     reader.into_iter().next().unwrap().unwrap()
 }
 
-/// Converter that builds lance datasets directly from CodeGraphs.
-/// Stores them in a side channel — returns nothing to the sink.
+/// Stores datasets in a side channel — returns nothing to the sink.
 struct LanceConverter {
     datasets: std::sync::Mutex<LanceDatasets>,
 }
@@ -70,7 +67,6 @@ impl GraphConverter for LanceConverter {
     }
 }
 
-/// Resolve the workspace root (where `Cargo.toml` with `[workspace]` lives).
 fn workspace_root() -> std::path::PathBuf {
     let output = std::process::Command::new("cargo")
         .args(["metadata", "--format-version=1", "--no-deps"])
@@ -81,7 +77,6 @@ fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(meta["workspace_root"].as_str().unwrap())
 }
 
-/// Copy all files from `src_dir` into `dst_dir`, preserving relative paths.
 fn copy_dir_recursive(
     src_dir: &std::path::Path,
     dst_dir: &std::path::Path,
@@ -122,11 +117,10 @@ fn extend_datasets(into: &mut LanceDatasets, incoming: LanceDatasets) {
     }
 }
 
-/// Run a YAML test suite from a string. Panics on any error-severity failure.
+/// Panics on any error-severity failure.
 pub async fn run_yaml_suite(yaml: &str) {
     let suite: TestSuite = serde_yaml::from_str(yaml).expect("Failed to parse YAML suite");
 
-    // Skip pipeline entirely if all tests are skipped
     if suite.tests.iter().all(|t| t.skip) {
         eprintln!(
             "[PASS] Suite: {} ({} tests, all skipped)",
@@ -139,7 +133,6 @@ pub async fn run_yaml_suite(yaml: &str) {
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
     let mut file_inventory = Vec::new();
 
-    // Copy fixture_dir contents first (if set)
     if let Some(dir) = &suite.fixture_dir {
         let root = workspace_root();
         let src = root.join(dir);
@@ -147,7 +140,7 @@ pub async fn run_yaml_suite(yaml: &str) {
         copy_dir_recursive(&src, tmp.path(), &mut file_inventory);
     }
 
-    // Write inline fixtures (override anything from fixture_dir)
+    // Written after the fixture_dir copy so inline fixtures override same-path files.
     for fixture in &suite.fixtures {
         let path = tmp.path().join(&fixture.path);
         if let Some(parent) = path.parent() {
@@ -275,7 +268,6 @@ pub async fn run_yaml_suite(yaml: &str) {
         }
     };
 
-    // Dump trace once, after all execution is complete
     pipeline_ctx.tracer.dump(&suite.name);
 
     let config = make_graph_config().expect("Failed to build graph config");

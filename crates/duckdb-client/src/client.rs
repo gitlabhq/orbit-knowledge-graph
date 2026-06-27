@@ -14,20 +14,17 @@ pub struct DuckDbClient {
     conn: duckdb::Connection,
 }
 
-/// Check whether a DuckDB error is a file-lock contention error.
-///
 /// DuckDB emits `IO Error: Could not set lock on file` when another
-/// process holds the write lock. The Rust crate surfaces this as a
-/// generic `duckdb::Error` with the message embedded.
+/// process holds the write lock, surfaced as a generic `duckdb::Error`
+/// with the message embedded.
 fn is_lock_error(e: &duckdb::Error) -> bool {
     let msg = e.to_string().to_ascii_lowercase();
     msg.contains("could not set lock") || msg.contains("lock on file")
 }
 
 impl DuckDbClient {
-    /// Open a DuckDB database for read-write access, retrying with
-    /// exponential backoff (capped at 5s per attempt, ~26s total) if
-    /// another process holds the write lock.
+    /// Retries with exponential backoff (capped at 5s per attempt, ~26s
+    /// total) if another process holds the write lock.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
@@ -50,8 +47,8 @@ impl DuckDbClient {
         unreachable!()
     }
 
-    /// Open a DuckDB database for read-only access. Retries briefly
-    /// (50ms intervals, ~250ms total) if a writer holds the lock.
+    /// Retries briefly (50ms intervals, ~250ms total) if a writer holds
+    /// the lock.
     pub fn open_read_only(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DuckDbError::Schema(e.to_string()))?;
@@ -78,8 +75,6 @@ impl DuckDbClient {
         Ok(Self { conn })
     }
 
-    /// Create all graph tables and the manifest table from the given DDL.
-    ///
     /// The DDL is typically generated from the ontology via
     /// `generate_local_tables` + `emit_duckdb_create_table`, with the
     /// manifest DDL appended via the `external_ddl` parameter.
@@ -92,9 +87,6 @@ impl DuckDbClient {
 
     /// Bulk insert via DuckDB's Appender, which converts Arrow RecordBatch
     /// directly to DuckDB DataChunks — no SQL parsing, no vtab overhead.
-    ///
-    /// `allowed_tables` is an allowlist of valid table names. Pass the
-    /// table names derived from the ontology's `local_db` config.
     pub fn insert_arrow(
         &self,
         table: &str,
@@ -131,9 +123,8 @@ impl DuckDbClient {
         Ok(batches)
     }
 
-    /// Deletes all data across all graph tables. In local mode each DB file
-    /// is one project, so a full truncate is the correct reset before
-    /// re-indexing. The manifest table is preserved.
+    /// In local mode each DB file is one project, so a full truncate is the
+    /// correct reset before re-indexing. The manifest table is preserved.
     pub fn delete_all_data(&self, tables: &[&str]) -> Result<()> {
         for table in tables {
             self.conn
@@ -152,7 +143,6 @@ impl DuckDbClient {
         node_tables: &[String],
         edge_table: &str,
     ) -> Result<()> {
-        // Delete edges first (while node IDs are still in the tables).
         let subqueries: Vec<String> = node_tables
             .iter()
             .map(|t| format!("SELECT id FROM {t} WHERE project_id = ?1"))
@@ -165,7 +155,6 @@ impl DuckDbClient {
             )?;
         }
 
-        // Then delete node tables.
         for table in node_tables {
             self.conn.execute(
                 &format!("DELETE FROM {table} WHERE project_id = ?1"),
@@ -176,10 +165,6 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Insert all graph data into DuckDB sequentially.
-    ///
-    /// Table names come from `LocalGraphData.tables`, which are derived from
-    /// the ontology during conversion.
     pub fn insert_graph(&self, data: LocalGraphData) -> Result<()> {
         for (table, batch) in data.tables {
             self.insert_batch(&table, &batch)?;
@@ -187,7 +172,6 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Insert a single Arrow RecordBatch into a table.
     pub fn insert_batch(
         &self,
         table: &str,
@@ -202,10 +186,6 @@ impl DuckDbClient {
         Ok(())
     }
 
-    /// Execute a SQL statement with positional parameters.
-    ///
-    /// Params are `serde_json::Value`s converted to DuckDB types:
-    /// strings, integers, floats, bools, and nulls.
     pub fn execute(&self, sql: &str, params: &[serde_json::Value]) -> Result<usize> {
         let boxed = json_params_to_sql(params);
         Ok(self
@@ -213,10 +193,6 @@ impl DuckDbClient {
             .execute(sql, duckdb::params_from_iter(boxed.iter()))?)
     }
 
-    /// Execute a SQL query with JSON parameters and return Arrow RecordBatches.
-    ///
-    /// Params are `serde_json::Value`s converted to DuckDB types:
-    /// strings, integers, floats, bools, and nulls.
     pub fn query_arrow_json(
         &self,
         sql: &str,
@@ -257,7 +233,6 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc;
 
-    /// Test DDL covering only the tables these tests exercise.
     const TEST_DDL: &str = "\
 CREATE TABLE IF NOT EXISTS gl_directory (
     id BIGINT NOT NULL,

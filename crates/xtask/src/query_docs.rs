@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
 
-/// Docs that embed the generated table, relative to the workspace root.
+/// Paths are relative to the workspace root.
 const DEFAULT_DOCS: &[&str] = &[
     "docs/source/remote/queries/query-language.md",
     "skills/orbit/references/query_language.md",

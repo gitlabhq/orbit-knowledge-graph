@@ -12,7 +12,6 @@ pub enum EdgeKind {
     Extends,
 }
 
-/// Node kind in the graph — the source or target of an edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter, EnumString, AsRefStr, Display)]
 pub enum NodeKind {
     Directory,
@@ -21,7 +20,6 @@ pub enum NodeKind {
     ImportedSymbol,
 }
 
-/// A fully described relationship in the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Relationship {
     pub edge_kind: EdgeKind,
@@ -60,7 +58,6 @@ const STRUCTURAL_LABELS: &[(NodeKind, NodeKind, &str)] = &[
 ];
 
 impl Relationship {
-    /// Fine-grained label (e.g. "CLASS_TO_METHOD", "DIR_CONTAINS_FILE").
     pub fn label(&self) -> String {
         if let (Some(src), Some(tgt)) = (self.source_def_kind, self.target_def_kind) {
             return format!("{}_TO_{}", src.as_upper_str(), tgt.as_upper_str());
@@ -72,8 +69,6 @@ impl Relationship {
             .unwrap_or_else(|| self.edge_kind.to_string())
     }
 }
-
-// ── Containment rules ───────────────────────────────────────────
 
 macro_rules! define_containment_rules {
     ( $( $parent:ident => [ $( $child:ident ),+ $(,)? ] ; )+ ) => {

@@ -36,8 +36,6 @@ pub trait Trigger: Send + Sync {
     async fn run(self: Box<Self>, cancel: CancellationToken) -> Result<(), TriggerError>;
 }
 
-/// Runs every trigger concurrently until one errors or all complete.
-///
 /// On the first error, the shared `cancel` token is fired so the remaining
 /// triggers shut down, and the originating error is returned.
 pub async fn launch(

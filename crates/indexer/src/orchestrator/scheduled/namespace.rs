@@ -3,22 +3,19 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use tracing::{debug, info, warn};
-use uuid::Uuid;
+use tracing::{debug, info};
 
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
+use crate::orchestrator::dispatch::NamespaceIndexingDispatch;
 use crate::orchestrator::scheduled::ScheduledTaskMetrics;
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
-use crate::topic::NamespaceIndexingRequest;
-use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
 use std::sync::LazyLock;
 
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
-/// Enabled namespace ID + traversal path pairs from the datalake.
 static ENABLED_NAMESPACE_QUERY: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
@@ -29,8 +26,8 @@ static ENABLED_NAMESPACE_QUERY: LazyLock<String> = LazyLock::new(|| {
 });
 
 pub struct NamespaceDispatcher {
-    nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
+    publisher: NamespaceIndexingDispatch,
     metrics: ScheduledTaskMetrics,
     config: NamespaceDispatcherConfig,
     campaign: Arc<CampaignState>,
@@ -45,8 +42,8 @@ impl NamespaceDispatcher {
         campaign: Arc<CampaignState>,
     ) -> Self {
         Self {
-            nats,
             datalake,
+            publisher: NamespaceIndexingDispatch::new(nats),
             metrics,
             config,
             campaign,
@@ -101,89 +98,35 @@ impl NamespaceDispatcher {
         );
 
         let watermark = Utc::now();
-        let campaign_id = self.campaign.current();
-        let mut dispatched: u64 = 0;
-        let mut skipped: u64 = 0;
-
-        for (namespace_id, traversal_path) in namespace_ids.iter().zip(traversal_paths.iter()) {
-            if !is_dispatchable_traversal_path(traversal_path) {
-                warn!(
-                    namespace_id = *namespace_id,
-                    traversal_path = %traversal_path,
-                    "skipping enabled namespace with invalid traversal_path"
-                );
-                continue;
-            }
-
-            let request = NamespaceIndexingRequest {
-                namespace: *namespace_id,
-                traversal_path: traversal_path.clone(),
-                watermark,
-                dispatch_id: Uuid::new_v4(),
-                campaign_id: campaign_id.clone(),
-                targets: Vec::new(),
-            };
-
-            let subscription = request.publish_subscription();
-            let envelope = Envelope::new(&request).map_err(|error| {
+        let namespaces: Vec<_> = namespace_ids.into_iter().zip(traversal_paths).collect();
+        let outcome = self
+            .publisher
+            .dispatch_for_namespaces(&namespaces, watermark, self.campaign.current())
+            .await
+            .inspect_err(|_error| {
                 self.metrics.record_error(self.name(), "publish");
-                TaskError::new(error)
             })?;
 
-            match self.nats.publish(&subscription, &envelope).await {
-                Ok(()) => {
-                    dispatched += 1;
-                    debug!(
-                        namespace_id = *namespace_id,
-                        traversal_path = %traversal_path,
-                        "dispatched namespace indexing request"
-                    );
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    skipped += 1;
-                    debug!(
-                        namespace_id = *namespace_id,
-                        traversal_path = %traversal_path,
-                        "skipped namespace indexing request, already in-flight"
-                    );
-                }
-                Err(error) => {
-                    self.metrics.record_error(self.name(), "publish");
-                    return Err(TaskError::new(error));
-                }
-            }
-        }
-
         self.metrics
-            .record_requests_published(self.name(), dispatched);
-        self.metrics.record_requests_skipped(self.name(), skipped);
+            .record_requests_published(self.name(), outcome.dispatched);
+        self.metrics
+            .record_requests_skipped(self.name(), outcome.skipped);
 
         info!(
-            dispatched,
-            skipped, "dispatched namespace indexing requests"
+            dispatched = outcome.dispatched,
+            skipped = outcome.skipped,
+            "dispatched namespace indexing requests"
         );
         Ok(())
     }
 }
 
-fn is_dispatchable_traversal_path(path: &str) -> bool {
-    gkg_utils::traversal_path::is_valid(path)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{ENABLED_NAMESPACE_QUERY, is_dispatchable_traversal_path};
+    use super::ENABLED_NAMESPACE_QUERY;
 
     #[test]
     fn enabled_namespace_query_excludes_empty_traversal_paths() {
         assert!(ENABLED_NAMESPACE_QUERY.contains("traversal_path != ''"));
-    }
-
-    #[test]
-    fn dispatchable_traversal_paths_require_org_and_namespace_segments() {
-        assert!(is_dispatchable_traversal_path("1/9/"));
-        assert!(!is_dispatchable_traversal_path(""));
-        assert!(!is_dispatchable_traversal_path("0/"));
-        assert!(!is_dispatchable_traversal_path("1/"));
     }
 }

@@ -13,7 +13,6 @@ use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-/// Default source directory relative to the workspace root.
 const DEFAULT_DIR: &str = "dashboards/orbit";
 /// Glob suffix that identifies dashboard sources (rather than helpers).
 const SOURCE_SUFFIX: &str = ".dashboard.jsonnet";

@@ -116,8 +116,8 @@ fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
     );
 
     // Group alone needs FINAL: namespace-deletion tombstones (distinct ids the
-    // _deleted-less projection can't drop) inflate uniq(id) ~6x on prod. Tiny
-    // table, so it's cheap; every other type is within ~1% with uniq(id).
+    // _deleted-less projection can't drop) inflate uniq(id). The table is tiny,
+    // so FINAL is cheap; other types stay accurate enough with approximate uniq(id).
     if node.name == "Group" {
         return Query {
             select: vec![

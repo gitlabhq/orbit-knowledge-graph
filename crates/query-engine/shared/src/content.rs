@@ -1,10 +1,3 @@
-//! Virtual column resolution infrastructure.
-//!
-//! The [`ColumnResolver`] trait and [`ColumnResolverRegistry`] are shared
-//! between the server (Gitaly) and local (filesystem) pipelines.
-//! [`resolve_virtual_columns`] contains the dispatch loop that both
-//! pipelines call after hydration.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -14,35 +7,21 @@ use pipeline::PipelineError;
 
 use compiler::VirtualColumnRequest;
 
-/// A single entity row's hydrated properties, keyed by column name.
 pub type PropertyRow = HashMap<String, ColumnValue>;
 
-/// Hydrated properties keyed by `(entity_type, id)`.
 pub type PropertyMap = HashMap<(String, i64), PropertyRow>;
 
-/// Entity type paired with the virtual columns that need resolution.
 pub type EntityVirtualColumns<'a> = (&'a str, &'a [VirtualColumnRequest]);
 
 const DEFAULT_MAX_BATCH_SIZE: usize = 100;
 
-/// Context passed to every [`ColumnResolver::resolve_batch`] call.
-///
-/// Wraps an optional security context and can be extended with
-/// additional cross-cutting concerns without changing the trait
-/// signature.
 #[derive(Debug, Clone, Default)]
 pub struct ResolverContext {
     pub security_context: Option<compiler::SecurityContext>,
 }
 
-/// A service that resolves virtual column values from an external source.
-///
-/// Implementations receive the hydrated property map for each entity row
-/// and extract whatever parameters they need internally.
 #[async_trait]
 pub trait ColumnResolver: Send + Sync {
-    /// Resolve a batch of rows for the given `lookup` operation.
-    ///
     /// Returns a `Vec<Option<ColumnValue>>` aligned with `rows` -- `None`
     /// means the value could not be resolved for that row.
     async fn resolve_batch(
@@ -53,8 +32,6 @@ pub trait ColumnResolver: Send + Sync {
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError>;
 }
 
-/// Maps service names (e.g. `"gitaly"`) to their [`ColumnResolver`]
-/// implementations, with a configurable batch size limit.
 #[derive(Clone)]
 pub struct ColumnResolverRegistry {
     services: HashMap<String, Arc<dyn ColumnResolver>>,
@@ -93,11 +70,6 @@ impl ColumnResolverRegistry {
     }
 }
 
-/// Resolve virtual columns for all entity types in `entity_virtual_columns`.
-///
-/// For each entity type, looks up the matching rows in `property_map`,
-/// dispatches to the registered [`ColumnResolver`] service, and merges
-/// resolved values back into the property map.
 pub async fn resolve_virtual_columns(
     registry: &ColumnResolverRegistry,
     resolver_ctx: &ResolverContext,

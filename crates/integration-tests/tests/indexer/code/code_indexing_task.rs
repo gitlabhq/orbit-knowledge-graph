@@ -218,9 +218,6 @@ async fn skips_oversized_go_parser_input_and_indexes_repository() {
     assert_active_definitions(&clickhouse, project_id, "main.go", &["main"]).await;
 }
 
-/// End-to-end test for CALLS and EXTENDS edges:
-/// indexes Java code with class inheritance and a method call, then
-/// queries `gl_code_edge` to verify both relationship kinds were written.
 #[tokio::test]
 async fn indexes_calls_and_extends_edges() {
     let project_id: i64 = 99;
@@ -666,7 +663,6 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
         result
     );
 
-    // Checkpoint is set with no commit, marking the project as indexed-empty.
     let checkpoint_rows = clickhouse
         .query(&format!(
             "SELECT last_task_id, last_commit FROM {} FINAL \
@@ -690,7 +686,6 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
         last_commits.value(0)
     );
 
-    // No graph rows should have been written for this project.
     let files = clickhouse
         .query(&format!(
             "SELECT path FROM {} WHERE project_id = {project_id}",
@@ -735,7 +730,6 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 /// `source_id IN (subquery)` that pins to `project_id` and `branch`.
 #[tokio::test]
 async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
-    // Two projects in the same namespace (traversal_path prefix "1/").
     let project_a: i64 = 20;
     let project_b: i64 = 21;
     let traversal_path_a = "1/20/";
@@ -749,7 +743,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
 
     let mock = MockGitlabServer::start().await;
 
-    // Project A: one Java file with two definitions.
     mock.add_project(
         project_a,
         "main",
@@ -761,7 +754,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
         )],
     );
 
-    // Project B: one Java file with two definitions.
     mock.add_project(
         project_b,
         "main",
@@ -776,7 +768,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    // Index both projects.
     index_code(
         &handler,
         &clickhouse,
@@ -796,7 +787,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     )
     .await;
 
-    // Verify both projects have active edges before reindexing.
     let edges_a_before = count_active_edges(&clickhouse, project_a, "DEFINES").await;
     let edges_b_before = count_active_edges(&clickhouse, project_b, "DEFINES").await;
     assert!(
@@ -808,7 +798,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
         "project B should have DEFINES edges before reindex, got {edges_b_before}"
     );
 
-    // Reindex project A with different content (triggers stale data cleanup for A).
     mock.replace_archive(
         project_a,
         &[(
@@ -828,7 +817,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     )
     .await;
 
-    // Project A's old edges should be gone, new ones present.
     assert_no_active_definitions(&clickhouse, project_a, "src/Alpha.java").await;
     assert_active_definitions(
         &clickhouse,
@@ -838,7 +826,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     )
     .await;
 
-    // Project B's edges must be completely untouched by project A's stale cleanup.
     let edges_b_after = count_active_edges(&clickhouse, project_b, "DEFINES").await;
     assert_eq!(
         edges_b_after, edges_b_before,

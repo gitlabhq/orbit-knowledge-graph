@@ -1,9 +1,6 @@
-//! Query planning: reads Input, produces a Plan.
-//!
-//! One Plan struct with a PlanBody enum. Common fields (nodes, hops,
-//! limit, etc.) live on Plan; query-type-specific data lives in the
-//! body variant. The Rust enum enforces that emit functions only access
-//! their own variant's data.
+//! One Plan struct with a PlanBody enum. Common fields live on Plan;
+//! query-type-specific data lives in the body variant. The Rust enum
+//! enforces that emit functions only access their own variant's data.
 
 pub mod edge_chain;
 pub mod hydration;
@@ -23,8 +20,6 @@ pub use hydration::HydrationNodePlan;
 /// Pipeline state compatibility alias (HasQueryPlan, take_query_plan, etc.).
 pub type QueryPlan = Plan;
 
-/// The single query plan. Common fields shared by all query types live
-/// here; query-type-specific data lives in `body`.
 pub struct Plan {
     pub nodes: HashMap<String, NodePlan>,
     pub hops: Vec<Hop>,
@@ -90,7 +85,6 @@ pub struct EdgeTableConfig {
     /// Empty when rel_types is unset. Used by pathfinding to add kind
     /// predicates on intermediate hops for granule pruning.
     pub source_kinds: Vec<String>,
-    /// Valid target entity kinds for the rel_types.
     pub target_kinds: Vec<String>,
     /// Physical tables a neighbors arm must scan per direction (a center is the
     /// edge source when outgoing, the target when incoming). Defaults to all

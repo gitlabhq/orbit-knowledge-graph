@@ -40,10 +40,8 @@ pub enum PermanentAction {
     Drop,
 }
 
-/// Errors that can occur during message handling.
 #[derive(Debug, Error)]
 pub enum HandlerError {
-    /// A general processing error with a descriptive message.
     #[error("processing failed: {0}")]
     Processing(String),
 
@@ -54,7 +52,6 @@ pub enum HandlerError {
         action: PermanentAction,
     },
 
-    /// Failed to deserialize the message payload.
     #[error("deserialization failed: {0}")]
     Deserialization(#[from] serde_json::Error),
 }
@@ -73,13 +70,11 @@ impl HandlerError {
     }
 }
 
-/// Errors that can occur during handler initialization.
 #[derive(Debug, Error)]
 #[error("{0}")]
 pub struct HandlerInitError(#[from] Box<dyn std::error::Error + Send + Sync>);
 
 impl HandlerInitError {
-    /// Creates a new handler initialization error from any error type.
     pub fn new<E: std::error::Error + Send + Sync + 'static>(error: E) -> Self {
         Self(Box::new(error))
     }
@@ -111,31 +106,16 @@ impl HandlerContext {
     }
 }
 
-/// A message handler that processes events from a specific topic.
-///
-/// Each handler subscribes to one topic and processes incoming messages.
 /// Engine behavior (retries, concurrency, DLQ) is configured on the
 /// [`Subscription`] returned by [`subscription()`](Handler::subscription),
 /// not on the handler itself.
 #[async_trait]
 pub trait Handler: Send + Sync {
-    /// Returns the unique name of this handler.
-    ///
-    /// Used for metrics labeling, config lookup, and debugging. Should be a stable identifier.
+    /// Should be a stable identifier; used for metrics labeling and config lookup.
     fn name(&self) -> &str;
 
-    /// Returns the subscription this handler listens on.
-    ///
-    /// The subscription carries message-level processing policy (retry,
-    /// concurrency group, DLQ) applied at registration time.
     fn subscription(&self) -> Subscription;
 
-    /// Processes a message from the subscribed topic.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`HandlerError`] if processing fails. The engine will
-    /// retry or ack based on the subscription's config.
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError>;
 
     /// Whether the engine should acquire a worker pool permit before calling
@@ -149,17 +129,12 @@ pub trait Handler: Send + Sync {
     }
 }
 
-/// A registry for managing handlers and their topic subscriptions.
-///
-/// The registry collects handlers and provides lookup functionality
-/// for the engine to dispatch messages.
 #[derive(Default)]
 pub struct HandlerRegistry {
     handlers_by_subscription: RwLock<HashMap<Subscription, Vec<Arc<dyn Handler>>>>,
 }
 
 impl HandlerRegistry {
-    /// Registers a handler, adding it to the registry under its subscription.
     pub fn register_handler(&self, handler: Box<dyn Handler>) {
         let mut handlers_by_subscription = self.handlers_by_subscription.write();
         let subscription = handler.subscription();
@@ -169,7 +144,6 @@ impl HandlerRegistry {
             .push(Arc::from(handler));
     }
 
-    /// Returns all handlers registered for a given subscription.
     pub fn handlers_for(&self, subscription: &Subscription) -> Vec<Arc<dyn Handler>> {
         self.handlers_by_subscription
             .read()
@@ -178,7 +152,6 @@ impl HandlerRegistry {
             .unwrap_or_default()
     }
 
-    /// Returns all unique subscriptions that have registered handlers.
     pub fn subscriptions(&self) -> Vec<Subscription> {
         let mut subscriptions: Vec<_> = self
             .handlers_by_subscription
@@ -190,7 +163,6 @@ impl HandlerRegistry {
         subscriptions
     }
 
-    /// Finds a handler by name across all subscriptions.
     pub fn find_by_name(&self, name: &str) -> Option<Arc<dyn Handler>> {
         self.handlers_by_subscription
             .read()

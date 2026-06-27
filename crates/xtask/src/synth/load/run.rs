@@ -1,5 +1,3 @@
-//! Load generated Parquet data into ClickHouse.
-
 use super::ParquetReader;
 use crate::synth::clickhouse::{ClickHouseWriter, check_clickhouse_health};
 use crate::synth::config::Config;
@@ -28,7 +26,6 @@ pub async fn run(
     );
     let ontology = Ontology::load_from_dir(&config.generation.ontology_path)?;
 
-    // Check ClickHouse connectivity before proceeding
     println!(
         "Checking ClickHouse connection at {}...",
         config.clickhouse.url
@@ -37,13 +34,11 @@ pub async fn run(
     check_clickhouse_health(&writer.client).await?;
     println!("ClickHouse is healthy");
 
-    // Create schemas
     if !no_schema {
         println!("\n=== Schema Setup ===");
         writer.create_schemas(&ontology, &config.clickhouse).await?;
     }
 
-    // Load data
     if !no_data {
         println!("\n=== Loading Data ===");
 
@@ -72,7 +67,6 @@ pub async fn run(
         for org_id in &orgs {
             println!("\nOrganization {}:", org_id);
 
-            // Load node tables
             for node in ontology.nodes() {
                 let file_path = reader.file_path(*org_id, &node.name);
                 if !file_path.exists() {
@@ -95,7 +89,6 @@ pub async fn run(
                 println!("{:.1}s", start.elapsed().as_secs_f64());
             }
 
-            // Load edges
             let edges_path = reader.file_path(*org_id, "edges");
             if edges_path.exists() {
                 print!("  edges... ");
@@ -120,13 +113,13 @@ pub async fn run(
         );
     }
 
-    // Add indexes (after data load for efficiency)
+    // Build indexes after the data load so the writes aren't slowed by index maintenance.
     if !no_indexes && !config.clickhouse.schema.indexes.is_empty() {
         println!("\n=== Indexes ===");
         writer.add_indexes(&ontology, &config.clickhouse).await?;
     }
 
-    // Add projections (after data load for efficiency)
+    // Build projections after the data load so the writes aren't slowed by projection maintenance.
     if !no_projections && !config.clickhouse.schema.projections.is_empty() {
         println!("\n=== Projections ===");
         writer
@@ -134,7 +127,6 @@ pub async fn run(
             .await?;
     }
 
-    // Print statistics
     println!();
     writer.print_statistics(&ontology).await?;
 

@@ -38,7 +38,6 @@ fn only_permitted_crates_depend_on_gkg_billing() {
 }
 
 fn workspace_root() -> PathBuf {
-    // crates/integration-tests is two levels below the workspace root.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)

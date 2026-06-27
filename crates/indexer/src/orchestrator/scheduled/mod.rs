@@ -331,8 +331,6 @@ mod tests {
         }
     }
 
-    // ── run_once tests ─────────────────────────────────────────────
-
     #[tokio::test]
     async fn run_once_runs_when_lock_available() {
         let lock_service = AlwaysGrantLockService;
@@ -372,8 +370,6 @@ mod tests {
         assert_eq!(b.run_count(), 1, "each task has its own cadence lock");
     }
 
-    // ── run_loop validation tests ──────────────────────────────────
-
     #[tokio::test]
     async fn run_loop_rejects_missing_cron() {
         let lock_service = Arc::new(AlwaysGrantLockService);
@@ -403,8 +399,6 @@ mod tests {
             "expected InvalidCron, got: {err}"
         );
     }
-
-    // ── run_loop scheduling tests ──────────────────────────────────
 
     #[tokio::test]
     async fn run_loop_exits_on_shutdown() {

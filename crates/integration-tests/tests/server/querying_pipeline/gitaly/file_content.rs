@@ -1,5 +1,3 @@
-//! Integration tests for GitalyContentService::resolve_batch with a mock HTTP server.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -71,8 +69,6 @@ impl Drop for MockServer {
     }
 }
 
-/// Starts a mock HTTP server that serves list_blobs responses.
-/// The server is aborted when the returned `MockServer` is dropped.
 async fn mock_gitlab_server(
     handler: impl Fn(i64, Vec<String>) -> Vec<u8> + Send + Sync + Clone + 'static,
 ) -> MockServer {
@@ -215,7 +211,7 @@ async fn deduplicates_same_file() {
 
     let service = GitalyContentService::new(mock.client.clone());
     let row1 = file_row(1, "main", "src/lib.rs");
-    let row2 = file_row(1, "main", "src/lib.rs"); // same file
+    let row2 = file_row(1, "main", "src/lib.rs");
     let rows: Vec<&PropertyRow> = vec![&row1, &row2];
     let ctx = resolver_ctx();
 
@@ -247,7 +243,7 @@ async fn groups_by_project_id() {
     let service = GitalyContentService::new(mock.client.clone());
     let row1 = file_row(10, "main", "a.rs");
     let row2 = file_row(20, "main", "b.rs");
-    let row3 = file_row(10, "main", "c.rs"); // same project as row1
+    let row3 = file_row(10, "main", "c.rs");
     let rows: Vec<&PropertyRow> = vec![&row1, &row2, &row3];
     let ctx = resolver_ctx();
 
@@ -291,8 +287,8 @@ async fn multiple_definitions_in_same_file() {
     .await;
 
     let service = GitalyContentService::new(mock.client.clone());
-    let row1 = definition_row(1, "main", "src/lib.rs", 0, 11); // "fn foo() {}"
-    let row2 = definition_row(1, "main", "src/lib.rs", 12, 23); // "fn bar() {}"
+    let row1 = definition_row(1, "main", "src/lib.rs", 0, 11);
+    let row2 = definition_row(1, "main", "src/lib.rs", 12, 23);
     let rows: Vec<&PropertyRow> = vec![&row1, &row2];
     let ctx = resolver_ctx();
 
@@ -317,7 +313,6 @@ async fn missing_project_id_returns_none() {
     let mut row = PropertyRow::new();
     row.insert("branch".into(), ColumnValue::String("main".into()));
     row.insert("path".into(), ColumnValue::String("src/lib.rs".into()));
-    // no project_id
     let rows: Vec<&PropertyRow> = vec![&row];
     let ctx = resolver_ctx();
 
@@ -420,7 +415,6 @@ async fn mixed_valid_and_invalid_rows() {
     let valid = file_row(1, "main", "src/lib.rs");
     let mut invalid = PropertyRow::new();
     invalid.insert("branch".into(), ColumnValue::String("main".into()));
-    // no project_id
     let rows: Vec<&PropertyRow> = vec![&valid, &invalid];
     let ctx = resolver_ctx();
 
@@ -479,7 +473,7 @@ async fn same_path_different_projects_fetched_separately() {
 
     let service = GitalyContentService::new(mock.client.clone());
     let row1 = file_row(1, "main", "src/lib.rs");
-    let row2 = file_row(2, "main", "src/lib.rs"); // same path, different project
+    let row2 = file_row(2, "main", "src/lib.rs");
     let rows: Vec<&PropertyRow> = vec![&row1, &row2];
     let ctx = resolver_ctx();
 

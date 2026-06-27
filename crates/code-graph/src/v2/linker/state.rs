@@ -24,9 +24,6 @@
 //! - **[`ScratchBuf`]**: reusable heap `String` for transient lookup keys.
 //!   Allocated once per walker, reused via `clear()` + `write!()`. For
 //!   strings that are used once for a lookup and immediately discarded.
-//!
-//! This module is designed to be adopted incrementally: existing code in
-//! `graph.rs` and `walker.rs` can migrate to these types one map at a time.
 
 use std::hash::{Hash, Hasher};
 
@@ -39,13 +36,9 @@ use smallvec::SmallVec;
 
 use bumpalo::collections::String as BumpString;
 
-// ── Hash key ────────────────────────────────────────────────────
-
-/// Hash a string for use as an index key. FxHash for speed.
-///
-/// Used internally by VerifiedMap/NestedMap. Also public for
-/// `ssa_names: FxHashSet<u64>` in the walker, which uses conservative
-/// hash-based membership checks (collision = extra work, never wrong edges).
+/// Hashes a string into a `u64` index key (FxHash, for speed). Also public for
+/// `ssa_names` membership checks in the walker, where a collision only costs
+/// extra work, never wrong edges.
 #[inline]
 pub fn hash_name(s: &str) -> u64 {
     let mut h = FxHasher::default();
@@ -53,22 +46,11 @@ pub fn hash_name(s: &str) -> u64 {
     h.finish()
 }
 
-// ── VerifiedMap ─────────────────────────────────────────────────
-
 /// A hash-keyed index map that forces verification on every lookup.
 ///
-/// Stores `FxHashMap<u64, SmallVec<[NodeIndex; N]>>` internally. The u64
-/// keys avoid string pointer chases during HashMap probing, but hash
-/// collisions (~10⁻⁹ per lookup) can return wrong entries. VerifiedMap
-/// makes it structurally impossible to consume unverified results.
-///
-/// # API
-///
-/// - [`insert`]: add an entry (hashes the key internally)
-/// - [`lookup`]: get entries, filtered through a caller-provided verifier
-/// - [`lookup_into`]: same but appends to an existing `Vec` (avoids alloc)
-/// - [`contains`]: conservative existence check (collision = false positive = extra work)
-/// - [`is_empty`]: check if the map has any entries at all
+/// The u64 keys avoid string pointer chases during HashMap probing, but hash
+/// collisions (~10⁻⁹ per lookup) can return wrong entries. VerifiedMap makes
+/// it structurally impossible to consume unverified results.
 pub struct VerifiedMap<const N: usize = 8> {
     inner: FxHashMap<u64, SmallVec<[NodeIndex; N]>>,
 }
@@ -86,13 +68,10 @@ impl<const N: usize> VerifiedMap<N> {
         }
     }
 
-    /// Insert a value under the given string key.
     pub fn insert(&mut self, key: &str, value: NodeIndex) {
         self.inner.entry(hash_name(key)).or_default().push(value);
     }
 
-    /// Look up entries for `key`, returning only those that pass `verify`.
-    ///
     /// The verifier receives each candidate `NodeIndex` and must check that
     /// the actual stored data matches `key` (e.g. `|idx| graph.def(idx).name == key`).
     pub fn lookup(
@@ -110,9 +89,8 @@ impl<const N: usize> VerifiedMap<N> {
         }
     }
 
-    /// Sort all entry lists for deterministic lookup order.
-    /// Call once after all insertions are complete.
-    /// `key_fn` extracts a sort key from each NodeIndex (e.g. FQN string).
+    /// Sort all entry lists for deterministic lookup order. Call once after
+    /// all insertions are complete.
     pub fn sort_all(&mut self, key_fn: impl Fn(NodeIndex) -> String) {
         for entries in self.inner.values_mut() {
             entries.sort_by_cached_key(|idx| key_fn(*idx));
@@ -162,14 +140,9 @@ impl<const N: usize> Default for VerifiedMap<N> {
     }
 }
 
-// ── NestedMap ───────────────────────────────────────────────────
-
 /// Two-level hash-keyed index map for scope → member lookups.
 ///
 /// `nested_defs[hash(scope_fqn)][hash(member_name)]` → `SmallVec<[NodeIndex; 8]>`
-///
-/// Both levels are verified on lookup: the outer key (scope) and inner key
-/// (member) are checked against actual graph data. No raw access.
 pub struct NestedMap {
     inner: FxHashMap<u64, FxHashMap<u64, SmallVec<[NodeIndex; 8]>>>,
 }
@@ -181,7 +154,6 @@ impl NestedMap {
         }
     }
 
-    /// Insert a member under a scope.
     pub fn insert(&mut self, scope: &str, member: &str, value: NodeIndex) {
         self.inner
             .entry(hash_name(scope))
@@ -191,9 +163,6 @@ impl NestedMap {
             .push(value);
     }
 
-    /// Look up members of a scope, verifying both scope and member keys.
-    ///
-    /// `verify_member` checks the candidate's name against `member`.
     /// Scope verification is implicit: callers pass a scope string that was
     /// already verified against the graph (e.g. from `def_fqn(start_node)`).
     /// If two scope FQNs hash-collide, entries from the wrong scope appear
@@ -218,7 +187,6 @@ impl NestedMap {
             .collect()
     }
 
-    /// Like [`lookup`] but appends to `out`. Returns `true` if any found.
     pub fn lookup_into(
         &self,
         scope: &str,
@@ -301,13 +269,7 @@ impl Default for DefinitionRangeIndex {
     }
 }
 
-// ── GraphIndexes ────────────────────────────────────────────────
-
 /// All resolution indexes for a CodeGraph, bundled together.
-///
-/// Replaces the scattered `def_by_fqn`, `def_by_name`, `nested_defs` fields
-/// on CodeGraph. Every lookup goes through VerifiedMap/NestedMap — no raw
-/// hash access possible.
 ///
 /// Construction-only indexes (`dir_index`, `file_index`) are held as
 /// `Option` and dropped after `finalize()`.
@@ -342,7 +304,6 @@ impl GraphIndexes {
         }
     }
 
-    /// Drop construction-only indexes after finalize.
     pub fn drop_construction_indexes(&mut self) {
         self.dir_index = None;
         self.file_index = None;
@@ -355,16 +316,10 @@ impl Default for GraphIndexes {
     }
 }
 
-// ── String pool (re-exported from gkg-utils) ────────────────────
-
 pub use gkg_utils::strings::{StrId, StringPool};
 
-// ── Pool-backed graph types ─────────────────────────────────────
-
-/// Pool-backed definition. Stored in `CodeGraph.defs`.
-///
-/// Replaces `CanonicalDefinition` for graph storage. All strings are
-/// [`StrId`] referencing the graph's [`StringPool`].
+/// Pool-backed definition. All strings are [`StrId`] referencing the graph's
+/// [`StringPool`].
 #[derive(Debug, Clone)]
 pub struct GraphDef {
     pub definition_type: &'static str,
@@ -377,7 +332,6 @@ pub struct GraphDef {
     pub metadata: Option<Box<GraphDefMeta>>,
 }
 
-/// Pool-backed definition metadata.
 #[derive(Debug, Clone, Default)]
 pub struct GraphDefMeta {
     pub super_types: SmallVec<[StrId; 2]>,
@@ -389,7 +343,6 @@ pub struct GraphDefMeta {
     pub is_exported: bool,
 }
 
-/// Pool-backed import. Stored in `CodeGraph.imports`.
 #[derive(Debug, Clone)]
 pub struct GraphImport {
     pub import_type: &'static str,
@@ -403,10 +356,7 @@ pub struct GraphImport {
     pub wildcard: bool,
 }
 
-// ── Conversion from parser types ────────────────────────────────
-
 impl GraphDef {
-    /// Convert from parser's `CanonicalDefinition`, allocating strings into pool.
     pub fn from_canonical(
         def: &crate::v2::types::CanonicalDefinition,
         pool: &mut StringPool,
@@ -436,7 +386,6 @@ impl GraphDef {
 }
 
 impl GraphImport {
-    /// Convert from parser's `CanonicalImport`, allocating strings into pool.
     pub fn from_canonical(imp: &crate::v2::types::CanonicalImport, pool: &mut StringPool) -> Self {
         Self {
             import_type: imp.import_type,
@@ -451,8 +400,6 @@ impl GraphImport {
         }
     }
 }
-
-// ── Arena ───────────────────────────────────────────────────────
 
 /// Per-file arena for walker scratch strings.
 ///
@@ -493,13 +440,11 @@ impl FileArena {
         Self(Bump::with_capacity(bytes))
     }
 
-    /// Copy a string into the arena.
     #[inline]
     pub fn alloc_str(&self, s: &str) -> &str {
         self.0.alloc_str(s)
     }
 
-    /// Allocate a string by formatting into the arena.
     pub fn alloc_fmt(&self, args: std::fmt::Arguments<'_>) -> &str {
         use std::fmt::Write;
         let mut w = BumpString::new_in(&self.0);
@@ -507,7 +452,6 @@ impl FileArena {
         w.into_bump_str()
     }
 
-    /// Total bytes allocated by this arena.
     pub fn allocated_bytes(&self) -> usize {
         self.0.allocated_bytes()
     }
@@ -527,17 +471,11 @@ impl Default for FileArena {
     }
 }
 
-// ── Scratch buffer (re-exported from gkg-utils) ─────────────────
-
 pub use gkg_utils::strings::ScratchBuf;
-
-// ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── VerifiedMap ─────────────────────────────────────────
 
     #[test]
     fn verified_map_insert_and_lookup() {
@@ -564,13 +502,11 @@ mod tests {
         map.insert("foo", n0);
         map.insert("foo", n1);
 
-        // Verifier accepts both
         let result = map.lookup("foo", |_| true);
         assert_eq!(result.len(), 2);
         assert!(result.contains(&n0));
         assert!(result.contains(&n1));
 
-        // Verifier filters
         let result = map.lookup("foo", |idx| idx == n1);
         assert_eq!(result.as_slice(), &[n1]);
     }
@@ -599,7 +535,7 @@ mod tests {
         map.insert("foo", n0);
         map.insert("foo", n1);
 
-        let mut out = vec![NodeIndex::new(99)]; // pre-existing
+        let mut out = vec![NodeIndex::new(99)];
         let found = map.lookup_into("foo", |_| true, &mut out);
         assert!(found);
         assert_eq!(out.len(), 3);
@@ -630,8 +566,6 @@ mod tests {
         let found = map.lookup_into("foo", |_| false, &mut out);
         assert!(!found);
     }
-
-    // ── NestedMap ───────────────────────────────────────────
 
     #[test]
     fn nested_map_insert_and_lookup() {
@@ -704,8 +638,6 @@ mod tests {
         assert_eq!(result.as_slice(), &[n1]);
     }
 
-    // ── FileArena ───────────────────────────────────────────
-
     #[test]
     fn file_arena_basic() {
         let arena = FileArena::new();
@@ -728,8 +660,6 @@ mod tests {
         assert!(bytes_before > 0);
 
         arena.reset();
-        // After reset, backing storage is retained but contents are gone.
-        // New allocations reuse the same memory.
         let s = arena.alloc_str("second file");
         assert_eq!(s, "second file");
     }
@@ -746,8 +676,6 @@ mod tests {
         assert_eq!(refs[999], "name_999");
         assert_eq!(refs.len(), 1000);
     }
-
-    // ── GraphIndexes ────────────────────────────────────────
 
     #[test]
     fn graph_indexes_construction_lifecycle() {
@@ -787,12 +715,9 @@ mod tests {
         assert_eq!(indexes.by_name.lookup("Foo", |_| true).len(), 1);
         assert_eq!(indexes.nested.lookup("com.Foo", "bar", |_| true).len(), 1);
 
-        // Cross-check: different maps don't interfere
         assert!(indexes.by_fqn.lookup("Foo", |_| true).is_empty());
         assert!(indexes.by_name.lookup("com.Foo", |_| true).is_empty());
     }
-
-    // ── StringPool ───────────────────────────────────────────
 
     #[test]
     fn string_pool_alloc_and_get() {
@@ -821,8 +746,6 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(pool.get(a), pool.get(b));
     }
-
-    // ── GraphDef / GraphImport ──────────────────────────────
 
     #[test]
     fn graph_def_from_canonical() {

@@ -1,24 +1,9 @@
-//! JSON Schema generation from ontology definitions.
-//!
-//! Populates a base query DSL schema with ontology-specific values:
-//! entity types, relationship types, per-node column validation, etc.
-
 use serde_json::{Map, Value};
 
 use crate::constants::{NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN};
 use crate::{Ontology, OntologyError};
 
 impl Ontology {
-    /// Generate a JSON Schema with ontology values populated.
-    ///
-    /// Given a base schema template, this populates:
-    /// - `$defs.EntityType.enum` with valid entity types
-    /// - `$defs.RelationshipTypeName.enum` with valid relationship types (including wildcard `*`)
-    /// - `$defs.NodeProperties` with property definitions per node type
-    /// - `$defs.NodeSelector.allOf` with per-entity column and filter validation
-    ///
-    /// # Errors
-    ///
     /// Returns an error if the base schema is invalid JSON or missing required sections.
     pub fn derive_json_schema(&self, base_schema_json: &str) -> Result<Value, OntologyError> {
         let mut schema: Value = serde_json::from_str(base_schema_json)
@@ -93,14 +78,12 @@ impl Ontology {
     fn build_node_selector_validation(&self) -> Vec<Value> {
         self.nodes()
             .map(|node| {
-                // All fields are valid for column selection.
                 let valid_columns: Vec<Value> = NODE_RESERVED_COLUMNS
                     .iter()
                     .map(|s| Value::String((*s).to_string()))
                     .chain(node.fields.iter().map(|f| Value::String(f.name.clone())))
                     .collect();
 
-                // Only filterable fields are valid filter targets.
                 let filterable_fields: Vec<Value> = NODE_RESERVED_COLUMNS
                     .iter()
                     .map(|s| Value::String((*s).to_string()))

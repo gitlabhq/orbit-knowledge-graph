@@ -1,11 +1,3 @@
-//! Input normalization.
-//!
-//! Transforms validated input into a canonical form before lowering.
-//! After normalization:
-//! - Entity names are resolved to table names
-//! - Filter values are coerced to match ontology types
-//! - Wildcard column selections are expanded to explicit column lists
-
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
@@ -56,12 +48,6 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
         .collect()
 }
 
-/// Normalize validated input.
-///
-/// Performs the following transformations:
-/// - Resolves entity names to ClickHouse table names
-/// - Coerces filter values to match ontology field types (e.g., enum int → string)
-/// - Expands wildcard column selections ("*") to explicit column lists
 pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     input.entity_auth = build_entity_auth(ontology);
     input.compiler.edge_tables = ontology
@@ -126,7 +112,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         }
     }
 
-    // Populate table sort keys for LIMIT BY dedup.
     input.compiler.table_sort_keys.clear();
     for node in ontology.nodes() {
         input
@@ -143,7 +128,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         }
     }
 
-    // Populate denormalized columns map for the optimizer.
     for dp in ontology.denormalized_properties() {
         let dir_prefix = match dp.direction {
             ontology::DenormDirection::Source => "source",
@@ -166,7 +150,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .push(dp.relationship_kind.clone());
     }
 
-    // Populate text index metadata from the ontology's StorageIndex entries.
     for node_entity in ontology.nodes() {
         for idx in &node_entity.storage.indexes {
             if let Some(tokenizer) = ontology.text_index_tokenizer(&node_entity.name, &idx.column) {
@@ -211,8 +194,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         node.has_traversal_path = node_entity.has_traversal_path;
         node.is_global = node_entity.global;
 
-        // Expand column selections to explicit lists. Strip virtual columns
-        // into node.virtual_columns for the hydration plan.
         // PathFinding/Neighbors handle virtuals in build_dynamic_specs.
         let strip_virtual = !matches!(
             input.query_type,
@@ -276,7 +257,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         });
         node.virtual_filters = virtual_filters;
 
-        // Coerce filter values to match ontology field types (e.g., enum int → string)
         for (column, filters) in &mut node.filters {
             let Some(field) = node_entity.fields.iter().find(|f| f.name == *column) else {
                 continue;
@@ -442,7 +422,6 @@ mod tests {
 
     #[test]
     fn enum_coercion_all_variants() {
-        // Single int → string
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}}"#,
         );
@@ -451,7 +430,6 @@ mod tests {
             Some(json!("opened"))
         );
 
-        // Array of ints → array of strings
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2, 3, 4]}}}}"#,
         );
@@ -469,7 +447,6 @@ mod tests {
             Some(json!(["opened", 999, "merged"]))
         );
 
-        // String values pass through unchanged
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}}"#,
         );
@@ -478,7 +455,6 @@ mod tests {
             Some(json!("opened"))
         );
 
-        // Unknown int passes through
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}}"#,
         );
@@ -487,7 +463,6 @@ mod tests {
             Some(json!(999))
         );
 
-        // Null filter value (is_null op) unchanged
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "is_null"}}}}"#,
         );
@@ -513,7 +488,6 @@ mod tests {
             }"#,
         );
 
-        // User: table resolved, non-enum filters unchanged
         assert_eq!(result.nodes[0].table, Some("gl_user".into()));
         assert_eq!(
             result.nodes[0].filters.get("username").unwrap()[0].value,
@@ -524,7 +498,6 @@ mod tests {
             Some(json!(42))
         );
 
-        // MergeRequest: table + enum coercion + non-enum passthrough
         assert_eq!(result.nodes[1].table, Some("gl_merge_request".into()));
         assert_eq!(
             result.nodes[1].filters.get("state").unwrap()[0].value,
@@ -539,7 +512,6 @@ mod tests {
             Some(json!("fix"))
         );
 
-        // Pipeline: multiple enum fields coerced
         assert_eq!(result.nodes[2].table, Some("gl_pipeline".into()));
         assert_eq!(
             result.nodes[2].filters.get("source").unwrap()[0].value,
@@ -550,7 +522,6 @@ mod tests {
             Some(json!("config_error"))
         );
 
-        // WorkItem: different entity with same enum field name (state) + work_item_type
         assert_eq!(result.nodes[3].table, Some("gl_work_item".into()));
         assert_eq!(
             result.nodes[3].filters.get("state").unwrap()[0].value,
@@ -561,13 +532,11 @@ mod tests {
             Some(json!("epic"))
         );
 
-        // Node without entity: no table
         assert_eq!(result.nodes[4].table, None);
     }
 
     #[test]
     fn edge_cases() {
-        // Unknown field on known entity - unchanged
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}}"#,
         );
@@ -576,7 +545,6 @@ mod tests {
             Some(json!(42))
         );
 
-        // Non-enum int field not coerced (User.id is int, not enum)
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "filters": {"id": 1}}}"#,
         );
@@ -585,7 +553,6 @@ mod tests {
             Some(json!(1))
         );
 
-        // Boolean field unchanged
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}}"#,
         );
@@ -594,7 +561,6 @@ mod tests {
             Some(json!(true))
         );
 
-        // String array on non-enum field unchanged
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"op": "in", "value": ["main", "develop"]}}}}"#,
         );
@@ -603,7 +569,6 @@ mod tests {
             Some(json!(["main", "develop"]))
         );
 
-        // Unknown entity rejected
         let input = parse_input(
             r#"{"query_type": "traversal", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
         ).unwrap();

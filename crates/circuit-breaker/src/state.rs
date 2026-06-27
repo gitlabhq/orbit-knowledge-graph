@@ -67,7 +67,6 @@ impl StateLabel {
     }
 }
 
-/// A state transition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub struct Transition {

@@ -53,7 +53,6 @@ fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
         .chain(input.path.iter().map(|p| (p.from.as_str(), p.to.as_str())))
         .collect();
 
-    // Flood-fill until no new node is reached.
     loop {
         let before = reachable.len();
         for &(a, b) in &edges {
@@ -947,9 +946,8 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Count, None);
-        // Drop the helper's default relationship so User and Group are declared
-        // but not connected. The old declaration-based check accepted this;
-        // the reachability check must reject it.
+        // User and Group declared but not connected: the old declaration-based
+        // check accepted this; the reachability check must reject it.
         input.relationships.clear();
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
         assert!(
@@ -1006,12 +1004,8 @@ mod tests {
         );
     }
 
-    // ── Real-ontology coverage for User admin-only columns ────────────────
-    //
-    // The synthetic ontology above only declares is_admin/is_auditor as
-    // admin_only. These tests load the embedded production ontology so any
-    // future drift in user.yaml is caught here, in addition to the pin test
-    // in the ontology crate.
+    // These tests load the embedded production ontology so any drift in
+    // user.yaml is caught here, in addition to the pin test in the ontology crate.
 
     const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
         "email",

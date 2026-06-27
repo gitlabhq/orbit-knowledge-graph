@@ -1,7 +1,3 @@
-//! Edge-chain query plan builder.
-//!
-//! `plan()` reads Input, produces a Plan for traversal and aggregation queries.
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -12,32 +8,19 @@ use crate::input::*;
 use super::{Plan, PlanBody};
 use crate::passes::shared::{requested_columns, resolve_edge_table};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// A single edge hop in the plan chain.
 pub struct Hop {
-    /// Relationship types to match (e.g. ["AUTHORED"]).
     pub rel_types: Vec<String>,
-    /// Physical edge table (e.g. "gl_edge", "gl_code_edge").
     pub edge_table: String,
-    /// Node alias on the "from" side of this hop.
     pub from_node: String,
-    /// Node alias on the "to" side of this hop.
     pub to_node: String,
-    /// Edge direction (determines source_id vs target_id mapping).
     pub direction: Direction,
     /// Min hops (1 = include depth-1, 2 = skip depth-1, etc.).
     pub min_hops: u32,
     /// Max hops (1 for single-hop, >1 for variable-length).
     pub max_hops: u32,
-    /// FK on a node table that encodes this relationship.
     /// When set, the plan can join node tables directly without the edge table.
     pub fk: Option<HopFk>,
-    /// Edge-level filters from the query (e.g. relationship property predicates).
     pub filters: Vec<(String, InputFilter)>,
-    /// Pre-resolved join columns for connecting to the previous hop.
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
     /// Tight `traversal_path` prefix to confine this hop's edge scan to,
@@ -55,25 +38,21 @@ pub struct Hop {
     pub cascade_anchor: bool,
 }
 
-/// Pre-resolved join columns for connecting a hop to the previous hop.
 pub struct JoinColumns {
     pub prev_alias: String,
     pub prev_col: String,
     pub curr_col: String,
 }
 
-/// FK info for a hop — which node has the FK column.
 #[derive(Clone, Debug)]
 pub struct HopFk {
     /// Node alias that holds the FK (must be one of from_node or to_node).
     pub fk_node: String,
-    /// The FK column on that node (e.g. "project_id").
     pub fk_column: String,
     /// The other node's alias (the one the FK points to).
     pub target_node: String,
 }
 
-/// Per-node plan metadata.
 pub struct NodePlan {
     pub alias: String,
     pub entity: Option<String>,
@@ -114,15 +93,11 @@ impl NodePlan {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Selectivity {
-    /// Pinned IDs — most selective.
     Pinned,
-    /// Has an ID range.
     IdRange,
-    /// Has property filters.
     Filtered,
     /// Auth-scoped only (traversal_path).
     AuthScoped,
-    /// Unconstrained.
     Open,
 }
 
@@ -157,9 +132,9 @@ pub enum HydrationStrategy {
 pub enum Strategy {
     /// Flat edge chain: e0 JOIN e1 JOIN e2 ... (no CTEs).
     Flat,
-    /// Bidirectional: forward arm + backward arm meeting at a hop index.
-    Bidirectional { meeting_hop: usize },
-    /// Single node, no edges.
+    Bidirectional {
+        meeting_hop: usize,
+    },
     SingleNode,
     /// FK-derived traversal answered by joining node tables on their FK
     /// columns, with zero edge-table scans. The [`FkShape`] selects how the
@@ -167,8 +142,7 @@ pub enum Strategy {
     Fk(FkShape),
 }
 
-/// Topology of an FK-derived traversal. Single-hop FK is the degenerate
-/// one-hop [`FkShape::Star`].
+/// Single-hop FK is the degenerate one-hop [`FkShape::Star`].
 pub enum FkShape {
     /// All hops have FKs on the same center node. The center node drives a
     /// single scan; other nodes JOIN via the center's FK columns.
@@ -178,10 +152,6 @@ pub enum FkShape {
     /// of those FKs, so the chain skips all edge-table scans.
     Chain,
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// plan()
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn plan(input: &mut Input) -> Plan {
     let hops = build_hops(input);
@@ -216,7 +186,6 @@ pub fn plan(input: &mut Input) -> Plan {
 
     resolve_dedup_columns(&mut nodes, input);
 
-    // In aggregation queries, only node group keys emit entity columns.
     if input.query_type == QueryType::Aggregation {
         let group_by_nodes: HashSet<&str> =
             crate::input::node_group_ids(&input.aggregation.group_by).collect();
@@ -249,10 +218,6 @@ pub fn plan(input: &mut Input) -> Plan {
         body,
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Plan builders
-// ─────────────────────────────────────────────────────────────────────────────
 
 fn build_hops(input: &Input) -> Vec<Hop> {
     input
@@ -692,8 +657,6 @@ fn resolve_cascade_anchors(hops: &mut [Hop]) {
     }
 }
 
-/// Pre-resolve join columns for each hop based on shared-node topology
-/// with the previous hop.
 fn resolve_join_columns(hops: &mut [Hop]) {
     for i in 1..hops.len() {
         let prev_hop = &hops[i - 1];
@@ -723,7 +686,6 @@ fn resolve_join_columns(hops: &mut [Hop]) {
     }
 }
 
-/// Pre-compute node_edge_col mappings from hops + elided_fks + strategy.
 fn compute_node_edge_mappings(
     hops: &[Hop],
     elided_fks: &[(String, String, String)],
@@ -773,14 +735,12 @@ fn compute_node_edge_mappings(
         }
     }
 
-    // Elided FK target nodes.
     for (target_node, fk_node, fk_column) in elided_fks {
         mappings
             .entry(target_node.clone())
             .or_insert_with(|| (fk_node.clone(), fk_column.clone()));
     }
 
-    // Store per-node for convenience.
     let _ = nodes;
     mappings
 }
@@ -815,7 +775,6 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         }
     }
 
-    // 2. Elevated access: Skip nodes with elevated auth need FilterOnly
     let elevated: Vec<String> = nodes
         .values()
         .filter(|np| {
@@ -830,7 +789,6 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
         nodes.get_mut(&alias).unwrap().needs_elevated_filter = true;
     }
 
-    // 3. FK join needs
     for hop in hops {
         let Some(ref fk) = hop.fk else { continue };
         let Some(np) = nodes.get(&fk.target_node) else {
@@ -858,7 +816,6 @@ fn has_elevated_access_level(np: &NodePlan, input: &Input) -> bool {
         .is_some_and(|cfg| cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
 }
 
-/// Pre-compute dedup columns for each node from the query input.
 fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
     let aliases: Vec<String> = nodes.keys().cloned().collect();
     for alias in aliases {
@@ -967,7 +924,6 @@ mod tests {
 
     #[test]
     fn fk_chain_with_global_hub_and_scope_anchor_elides() {
-        // scoped a→b, then b→hub (non-scope-preserving, hub is the global node).
         let hops = [fk_hop("a", "b", true), fk_hop("b", "hub", false)];
         let nodes = node_map(&[("a", true, false), ("b", true, false), ("hub", false, true)]);
         assert!(detect_fk_chain(&hops, &nodes));

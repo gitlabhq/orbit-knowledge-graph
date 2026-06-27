@@ -1,5 +1,3 @@
-//! Integration tests for the indexer readiness probe.
-//!
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::net::SocketAddr;
@@ -78,7 +76,6 @@ async fn start_infra() -> Infra {
         &std::collections::HashMap::new(),
     );
 
-    // Wait for ClickHouse to accept queries
     for attempt in 1..=30 {
         if ch_client.execute("SELECT 1").await.is_ok() {
             break;
@@ -145,7 +142,6 @@ fn unhealthy_components(json: &serde_json::Value) -> Vec<String> {
 async fn readiness_probe_gitlab_scenarios() {
     let infra = start_infra().await;
 
-    // No GitLab configured — "gitlab" should not appear in unhealthy_components
     {
         let state = HealthState {
             nats_client: infra.nats_client.clone(),
@@ -163,7 +159,7 @@ async fn readiness_probe_gitlab_scenarios() {
         assert!(!components.contains(&"gitlab".to_string()));
     }
 
-    // GitLab returns 404 — auth works, project just doesn't exist → healthy
+    // 404 means auth works and the project just doesn't exist, so still healthy.
     {
         let addr = start_mock_gitlab(StatusCode::NOT_FOUND).await;
         let state = HealthState {
@@ -181,7 +177,6 @@ async fn readiness_probe_gitlab_scenarios() {
         assert!(!components.contains(&"gitlab".to_string()));
     }
 
-    // GitLab returns 401 — auth broken → unhealthy
     {
         let addr = start_mock_gitlab(StatusCode::UNAUTHORIZED).await;
         let state = HealthState {
@@ -199,7 +194,6 @@ async fn readiness_probe_gitlab_scenarios() {
         assert!(components.contains(&"gitlab".to_string()));
     }
 
-    // GitLab unreachable — connection refused → unhealthy
     {
         let state = HealthState {
             nats_client: infra.nats_client.clone(),

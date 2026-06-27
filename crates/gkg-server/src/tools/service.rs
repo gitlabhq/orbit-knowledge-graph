@@ -696,8 +696,6 @@ mod tests {
 
     #[test]
     fn get_graph_schema_rejects_unknown_parameter() {
-        // get_graph_schema declares additionalProperties: false, so an unknown
-        // parameter is a hard error instead of being silently dropped.
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let service = ToolService::new(ontology);
         let result = service.resolve(

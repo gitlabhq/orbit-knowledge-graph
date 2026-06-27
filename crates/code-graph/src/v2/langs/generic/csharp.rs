@@ -15,8 +15,6 @@ use crate::v2::linker::rules::{
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct CSharpDsl;
 
@@ -102,24 +100,18 @@ impl DslLanguage for CSharpDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Chain method call: obj.Method() — function is a member_access_expression
             reference("invocation_expression")
                 .name_from(field("function").field("name"))
                 .when(has_descendant("member_access_expression"))
                 .receiver_via(field("function").field("expression")),
-            // Simple method call: Method() — function is an identifier
             reference("invocation_expression")
                 .name_from(field("function"))
                 .when(!has_descendant("member_access_expression")),
-            // Constructor: new Foo()
             reference("object_creation_expression").name_from(field("type")),
-            // Bare type references: type casts, is, as
             reference("type_identifier")
                 .name_from(text())
                 .when(!parent_is("object_creation_expression")),
-            // is pattern: x is Foo
             reference("is_pattern_expression").name_from(field("pattern")),
-            // Attribute references: [Serializable]
             reference("attribute").name_from(field("name")),
         ]
     }
@@ -182,11 +174,8 @@ impl DslLanguage for CSharpDsl {
         let csharp_type = |rule: BindingRule| {
             rule.typed(
                 vec![
-                    // Qualified types (Outer.Inner): extract full text
                     Extract::one(Field("type"), Kind("qualified_name")),
-                    // Generic types (List<T>): extract the base identifier
                     field("type").child_of_kind("identifier"),
-                    // Simple types: identifier text
                     field("type"),
                 ],
                 skip,
@@ -194,9 +183,7 @@ impl DslLanguage for CSharpDsl {
         };
         use treesitter_visit::extract::child_of_kind;
         vec![
-            // variable_declaration: covers both local vars and fields.
-            // C# variable_declarator has name as identifier child, and
-            // the initializer (= expr) as equals_value_clause child.
+            // variable_declaration covers both local vars and fields.
             csharp_type(
                 binding("variable_declaration", BindingKind::Assignment)
                     .name_from_extract(child_of_kind("variable_declarator").field("name"))
@@ -207,27 +194,22 @@ impl DslLanguage for CSharpDsl {
                     )
                     .instance_attrs(&["this."]),
             ),
-            // Property declarations
             csharp_type(
                 binding("property_declaration", BindingKind::Assignment)
                     .name_from(&["name"])
                     .no_value(),
             ),
-            // Method/constructor parameters
             csharp_type(
                 binding("parameter", BindingKind::Parameter)
                     .name_from(&["name"])
                     .no_value(),
             ),
-            // foreach variable
             binding("foreach_statement", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
-            // x = y
             binding("assignment_expression", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
-            // catch (Exception e)
             binding("catch_declaration", BindingKind::Parameter)
                 .name_from(&["name"])
                 .typed(vec![field("type")], skip)
@@ -310,8 +292,6 @@ fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) 
 
     true
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct CSharpRules;
 

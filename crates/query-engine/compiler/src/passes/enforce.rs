@@ -5,9 +5,6 @@
 //!
 //! For aggregation queries, only nodes that appear in node group keys can have
 //! their ID columns selected (aggregated nodes don't have individual IDs).
-//!
-//! For path finding queries, the start node's ID is added to the base query and
-//! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
@@ -38,23 +35,15 @@ pub struct RedactionNode {
 pub struct EdgeMeta {
     /// Column prefix for this edge (e.g. "e0_", "hop_e1_").
     pub column_prefix: String,
-    /// Optional internal path column for multi-hop relationships.
+    /// Internal path column, present only for multi-hop relationships.
     pub path_column: Option<String>,
-    /// Relationship types from the input (e.g. ["AUTHORED"]).
     pub rel_types: Vec<String>,
-    /// Source node alias (e.g. "u").
     pub from_alias: String,
-    /// Target node alias (e.g. "p").
     pub to_alias: String,
-    /// Pre-computed column name for edge type (e.g. "e0_type").
     pub type_column: String,
-    /// Pre-computed column name for source ID (e.g. "e0_src").
     pub src_column: String,
-    /// Pre-computed column name for source type (e.g. "e0_src_type").
     pub src_type_column: String,
-    /// Pre-computed column name for destination ID (e.g. "e0_dst").
     pub dst_column: String,
-    /// Pre-computed column name for destination type (e.g. "e0_dst_type").
     pub dst_type_column: String,
 }
 
@@ -490,7 +479,6 @@ mod tests {
         }
     }
 
-    /// Single-node traversal (search shape) for table-centric enforce tests.
     fn test_input() -> Input {
         Input {
             query_type: QueryType::Traversal,
@@ -504,7 +492,6 @@ mod tests {
         }
     }
 
-    /// Two-node input for tests that need multiple selectable nodes.
     fn test_input_two_nodes() -> Input {
         Input {
             query_type: QueryType::Traversal,
@@ -776,8 +763,7 @@ mod tests {
             panic!("expected Query")
         };
 
-        // Should only have columns for 'u' (group_by node), not 'n' (target node)
-        assert_eq!(q.select.len(), 3); // u_id, _gkg_u_id, _gkg_u_type
+        assert_eq!(q.select.len(), 3);
         assert!(
             q.select
                 .iter()
@@ -798,9 +784,8 @@ mod tests {
                 .iter()
                 .any(|s| s.alias.as_ref() == Some(&"_gkg_n_type".to_string()))
         );
-        assert_eq!(q.group_by.len(), 1); // u.id already present, no duplicate added
+        assert_eq!(q.group_by.len(), 1);
 
-        // Context should only have the group_by node
         assert_eq!(ctx.len(), 1);
         assert!(ctx.get("u").is_some());
         assert!(ctx.get("n").is_none());
@@ -867,7 +852,7 @@ mod tests {
             "redaction id column must be in GROUP BY: {:?}",
             q.group_by
         );
-        assert_eq!(q.group_by.len(), 2); // username + id
+        assert_eq!(q.group_by.len(), 2);
     }
 
     #[test]
@@ -943,7 +928,7 @@ mod tests {
             "redaction id column must be in GROUP BY: {:?}",
             q.group_by
         );
-        assert_eq!(q.group_by.len(), 3); // path + id + project_id
+        assert_eq!(q.group_by.len(), 3);
     }
 
     #[test]
@@ -997,8 +982,6 @@ mod tests {
 
         assert_eq!(q.select.len(), 5);
 
-        // Definition (edge-centric, non-default redaction): pk = edge col,
-        // auth id = joined d.project_id, type = literal
         assert_eq!(q.select[0].alias, Some("_gkg_d_pk".into()));
         assert!(
             matches!(&q.select[0].expr, Expr::Column { table, column } if table == "e0" && column == "source_id")
@@ -1008,7 +991,6 @@ mod tests {
         assert_eq!(q.select[2].alias, Some("_gkg_d_type".into()));
         assert!(matches!(&q.select[2].expr, Expr::Param { value, .. } if value == "Definition"));
 
-        // Project (edge-centric, default redaction): id = edge col, type = literal
         assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
         assert!(
             matches!(&q.select[3].expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
@@ -1062,7 +1044,6 @@ mod tests {
             ..Input::default()
         };
 
-        // Path finding generates a Query with unrolled CTEs
         let mut query = Node::Query(Box::new(Query {
             ctes: vec![
                 Cte::new(
@@ -1095,9 +1076,8 @@ mod tests {
 
         let ctx = enforce_return(&mut query, &input, &input.compiler.node_edge_col).unwrap();
 
-        // Path finding queries use _gkg_path column for redaction data.
-        // No additional _gkg_* columns are added by enforce_return.
-        // The ResultContext is empty but has query_type set for path extraction.
+        // Path finding uses the _gkg_path column for redaction data, so enforce
+        // adds no _gkg_* columns; ctx is empty but carries query_type.
         assert!(ctx.is_empty());
         assert_eq!(ctx.query_type, Some(QueryType::PathFinding));
     }
@@ -1110,7 +1090,6 @@ mod tests {
                 id: "p".to_string(),
                 entity: Some("Project".to_string()),
                 table: Some("gl_project".to_string()),
-                // redaction_id_column defaults to "id" — same as DEFAULT_PRIMARY_KEY
                 ..Default::default()
             }],
             ..Input::default()
@@ -1139,10 +1118,8 @@ mod tests {
             !aliases.contains(&&"_gkg_p_pk".to_string()),
             "default entity (redaction_id_column == id) should not emit _gkg_p_pk"
         );
-        assert_eq!(q.select.len(), 3); // p_name + _gkg_p_id + _gkg_p_type
+        assert_eq!(q.select.len(), 3);
     }
-
-    // ─── Traversal (edge-centric) tests ──────────────────────────────
 
     fn traversal_input_with_edge_col(
         nodes: Vec<InputNode>,
@@ -1204,7 +1181,6 @@ mod tests {
             panic!("expected Query")
         };
 
-        // u: _gkg_u_id (from e0.source_id), _gkg_u_type
         let u_id = q
             .select
             .iter()
@@ -1214,7 +1190,6 @@ mod tests {
             matches!(&u_id.expr, Expr::Column { table, column } if table == "e0" && column == "source_id")
         );
 
-        // mr: _gkg_mr_id (from e0.target_id), _gkg_mr_type
         let mr_id = q
             .select
             .iter()
@@ -1224,7 +1199,6 @@ mod tests {
             matches!(&mr_id.expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
         );
 
-        // No _pk columns for default entities
         assert!(
             !q.select
                 .iter()
@@ -1236,7 +1210,6 @@ mod tests {
                 .any(|s| s.alias.as_deref() == Some("_gkg_mr_pk"))
         );
 
-        // Type columns present
         assert!(
             q.select
                 .iter()
@@ -1290,7 +1263,6 @@ mod tests {
             panic!("expected Query")
         };
 
-        // _gkg_d_pk from edge column (e0.target_id)
         let d_pk = q
             .select
             .iter()
@@ -1300,7 +1272,6 @@ mod tests {
             matches!(&d_pk.expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
         );
 
-        // _gkg_d_id from joined node table (d.merge_request_id)
         let d_id = q
             .select
             .iter()
@@ -1315,7 +1286,6 @@ mod tests {
             "non-default redaction_id_column should JOIN the node table"
         );
 
-        // mr (default) has no pk column
         assert!(
             !q.select
                 .iter()
@@ -1364,7 +1334,6 @@ mod tests {
             panic!("expected Query")
         };
 
-        // _gkg_d_pk should use source_id (d is on the from side)
         let d_pk = q
             .select
             .iter()
@@ -1379,7 +1348,6 @@ mod tests {
 
     #[test]
     fn traversal_node_without_edge_mapping_returns_error() {
-        // Multi-node traversal: node "x" is selectable but has no edge mapping.
         let input = traversal_input_with_edge_col(
             vec![
                 InputNode {
@@ -1422,7 +1390,7 @@ mod tests {
             vec![InputNode {
                 id: "d".to_string(),
                 entity: Some("MergeRequestDiff".to_string()),
-                table: None, // no resolved table
+                table: None,
                 redaction_id_column: "merge_request_id".to_string(),
                 ..Default::default()
             }],

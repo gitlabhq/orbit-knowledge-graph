@@ -388,11 +388,7 @@ mod tests {
         // prefix. is_descendant confines that to a benign under-prune within authorized
         // scope and rejects any stale prefix the caller is not already authorized over.
         let authorized = ["1/255/"];
-        // intra-subtree move (caller authorized over the shared parent): stale prefix
-        // still injects, so the only fallout is a transient under-prune, never a widen.
         assert!(is_descendant("1/255/273/292/", &authorized));
-        // cross-namespace move where the caller only gained access to the new tree:
-        // the stale old-tree prefix is rejected, leaving a clean fallback to the id filter.
         assert!(!is_descendant("1/700/701/292/", &authorized));
     }
 

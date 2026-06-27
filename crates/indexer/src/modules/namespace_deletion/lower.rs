@@ -3,7 +3,7 @@ use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub struct DeletionStatement {
-    /// Unprefixed table name, used for logging and test assertions.
+    /// Unprefixed table name.
     pub table: String,
     /// Full SQL with the schema-version prefix applied to the table name.
     pub sql: String,

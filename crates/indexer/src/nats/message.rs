@@ -1,5 +1,3 @@
-//! NATS message types.
-
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -75,7 +73,6 @@ impl MessageAcker for NoopAcker {
 }
 
 pub struct NatsMessage {
-    /// The message envelope containing payload and metadata.
     pub envelope: Envelope,
     acker: Arc<dyn MessageAcker>,
 }
@@ -103,18 +100,14 @@ impl NatsMessage {
         self.acker.ack_term().await
     }
 
-    /// Negatively acknowledges the message for immediate redelivery.
     pub async fn nack(self) -> Result<(), NatsError> {
         self.acker.nack(None).await
     }
 
-    /// Negatively acknowledges the message with a delay before redelivery.
     pub async fn nack_with_delay(self, delay: Duration) -> Result<(), NatsError> {
         self.acker.nack(Some(delay)).await
     }
 
-    /// Publishes the message to the dead letter queue, then acks it.
-    ///
     /// If the DLQ publish fails, the message is nacked for redelivery instead.
     pub async fn to_dlq(
         self,
@@ -168,7 +161,6 @@ impl ProgressNotifier {
         Self { acker: None }
     }
 
-    /// Resets the ack wait timer, preventing redelivery while processing continues.
     pub async fn notify_in_progress(&self) {
         if let Some(acker) = &self.acker
             && let Err(error) = acker.ack_progress().await
@@ -178,6 +170,5 @@ impl ProgressNotifier {
     }
 }
 
-/// A stream of messages from a NATS subscription.
 pub type NatsSubscription =
     Pin<Box<dyn FuturesStream<Item = Result<NatsMessage, NatsError>> + Send>>;

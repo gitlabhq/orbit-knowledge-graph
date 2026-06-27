@@ -1,16 +1,7 @@
-//! Incremental-extract windowing: watermark filtering and keyset-cursor resume.
-//!
-//! These exercise the shared `pull_window` + cursor-DNF path
-//! (`crates/indexer/src/modules/sdlc/handler/entity.rs`), which is
-//! entity-agnostic, so one representative entity per cursor arity covers it:
-//! `User` for the single-column key, `Group` for the composite
-//! `[traversal_path, id]` key.
-//!
-//! Each subtest is shaped as seed -> run -> assert so it maps onto a future
-//! YAML scenario. These three need no format additions to port: the scenario
-//! format already seeds the `checkpoint` table and asserts the surviving id-set
-//! via `expect.nodes.rows`. They stay in Rust only to share a container with the
-//! partitioning mechanics that are not yet portable.
+//! The shared `pull_window` + cursor-DNF path
+//! (`crates/indexer/src/modules/sdlc/handler/entity.rs`) is entity-agnostic, so
+//! one representative entity per cursor arity covers it: `User` for the
+//! single-column key, `Group` for the composite `[traversal_path, id]` key.
 
 use arrow::array::Int64Array;
 use gkg_utils::arrow::ArrowUtils;

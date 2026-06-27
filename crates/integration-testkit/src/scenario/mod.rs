@@ -1,5 +1,3 @@
-//! Declarative YAML scenario runner for indexer integration tests.
-//!
 //! Each scenario file seeds datalake rows, runs one or more indexer
 //! handlers, and asserts on the resulting graph nodes and edges. See
 //! `config/schemas/indexer_scenario.schema.json` for the format.

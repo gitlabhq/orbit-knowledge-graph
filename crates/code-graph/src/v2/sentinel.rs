@@ -1,34 +1,28 @@
 //! Watchdog sentinel for per-file timeout enforcement.
 //!
-//! The sentinel runs on a dedicated thread, monitoring active files
-//! across all pipeline phases. When a file exceeds its timeout, the
-//! sentinel sets its kill flag, causing the worker to bail out at the
-//! next check point via `Result<T, Killed>`.
+//! When a file exceeds its timeout, the sentinel sets its kill flag, causing
+//! the worker to bail out at the next check point via `Result<T, Killed>`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-/// Error returned when the sentinel kills a file's processing.
 #[derive(Debug)]
 pub struct Killed;
 
-/// Message from a worker thread to the sentinel.
 pub enum SentinelMsg {
-    /// A file has started processing. Includes a kill flag the sentinel
-    /// can set to abort the file.
+    /// Includes a kill flag the sentinel can set to abort the file.
     FileStart {
         id: u64,
         path: String,
         kill: Arc<AtomicBool>,
     },
-    /// A file has finished processing (success or failure).
-    FileDone { id: u64 },
-    /// Shut down the sentinel thread.
+    FileDone {
+        id: u64,
+    },
     Shutdown,
 }
 
-/// Handle for workers to communicate with the sentinel.
 #[derive(Clone)]
 pub struct SentinelHandle {
     tx: crossbeam_channel::Sender<SentinelMsg>,
@@ -36,8 +30,7 @@ pub struct SentinelHandle {
 }
 
 impl SentinelHandle {
-    /// Register a file as active. Returns a `FileGuard` that automatically
-    /// sends `FileDone` on drop and provides the kill flag for checking.
+    /// Returns a `FileGuard` that sends `FileDone` on drop.
     pub fn file_start(&self, path: &str) -> FileGuard {
         let id = self
             .next_id
@@ -55,14 +48,12 @@ impl SentinelHandle {
         }
     }
 
-    /// Signal the sentinel to shut down.
     pub fn shutdown(&self) {
         let _ = self.tx.send(SentinelMsg::Shutdown);
     }
 }
 
-/// RAII guard for a file being processed. Sends `FileDone` on drop
-/// and provides the kill flag for cooperative cancellation.
+/// Sends `FileDone` on drop.
 pub struct FileGuard {
     id: u64,
     kill: Arc<AtomicBool>,
@@ -70,13 +61,11 @@ pub struct FileGuard {
 }
 
 impl FileGuard {
-    /// Check if the sentinel has killed this file's processing.
     #[inline]
     pub fn is_killed(&self) -> bool {
         self.kill.load(Ordering::Relaxed)
     }
 
-    /// Get a clone of the kill flag for passing to other structs.
     pub fn kill_flag(&self) -> Arc<AtomicBool> {
         self.kill.clone()
     }
@@ -94,8 +83,6 @@ struct ActiveFile {
     kill: Arc<AtomicBool>,
 }
 
-/// Spawn the sentinel thread. Returns a handle for workers and a
-/// `JoinHandle` for the caller to join on shutdown.
 pub fn spawn_sentinel(timeout: Duration) -> Option<(SentinelHandle, std::thread::JoinHandle<()>)> {
     let (tx, rx) = crossbeam_channel::unbounded();
     let handle = SentinelHandle {
@@ -129,7 +116,6 @@ pub fn spawn_sentinel(timeout: Duration) -> Option<(SentinelHandle, std::thread:
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 }
 
-                // Check for stalled files
                 let now = Instant::now();
                 for (_, file) in &active {
                     if now.duration_since(file.started_at) > timeout

@@ -45,9 +45,6 @@ pub fn attach_resolution_edges(
     let lookup = GraphLookup::from_graph(graph);
     let mut seen = FxHashSet::default();
 
-    // ── Phase 1: resolve local call edges in parallel ───────
-    // Each file's SSA-based local resolution is independent. Collect
-    // edges from all files concurrently, then insert sequentially.
     let all_local_edges: Vec<Vec<(NodeIndex, NodeIndex, GraphEdge)>> = {
         let graph: &CodeGraph = graph;
         analyzed_files
@@ -98,17 +95,12 @@ pub fn attach_resolution_edges(
 
     let resolver = JsCrossFileResolver::new_with_hints(probe);
 
-    // Wall-clock budget for the cross-file resolution phases.
     let deadline = ctx
         .config
         .cross_file_resolve_timeout
         .map(|d| Instant::now() + d);
     let timed_out = AtomicBool::new(false);
 
-    // ── Phase 2: resolve import edges in parallel ───────────
-    // import_target() only reads from the graph; parallelise the
-    // resolution and collect (source, target) pairs, then insert
-    // edges sequentially.
     let import_nodes: Vec<_> = graph
         .imports_iter()
         .map(|(node, file_path, _)| (node, file_path.as_ref().to_string()))
@@ -161,7 +153,6 @@ pub fn attach_resolution_edges(
     } else {
         let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
 
-        // ── Phase 3: resolve call edges in parallel ─────────
         for relationship in resolver.resolve_calls(&imported_calls, modules_index, &deadline) {
             add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
         }

@@ -1,8 +1,3 @@
-//! Canary tests for the integration test infrastructure itself.
-//!
-//! These validate that `TestContext`, `optimize_all`, `run_subtests_shared!`,
-//! `run_subtests!`, and stale container cleanup all work correctly.
-
 use arrow::array::UInt64Array;
 use gkg_utils::arrow::ArrowUtils;
 
@@ -73,18 +68,14 @@ async fn infra_canary() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
-    // Shared subtests see the seeded data, don't fork.
     run_subtests_shared!(
         &ctx,
         shared_subtest_reads_seeded_data,
         shared_subtest_sees_same_data,
     );
 
-    // Forked subtest gets its own DB and can write without affecting shared.
     run_subtests!(&ctx, forked_subtest_can_write);
 
-    // Verify the shared DB wasn't contaminated by the forked write,
-    // and that fetch_arrow_with_summary returns ClickHouse stats.
     run_subtests_shared!(
         &ctx,
         forked_write_does_not_leak_to_shared,

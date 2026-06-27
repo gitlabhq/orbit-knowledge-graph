@@ -1,9 +1,5 @@
-//! Shared observability primitives.
-//!
-//! `MultiObserver<T>` composes multiple trait objects of the same
-//! observer trait into one. The trait-specific forwarding `impl`
-//! lives in the consuming crate so this module stays trait-agnostic
-//! and dependency-free.
+//! The trait-specific forwarding `impl` for `MultiObserver<T>` lives in the
+//! consuming crate so this module stays trait-agnostic and dependency-free.
 
 pub struct MultiObserver<T: ?Sized> {
     observers: Vec<Box<T>>,

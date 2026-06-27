@@ -22,8 +22,6 @@ pub(crate) struct TestSuite {
     #[serde(default)]
     pub fixture_dir: Option<String>,
     /// When true, emit detailed engine/resolver trace events to stderr.
-    /// Shows SSA state, scope changes, binding writes, chain building,
-    /// and resolver strategy attempts for every file in the pipeline.
     #[serde(default)]
     pub trace: bool,
     pub tests: Vec<TestCase>,

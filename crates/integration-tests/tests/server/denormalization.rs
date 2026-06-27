@@ -1,9 +1,6 @@
-//! End-to-end denormalization correctness tests.
-//!
-//! Uses a dedicated seed (`denormalization.sql`) with pre-populated
-//! `source_tags` / `target_tags` arrays on edge rows. Verifies that
-//! queries filtering on denormalized properties return correct results
-//! when the compiler rewrites `_nf_` CTEs to `hasToken`/`hasAllTokens`.
+//! Seed `denormalization.sql` pre-populates `source_tags` / `target_tags`
+//! arrays on edge rows; these tests cover the compiler rewrite of `_nf_` CTEs
+//! to `hasToken`/`hasAllTokens`.
 
 use std::sync::Arc;
 
@@ -48,9 +45,8 @@ async fn query(ctx: &TestContext, json: &str) -> ResponseView {
     query_with_security(ctx, json, test_security_context()).await
 }
 
-/// SecurityContext with SecurityManager access (level 25), needed for
-/// Vulnerability queries where `required_role: security_manager` blocks
-/// the default Reporter-level context.
+/// Vulnerability queries require `required_role: security_manager` (level 25);
+/// the default Reporter-level context is blocked.
 fn security_manager_context() -> SecurityContext {
     SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 25)])
         .expect("valid security context")
@@ -131,8 +127,6 @@ async fn denormalization_correctness() {
     );
 }
 
-/// Opened MRs in project 20. Expected: MR 100 + 101 (both opened).
-/// Traversal so we can verify actual filtered nodes, not just a count.
 async fn count_opened_mrs_in_project(ctx: &TestContext) {
     let resp = query(
         ctx,
@@ -147,7 +141,7 @@ async fn count_opened_mrs_in_project(ctx: &TestContext) {
     }"#,
     )
     .await;
-    resp.assert_node_count(3); // 2 MRs + 1 Project
+    resp.assert_node_count(3);
     resp.assert_node_ids("Project", &[20]);
     resp.assert_filter("MergeRequest", "state", |n| {
         n.prop_str("state") == Some("opened")
@@ -155,7 +149,6 @@ async fn count_opened_mrs_in_project(ctx: &TestContext) {
     resp.assert_edge_exists("MergeRequest", 100, "Project", 20, "IN_PROJECT");
 }
 
-/// Failed pipelines in project 20. Expected: Pipeline 400 + 402.
 async fn count_failed_pipelines_in_project(ctx: &TestContext) {
     let resp = query(
         ctx,
@@ -170,7 +163,7 @@ async fn count_failed_pipelines_in_project(ctx: &TestContext) {
     }"#,
     )
     .await;
-    resp.assert_node_count(3); // 2 Pipelines + 1 Project
+    resp.assert_node_count(3);
     resp.assert_node_ids("Project", &[20]);
     resp.assert_filter("Pipeline", "status", |n| {
         n.prop_str("status") == Some("failed")
@@ -178,7 +171,6 @@ async fn count_failed_pipelines_in_project(ctx: &TestContext) {
     resp.assert_edge_exists("Pipeline", 400, "Project", 20, "IN_PROJECT");
 }
 
-/// Traversal: find opened MRs authored by user 1. Expected: 2 (MR 100 + 101).
 async fn traversal_opened_mrs_authored_by_user(ctx: &TestContext) {
     let resp = query(
         ctx,
@@ -201,7 +193,6 @@ async fn traversal_opened_mrs_authored_by_user(ctx: &TestContext) {
     resp.assert_edge_exists("User", 1, "MergeRequest", 100, "AUTHORED");
 }
 
-/// Multi-filter: detected + critical vulnerabilities in project 20. Expected: vuln 200 only.
 async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
     let resp = query_with_security(
         ctx,
@@ -220,7 +211,7 @@ async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
         security_manager_context(),
     )
     .await;
-    resp.assert_node_count(2); // 1 Vulnerability + 1 Project
+    resp.assert_node_count(2);
     resp.assert_node_ids("Project", &[20]);
     resp.assert_filter("Vulnerability", "state", |n| {
         n.prop_str("state") == Some("detected")
@@ -231,8 +222,7 @@ async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
     resp.assert_edge_exists("Vulnerability", 200, "Project", 20, "IN_PROJECT");
 }
 
-/// WorkItem type filter: opened issues in group 10. Expected: WI 300 only.
-/// WI 301 is closed, WI 302 is epic (not issue).
+/// Seed: WI 301 is closed, WI 302 is epic (not issue), so only WI 300 matches.
 async fn work_item_type_filter(ctx: &TestContext) {
     let resp = query(
         ctx,
@@ -250,7 +240,7 @@ async fn work_item_type_filter(ctx: &TestContext) {
     }"#,
     )
     .await;
-    resp.assert_node_count(2); // 1 WorkItem + 1 Group
+    resp.assert_node_count(2);
     resp.assert_node_ids("Group", &[10]);
     resp.assert_filter("WorkItem", "state", |n| {
         n.prop_str("state") == Some("opened")
@@ -261,7 +251,6 @@ async fn work_item_type_filter(ctx: &TestContext) {
     resp.assert_edge_exists("WorkItem", 300, "Group", 10, "IN_GROUP");
 }
 
-/// Critical vulnerabilities in project 20. Expected: vuln 200 + 202.
 async fn single_severity_filter(ctx: &TestContext) {
     let resp = query_with_security(
         ctx,
@@ -277,7 +266,7 @@ async fn single_severity_filter(ctx: &TestContext) {
         security_manager_context(),
     )
     .await;
-    resp.assert_node_count(3); // 2 Vulnerabilities + 1 Project
+    resp.assert_node_count(3);
     resp.assert_node_ids("Project", &[20]);
     resp.assert_filter("Vulnerability", "severity", |n| {
         n.prop_str("severity") == Some("critical")
@@ -285,7 +274,6 @@ async fn single_severity_filter(ctx: &TestContext) {
     resp.assert_edge_exists("Vulnerability", 200, "Project", 20, "IN_PROJECT");
 }
 
-/// Merged MRs in project 20. Expected: MR 102 only.
 async fn merged_mr_count_is_one(ctx: &TestContext) {
     let resp = query(
         ctx,
@@ -300,7 +288,7 @@ async fn merged_mr_count_is_one(ctx: &TestContext) {
     }"#,
     )
     .await;
-    resp.assert_node_count(2); // 1 MR + 1 Project
+    resp.assert_node_count(2);
     resp.assert_node_ids("Project", &[20]);
     resp.assert_filter("MergeRequest", "state", |n| {
         n.prop_str("state") == Some("merged")
@@ -308,7 +296,6 @@ async fn merged_mr_count_is_one(ctx: &TestContext) {
     resp.assert_edge_exists("MergeRequest", 102, "Project", 20, "IN_PROJECT");
 }
 
-/// No-match filter returns zero results. No MR with state='draft' exists.
 async fn no_match_returns_zero(ctx: &TestContext) {
     let resp = query(
         ctx,

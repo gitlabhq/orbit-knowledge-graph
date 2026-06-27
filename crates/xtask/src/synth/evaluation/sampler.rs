@@ -1,7 +1,3 @@
-//! Parameter sampling from ClickHouse.
-//!
-//! Samples valid IDs and values from the database to use as query parameters.
-
 use anyhow::Result;
 use clickhouse::Row;
 use clickhouse_client::ArrowClickHouseClient;
@@ -12,10 +8,8 @@ use rand::seq::IndexedRandom;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-/// Samples valid parameter values from the database.
 pub struct ParameterSampler {
     client: ArrowClickHouseClient,
-    /// Cached samples: entity_type -> list of sampled IDs
     cache: HashMap<String, Vec<i64>>,
     sample_size: usize,
 }
@@ -39,17 +33,13 @@ impl ParameterSampler {
         }
     }
 
-    /// Sample IDs for a given entity type.
     pub async fn sample_ids(&mut self, entity: &str, ontology: &Ontology) -> Result<Vec<i64>> {
-        // Return cached values if available
         if let Some(ids) = self.cache.get(entity) {
             return Ok(ids.clone());
         }
 
         let table_name = ontology.table_name(entity)?;
 
-        // Use SAMPLE or ORDER BY RAND() with LIMIT for random sampling
-        // ClickHouse's cityHash64(rand()) is efficient for random ordering
         let query = format!(
             "SELECT {pk} FROM {} ORDER BY cityHash64(rand()) LIMIT {}",
             table_name,
@@ -71,7 +61,6 @@ impl ParameterSampler {
         Ok(ids)
     }
 
-    /// Get a random ID for an entity type.
     pub async fn random_id(&mut self, entity: &str, ontology: &Ontology) -> Result<Option<i64>> {
         let ids = self.sample_ids(entity, ontology).await?;
         if ids.is_empty() {
@@ -82,7 +71,6 @@ impl ParameterSampler {
         Ok(Some(ids[idx]))
     }
 
-    /// Get multiple random IDs for an entity type.
     pub async fn random_ids(
         &mut self,
         entity: &str,
@@ -100,9 +88,7 @@ impl ParameterSampler {
         Ok(ids.sample(&mut rng, count).copied().collect())
     }
 
-    /// Get multiple random IDs for an entity type within a specific traversal path.
-    ///
-    /// This ensures sampled IDs exist within the security context's scope,
+    /// Ensures sampled IDs exist within the security context's scope,
     /// preventing empty results from path mismatches.
     pub async fn random_ids_in_path(
         &self,
@@ -113,7 +99,6 @@ impl ParameterSampler {
     ) -> Result<Vec<i64>> {
         let table_name = ontology.table_name(entity)?;
 
-        // Sample IDs that exist within the given traversal path
         let escaped = traversal_path.replace('\'', "''");
         let query = format!(
             "SELECT {pk} FROM {} WHERE startsWith({tp}, '{}') \
@@ -138,9 +123,7 @@ impl ParameterSampler {
         Ok(ids)
     }
 
-    /// Get multiple random IDs for an entity type within a specific organization.
-    ///
-    /// This is used as a fallback when path-scoped sampling returns no results,
+    /// Fallback when path-scoped sampling returns no results,
     /// ensuring we still sample from the correct organization.
     pub async fn random_ids_in_org(
         &self,
@@ -151,7 +134,6 @@ impl ParameterSampler {
     ) -> Result<Vec<i64>> {
         let table_name = ontology.table_name(entity)?;
 
-        // Sample IDs where traversal_path starts with "org_id/"
         let query = format!(
             "SELECT {pk} FROM {} WHERE startsWith({tp}, '{}/') \
              ORDER BY cityHash64(rand()) LIMIT {}",
@@ -175,7 +157,6 @@ impl ParameterSampler {
         Ok(ids)
     }
 
-    /// Sample valid values for string enum fields (e.g., state, status).
     pub async fn sample_enum_values(
         &mut self,
         entity: &str,
@@ -206,7 +187,6 @@ impl ParameterSampler {
         Ok(values)
     }
 
-    /// Sample traversal paths from the namespace entity table.
     /// Returns (org_id, traversal_path) pairs.
     /// The first segment of traversal_path is the org_id.
     pub async fn sample_traversal_paths(
@@ -232,7 +212,6 @@ impl ParameterSampler {
             .await?
             .into_iter()
             .filter_map(|r| {
-                // First segment is org_id
                 let org_id: i64 = gkg_utils::traversal_path::org_id(&r.traversal_path)?;
                 // Append trailing slash for SecurityContext format
                 let path = if r.traversal_path.ends_with('/') {
@@ -247,7 +226,6 @@ impl ParameterSampler {
         Ok(rows)
     }
 
-    /// Pre-warm the cache for all entity types in the ontology.
     pub async fn warm_cache(&mut self, ontology: &Ontology) -> Result<()> {
         for node in ontology.nodes() {
             if let Err(e) = self.sample_ids(&node.name, ontology).await {
@@ -257,7 +235,6 @@ impl ParameterSampler {
         Ok(())
     }
 
-    /// Get cache statistics.
     pub fn cache_stats(&self) -> HashMap<String, usize> {
         self.cache
             .iter()
@@ -265,7 +242,6 @@ impl ParameterSampler {
             .collect()
     }
 
-    /// Clear the cache.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
     }

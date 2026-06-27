@@ -1,7 +1,4 @@
-//! ClickHouse SQL code generation.
-//!
-//! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax and
-//! ClickHouse-specific functions (`startsWith`, `has`, `array`, etc.).
+//! Emits parameterized SQL using ClickHouse's `{name:Type}` bind syntax.
 
 use gkg_server_config::QueryConfig;
 
@@ -49,9 +46,6 @@ pub fn codegen(
     })
 }
 
-/// Emit a `Query` (or `Insert`) AST as parameterized ClickHouse SQL without
-/// requiring `ResultContext` or `QueryConfig`.
-///
 /// # Trust boundary
 ///
 /// This function bypasses the compiler security pipeline (`apply_security_context`,
@@ -99,12 +93,10 @@ impl Context {
     fn emit_query(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
-        // WITH clause (CTEs)
         if !q.ctes.is_empty() {
             parts.push(self.emit_ctes(&q.ctes)?);
         }
 
-        // SELECT, FROM, WHERE, GROUP BY, HAVING, UNION ALL, ORDER BY, LIMIT
         parts.push(self.emit_query_body(q)?);
 
         Ok(parts.join(" "))
@@ -136,7 +128,6 @@ impl Context {
     fn emit_query_body(&mut self, q: &Query) -> Result<String> {
         let mut parts = Vec::new();
 
-        // SELECT
         let select_items: Vec<_> = q
             .select
             .iter()
@@ -155,27 +146,22 @@ impl Context {
         };
         parts.push(format!("{keyword} {}", select_items.join(", ")));
 
-        // FROM
         let from = self.emit_table_ref(&q.from)?;
         parts.push(format!("FROM {from}"));
 
-        // WHERE
         if let Some(w) = &q.where_clause {
             parts.push(format!("WHERE {}", self.emit_expr(w)));
         }
 
-        // GROUP BY
         if !q.group_by.is_empty() {
             let groups: Vec<_> = q.group_by.iter().map(|g| self.emit_expr(g)).collect();
             parts.push(format!("GROUP BY {}", groups.join(", ")));
         }
 
-        // HAVING
         if let Some(h) = &q.having {
             parts.push(format!("HAVING {}", self.emit_expr(h)));
         }
 
-        // UNION ALL
         for union_q in &q.union_all {
             parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
         }
@@ -190,7 +176,6 @@ impl Context {
             parts.push(format!("SELECT * FROM ({body})"));
         }
 
-        // ORDER BY
         if !q.order_by.is_empty() {
             let orders: Vec<_> = q
                 .order_by

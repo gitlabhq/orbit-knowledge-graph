@@ -127,16 +127,11 @@ impl ColumnResolver for MockColumnResolver {
     }
 }
 
-/// Replace the corpus' run-time placeholders with dummy values so the query
-/// compiles and executes. Correctness is irrelevant here.
 fn resolve_placeholders(query: &str) -> serde_json::Result<String> {
-    // `{{TOKEN}}` -> 1. Works for both bare-numeric (`[{{ID}}]` -> `[1]`) and
-    // quoted-string (`"{{PATH}}"` -> `"1"`) placeholders.
     let token_re = regex::Regex::new(r"\{\{[^}]+\}\}").unwrap();
     let s = token_re.replace_all(query, "1");
 
     let mut value: serde_json::Value = serde_json::from_str(&s)?;
-    // A query has either `nodes` (array) or a singular `node`; resolve both.
     if let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_array_mut()) {
         for node in nodes.iter_mut() {
             resolve_sample_node_ids(node);
@@ -379,7 +374,6 @@ fn relative_path(path: &Path) -> String {
         .to_string()
 }
 
-/// Run one query through the production pipeline stage sequence (authz mocked).
 async fn run_pipeline(
     db: &TestContext,
     json: &str,

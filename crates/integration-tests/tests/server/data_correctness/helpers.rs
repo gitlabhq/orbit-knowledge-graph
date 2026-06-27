@@ -1,20 +1,3 @@
-//! Data correctness integration tests.
-//!
-//! Seeds known data into ClickHouse, runs the full query pipeline
-//! (compile → execute → redact → hydrate → format), and asserts that
-//! returned values exactly match expectations. Every response is validated
-//! against `query_response.json` and deserialized into typed [`GraphResponse`]
-//! structs for type-safe assertions via [`ResponseView`].
-//!
-//! What these tests verify:
-//! - Specific property values match seeded data (e.g. alice.username == "alice")
-//! - Exact node counts, edge endpoints, and edge types per query
-//! - Result ordering when `order_by` is specified
-//! - Aggregation results are numerically correct against known inputs
-//! - Path finding returns complete, connected paths with exact hop counts
-//! - Redaction removes exactly the unauthorized nodes/edges
-//! - Referential integrity: every edge endpoint exists in the nodes array
-
 pub(super) use std::collections::HashSet;
 pub(super) use std::sync::Arc;
 

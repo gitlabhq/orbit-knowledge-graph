@@ -1,5 +1,3 @@
-//! PathFinding plan: bidirectional frontier expansion.
-
 use std::collections::HashMap;
 
 use crate::error::Result;

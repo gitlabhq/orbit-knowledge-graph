@@ -1,5 +1,3 @@
-//! ClickHouse dialect end-to-end tests.
-
 use crate::compiler::setup::{compile_to_ast, test_ctx, test_ontology};
 use crate::compiler::utils::has_param_value;
 use compiler::{Node, QueryError, compile};
@@ -337,7 +335,6 @@ fn neighbors_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    // Uses ClickHouse `IN [...]` array syntax for node_ids.
     let rendered = result.base.render();
 
     assert!(rendered.contains("_gkg_neighbor_id"));
@@ -376,7 +373,6 @@ fn filter_operators() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
     // Search uses FINAL for latest-row dedup.
@@ -492,8 +488,6 @@ fn valid_identifiers_produce_renderable_sql() {
     assert!(rendered.contains("_gkg_CamelCase_id"));
     assert!(rendered.contains("_gkg_node123_id"));
 }
-
-// ── Multi-edge-table end-to-end SQL tests ───────────────────────────────
 
 fn multi_table_ontology() -> ontology::Ontology {
     use ontology::DataType;

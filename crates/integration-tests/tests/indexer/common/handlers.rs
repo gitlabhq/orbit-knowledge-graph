@@ -104,10 +104,8 @@ pub async fn global_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     build_fan_out(ctx, "global_fan_out", GlobalIndexingRequest::subscription()).await
 }
 
-/// Build a handler that runs only the `SystemNote` entity handler in
-/// isolation — so we can seed system-note rows and assert on
-/// exactly the edges it materializes without the rest of the namespace
-/// fan-out also writing to `gl_edge`.
+/// Runs only the `SystemNote` entity handler in isolation, so the rest of the
+/// namespace fan-out does not also write to `gl_edge`.
 pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     // SystemNotes is feature-flagged off by default; the global is process-wide
     // and init panics if called twice, so guard it for the subtests sharing a run.

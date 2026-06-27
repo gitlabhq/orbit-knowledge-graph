@@ -1,7 +1,3 @@
-//! Integration tests for the NATS broker.
-//!
-//! These tests require a Docker-compatible runtime (Docker, Colima, etc).
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -504,12 +500,10 @@ async fn updates_stream_config_during_rolling_update() {
         "stream max_age should reflect the v2 config"
     );
 
-    // Old consumer still receives on original subject after config update
     publish_event(&broker_new, &subscription_v2_existing, "after-update", 1).await;
     let event = receive_event(&mut old_subscription).await;
     assert_eq!(event.id, "after-update");
 
-    // New consumer receives on the newly added subject
     let mut new_subscription = broker_new
         .subscribe(&subscription_v2_new, Arc::new(EngineMetrics::new()))
         .await
