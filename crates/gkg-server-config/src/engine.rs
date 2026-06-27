@@ -220,7 +220,7 @@ impl Default for EntityHandlerConfig {
 }
 
 fn default_fetch_concurrency() -> usize {
-    6
+    10
 }
 
 fn default_partition_min_rows() -> u64 {
@@ -236,7 +236,7 @@ fn default_code_indexing_max_files() -> usize {
 }
 
 fn default_code_indexing_max_total_bytes() -> u64 {
-    10_000_000_000
+    2_000_000_000
 }
 
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
@@ -298,9 +298,10 @@ pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     #[serde(default = "default_code_indexing_max_files")]
     pub max_files: usize,
-    /// Total discovered bytes above which a repository is skipped entirely
-    /// (indexed empty, then checkpointed). Bounds pathologically large repos.
-    /// 0 = no limit. Defaults to 10 GB.
+    /// Post-filter retained bytes above which a repository is skipped entirely
+    /// (indexed empty, then checkpointed). Bounds per-repo disk so fetch/index
+    /// concurrency can rise without exhausting the pod volume. 0 = no limit.
+    /// Defaults to 2 GB.
     #[serde(default = "default_code_indexing_max_total_bytes")]
     pub max_total_bytes: u64,
     #[serde(default)]
@@ -327,7 +328,7 @@ pub struct CodeIndexingPipelineConfig {
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
     /// many repositories can be downloaded simultaneously in the pipelined
-    /// code indexer. 0 = no limit. Defaults to 6.
+    /// code indexer. 0 = no limit. Defaults to 10.
     #[serde(default = "default_fetch_concurrency")]
     pub fetch_concurrency: usize,
     /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.

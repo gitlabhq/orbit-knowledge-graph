@@ -56,10 +56,10 @@ graph:
 #   key_path: "/path/to/key.pem"
 
 engine:
-  max_concurrent_workers: 16
+  max_concurrent_workers: 24
   concurrency_groups:
     sdlc: 12
-    code: 4
+    code: 12
   topics:
     global-handler:
       concurrency_group: sdlc
@@ -88,7 +88,7 @@ engine:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
-        max_total_bytes: 10000000000
+        max_total_bytes: 2000000000
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 2000
@@ -97,7 +97,7 @@ engine:
         per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
         job_timeout_secs: 250
-        fetch_concurrency: 6
+        fetch_concurrency: 10
         write_channel_capacity: 8
         write_slice_rows: 500000
         write_buffer_age_secs: 60

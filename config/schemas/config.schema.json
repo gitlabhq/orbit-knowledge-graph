@@ -68,12 +68,12 @@
             "pipeline": {
               "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
-              "fetch_concurrency": 6,
+              "fetch_concurrency": 10,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
-              "max_total_bytes": 10000000000,
+              "max_total_bytes": 2000000000,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
@@ -419,10 +419,10 @@
           "minimum": 0
         },
         "fetch_concurrency": {
-          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit. Defaults to 6.",
+          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit. Defaults to 10.",
           "type": "integer",
           "format": "uint",
-          "default": 6,
+          "default": 10,
           "minimum": 0
         },
         "job_timeout_secs": {
@@ -451,10 +451,10 @@
           "minimum": 0
         },
         "max_total_bytes": {
-          "description": "Total discovered bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds pathologically large repos.\n0 = no limit. Defaults to 10 GB.",
+          "description": "Post-filter retained bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds per-repo disk so fetch/index\nconcurrency can rise without exhausting the pod volume. 0 = no limit.\nDefaults to 2 GB.",
           "type": "integer",
           "format": "uint64",
-          "default": 10000000000,
+          "default": 2000000000,
           "minimum": 0
         },
         "per_file_parse_timeout_ms": {
@@ -541,12 +541,12 @@
           "default": {
             "big_indexing_slots": 2,
             "cross_file_resolve_timeout_ms": 180000,
-            "fetch_concurrency": 6,
+            "fetch_concurrency": 10,
             "job_timeout_secs": 250,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
-            "max_total_bytes": 10000000000,
+            "max_total_bytes": 2000000000,
             "per_file_parse_timeout_ms": 100,
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
@@ -644,12 +644,12 @@
               "pipeline": {
                 "big_indexing_slots": 2,
                 "cross_file_resolve_timeout_ms": 180000,
-                "fetch_concurrency": 6,
+                "fetch_concurrency": 10,
                 "job_timeout_secs": 250,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
-                "max_total_bytes": 10000000000,
+                "max_total_bytes": 2000000000,
                 "per_file_parse_timeout_ms": 100,
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
@@ -897,12 +897,12 @@
             "pipeline": {
               "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
-              "fetch_concurrency": 6,
+              "fetch_concurrency": 10,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
-              "max_total_bytes": 10000000000,
+              "max_total_bytes": 2000000000,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
