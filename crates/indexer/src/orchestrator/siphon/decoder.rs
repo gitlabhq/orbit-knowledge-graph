@@ -1,5 +1,3 @@
-//! Helper functions for decoding Siphon protobuf types.
-
 use prost::Message;
 use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 

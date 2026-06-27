@@ -1,5 +1,3 @@
-//! Content resolution metrics: Gitaly latency, batch sizing, blob sizes.
-
 use crate::MetricSpec;
 use crate::buckets::{BATCH_SIZE, BLOB_BYTES, LATENCY_FAST};
 

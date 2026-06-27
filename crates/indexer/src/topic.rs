@@ -109,8 +109,6 @@ impl Event for CodeIndexingTaskRequest {
     }
 }
 
-// --- Namespace deletion ---
-
 pub const NAMESPACE_DELETION_SUBJECT_PREFIX: &str = "sdlc.namespace.deletion.requested";
 pub const NAMESPACE_DELETION_SUBJECT_PATTERN: &str = "sdlc.namespace.deletion.requested.*";
 

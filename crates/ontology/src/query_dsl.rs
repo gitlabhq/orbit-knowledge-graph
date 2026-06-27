@@ -1,8 +1,5 @@
-//! Query DSL schema condensation.
-//!
 //! Loads `graph_query.schema.json` at compile time and strips trivial
-//! descriptions and defaults. Returns condensed `serde_json::Value`
-//! for callers to encode as they see fit (TOON, JSON, etc).
+//! descriptions and defaults.
 
 use serde_json::{Map, Value};
 
@@ -15,7 +12,6 @@ const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "List of values",
 ];
 
-/// Return the condensed query DSL schema as a `serde_json::Value`.
 pub fn condensed_query_schema() -> Result<Value, String> {
     let schema: Value = serde_json::from_str(BASE_SCHEMA)
         .map_err(|e| format!("failed to parse base schema: {e}"))?;

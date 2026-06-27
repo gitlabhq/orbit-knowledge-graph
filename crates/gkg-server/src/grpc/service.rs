@@ -324,8 +324,6 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                         use crate::proto::execute_query_result::Content;
 
-                        // Static dispatch: monomorphize per formatter type
-                        // instead of going through a vtable.
                         let (formatted, format_version, format_name) = if use_llm_format {
                             GoonFormatter.format_stamped(&output)
                         } else {

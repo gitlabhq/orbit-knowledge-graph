@@ -136,9 +136,8 @@ pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// A row from the `siphon_routes` lookup, keyed by `path`. Decoded from the
-/// `ROUTES_SQL` result in `handler::query_routes`. `ROUTES_SQL` already
-/// filters `source_type = 'Project'`, so every row here is a project route.
+/// `ROUTES_SQL` filters `source_type = 'Project'`, so every row here is a
+/// project route.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteRow {
     pub source_id: i64,
@@ -146,9 +145,6 @@ pub struct RouteRow {
     pub traversal_path: String,
 }
 
-/// A row from a `(project_id, iid) → id` lookup against a noteable table.
-/// Decoded from `MERGE_REQUESTS_SQL` / `WORK_ITEMS_SQL` in
-/// `handler::query_entities`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityRow {
     pub id: i64,
@@ -156,13 +152,11 @@ pub struct EntityRow {
     pub iid: i64,
 }
 
-/// Output of the resolver: the resolved entity id plus its
-/// `traversal_path`. The traversal_path here is the *resolved ref's* route
-/// namespace, which the emitter does **not** use as the edge partition for
-/// MENTIONS — the MENTIONS edge lands in the noteable's (target's)
-/// namespace via `NoteRow.traversal_path` so that inbound-degree queries
-/// hit the right `gl_edge` partition. This field is still carried for
-/// potential future use by other edge kinds.
+/// The traversal_path here is the *resolved ref's* route namespace, which the
+/// emitter does **not** use as the edge partition for MENTIONS — the MENTIONS
+/// edge lands in the noteable's (target's) namespace via `NoteRow.traversal_path`
+/// so that inbound-degree queries hit the right `gl_edge` partition. This field
+/// is still carried for potential future use by other edge kinds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
     pub id: i64,
@@ -174,20 +168,14 @@ pub struct ResolvedTarget {
 /// and for the per-batch metric output.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolutionPlan {
-    /// Distinct project paths to look up in `siphon_routes`.
     pub paths: HashSet<String>,
-    /// Distinct (project_path, iid) tuples for issues / work-items.
     pub issue_pairs: HashSet<(String, i64)>,
-    /// Distinct (project_path, iid) tuples for merge requests.
     pub mr_pairs: HashSet<(String, i64)>,
 }
 
 impl ResolutionPlan {
-    /// Build a plan from a batch of `(noteable_project_path, references)`
-    /// tuples emitted by the parser. The default project path is substituted
-    /// when a `Reference` carries no explicit project prefix (same-project
-    /// shorthand: `#123`, `!456`). The handler builds plans row-by-row via
-    /// [`ResolutionPlan::add_ref`]; this batch constructor backs the tests.
+    /// The default project path is substituted when a `Reference` carries no
+    /// explicit project prefix (same-project shorthand: `#123`, `!456`).
     #[cfg(test)]
     pub fn from_refs<'a, I>(refs: I) -> Self
     where
@@ -200,10 +188,8 @@ impl ResolutionPlan {
         plan
     }
 
-    /// Add a single reference to the plan. Used by the production handler's
-    /// row-by-row loop, where the default project path is computed per-row
-    /// from the noteable. Skips empty default projects (the path-IN-list
-    /// can't tolerate an empty string against `siphon_routes.path`).
+    /// Skips empty default projects (the path-IN-list can't tolerate an empty
+    /// string against `siphon_routes.path`).
     pub fn add_ref(&mut self, r: &Reference, default_project: &str) {
         let project = r
             .project_path
@@ -236,33 +222,22 @@ impl ResolutionPlan {
     }
 }
 
-/// Runtime resolver index built from one routes lookup plus the per-kind
-/// noteable lookups (`MERGE_REQUESTS_SQL`, `WORK_ITEMS_SQL`). Keyed on
-/// `(project_path, kind, iid)` so the [`build_edges`] closure can resolve a
-/// parsed [`Reference`] — substituting the note's default project path for
-/// same-project shorthand — without re-querying ClickHouse per reference.
-///
-/// Each resolved entry carries the ref's own `traversal_path` from its
-/// route row. For MENTIONS edges, the emitter uses the *noteable's*
-/// traversal_path (from `NoteRow`) as the edge partition — not this one —
-/// so inbound-degree queries on the mentioned entity hit the right
-/// `gl_edge` partition.
+/// Keyed on `(project_path, kind, iid)` so the [`build_edges`] closure can
+/// resolve a parsed [`Reference`] — substituting the note's default project
+/// path for same-project shorthand — without re-querying ClickHouse per
+/// reference.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ResolvedIndex {
     by_key: HashMap<(RefKind, i64), HashMap<String, ResolvedTarget>>,
 }
 
 impl ResolvedIndex {
-    /// Build the index from the routes rows and the two noteable lookups.
-    /// `mr_entities` come from `MERGE_REQUESTS_SQL`, `wi_entities` from
-    /// `WORK_ITEMS_SQL`; both are `(id, project_id, iid)` rows. Commit
-    /// references are not indexed here (no `Commit` node yet).
+    /// Commit references are not indexed here (no `Commit` node yet).
     pub fn build(
         routes: &[RouteRow],
         mr_entities: &[EntityRow],
         wi_entities: &[EntityRow],
     ) -> Self {
-        // `ROUTES_SQL` already restricts to `source_type = 'Project'`.
         let path_routes: HashMap<i64, (&str, &str)> = routes
             .iter()
             .map(|r| (r.source_id, (r.path.as_str(), r.traversal_path.as_str())))
@@ -423,7 +398,7 @@ mod tests {
     fn plan_collects_distinct_paths_and_pairs() {
         let body1 = "mentioned in gitlab-org/gitlab#123";
         let body2 = "mentioned in gitlab-org/gitlab!42";
-        let body3 = "mentioned in gitlab-org/gitlab!42"; // duplicate
+        let body3 = "mentioned in gitlab-org/gitlab!42";
         let refs1 = extract(Action::CrossReference, body1);
         let refs2 = extract(Action::CrossReference, body2);
         let refs3 = extract(Action::CrossReference, body3);
@@ -449,11 +424,9 @@ mod tests {
 
     #[test]
     fn plan_ignores_commit_refs() {
-        // Commit references resolve to nothing today (no `Commit` node yet),
-        // so they add no routes/IID lookup work — not even the default
-        // project path, since no edge can ever come out of them.
         let refs = extract(Action::CrossReference, "mentioned in 54f7727c");
         let plan = ResolutionPlan::from_refs(refs.iter().map(|r| ("my/proj", r)));
+
         assert!(plan.paths.is_empty());
         assert!(plan.issue_pairs.is_empty());
         assert!(plan.mr_pairs.is_empty());
@@ -503,7 +476,6 @@ mod tests {
                 iid: 7,
             }],
         );
-        // `#7` with no explicit project resolves against the default.
         let r = Reference {
             kind: RefKind::Issue,
             project_path: None,
@@ -511,7 +483,6 @@ mod tests {
             commit_sha: None,
         };
         assert_eq!(index.resolve(&r, "gitlab-org/gitlab").unwrap().id, 555);
-        // Empty default project never resolves.
         assert!(index.resolve(&r, "").is_none());
     }
 

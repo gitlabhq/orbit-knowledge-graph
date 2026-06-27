@@ -30,12 +30,9 @@ use rand::{Rng, RngExt};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-/// Context for a generated entity, tracking its ID and traversal path.
 #[derive(Debug, Clone)]
 pub struct EntityContext {
-    /// The entity's unique ID.
     pub id: i64,
-    /// The traversal ID (namespace path from org root).
     /// For Groups: extends parent's traversal ID with own ID.
     /// For other entities: inherits from parent container.
     pub traversal_path: String,
@@ -68,7 +65,6 @@ impl EntityContext {
     }
 }
 
-/// Registry of generated entities by type, for parent lookups during generation.
 #[derive(Debug)]
 pub struct EntityRegistry {
     /// Full entities by node type (used during relationship generation).
@@ -76,15 +72,12 @@ pub struct EntityRegistry {
     /// Compact ID-only storage (used after compaction for associations).
     ids_only: HashMap<String, Vec<i64>>,
     /// ID → traversal_path lookup, built during compaction.
-    /// Used by association edge generation to assign realistic traversal paths.
     id_paths: HashMap<i64, String>,
-    /// Whether the registry has been compacted.
     compacted: bool,
-    /// Namespace ID counter (for Groups only, monotonically increasing).
+    /// For Groups only, monotonically increasing.
     namespace_counter: AtomicI64,
-    /// Entity ID counter (for non-namespace entities).
+    /// For non-namespace entities.
     entity_counter: AtomicI64,
-    /// Organization ID.
     org_id: u32,
 }
 
@@ -113,8 +106,7 @@ impl EntityRegistry {
         self.entity_counter.fetch_add(1, Ordering::SeqCst)
     }
 
-    /// Compact the registry to only store IDs, freeing traversal path memory.
-    /// Call this after relationship generation is complete, before associations.
+    /// Call after relationship generation is complete, before associations.
     pub fn compact(&mut self) {
         self.compact_with_aliases(&HashMap::new());
     }
@@ -127,8 +119,6 @@ impl EntityRegistry {
         if self.compacted {
             return;
         }
-        // Convert full entities to IDs and merge, resolving aliases.
-        // Preserve id→traversal_path mapping for association edge generation.
         for (node_type, contexts) in self.entities.drain() {
             let real_type = aliases.get(&node_type).cloned().unwrap_or(node_type);
             let mut ids = Vec::with_capacity(contexts.len());
@@ -138,7 +128,6 @@ impl EntityRegistry {
             }
             self.ids_only.entry(real_type).or_default().extend(ids);
         }
-        // Also resolve aliases in existing id-only entries
         let id_entries: Vec<_> = self.ids_only.keys().cloned().collect();
         for key in id_entries {
             if let Some(real_type) = aliases.get(&key)
@@ -153,7 +142,6 @@ impl EntityRegistry {
         self.compacted = true;
     }
 
-    /// Add a full entity context (for parent entities that may have children).
     pub fn add(&mut self, node_type: &str, context: EntityContext) {
         debug_assert!(!self.compacted, "Cannot add after compaction");
         self.entities
@@ -162,9 +150,7 @@ impl EntityRegistry {
             .push(context);
     }
 
-    /// Add an entity ID with its traversal path (for leaf entities with no children).
-    /// The ID is stored compactly without `EntityContext`, but the path is
-    /// preserved in `id_paths` so association edge generation can inherit it.
+    /// The path is preserved in `id_paths` so association edge generation can inherit it.
     pub fn add_id_only(&mut self, node_type: &str, id: i64, traversal_path: &str) {
         debug_assert!(!self.compacted, "Cannot add after compaction");
         self.id_paths.insert(id, traversal_path.to_string());
@@ -179,7 +165,6 @@ impl EntityRegistry {
         self.entities.get(node_type).map(|v| v.as_slice())
     }
 
-    /// Get entity IDs as a slice.
     /// Works after compaction, or for leaf types that were added with add_id_only.
     pub fn get_ids_slice(&self, node_type: &str) -> Option<&[i64]> {
         self.ids_only.get(node_type).map(|v| v.as_slice())
@@ -200,7 +185,6 @@ impl EntityRegistry {
         &self.entities
     }
 
-    /// Look up traversal_path for an entity ID.
     /// Available after compaction (populated during compact_with_aliases).
     pub fn get_path(&self, id: i64) -> Option<&str> {
         self.id_paths.get(&id).map(|s| s.as_str())
@@ -304,7 +288,6 @@ fn generate_trie(org_id: u32, count: usize, max_depth: usize) -> Vec<String> {
         current_level = next_level;
     }
 
-    // DFS pre-order
     let mut result = Vec::with_capacity(count.min(nodes.len()));
     let mut stack = vec![0usize];
 
@@ -327,7 +310,6 @@ fn calculate_branching_factor(count: usize, max_depth: usize) -> usize {
         return count;
     }
 
-    // Binary search for branching factor
     // Total nodes in balanced tree = (b^d - 1) / (b - 1) where b = branching factor, d = depth
     let mut low = 2usize;
     let mut high = count;
@@ -346,7 +328,6 @@ fn calculate_branching_factor(count: usize, max_depth: usize) -> usize {
     low.max(2)
 }
 
-/// Calculate total nodes in a balanced tree with given branching factor and depth.
 fn tree_size(branching_factor: usize, depth: usize) -> usize {
     if branching_factor <= 1 {
         return depth;
@@ -395,12 +376,10 @@ mod tests {
 
         assert_eq!(generator.len(), 10);
 
-        // All IDs should start with org_id
         for path in generator.paths() {
             assert!(path.starts_with("1"), "Path {} should start with 1", path);
         }
 
-        // First ID should be just the root
         assert_eq!(generator.paths()[0], "1/");
     }
 
@@ -421,7 +400,6 @@ mod tests {
         let generator = TraversalPathGenerator::new(1, 50, 4);
 
         for path in generator.paths() {
-            // Should be slash-separated numbers (with trailing slash)
             for part in path.split('/').filter(|s| !s.is_empty()) {
                 assert!(
                     part.parse::<u64>().is_ok(),
@@ -436,7 +414,6 @@ mod tests {
     fn test_monotonically_increasing_ids() {
         let generator = TraversalPathGenerator::new(1, 20, 4);
 
-        // Extract all individual IDs used in paths
         let mut all_ids: Vec<u64> = generator
             .paths()
             .iter()
@@ -450,7 +427,6 @@ mod tests {
         all_ids.sort();
         all_ids.dedup();
 
-        // IDs should form a contiguous sequence starting from org_id
         for (i, &id) in all_ids.iter().enumerate() {
             assert_eq!(
                 id,
@@ -467,9 +443,7 @@ mod tests {
         let generator = TraversalPathGenerator::new(1, 100, 5);
         let path_set: HashSet<_> = generator.paths().iter().map(|s| s.as_str()).collect();
 
-        // Every path's parent should also exist (except root)
         for path in generator.paths() {
-            // Remove trailing slash to find parent
             let path_without_trailing = path.trim_end_matches('/');
             if let Some(last_slash) = path_without_trailing.rfind('/') {
                 let parent = format!("{}/", &path_without_trailing[..last_slash]);
@@ -531,7 +505,6 @@ mod tests {
         assert_eq!(child.id, 101);
         assert_eq!(child.traversal_path, "1/100/101/");
 
-        // Deeper nesting
         let grandchild = EntityContext::subgroup(&child, 102);
         assert_eq!(grandchild.id, 102);
         assert_eq!(grandchild.traversal_path, "1/100/101/102/");
@@ -542,12 +515,10 @@ mod tests {
         let group = EntityContext::root_group(1, 100);
         let project = EntityContext::child(&group, 500);
 
-        // Project inherits group's traversal ID
         assert_eq!(project.id, 500);
         assert_eq!(project.traversal_path, "1/100/");
 
         let mr = EntityContext::child(&project, 1000);
-        // MR also inherits the same traversal ID
         assert_eq!(mr.id, 1000);
         assert_eq!(mr.traversal_path, "1/100/");
     }
@@ -556,7 +527,6 @@ mod tests {
     fn test_entity_registry_namespace_counter() {
         let registry = EntityRegistry::new(1);
 
-        // Namespace counter starts at org_id + 1
         assert_eq!(registry.next_namespace_id(), 2);
         assert_eq!(registry.next_namespace_id(), 3);
         assert_eq!(registry.next_namespace_id(), 4);
@@ -566,7 +536,6 @@ mod tests {
     fn test_entity_registry_entity_counter() {
         let registry = EntityRegistry::new(1);
 
-        // Entity counter starts at 1
         assert_eq!(registry.next_entity_id(), 1);
         assert_eq!(registry.next_entity_id(), 2);
         assert_eq!(registry.next_entity_id(), 3);
@@ -576,33 +545,26 @@ mod tests {
     fn test_entity_registry_compact() {
         let mut registry = EntityRegistry::new(1);
 
-        // Add full contexts (parent entities)
         registry.add("Group", EntityContext::root_group(1, 100));
         registry.add("Group", EntityContext::root_group(1, 101));
 
-        // Add ID-only (leaf entities)
         registry.add_id_only("MergeRequest", 500, "1/100/");
         registry.add_id_only("MergeRequest", 501, "1/101/");
 
-        // Before compaction: full contexts accessible via get()
         assert!(registry.get("Group").is_some());
         assert_eq!(registry.count("Group"), 2);
         assert_eq!(registry.count("MergeRequest"), 2);
 
-        // Compact
         registry.compact();
 
-        // After compaction: all IDs accessible via get_ids_slice()
         let group_ids = registry.get_ids_slice("Group").unwrap();
         assert_eq!(group_ids, &[100, 101]);
 
         let mr_ids = registry.get_ids_slice("MergeRequest").unwrap();
         assert_eq!(mr_ids, &[500, 501]);
 
-        // get_ids() still works after compaction
         assert_eq!(registry.get_ids("Group"), vec![100, 101]);
 
-        // total_count is preserved
         assert_eq!(registry.total_count(), 4);
     }
 
@@ -610,7 +572,6 @@ mod tests {
     fn test_entity_registry_compact_merges_full_and_id_only() {
         let mut registry = EntityRegistry::new(1);
 
-        // Mix: some entities added as full, some as id-only, same type
         registry.add("Project", EntityContext::new(10, "1/100/".to_string()));
         registry.add_id_only("Project", 20, "1/100/");
 
@@ -628,11 +589,9 @@ mod tests {
     fn test_entity_registry_compact_with_aliases() {
         let mut registry = EntityRegistry::new(1);
 
-        // Root-level Group entities
         registry.add("Group", EntityContext::root_group(1, 100));
         registry.add("Group", EntityContext::root_group(1, 101));
 
-        // Virtual depth-level entries
         registry.add("Group@1", EntityContext::new(200, "1/100/200/".to_string()));
         registry.add("Group@1", EntityContext::new(201, "1/101/201/".to_string()));
         registry.add(
@@ -640,7 +599,6 @@ mod tests {
             EntityContext::new(300, "1/100/200/300/".to_string()),
         );
 
-        // Non-aliased type
         registry.add_id_only("Project", 500, "1/100/");
         registry.add_id_only("Project", 501, "1/101/");
 
@@ -653,18 +611,15 @@ mod tests {
 
         registry.compact_with_aliases(&aliases);
 
-        // All Group IDs (root + epsilon) should be merged
         let group_ids = registry.get_ids_slice("Group").unwrap();
         assert_eq!(group_ids.len(), 5); // 100, 101, 200, 201, 300
         assert!(group_ids.contains(&100));
         assert!(group_ids.contains(&201));
         assert!(group_ids.contains(&300));
 
-        // Epsilon keys should not exist
         assert!(registry.get_ids_slice("Group@1").is_none());
         assert!(registry.get_ids_slice("Group@2").is_none());
 
-        // Non-aliased type is unchanged
         let project_ids = registry.get_ids_slice("Project").unwrap();
         assert_eq!(project_ids.len(), 2);
     }

@@ -1,5 +1,3 @@
-//! Compiler tests using the embedded (production) ontology.
-
 use std::sync::Arc;
 
 use super::setup::{admin_ctx, embedded_ontology, test_ctx};
@@ -7,10 +5,6 @@ use compiler::{
     ColumnSelection, HydrationPlan, Input, InputNode, QueryType, TraversalPath, compile,
     compile_input,
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Validation (error path — no SQL produced)
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn valid_column_in_order_by() {
@@ -106,10 +100,6 @@ fn invalid_entity_type_rejected() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Full pipeline — SQL structure
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn full_pipeline() {
     let json = r#"{
@@ -134,9 +124,6 @@ fn full_pipeline() {
 
 #[test]
 fn package_built_by_pipeline_traversal() {
-    // Package provenance: "which pipeline built this package?" — the spike's
-    // primary unmet question. Exercises the Package node plus the BUILT_BY edge
-    // (join-table sourced from siphon_packages_build_infos).
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -150,8 +137,6 @@ fn package_built_by_pipeline_traversal() {
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // BUILT_BY is a join-table edge: it scans the shared gl_edge table, filtered
-    // to the relationship and endpoint kinds, joined to the filtered gl_package.
     assert!(rendered.contains("gl_package"));
     assert!(rendered.contains("gl_edge"));
     assert!(rendered.contains("'BUILT_BY'"));
@@ -176,7 +161,6 @@ fn basic_search_query() {
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // Search uses FINAL for latest-row dedup.
     assert!(
         rendered.contains(" FINAL"),
         "search should use FINAL for dedup"
@@ -215,7 +199,6 @@ fn complex_search_query() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    // Search uses FINAL for latest-row dedup.
     assert!(rendered.contains(" FINAL"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains("username"));
@@ -361,10 +344,6 @@ fn result_context_populated() {
     assert!(rendered.contains("_gkg_p_type"));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Multi-hop
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn multi_hop_traversal_generates_union_subquery() {
     let json = r#"{
@@ -446,10 +425,6 @@ fn multi_hop_aggregation() {
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Redaction columns
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn definition_uses_project_id_for_redaction() {
     let json = r#"{
@@ -463,7 +438,6 @@ fn definition_uses_project_id_for_redaction() {
 
     assert!(rendered.contains("_gkg_d_id"));
     assert!(rendered.contains("_gkg_d_type"));
-    // Search uses FINAL for dedup, so project_id is a plain column reference.
     assert!(
         rendered.contains("d.project_id") && rendered.contains("_gkg_d_id"),
         "Definition should use project_id for redaction"
@@ -488,10 +462,6 @@ fn project_still_uses_id_for_redaction() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cursor pagination (compiler-level validation)
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn cursor_pagination_validation() {
     use compiler::QueryError;
@@ -499,7 +469,6 @@ fn cursor_pagination_validation() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();
 
-    // Valid cursor: offset + page_size <= limit
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -512,19 +481,16 @@ fn cursor_pagination_validation() {
     );
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
 
-    // Cursor does not affect SQL — LIMIT comes from the limit field
     let result = result.unwrap();
     let rendered = result.base.render();
     assert!(rendered.contains("LIMIT 100"));
 
-    // Cursor query emits SETTINGS for CH query cache
     assert!(
         result.base.sql.contains("use_query_cache = 1"),
         "cursor query should enable CH query cache: {}",
         result.base.sql
     );
 
-    // offset + page_size > limit rejected
     let err = compile(
         r#"{
         "query_type": "traversal",
@@ -541,7 +507,6 @@ fn cursor_pagination_validation() {
         "offset + page_size > limit should be a pagination error, got: {err}"
     );
 
-    // Cursor on traversal compiles fine (pagination is server-side)
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -561,7 +526,6 @@ fn cursor_pagination_validation() {
         "cursor on traversal should compile: {result:?}"
     );
 
-    // offset + page_size == limit is valid (boundary)
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -577,7 +541,6 @@ fn cursor_pagination_validation() {
         "offset + page_size == limit should be valid"
     );
 
-    // offset == 0, page_size == limit is valid (full window)
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -590,7 +553,6 @@ fn cursor_pagination_validation() {
     );
     assert!(result.is_ok(), "page_size == limit should be valid");
 
-    // Missing required cursor fields rejected at deserialization
     let err = compile(
         r#"{
         "query_type": "traversal",
@@ -613,7 +575,6 @@ fn cursor_pagination_validation() {
     );
     assert!(err.is_err(), "cursor missing offset should fail");
 
-    // Empty cursor object rejected
     let err = compile(
         r#"{
         "query_type": "traversal",
@@ -625,7 +586,6 @@ fn cursor_pagination_validation() {
     );
     assert!(err.is_err(), "empty cursor should fail");
 
-    // page_size = 0 rejected (schema minimum: 1)
     let err = compile(
         r#"{
         "query_type": "traversal",
@@ -638,7 +598,6 @@ fn cursor_pagination_validation() {
     );
     assert!(err.is_err(), "page_size = 0 should fail");
 
-    // No cursor: default limit still works, no SETTINGS emitted
     let result = compile(
         r#"{
         "query_type": "traversal",
@@ -657,10 +616,6 @@ fn cursor_pagination_validation() {
         result.base.sql
     );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Render (parameterized → inlined)
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn render_traversal_inlines_all_params() {
@@ -709,7 +664,6 @@ fn render_in_filter_inlines_array() {
     .base
     .render();
 
-    // Uses ClickHouse `IN [...]` array syntax.
     assert!(
         !rendered.contains("{p"),
         "rendered SQL should have no placeholders"
@@ -732,7 +686,6 @@ fn render_node_ids_inlines_array() {
     .base
     .render();
 
-    // Uses ClickHouse `IN [...]` array syntax for node_ids.
     assert!(
         !rendered.contains("{p"),
         "rendered SQL should have no placeholders"
@@ -779,10 +732,6 @@ fn debug_json_round_trip() {
     );
     assert!(parsed["hydration"].is_array());
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Hydration
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn hydration_query_type_generates_union_all() {
@@ -1000,10 +949,6 @@ fn hydration_id_column_included_in_map() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LIKE hardening: rejection at compile time
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn like_rejects_short_contains_pattern() {
     let err = compile(
@@ -1141,11 +1086,6 @@ fn equality_on_email_rejected_for_non_admin() {
         "expected admin-only rejection on User.email, got: {msg}"
     );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// filterable: false — traversal_path is the one system field users may filter,
-// but RestrictPass scopes requested paths to the JWT traversal paths.
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn filterable_allows_traversal_path_starts_with_inside_scope() {
@@ -1306,15 +1246,10 @@ fn filterable_allows_traversal_path_in_columns() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregation filter pushdown (Bug 1 regression guard)
-//
-// Single-aggregate queries with a sort-key filter must keep the filter inside
-// the FINAL scan so ClickHouse uses the primary-key index to skip granules.
-// Without this, the latest-row scan reads the full authorized table before
-// aggregation.
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Bug 1 regression guard: single-aggregate queries with a sort-key filter must
+// keep the filter inside the FINAL scan so ClickHouse uses the primary-key index
+// to skip granules. Without this, the latest-row scan reads the full authorized
+// table before aggregation.
 #[test]
 fn aggregation_count_pushes_project_id_into_dedup_subquery() {
     let json = r#"{
@@ -1326,13 +1261,10 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // v2 emits COUNT() over a dedup subquery instead of countIf folding.
     assert!(
         rendered.contains("COUNT()") || rendered.contains("countIf"),
         "should contain COUNT() or countIf: {rendered}"
     );
-    // The FINAL scan must also carry the project_id filter so the granule
-    // index narrows the read.
     let inner = rendered
         .split(" FINAL")
         .nth(1)
@@ -1362,8 +1294,6 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // v2 uses edge-centric JOINs: the pinned File node_id narrows the edge
-    // scan, which in turn narrows the joined Definition table.
     assert!(
         rendered.contains("gl_code_edge"),
         "DEFINES should scan gl_code_edge: {rendered}"
@@ -1372,17 +1302,11 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
         rendered.contains("12345"),
         "pinned File node_id must appear in WHERE clause: {rendered}"
     );
-    // The edge scan is narrowed by source_id = pinned id, which restricts
-    // which Definition rows are reachable through the JOIN.
     assert!(
         rendered.contains("e0.source_id"),
         "edge-centric filter must reference source_id: {rendered}"
     );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Code-graph edges (CALLS, EXTENDS) — registered in schema.yaml
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn calls_traversal_compiles_against_embedded_ontology() {
@@ -1455,9 +1379,6 @@ fn extends_traversal_compiles_against_embedded_ontology() {
 
 #[test]
 fn calls_to_imported_symbol_variant_compiles() {
-    // Exercises the Definition→ImportedSymbol variant declared in calls.yaml
-    // (used when a call site targets a symbol that has not been resolved to a
-    // concrete definition).
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -1490,12 +1411,6 @@ fn calls_aggregation_compiles() {
 
 #[test]
 fn code_graph_edge_union_routes_to_code_table() {
-    // CALLS, EXTENDS, DEFINES, IMPORTS all route to gl_code_edge — a UNION
-    // ALL across them must touch only that table, never the SDLC gl_edge.
-    // Definition is in scope for every edge in this set (CALLS Def→Def,
-    // EXTENDS Def→Def, DEFINES Def→Def for nesting, IMPORTS reaches
-    // Definition via ImportedSymbol → Definition; we approximate by
-    // querying the Def→Def slice that all four edges support).
     let json = r#"{
         "query_type": "traversal",
         "nodes": [

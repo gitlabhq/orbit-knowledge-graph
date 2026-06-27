@@ -16,7 +16,6 @@ use std::sync::LazyLock;
 
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
-/// Enabled namespace ID + traversal path pairs from the datalake.
 static ENABLED_NAMESPACE_QUERY: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(

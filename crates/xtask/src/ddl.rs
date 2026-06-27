@@ -108,8 +108,6 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-// ── Schema diff helpers ────────────────────────────────────────────────────
-
 fn run_schema_diff(generated_stmts: &[String], sql_path: &Path) -> Result<()> {
     let existing_sql = std::fs::read_to_string(sql_path)
         .with_context(|| format!("failed to read {}", sql_path.display()))?;

@@ -1,14 +1,7 @@
-//! Ontology-driven DDL generator.
-//!
-//! Builds [`CreateTable`] and [`CreateMaterializedView`] AST nodes from an
-//! [`Ontology`]. The storage metadata in each node/edge/auxiliary YAML is
-//! fully explicit: every column, codec, default, index, and projection is
-//! specified. The generator is a thin pass-through with no auto-derivation.
-//!
-//! Submodules provide backend-specific SQL emission:
-//! - [`clickhouse`] — ClickHouse `CREATE TABLE` / `CREATE MATERIALIZED VIEW`
-//!   with engine, codecs, indexes, projections
-//! - [`duckdb`] — DuckDB `CREATE TABLE` stripped of ClickHouse-specific features
+//! Ontology-driven DDL generator. The storage metadata in each
+//! node/edge/auxiliary YAML is fully explicit: every column, codec, default,
+//! index, and projection is specified. The generator is a thin pass-through
+//! with no auto-derivation.
 
 pub mod clickhouse;
 pub mod duckdb;
@@ -22,12 +15,6 @@ use ontology::{
 
 use crate::ast::ddl::*;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Generates all graph table DDL from the ontology.
-///
 /// Tables are returned unprefixed. Call `.with_prefix()` on each to apply
 /// a schema version prefix before codegen.
 pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
@@ -52,8 +39,6 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
     tables
 }
 
-/// Generates all materialized view DDL from the ontology.
-///
 /// Views are returned unprefixed. Call
 /// [`generate_graph_materialized_views_with_prefix`] to apply a schema
 /// version prefix to view names, `TO` targets, and table references inside
@@ -82,9 +67,8 @@ pub fn generate_graph_materialized_views_with_prefix(
         .collect()
 }
 
-/// Collects all known graph table names from the ontology (auxiliary + node +
-/// edge) so that `{table_name}` placeholders in materialized view queries can
-/// be resolved.
+/// Collects table names so `{table_name}` placeholders in materialized view
+/// queries can be resolved.
 fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     for aux in ontology.auxiliary_tables() {
@@ -140,10 +124,7 @@ pub fn generate_graph_dictionaries_with_prefix(
         })
         .collect()
 }
-/// Generates local (DuckDB) graph table DDL from the ontology's `local_db` config.
-///
-/// Returns `CreateTable` ASTs for each local entity and the local edge table.
-/// These are stripped-down versions of the ClickHouse tables: no system columns
+/// Stripped-down versions of the ClickHouse tables: no system columns
 /// (`_version`, `_deleted`), and any entity-specific excluded properties
 /// are filtered out. The engine/indexes/projections fields are set to empty
 /// defaults since DuckDB codegen ignores them.
@@ -163,13 +144,6 @@ pub fn generate_local_tables(ontology: &Ontology) -> Vec<CreateTable> {
     tables
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Column conversion
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Converts a `StorageColumn` (explicit YAML) into a `ColumnDef` (DDL AST).
-/// The `ch_type` string is passed through as-is to the codegen layer.
-///
 /// SAFETY: `default` and `ch_type` are emitted as raw SQL in the DDL output.
 /// This is safe because the ontology YAML is developer-controlled configuration
 /// embedded at compile time -- not user input. If the trust boundary changes
@@ -186,7 +160,6 @@ fn storage_col_to_def(col: &StorageColumn) -> ColumnDef {
     def
 }
 
-/// System columns appended to every table.
 fn system_columns(version_type: Option<&str>) -> Vec<ColumnDef> {
     let version = match version_type {
         Some("uint64") => ColumnDef::new("_version", ColumnType::UInt64),
@@ -200,7 +173,7 @@ fn system_columns(version_type: Option<&str>) -> Vec<ColumnDef> {
         .with_default("now64(6)")
         // _version is batch-shared (one now64() per insert) and contiguous within a
         // traversal_path, so it's piecewise-constant: Delta yields runs of zeros that
-        // ZSTD crushes (~5x vs raw ZSTD, measured), beating both ZSTD and DoubleDelta.
+        // ZSTD compresses well, beating both raw ZSTD and DoubleDelta here.
         .with_codec(vec![Codec::Delta(8), Codec::ZSTD(1)]),
     };
     vec![
@@ -209,13 +182,6 @@ fn system_columns(version_type: Option<&str>) -> Vec<ColumnDef> {
     ]
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Type parsing — string → AST
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Parses a ClickHouse type string into a `ColumnType`.
-/// Handles: Int64, UInt64, Bool, String, Date32, DateTime64(...),
-/// Nullable(...), LowCardinality(...).
 fn parse_column_type(s: &str) -> ColumnType {
     let s = s.trim();
     if let Some(inner) = strip_wrapper(s, "Nullable") {
@@ -246,7 +212,7 @@ fn parse_column_type(s: &str) -> ColumnType {
         "Bool" => ColumnType::Bool,
         "String" => ColumnType::String,
         "Date32" => ColumnType::Date32,
-        _ => ColumnType::String, // fallback
+        _ => ColumnType::String,
     }
 }
 
@@ -289,19 +255,14 @@ fn parse_index_type(s: &str) -> IndexType {
     }
 }
 
-/// Strips `Wrapper(...)` and returns the inner content.
 fn strip_wrapper<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     if s.starts_with(prefix) && s.ends_with(')') {
-        let start = prefix.len() + 1; // skip "Prefix("
+        let start = prefix.len() + 1;
         Some(&s[start..s.len() - 1])
     } else {
         None
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Settings builder
-// ─────────────────────────────────────────────────────────────────────────────
 
 fn table_settings(
     index_granularity: Option<u32>,
@@ -340,10 +301,6 @@ fn upsert_setting(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Index/projection conversion
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn convert_index(idx: &StorageIndex) -> IndexDef {
     IndexDef {
         name: idx.name.clone(),
@@ -353,8 +310,6 @@ fn convert_index(idx: &StorageIndex) -> IndexDef {
     }
 }
 
-/// Converts ontology projection metadata into DDL AST.
-///
 /// SAFETY: `select` and `group_by` entries are emitted as raw SQL expressions.
 /// Same trust assumption as `storage_col_to_def` -- ontology YAML is developer-controlled.
 fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
@@ -378,10 +333,6 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
         },
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Node table
-// ─────────────────────────────────────────────────────────────────────────────
 
 fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
     let mut columns: Vec<ColumnDef> = node
@@ -417,10 +368,6 @@ fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
         settings: table_settings(Some(1024), !projections.is_empty(), &node.storage.settings),
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Edge table
-// ─────────────────────────────────────────────────────────────────────────────
 
 fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTable {
     let mut columns: Vec<ColumnDef> = config
@@ -470,10 +417,6 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Auxiliary table
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
     let mut columns: Vec<ColumnDef> = aux
         .columns
@@ -514,8 +457,8 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
     }
 }
 
-/// Maps ontology DataType to a ClickHouse type string for auxiliary tables
-/// (which don't have explicit StorageColumn definitions).
+/// Auxiliary tables have no explicit `StorageColumn` definitions, so map the
+/// ontology `DataType` to a ClickHouse type string directly.
 fn aux_col_ch_type(dt: &ontology::DataType, nullable: bool) -> String {
     let base = match dt {
         ontology::DataType::String | ontology::DataType::Uuid => "String",
@@ -532,10 +475,6 @@ fn aux_col_ch_type(dt: &ontology::DataType, nullable: bool) -> String {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Materialized view builder
-// ─────────────────────────────────────────────────────────────────────────────
-
 fn build_materialized_view(mv: &MaterializedViewDefinition) -> CreateMaterializedView {
     CreateMaterializedView {
         name: mv.name.clone(),
@@ -550,12 +489,7 @@ fn build_materialized_view(mv: &MaterializedViewDefinition) -> CreateMaterialize
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Local (DuckDB) table builders
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Builds a local node table from the ontology's storage columns, filtering
-/// out properties listed in the entity's `exclude_properties`.
+/// Filters out properties listed in the entity's `exclude_properties`.
 fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<CreateTable> {
     let exclude = ontology.local_entity_excludes(entity_name)?;
     let node = ontology.get_node(entity_name)?;
@@ -588,7 +522,6 @@ fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<Crea
     })
 }
 
-/// Builds the local edge table from the ontology's `local_db.edge_table` config.
 fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
     let table_name = ontology.local_edge_table_name()?;
     let columns: Vec<ColumnDef> = ontology
@@ -619,7 +552,6 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
     })
 }
 
-/// Maps ontology `DataType` to DDL `ColumnType` for local tables.
 fn local_data_type_to_column_type(dt: &ontology::DataType) -> ColumnType {
     match dt {
         ontology::DataType::String | ontology::DataType::Uuid => ColumnType::String,
@@ -633,10 +565,6 @@ fn local_data_type_to_column_type(dt: &ontology::DataType) -> ColumnType {
         _ => ColumnType::String,
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -691,8 +619,6 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Print for manual comparison:
-        // cargo test -p compiler --lib ddl_generator::tests::generated_ddl_snapshot -- --nocapture
         eprintln!("\n--- GENERATED DDL ---\n{full_ddl}\n--- END ---\n");
 
         for table in &tables {
@@ -753,8 +679,6 @@ mod tests {
         }));
     }
 
-    // ─── Materialized view generation tests ─────────────────────────────
-
     #[test]
     fn generates_no_materialized_views_by_default() {
         let views = generate_graph_materialized_views(&ontology());
@@ -791,8 +715,6 @@ mod tests {
         assert!(sql.contains("ENGINE = SummingMergeTree"));
         assert!(sql.contains("ORDER BY (traversal_path)"));
     }
-
-    // ─── Local table generation tests ────────────────────────────────────
 
     #[test]
     fn local_tables_include_expected_entities() {
@@ -876,8 +798,6 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Print for manual comparison:
-        // cargo test -p compiler --lib ddl_generator::tests::local_ddl_snapshot -- --nocapture
         eprintln!("\n--- LOCAL DDL ---\n{full_ddl}\n--- END ---\n");
 
         for table in &tables {

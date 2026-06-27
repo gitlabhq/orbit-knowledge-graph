@@ -1,5 +1,3 @@
-//! Shared test setup for compiler tests.
-
 use compiler::passes::lower::lower;
 use compiler::passes::validate::Validator;
 use compiler::{AccessLevel, Node, SecurityContext, TraversalPath, normalize};

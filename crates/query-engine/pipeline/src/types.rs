@@ -7,7 +7,6 @@ use ontology::Ontology;
 
 use crate::error::PipelineError;
 
-/// Type-erased map for storing values by their concrete type.
 #[derive(Default)]
 pub struct TypeMap {
     map: HashMap<TypeId, Box<dyn Any + Send + Sync>>,

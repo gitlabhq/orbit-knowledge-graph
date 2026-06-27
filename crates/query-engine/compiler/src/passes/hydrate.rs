@@ -8,19 +8,12 @@ use ontology::{FieldSource, Ontology, VirtualSource};
 use crate::input::{ColumnSelection, DynamicColumnMode, Input, QueryType};
 use crate::types::SecurityContext;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq, strum::IntoStaticStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum HydrationPlan {
-    /// No hydration needed (e.g., Aggregation).
     None,
-    /// Entity types known at compile time (Traversal).
     /// One template per input node, with IDs to be filled at runtime.
     Static(Vec<HydrationTemplate>),
-    /// Entity types discovered at runtime (PathFinding, Neighbors).
     /// Column specs are pre-resolved for every ontology entity type so
     /// the server just looks up the matching spec — no ontology queries.
     Dynamic(Vec<DynamicEntityColumns>),
@@ -29,27 +22,23 @@ pub enum HydrationPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HydrationTemplate {
     pub entity_type: String,
-    /// Alias from the base query (e.g. "u", "p"). Used to correlate hydration
-    /// results back to the base query's `_gkg_{alias}_pk` column.
+    /// Used to correlate hydration results back to the base query's
+    /// `_gkg_{alias}_pk` column.
     pub node_alias: String,
-    /// ClickHouse table to query (resolved from ontology at compile time).
     pub destination_table: String,
-    /// DB columns to fetch from ClickHouse (user-requested columns with
-    /// virtual columns filtered out, plus injected dependencies).
+    /// User-requested columns with virtual columns filtered out, plus
+    /// injected dependencies.
     pub columns: Vec<String>,
-    /// Virtual columns that need to be resolved from remote services after
-    /// ClickHouse hydration completes.
     pub virtual_columns: Vec<VirtualColumnRequest>,
     /// Dependency columns injected for virtual column resolvers that the
     /// user didn't explicitly request. These should be stripped from the
     /// final output after content resolution.
     pub injected_columns: Vec<String>,
-    /// Whether the destination table has a `traversal_path` column. When true,
-    /// the hydration pipeline can narrow scans via `startsWith(traversal_path, tp)`
-    /// using TP values extracted from the base query.
+    /// When true, the hydration pipeline can narrow scans via
+    /// `startsWith(traversal_path, tp)` using TP values from the base query.
     pub has_traversal_path: bool,
     /// Filters on virtual columns to apply in-memory after hydration resolves
-    /// their values. Each entry is `(column_name, filter)`.
+    /// their values.
     pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
 }
 
@@ -62,24 +51,16 @@ pub struct DynamicEntityColumns {
     pub virtual_columns: Vec<VirtualColumnRequest>,
     /// Columns injected as dependencies, not user-requested.
     pub injected_columns: Vec<String>,
-    /// Whether the destination table has a `traversal_path` column.
     pub has_traversal_path: bool,
 }
 
 /// A column that must be resolved from a remote service rather than ClickHouse.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VirtualColumnRequest {
-    /// The column name as the user sees it (e.g. "content").
     pub column_name: String,
-    /// Logical service name (e.g. "gitaly").
     pub service: String,
-    /// Logical operation name within the service (e.g. "blob_content").
     pub lookup: String,
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Plan generation
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Build the hydration plan for a compiled query.
 ///
@@ -227,8 +208,7 @@ fn build_dynamic_specs(
         .collect()
 }
 
-/// Inject depends_on columns required by virtual column resolvers.
-/// Returns the list of columns that were injected (not originally requested).
+/// Returns the columns that were injected (not originally requested).
 fn inject_virtual_dependencies(
     columns: &mut Vec<String>,
     virtual_columns: &[VirtualColumnRequest],
@@ -255,8 +235,6 @@ fn inject_virtual_dependencies(
     injected
 }
 
-/// Partition requested column names into CH-backed and virtual based on
-/// the ontology field definitions.
 fn split_columns(
     requested: &[String],
     node: &ontology::NodeEntity,
@@ -396,7 +374,6 @@ mod tests {
         let count = columns.iter().filter(|c| *c == "project_id").count();
         assert_eq!(count, 1, "project_id should not be duplicated");
         assert!(columns.contains(&"branch".to_string()));
-        // project_id was already present, so only branch is injected
         assert_eq!(injected, vec!["branch"]);
     }
 
@@ -475,8 +452,6 @@ mod tests {
         assert!(vcs.is_empty());
     }
 
-    // ── build_dynamic_specs: admin_only filtering ────────────────────────
-    //
     // Regression guard: before the fix, `dynamic_columns: "*"` on
     // Neighbors/PathFinding leaked `is_admin`/`is_auditor` because the
     // wildcard expansion pulled straight from the ontology without

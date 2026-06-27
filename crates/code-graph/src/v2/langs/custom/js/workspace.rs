@@ -5,11 +5,6 @@
 //! and hands the parsed results to every downstream consumer:
 //! `JsCrossFileResolver`, tsconfig discovery, the webpack evaluator, and
 //! `is_bun` detection.
-//!
-//! Before this existed, the pipeline re-read `package.json` twice, probed
-//! seven manifest filenames in one place and three more in another, and
-//! walked eight webpack-config candidates from inside the evaluator. All
-//! of that collapses into this struct.
 
 use oxc_resolver::{TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
 use std::path::{Path, PathBuf};

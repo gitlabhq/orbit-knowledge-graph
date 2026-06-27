@@ -1,6 +1,3 @@
-//! SDLC indexing pipeline metrics: per-entity throughput, watermark freshness,
-//! datalake query and transform latency.
-
 use crate::MetricSpec;
 use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
 

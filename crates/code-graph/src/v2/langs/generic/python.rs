@@ -18,8 +18,6 @@ use crate::v2::linker::rules::{
     ResolverHooks,
 };
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct PythonDsl;
 
@@ -139,7 +137,6 @@ impl DslLanguage for PythonDsl {
                 .metadata(metadata().type_annotation(field("type"))),
         ];
 
-        // Inside a class: functions become methods
         rules.extend(within(
             grandparent_is("class_definition"),
             vec![
@@ -159,12 +156,10 @@ impl DslLanguage for PythonDsl {
                 .name_from(field_chain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
             reference("call").name_from(field("function")),
-            // Instance field access: obj.email
             reference("attribute")
                 .name_from(field("attribute"))
                 .receiver_chain(&["object"])
                 .when(!parent_is("call")),
-            // Bare type references in annotations: x: MyClass, def foo() -> MyClass
             reference("type").name_from(text()),
         ]
     }
@@ -298,8 +293,6 @@ impl DslLanguage for PythonDsl {
         }
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct PythonRules;
 
@@ -472,7 +465,7 @@ fn insert_importable_path_prefixes(
 /// `from ..services import Auth` in `pkg.sub.mod` → `pkg.services`
 fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
     if !raw_path.starts_with('.') {
-        return None; // absolute import, no resolution needed
+        return None;
     }
     let dots = raw_path.chars().take_while(|&c| c == '.').count();
     let suffix = &raw_path[dots..];
@@ -481,7 +474,7 @@ fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str)
     // 1 dot = same package (drop last component), 2 dots = parent, etc.
     let parts: Vec<&str> = module_scope.split(sep).collect();
     if dots > parts.len() {
-        return None; // too many dots, can't resolve
+        return None;
     }
     let base = &parts[..parts.len() - dots];
     if suffix.is_empty() {

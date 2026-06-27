@@ -40,7 +40,6 @@ pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
 }
 
 /// Cooperative cancellation token. Clone-cheap (`Arc`).
-/// Set `cancel()` from any thread to request pipeline shutdown.
 #[derive(Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
 
@@ -55,7 +54,6 @@ impl CancellationToken {
         self.0.store(true, Ordering::Relaxed);
     }
 
-    /// Check if cancellation has been requested.
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
@@ -184,12 +182,6 @@ fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput]
     }
 }
 
-/// Immutable context shared across the entire pipeline run.
-/// Bundles config, tracer, root path, and cancellation — everything
-/// that doesn't change per-language or per-file.
-///
-/// Owned so it can be stored in `Arc` and shared across threads
-/// and into structs like `CodeGraph`.
 /// Max file timing entries retained (top-N by total_ms).
 const MAX_FILE_TIMINGS: usize = 100;
 
@@ -204,9 +196,7 @@ pub struct PipelineContext {
     /// `gkg.indexer.code.file_faults{kind}` and contribute to
     /// `files.processed{outcome="errored"}`.
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
-    /// Per-file timing entries collected across all languages.
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
-    /// Per-language phase timing entries.
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
 }
 
@@ -275,7 +265,6 @@ impl PipelineContext {
         }
     }
 
-    /// Drain collected timings, sorted by total_ms descending.
     pub fn drain_slowest_files(&self) -> Vec<FileTimingEntry> {
         let mut timings = self
             .file_timings
@@ -291,8 +280,6 @@ impl PipelineContext {
     }
 }
 
-/// Per-language context built inside `process_files`. Bundles the
-/// pipeline-wide context with the language-specific spec and rules.
 pub struct LanguageContext {
     pub pipeline: Arc<PipelineContext>,
     pub spec: crate::v2::dsl::types::LanguageSpec,
@@ -321,11 +308,6 @@ impl LanguageContext {
     }
 }
 
-/// Handle for streaming Arrow batches out of a pipeline.
-///
-/// Wraps an `OnBatch` callback, converter reference, and stat counters.
-/// Language pipelines call `send_graph()` for graph-based output
-/// or `send_raw()` for pre-built Arrow batches.
 #[derive(Clone, Copy)]
 pub struct GraphStatsCounters<'a> {
     directories: &'a AtomicUsize,
@@ -400,8 +382,6 @@ impl<'a> BatchTx<'a> {
 }
 
 impl BatchTx<'_> {
-    /// Count graph stats, convert to Arrow batches, and forward via
-    /// `on_batch`. Takes ownership -- graph is dropped after conversion.
     pub fn send_graph(&self, graph: CodeGraph) {
         self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
@@ -430,7 +410,6 @@ impl BatchTx<'_> {
         }
     }
 
-    /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
     pub fn send_raw(&self, table: String, batch: RecordBatch) {
         if let Err(error) = (self.on_batch)(&table, batch) {
             self.errors.lock().unwrap().push(
@@ -478,11 +457,6 @@ fn write_graph_direct(
     }
 }
 
-/// Trait for language-specific pipeline execution.
-///
-/// All pipelines stream their output through a `BatchTx` handle.
-/// Graph-based pipelines use `btx.send_graph()`.
-/// Batch-based pipelines use `btx.send_raw()`.
 pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
@@ -595,7 +569,6 @@ pub struct PipelineStats {
     pub edges_count: usize,
     /// Per-file timing entries, sorted by total_ms descending.
     pub slowest_files: Vec<FileTimingEntry>,
-    /// Per-language phase breakdown.
     pub language_timings: Vec<LanguageTimings>,
     /// Top-level pipeline phase durations (non-overlapping).
     pub phase_timings: PhaseTimings,
@@ -698,10 +671,6 @@ impl Pipeline {
         )
     }
 
-    /// Run the pipeline. Each language gets its own CPU thread.
-    /// Converted batches are forwarded to `on_batch` inline.
-    /// Graphs are dropped immediately after conversion.
-    ///
     /// Blocks until all languages finish processing.
     pub fn run_with_tracer(
         root: &Path,
@@ -774,7 +743,6 @@ impl Pipeline {
 
         std::thread::scope(|s| {
             for (family, files) in &files_by_family {
-                // Block until a slot opens
                 sem_rx.recv().unwrap();
 
                 let ctx = &ctx;
@@ -844,7 +812,6 @@ impl Pipeline {
                         }))
                     });
 
-                    // Pool dropped here — rayon threads freed
                     drop(pool);
 
                     match result.unwrap_or_else(|payload| {
@@ -940,11 +907,10 @@ impl Pipeline {
                     if let Some(cb) = &ctx.config.on_progress {
                         cb();
                     }
-                    // Release permit — next family can start
                     sem_tx.send(()).ok();
                 });
             }
-        }); // all threads join here
+        });
         let language_processing_ms = t_languages.elapsed().as_secs_f64() * 1000.0;
 
         let skipped = ctx
@@ -1075,8 +1041,6 @@ where
     }
 }
 
-// ── FamilyPipeline ──────────────────────────────────────────────
-
 /// Pipeline for language families with multiple member languages.
 ///
 /// Parses each file with its language-specific `LanguageSpec`, but
@@ -1144,7 +1108,6 @@ impl FamilyPipeline {
                 })
                 .collect();
 
-        // ── Phase 1a: parallel parse with per-file spec ─────────
         let pb = progress_bar(file_count as u64, "parse + graph");
 
         use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
@@ -1305,7 +1268,6 @@ impl FamilyPipeline {
             faults.extend(parsed_faults);
         }
 
-        // ── Phase 1b: add all defs to one shared CodeGraph ──────
         struct FileWithRefs {
             info: FileInfo,
             language: Language,
@@ -1363,7 +1325,6 @@ impl FamilyPipeline {
         graph.drop_construction_indexes();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
 
-        // ── Phase 1c: patch unresolved SSA aliases ──────────────
         for fwr in files_with_refs.iter_mut().flatten() {
             if fwr.unresolved_aliases.is_empty() {
                 continue;
@@ -1381,7 +1342,6 @@ impl FamilyPipeline {
             }
         }
 
-        // ── Phase 2: resolve refs with per-file lang_ctx ────────
         let needs_include = member_ctxs.values().any(|lc| {
             lc.rules
                 .import_strategies
@@ -1500,7 +1460,6 @@ impl FamilyPipeline {
             t2.elapsed()
         ));
 
-        // Insert Phase 2 edges and collect failed chains
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
         let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
 
@@ -1529,7 +1488,6 @@ impl FamilyPipeline {
             }
         }
 
-        // ── Phase 3: re-resolve failed chains ───────────────────
         if !all_inferred.is_empty() {
             for (def_nodes, inferred) in &all_inferred {
                 for (def_idx, rt) in inferred {
@@ -1660,7 +1618,6 @@ mod tests {
     use crate::v2::sink::{GraphConverter, SinkError};
     use crate::v2::types::{DefKind, NodeKind};
 
-    /// Test-only converter that captures CodeGraphs for inspection.
     struct TestCapture {
         graphs: std::sync::Mutex<Vec<CodeGraph>>,
     }
@@ -2053,8 +2010,6 @@ mod tests {
         assert_eq!(structural_files, vec!["listed.py".to_string()]);
     }
 
-    // ── Python fixture ──────────────────────────────────────────────
-
     #[test]
     fn python_definitions_fixture() {
         let path = fixture_path("python/definitions.py");
@@ -2083,8 +2038,6 @@ mod tests {
         assert!(class_count > 0, "Should find at least one class");
     }
 
-    // ── Java fixture ────────────────────────────────────────────────
-
     #[test]
     fn java_comprehensive_fixture() {
         let path = fixture_path("java/ComprehensiveJavaDefinitions.java");
@@ -2101,8 +2054,6 @@ mod tests {
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
         assert!(kinds.contains(&DefKind::Method), "Should have a method");
     }
-
-    // ── Kotlin fixture ──────────────────────────────────────────────
 
     #[test]
     fn kotlin_comprehensive_fixture() {
@@ -2121,8 +2072,6 @@ mod tests {
         assert!(kinds.contains(&DefKind::Function), "Should have a function");
     }
 
-    // ── C# fixture ──────────────────────────────────────────────────
-
     #[test]
     fn csharp_comprehensive_fixture() {
         let path = fixture_path("csharp/ComprehensiveCSharp.cs");
@@ -2138,8 +2087,6 @@ mod tests {
         let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
     }
-
-    // ── Full pipeline e2e ───────────────────────────────────────────
 
     #[test]
     fn full_pipeline_on_fixture_directory() {

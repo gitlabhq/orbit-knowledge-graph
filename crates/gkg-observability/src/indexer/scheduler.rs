@@ -1,5 +1,3 @@
-//! Scheduler metrics: per-task cadence, duration, publish/skip counts, errors.
-
 use crate::MetricSpec;
 use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
 

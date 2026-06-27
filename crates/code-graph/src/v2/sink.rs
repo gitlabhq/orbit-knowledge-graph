@@ -29,5 +29,4 @@ impl From<arrow::error::ArrowError> for SinkError {
     }
 }
 
-/// Callback type for receiving converted batches from the pipeline.
 pub type OnBatch = dyn Fn(&str, RecordBatch) -> Result<(), SinkError> + Send + Sync;

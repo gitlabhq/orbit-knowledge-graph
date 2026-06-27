@@ -1,7 +1,5 @@
-//! Proc macros for the compiler pipeline.
-//!
-//! - `define_compiler_ctx! { .. }` — generates per-pipeline context structs with
-//!   per-phase runtime-enforced field access grants
+//! `define_compiler_ctx! { .. }` generates per-pipeline context structs with
+//! per-phase runtime-enforced field access grants.
 
 use proc_macro::TokenStream;
 
@@ -20,8 +18,7 @@ fn to_pascal(field_name: &str) -> String {
         .collect()
 }
 
-/// Generate per-pipeline context structs and per-phase runtime-enforced
-/// field access grants.
+/// Per-phase field access grants are runtime-enforced.
 ///
 /// See `compiler/src/config.rs` for the full DSL syntax.
 #[proc_macro]

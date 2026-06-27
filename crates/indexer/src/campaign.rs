@@ -8,12 +8,10 @@
 
 use std::sync::RwLock;
 
-/// Human-readable, version-scoped campaign id for a migration to `version`.
 pub fn campaign_id_for_version(version: u32) -> String {
     format!("migration-v{version}")
 }
 
-/// In-memory holder for the currently active campaign id.
 #[derive(Debug, Default)]
 pub struct CampaignState {
     current: RwLock<Option<String>>,

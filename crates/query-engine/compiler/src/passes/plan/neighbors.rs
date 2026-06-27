@@ -1,5 +1,3 @@
-//! Neighbors plan: single-hop edge scan for adjacent entities.
-
 use std::collections::HashMap;
 
 use ontology::constants::*;

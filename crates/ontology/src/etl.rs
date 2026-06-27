@@ -1,8 +1,3 @@
-//! ETL configuration types for the Knowledge Graph indexer.
-//!
-//! These types define how data is extracted, transformed, and loaded from
-//! source tables into the Knowledge Graph.
-
 use std::collections::BTreeMap;
 
 /// Default transform: the built-in SQL projection. Nodes and standalone edges
@@ -22,16 +17,11 @@ pub enum EtlScope {
 /// `fk_column IN (SELECT id FROM _batch)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageJoin {
-    /// Datalake table to join (e.g. `siphon_system_note_metadata`).
     pub table: String,
-    /// Table alias (e.g. `snm`).
     pub alias: String,
-    /// FK column on the joined table that references the base table's `id`
-    /// (e.g. `note_id`).
+    /// FK column on the joined table that references the base table's `id`.
     pub fk_column: String,
-    /// Columns to select from the joined table (e.g. `["action"]`).
     pub select: Vec<String>,
-    /// Extra WHERE predicate on the joined table (e.g. `{{deleted_column}} = false`).
     pub where_clause: Option<String>,
     /// Watermark column for `argMax` deduplication. Always filled by the
     /// ontology loader; defaults to the ontology's `default_watermark`.
@@ -54,10 +44,8 @@ pub enum EdgeDirection {
     Incoming,
 }
 
-/// How the edge target type is determined.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EdgeTarget {
-    /// A fixed node type (e.g., "User").
     Literal(String),
     /// Type read from a column at runtime (e.g., "noteable_type").
     Column {
@@ -123,13 +111,7 @@ pub enum EtlConfig {
         /// Used to qualify bare column references (e.g. `id`) that would
         /// otherwise be ambiguous across JOINed tables.
         table_alias: Option<String>,
-        /// Join pushed below the page `LIMIT` to avoid materializing the
-        /// full joined table in ClickHouse's hash-join build phase.
-        /// When set, the lowering wraps the base query in a `_batch` CTE
-        /// and enriches via `fk IN (SELECT id FROM _batch)`.
         page_join: Option<Box<PageJoin>>,
-        /// Edges keyed by source column name. Each column may declare one or
-        /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
 }
@@ -163,7 +145,6 @@ impl EtlConfig {
         }
     }
 
-    /// Returns the main table alias for Query-type ETLs, if set.
     /// Table-type ETLs always return `None` (single table, no ambiguity).
     pub fn table_alias(&self) -> Option<&str> {
         match self {

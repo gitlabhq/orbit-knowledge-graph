@@ -23,8 +23,6 @@ const MAX_SSA_READ_DEPTH: usize = 10_000;
 const SSA_READ_RED_ZONE: usize = 128 * 1024;
 const SSA_READ_STACK_SEGMENT: usize = 4 * 1024 * 1024;
 
-// ── SSA types (local to the parser) ─────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct BlockId(pub usize);
 
@@ -75,7 +73,6 @@ pub(crate) struct SsaStats {
     pub depth_capped: u64,
 }
 
-/// The concrete values a variable resolves to at a given program point.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReachingDefs<'a> {
     pub values: SmallVec<[SsaValue<'a>; 2]>,
@@ -97,7 +94,6 @@ impl SsaValue<'_> {
         }
     }
 
-    /// Human-readable representation for trace output.
     pub(crate) fn trace_display(&self) -> String {
         match self {
             SsaValue::LocalDef(i) => format!("LocalDef({i})"),
@@ -114,8 +110,6 @@ impl SsaValue<'_> {
     }
 }
 
-// ── Phi node ────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 struct PhiNode<'a> {
     block: BlockId,
@@ -127,19 +121,12 @@ struct PhiNode<'a> {
     witnesses: [Option<SsaValue<'a>>; 2],
 }
 
-// ── Block ───────────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 struct Block {
     predecessors: SmallVec<[BlockId; 2]>,
     sealed: bool,
 }
 
-// ── SSA Resolver ────────────────────────────────────────────────
-
-/// Parser-level SSA engine (Braun et al. algorithm).
-///
-/// All variable names are `&'a str` backed by `FileArena`.
 pub(crate) struct SsaEngine<'a> {
     blocks: Vec<Block>,
     phis: Vec<PhiNode<'a>>,
@@ -192,7 +179,6 @@ impl<'a> SsaEngine<'a> {
         self
     }
 
-    /// Create a new basic block. Returns its ID.
     pub(crate) fn add_block(&mut self) -> BlockId {
         let id = BlockId(self.blocks.len());
         self.blocks.push(Block {
@@ -204,7 +190,6 @@ impl<'a> SsaEngine<'a> {
         id
     }
 
-    /// Add a predecessor edge: `pred` flows into `block`.
     pub(crate) fn add_predecessor(&mut self, block: BlockId, pred: BlockId) {
         self.blocks[block.0].predecessors.push(pred);
         trace!(
@@ -216,7 +201,6 @@ impl<'a> SsaEngine<'a> {
         );
     }
 
-    /// Create a sealed successor block with a single predecessor.
     pub fn add_sealed_successor(&mut self, predecessor: BlockId) -> BlockId {
         let block = self.add_block();
         self.add_predecessor(block, predecessor);
@@ -224,7 +208,6 @@ impl<'a> SsaEngine<'a> {
         block
     }
 
-    /// Create and seal a join block from the provided predecessors.
     pub fn add_sealed_join<I>(&mut self, predecessors: I) -> BlockId
     where
         I: IntoIterator<Item = BlockId>,
@@ -237,7 +220,6 @@ impl<'a> SsaEngine<'a> {
         block
     }
 
-    /// Create a sealed branch block from a shared predecessor.
     pub fn add_branch_block(&mut self, predecessor: BlockId) -> BlockId {
         self.add_sealed_successor(predecessor)
     }
@@ -256,7 +238,6 @@ impl<'a> SsaEngine<'a> {
         self.add_sealed_join(predecessors)
     }
 
-    /// Create a loop header/body pair from the current predecessor block.
     pub fn begin_loop(&mut self, predecessor: BlockId) -> (BlockId, BlockId) {
         let header = self.add_block();
         self.add_predecessor(header, predecessor);
@@ -264,16 +245,13 @@ impl<'a> SsaEngine<'a> {
         (header, body)
     }
 
-    /// Close a loop by wiring the body exit back into the header and creating
-    /// a sealed exit block.
     pub fn finish_loop(&mut self, header: BlockId, body_exit: BlockId) -> BlockId {
         self.add_predecessor(header, body_exit);
         self.seal_block(header);
         self.add_sealed_successor(header)
     }
 
-    /// Seal a block — all predecessors are now known.
-    /// Resolves any incomplete phi nodes that were deferred.
+    /// All predecessors are now known; resolves any incomplete phi nodes that were deferred.
     pub(crate) fn seal_block(&mut self, block: BlockId) {
         if let Some(incomplete) = self.incomplete_phis.remove(&block) {
             for (variable, phi_id) in incomplete {
@@ -284,7 +262,6 @@ impl<'a> SsaEngine<'a> {
         trace!(self.tracer, SsaBlockSealed { block_id: block.0 });
     }
 
-    /// Seal any blocks that haven't been sealed yet.
     pub(crate) fn seal_remaining(&mut self) {
         for id in 0..self.blocks.len() {
             if !self.blocks[id].sealed {
@@ -293,16 +270,14 @@ impl<'a> SsaEngine<'a> {
         }
     }
 
-    /// Record a variable definition: `variable` is defined as `value` in `block`.
-    /// On-the-fly copy propagation (Section 3.1): if the value is an alias
-    /// to another variable, resolve it immediately instead of deferring.
-    /// Check if a variable has been written in a specific block.
     pub(crate) fn has_variable_in_block(&self, variable: &str, block: BlockId) -> bool {
         self.current_def
             .get(variable)
             .is_some_and(|blocks| blocks.contains_key(&block))
     }
 
+    /// On-the-fly copy propagation (Section 3.1): an alias value is resolved
+    /// to its target immediately instead of being deferred.
     pub(crate) fn write_variable(
         &mut self,
         variable: &'a str,
@@ -334,7 +309,6 @@ impl<'a> SsaEngine<'a> {
         self.stats.writes += 1;
     }
 
-    /// Look up a variable's reaching definitions without recording the read.
     pub(crate) fn read_variable_stateless(
         &mut self,
         variable: &'a str,
@@ -375,15 +349,11 @@ impl<'a> SsaEngine<'a> {
         self.read_variable_internal(variable, block)
     }
 
-    /// Expand a raw SSA value into its reaching definitions.
     pub(crate) fn expand_value(&self, value: &SsaValue<'a>) -> ReachingDefs<'a> {
         self.resolve_value(value)
     }
 
-    // ── Internal: Braun et al. algorithm ────────────────────────
-
     fn read_variable_internal(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
-        // Local value numbering: check current block first
         if let Some(block_defs) = self.current_def.get(&variable)
             && let Some(value) = block_defs.get(&block)
         {
@@ -532,7 +502,6 @@ impl<'a> SsaEngine<'a> {
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
         for pred in preds {
             let val = self.read_variable_internal(variable, pred);
-            // Update witnesses: track first two distinct non-self operands.
             if val != SsaValue::Phi(phi_id) {
                 let phi = &mut self.phis[phi_id.0];
                 if phi.witnesses[0].is_none() {
@@ -586,14 +555,12 @@ impl<'a> SsaEngine<'a> {
         let variable = self.phis[phi_id.0].variable;
         let block = self.phis[phi_id.0].block;
 
-        // Update current_def if it points to this phi
         if let Some(block_defs) = self.current_def.get_mut(&variable)
             && block_defs.get(&block) == Some(&SsaValue::Phi(phi_id))
         {
             block_defs.insert(block, replacement.clone());
         }
 
-        // Check if any other phis using this one become trivial
         let phi_users: Vec<PhiId> = self
             .phis
             .iter()
@@ -602,7 +569,6 @@ impl<'a> SsaEngine<'a> {
             .map(|(i, _)| PhiId(i))
             .collect();
 
-        // Replace this phi in all users' operands and invalidate witnesses
         let phi_val = SsaValue::Phi(phi_id);
         for user_id in &phi_users {
             let user = &mut self.phis[user_id.0];
@@ -619,7 +585,6 @@ impl<'a> SsaEngine<'a> {
             }
         }
 
-        // Recursively try to simplify users
         for user_id in phi_users {
             self.try_remove_trivial_phi(user_id);
         }
@@ -656,7 +621,6 @@ impl<'a> SsaEngine<'a> {
             return;
         }
 
-        // Build a DiGraph of phi-to-phi edges for SCC computation.
         let mut phi_graph = DiGraph::<PhiId, ()>::new();
         let mut phi_to_node: FxHashMap<PhiId, NodeIndex> = FxHashMap::default();
 
@@ -685,7 +649,6 @@ impl<'a> SsaEngine<'a> {
             let scc: Vec<PhiId> = scc_nodes.iter().map(|&n| phi_graph[n]).collect();
             let scc_set: FxHashSet<PhiId> = scc.iter().copied().collect();
 
-            // Collect external operands (values outside the SCC).
             let mut outer_values: FxHashSet<SsaValue<'a>> = FxHashSet::default();
             let mut inner_phis: Vec<PhiId> = Vec::new();
 
@@ -706,7 +669,6 @@ impl<'a> SsaEngine<'a> {
             }
 
             if outer_values.len() == 1 {
-                // All phis in the SCC produce the same external value — collapse.
                 let replacement = outer_values.into_iter().next().unwrap();
                 trace!(
                     self.tracer,
@@ -717,7 +679,6 @@ impl<'a> SsaEngine<'a> {
                 );
                 let phi_vals: Vec<SsaValue<'a>> = scc.iter().map(|&p| SsaValue::Phi(p)).collect();
                 for &pid in &scc {
-                    // Update current_def
                     let variable = self.phis[pid.0].variable;
                     let block = self.phis[pid.0].block;
                     if let Some(block_defs) = self.current_def.get_mut(&variable)
@@ -727,7 +688,6 @@ impl<'a> SsaEngine<'a> {
                     }
                     self.stats.phis_trivial += 1;
                 }
-                // Replace all references to SCC phis in ALL phi operands.
                 for phi in &mut self.phis {
                     for op in &mut phi.operands {
                         if phi_vals.contains(op) {
@@ -744,15 +704,12 @@ impl<'a> SsaEngine<'a> {
                     }
                 }
             } else if outer_values.len() > 1 && !inner_phis.is_empty() {
-                // Multiple external values — recurse on inner phis that
-                // have no external operands (they might form a sub-SCC).
+                // Inner phis with no external operands may form a sub-SCC.
                 self.remove_redundant_phi_sccs_inner(&inner_phis, depth + 1);
             }
         }
     }
 
-    /// Expand a value into its concrete reaching definitions.
-    /// Phi nodes are recursively expanded. Cycles are handled via visited set.
     fn resolve_value(&self, value: &SsaValue<'a>) -> ReachingDefs<'a> {
         // Fast path: non-Phi values resolve directly without allocating HashSets.
         match value {
@@ -768,7 +725,7 @@ impl<'a> SsaEngine<'a> {
             SsaValue::Opaque | SsaValue::Marker => {
                 return ReachingDefs::default();
             }
-            SsaValue::Phi(_) => {} // fall through to full resolution
+            SsaValue::Phi(_) => {}
         }
 
         let mut values = SmallVec::new();
@@ -964,7 +921,6 @@ mod tests {
         // Read while header is unsealed: forces an incomplete phi.
         let _ = ssa.read_variable_stateless("x", body);
 
-        // Back-edge writes the same value as entry.
         ssa.write_variable("x", body, SsaValue::LocalDef(0));
 
         ssa.seal_block(body);
@@ -1121,13 +1077,10 @@ mod tests {
         let right = ssa.add_block();
         let exit = ssa.add_block();
 
-        // entry → left, entry → right
         ssa.add_predecessor(left, entry);
         ssa.add_predecessor(right, entry);
-        // left ←→ right (irreducible)
         ssa.add_predecessor(left, right);
         ssa.add_predecessor(right, left);
-        // both → exit
         ssa.add_predecessor(exit, left);
         ssa.add_predecessor(exit, right);
 
@@ -1149,7 +1102,6 @@ mod tests {
         assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 
-    /// SCC with multiple external values — should NOT collapse.
     #[test]
     fn scc_no_collapse_multiple_values() {
         let mut ssa = SsaEngine::new();
@@ -1166,7 +1118,6 @@ mod tests {
         ssa.add_predecessor(exit, right);
 
         ssa.write_variable("x", entry, SsaValue::LocalDef(0));
-        // Write a different value in one of the cycle blocks
         ssa.write_variable("x", left, SsaValue::LocalDef(1));
 
         ssa.seal_block(entry);
@@ -1177,7 +1128,6 @@ mod tests {
         ssa.remove_redundant_phi_sccs();
 
         let result = ssa.read_variable_stateless("x", exit);
-        // Should have both values — SCC not collapsed
         assert!(
             result.values.contains(&SsaValue::LocalDef(0))
                 && result.values.contains(&SsaValue::LocalDef(1)),
@@ -1186,7 +1136,6 @@ mod tests {
         );
     }
 
-    // A zero budget must trip during a deep read and degrade to Opaque.
     #[test]
     fn ssa_budget_degrades_deep_read() {
         let mut ssa = SsaEngine::new();

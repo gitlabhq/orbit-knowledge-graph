@@ -1,5 +1,3 @@
-//! Shared types used across the compiler and downstream crates.
-
 use crate::error::{QueryError, Result};
 use regex::Regex;
 use serde::Deserialize;
@@ -19,13 +17,10 @@ pub const DEFAULT_PATH_ACCESS_LEVEL: u32 = 20;
 /// `CloudConnector.gitlab_realm` in Rails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Realm {
-    /// GitLab.com (SaaS).
     #[serde(alias = "saas")]
     SaaS,
-    /// Customer-hosted GitLab instance.
     #[serde(rename = "self-managed", alias = "self_managed")]
     SelfManaged,
-    /// GitLab-managed single-tenant instance.
     #[serde(alias = "dedicated")]
     Dedicated,
 }
@@ -101,7 +96,6 @@ pub struct SecurityContext {
     pub traversal_paths: Vec<TraversalPath>,
     pub admin: bool,
     pub access_level: Option<AccessLevel>,
-    /// Deployment realm from the JWT.
     pub realm: Option<Realm>,
     /// Whether the user is a GitLab team member (from the JWT
     /// `is_gitlab_team_member` claim). Only meaningful on SaaS.

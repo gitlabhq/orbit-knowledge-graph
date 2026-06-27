@@ -1,6 +1,5 @@
 use tokio_util::sync::CancellationToken;
 
-/// Waits for SIGINT or SIGTERM, then cancels the token.
 pub async fn wait_for_signal(shutdown: CancellationToken) {
     #[cfg(unix)]
     {

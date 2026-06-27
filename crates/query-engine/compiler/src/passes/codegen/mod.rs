@@ -1,8 +1,5 @@
-//! Codegen: AST → SQL
-//!
-//! Backend-specific code generators translate the shared AST into parameterized
-//! SQL for a target database. Each backend lives in its own submodule and
-//! exposes a single `codegen()` entry point with the same signature.
+//! Each backend lives in its own submodule and exposes a single `codegen()`
+//! entry point with the same signature.
 
 pub mod clickhouse;
 pub mod ddl;
@@ -15,11 +12,8 @@ use crate::passes::hydrate::HydrationPlan;
 pub use gkg_utils::clickhouse::ParamValue;
 use std::collections::HashMap;
 
-// Re-export the ClickHouse backend as the default `codegen` function so
-// existing call-sites (`codegen::codegen(...)`) keep working unchanged.
 pub use clickhouse::codegen;
 
-/// Which SQL dialect a [`ParameterizedQuery`] was generated for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SqlDialect {
     #[default]
@@ -47,10 +41,8 @@ pub struct CompiledQueryContext {
 }
 
 impl ParameterizedQuery {
-    /// Render SQL with parameters inlined for debugging/observability.
-    /// Replaces ClickHouse `{name:Type}` placeholders.
-    ///
-    /// **Not for execution** — use parameterized queries to prevent injection.
+    /// **Not for execution** — inlines params into SQL; use parameterized
+    /// queries to prevent injection.
     pub fn render(&self) -> String {
         use regex::Regex;
 

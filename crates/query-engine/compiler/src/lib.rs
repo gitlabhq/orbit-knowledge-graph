@@ -93,10 +93,6 @@ use std::sync::Arc;
 
 use config::CompilerCtx as _;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Compile a JSON query into a [`CompiledQueryContext`].
 ///
 /// The context contains the parameterized SQL, bind parameters, result context
@@ -163,10 +159,6 @@ pub fn compile_input(
         .count_err()
 }
 
-// Pipeline presets are in `pipelines.rs`.
-// Tests are in `tests/compiler_tests.rs` and `tests/ontology_tests.rs`.
-
-/// Shared test helpers available to all test modules in this crate.
 #[cfg(test)]
 pub(crate) mod testkit {
     use crate::types::{AccessLevel, SecurityContext, TraversalPath};
@@ -197,8 +189,6 @@ mod tests {
         crate::testkit::non_admin_ctx()
     }
 
-    /// Compile a query JSON string against the embedded ontology and return
-    /// the rendered ClickHouse SQL.
     fn compile_sql(query: &str) -> String {
         compile(query, &ONTOLOGY, &security_ctx())
             .expect("should compile")
@@ -320,9 +310,6 @@ mod tests {
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // FK elision replaces the edge table scan with a direct FK join
-        // (mr.author_id → u.id). Verify that node tables are prefixed and
-        // the FK join condition is used instead of the edge table.
         assert!(
             sql.contains("v1_gl_merge_request") && sql.contains("v1_gl_user"),
             "traversal SQL should use prefixed node tables, got: {sql}"
@@ -333,10 +320,6 @@ mod tests {
         );
     }
 
-    /// Aggregation with a relationship and a property-less `count(target)`
-    /// must resolve correctly without ClickHouse `Database does not exist`
-    /// errors. The lowerer uses FK-shortcut joins for IN_PROJECT,
-    /// joining MR and Project via `mr.project_id` instead of an edge scan.
     #[test]
     fn aggregation_with_relationship_emits_no_bare_node_ref() {
         let query = r#"{
@@ -353,22 +336,16 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // MR table is joined via FK shortcut (mr.project_id = p.id).
         assert!(
             sql.contains("mr.project_id"),
             "FK-shortcut join must reference mr.project_id, got:\n{sql}"
         );
-        // Project node_ids constraint must survive.
         assert!(
             sql.contains("278964"),
             "Project node_ids filter must survive, got:\n{sql}"
         );
     }
 
-    /// Org-wide `count(target) GROUP BY group` with no filters and no pinned
-    /// IDs must emit bare `COUNT()`. A column argument like
-    /// `COUNT(e0.source_id)` forces ClickHouse to read and null-check that
-    /// column, which is unnecessary when counting rows.
     #[test]
     fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
         let query = r#"{
@@ -405,10 +382,6 @@ mod tests {
         );
     }
 
-    /// When the target node has filters, the count must still be bounded
-    /// by those filters. The lowerer uses FK-shortcut joins for
-    /// IN_PROJECT, so the MR table is joined directly and the state
-    /// filter appears as `mr.state = 'opened'` in the WHERE clause.
     #[test]
     fn filtered_edge_only_count_keeps_column_arg_for_count_if() {
         let query = r#"{
@@ -431,12 +404,10 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // FK-shortcut join means bare COUNT() bounded by WHERE clause.
         assert!(
             sql.contains("COUNT()"),
             "count must be bare COUNT() with WHERE bounding rows, got:\n{sql}"
         );
-        // State filter applied on the MR dedup subquery.
         assert!(
             sql.contains("state = 'opened'"),
             "state filter must reach the SQL on the MR subquery, got:\n{sql}"
@@ -536,9 +507,8 @@ mod tests {
         );
     }
 
-    /// A single-hop edge scan cannot fan a node out, so it stays a plain scan.
-    /// Deduplicating the hot single-edge path would cost an unnecessary
-    /// aggregation.
+    /// A single-hop edge scan cannot fan a node out, so it stays a plain scan;
+    /// deduplicating the hot single-edge path would cost an unnecessary aggregation.
     #[test]
     fn single_edge_scan_stays_plain() {
         let query = r#"{
@@ -562,9 +532,6 @@ mod tests {
         );
     }
 
-    /// Traversal with `id_range` (no `node_ids` or `filters`) must produce
-    /// range conditions that reach the SQL. FK elision pushes range
-    /// conditions onto the User node table subquery.
     #[test]
     fn traversal_id_range_produces_range_conditions_in_sql() {
         let query = r#"{
@@ -579,8 +546,6 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // FK elision replaces edge scans: range conditions are pushed to
-        // the User node table subquery instead of the edge WHERE.
         assert!(
             sql.contains("u.id >= 1"),
             "range lower bound must reach the User subquery WHERE, got:\n{sql}"
@@ -591,8 +556,6 @@ mod tests {
         );
     }
 
-    /// Path-finding with a filtered endpoint (no `node_ids`) must produce
-    /// a `_nf_*` CTE that resolves the filter into IDs for frontier seeding.
     #[test]
     fn path_finding_filtered_endpoint_produces_anchor_cte() {
         let query = r#"{
@@ -618,8 +581,6 @@ mod tests {
         );
     }
 
-    /// Path-finding with id_range on an endpoint must produce a `_nf_*` CTE
-    /// with range conditions.
     #[test]
     fn path_finding_id_range_endpoint_produces_anchor_cte() {
         let query = r#"{
@@ -672,12 +633,10 @@ mod tests {
             sql.contains("f.traversal_path = b.traversal_path"),
             "frontier intersection should stay within one traversal_path, got:\n{sql}"
         );
-        // lowerer uses `forward` CTE seeded from _nf_start.
         assert!(
             sql.contains("forward") && sql.contains("FROM _nf_start"),
             "forward CTE should seed from _nf_start, got:\n{sql}"
         );
-        // Traversal-path scope applied to edge scans inside the forward CTE.
         assert!(
             sql.contains(
                 "traversal_path IN (SELECT traversal_path FROM _path_scope_traversal_paths)"
@@ -761,9 +720,6 @@ mod tests {
         );
     }
 
-    /// Wildcard path finding passes `*` through as the relationship_kind
-    /// on all hops. The lowerer scans all edge tables (UNION ALL) to
-    /// cover all relationship types.
     #[test]
     fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
         let query = r#"{
@@ -779,12 +735,10 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // Wildcard path finding should scan all edge tables.
         assert!(
             sql.contains("gl_ci_edge") && sql.contains("gl_code_edge") && sql.contains("gl_edge"),
             "wildcard path finding should UNION ALL across all edge tables, got:\n{sql}"
         );
-        // Endpoint entity kinds are constrained.
         assert!(
             sql.contains("e1.source_kind = 'User'"),
             "forward start must constrain source_kind = User, got:\n{sql}"
@@ -912,11 +866,6 @@ mod tests {
         );
     }
 
-    /// Multi-hop traversal must correctly resolve entity relationships.
-    /// FK elision replaces edge table scans with direct FK column joins
-    /// (e.g. `mr.project_id`, `mr.author_id`), which implicitly constrain
-    /// entity kinds through the typed FK targets. Synthetic edge columns
-    /// in the SELECT list carry the kind metadata for result formatting.
     #[test]
     fn multi_hop_traversal_constrains_kind_on_every_edge() {
         let query = r#"{
@@ -935,9 +884,6 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // FK elision replaces edge scans with direct FK column joins.
-        // IN_PROJECT → mr.project_id, AUTHORED → mr.author_id.
-        // Kind constraints are implicit through the FK join targets.
         assert!(
             sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
             "IN_PROJECT must be resolved via FK join on project_id, got:\n{sql}"
@@ -946,7 +892,6 @@ mod tests {
             sql.contains("u.id = mr.author_id") || sql.contains("mr.author_id"),
             "AUTHORED must be resolved via FK join on author_id, got:\n{sql}"
         );
-        // Synthetic edge columns in the SELECT list carry the kind info.
         assert!(
             sql.contains("'MergeRequest' AS e0_src_type"),
             "e0 source type must be MergeRequest, got:\n{sql}"
@@ -957,12 +902,6 @@ mod tests {
         );
     }
 
-    /// Aggregation `count(MR) GROUP BY Project` with a User node + AUTHORED
-    /// rel that the DSL forces for structural connectivity but never
-    /// references in the aggregation must drop the `gl_user` table join,
-    /// the `_cascade_u` CTE, and any User-aliased WHERE conjuncts. The
-    /// `gl_edge` join for AUTHORED stays — it preserves the "MR has an
-    /// author" semi-join semantics. See findings G1 in the dual-cliff MR.
     #[test]
     fn aggregation_prunes_unreferenced_node_table_join() {
         let query = r#"{
@@ -989,7 +928,6 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // gl_user and any u-alias CTE should be gone.
         assert!(
             !sql.contains("gl_user AS u") && !sql.contains("FROM gl_user"),
             "gl_user join must be pruned for aggregation that never \
@@ -999,23 +937,16 @@ mod tests {
             !sql.contains("_nf_u"),
             "User-aliased CTEs must be dropped, got:\n{sql}"
         );
-        // Direct FINAL scans do not need to project unused FK columns just to
-        // feed a dedup subquery; the pruned User node should leave no user
-        // table or CTE artifacts behind.
         assert!(
             !sql.contains("author_id"),
             "unused AUTHORED FK column should not be projected, got:\n{sql}"
         );
-        // Project + MR work products survive.
         assert!(
             sql.contains("gl_project AS p") || sql.contains("FROM gl_project"),
             "gl_project must remain in FROM, got:\n{sql}"
         );
     }
 
-    /// Neither `_target_mr_ids` nor `_cascade_mr` CTEs should appear.
-    /// FK elision replaces edge scans with direct FK column joins
-    /// (e.g. `mr.author_id`, `mr.project_id`) when FK columns exist.
     #[test]
     fn aggregation_skips_redundant_target_ids_cte_when_cascade_present() {
         let query = r#"{
@@ -1040,8 +971,6 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // FK elision replaces edge-chain JOINs with direct FK joins.
-        // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
         assert!(
             sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
             "User node_ids filter must be pushed to FK column, got:\n{sql}"
@@ -1052,9 +981,6 @@ mod tests {
         );
     }
 
-    /// Multi-hop traversal with a pinned source node must generate UNION ALL
-    /// arms for each depth. The lowerer uses inline edge JOINs within
-    /// each arm instead of frontier CTEs.
     #[test]
     fn multi_hop_traversal_generates_hop_frontier_ctes() {
         let query = r#"{
@@ -1075,26 +1001,20 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // lowerer uses UNION ALL arms for variable-length hops.
         assert!(
             sql.contains("UNION ALL"),
             "variable-length traversal must use UNION ALL arms, got:\n{sql}"
         );
-        // Pinned source node_ids must be pushed into the arms.
         assert!(
             sql.contains("e0.source_id = 1"),
             "pinned User node_ids must reach the outer WHERE, got:\n{sql}"
         );
-        // Depth-2 and depth-3 arms must use edge JOINs.
         assert!(
             sql.contains("e1.target_id = e2.source_id"),
             "depth-2 arm must chain edges via JOIN, got:\n{sql}"
         );
     }
 
-    /// Multi-hop traversal with a pinned to-side node. The lowerer
-    /// uses UNION ALL arms with inline edge JOINs instead of frontier CTEs.
-    /// The pinned `node_ids` filter is pushed into the outer WHERE.
     #[test]
     fn multi_hop_traversal_skips_frontiers_without_selectivity() {
         let query = r#"{
@@ -1119,17 +1039,12 @@ mod tests {
             sql.contains("UNION ALL"),
             "variable-length traversal should use UNION ALL arms, got:\n{sql}"
         );
-        // Pinned to-side node_ids filter must be pushed to outer WHERE.
         assert!(
             sql.contains("e0.target_id = 1"),
             "pinned to-side node_ids must reach the outer WHERE, got:\n{sql}"
         );
     }
 
-    /// Multi-hop aggregation with a pinned root must generate a UNION ALL
-    /// subquery with depth-1 and depth-2 arms for the variable-length
-    /// CONTAINS relationship. The lowerer uses inline UNION ALL instead
-    /// of cascade CTEs.
     #[test]
     fn multi_hop_aggregation_generates_cascade_cte() {
         let query = r#"{
@@ -1152,7 +1067,6 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // lowerer emits UNION ALL arms for variable-length hops.
         assert!(
             sql.contains("UNION ALL"),
             "multi-hop aggregation should use UNION ALL for variable-length hops, got:\n{sql}"
@@ -1167,13 +1081,9 @@ mod tests {
         );
     }
 
-    /// Intermediate nodes (referenced by 2+ relationships) must keep
-    /// connectivity even when absent from the aggregation target/group_by.
-    /// Variable-length CONTAINS×{1..3} traversal: each UNION ALL arm should
-    /// carry static `e1.source_kind = 'Group'` and `e<depth>.target_kind = 'Project'`
-    /// literals so ClickHouse can use the kind-led PK projection
-    /// (`by_rel_source_kind`/`by_rel_target_kind`) for granule pruning at every
-    /// depth, instead of relying on dynamic IN-subqueries.
+    /// Each UNION ALL arm must carry static kind literals so ClickHouse can use
+    /// the kind-led PK projection (`by_rel_source_kind`/`by_rel_target_kind`) for
+    /// granule pruning at every depth, instead of dynamic IN-subqueries.
     #[test]
     fn variable_length_traversal_emits_per_arm_kind_literals() {
         let query = r#"{
@@ -1213,9 +1123,6 @@ mod tests {
         );
     }
 
-    // ── Denormalization pass tests ──────────────────────────────────────
-
-    /// Compile a User→MR REVIEWER traversal with the given MR filter JSON fragment.
     fn denorm_traversal_sql(mr_filter: &str) -> String {
         let query = format!(
             r#"{{
@@ -1348,9 +1255,6 @@ mod tests {
         );
     }
 
-    /// When node_ids are present alongside filters, the lowerer applies
-    /// both the node_ids filter (e0.target_id IN [...]) and the denorm tag
-    /// filter (has on target_tags) to the edge. Both filters narrow the scan.
     #[test]
     fn denorm_skips_rewrite_when_node_ids_present() {
         let query = r#"{
@@ -1366,12 +1270,10 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // Node_ids filter is pushed to the edge.
         assert!(
             sql.contains("e0.target_id IN [1, 2, 3]"),
             "node_ids must be pushed to edge target_id filter, got:\n{sql}"
         );
-        // Denorm tag is also applied on the edge for additional selectivity.
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm tag filter is applied alongside node_ids, got:\n{sql}"
@@ -1400,12 +1302,10 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // lowerer pushes the denorm filter to edge tags directly.
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
         );
-        // No _nf_mr CTE needed — edge tag handles the filter.
         assert!(
             !sql.contains("_nf_mr"),
             "lowerer should not emit _nf_mr when filter is fully denormalized, got:\n{sql}"
@@ -1933,7 +1833,6 @@ mod tests {
 
     #[test]
     fn cross_namespace_fk_chain_elides_to_node_joins() {
-        // FK-backed chain reaching the global User hub: elides to node joins, scoping the in-namespace nodes but not the hub.
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -2003,8 +1902,6 @@ mod tests {
         );
     }
 
-    /// Single-reference CTEs must NOT be materialized — inlining lets
-    /// ClickHouse push predicates through and is the default behavior.
     #[test]
     fn single_ref_cte_is_not_materialized() {
         let query = r#"{
@@ -2025,10 +1922,6 @@ mod tests {
         );
     }
 
-    /// Aggregation query where the target node has a denormalized filter
-    /// (state=merged). The lowerer uses edge-chain JOINs with the
-    /// denorm filter pushed to `has(e0.target_tags, 'state:merged')`.
-    /// No cascade or _nf_mr CTEs are needed.
     #[test]
     fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
         let query = r#"{
@@ -2055,14 +1948,11 @@ mod tests {
 
         let sql = compile_sql(query);
 
-        // No _nf_mr CTE — denorm covers the filter.
         assert!(
             !sql.contains("_nf_mr"),
             "_nf_mr must not be emitted when state is fully denormalized, got:\n{sql}"
         );
 
-        // FK elision replaces edge scans, so the state filter is applied
-        // directly on the MR node table instead of as an edge tag.
         assert!(
             sql.contains("mr.state = 'merged'") || sql.contains("state = 'merged'"),
             "state filter must be applied on MR node table, got:\n{sql}"
@@ -2117,7 +2007,6 @@ mod tests {
             "virtual column 'content' must not appear in SQL, got:\n{sql}"
         );
 
-        // Virtual filter should be carried on the hydration plan.
         if let HydrationPlan::Static(templates) = &compiled.hydration {
             assert!(
                 templates.iter().any(|t| !t.virtual_filters.is_empty()),

@@ -31,7 +31,6 @@ pub struct ResolvedJsFile {
     pub analysis: JsFileAnalysis,
 }
 
-/// `(relative_path, analyzer_error)` pairs collected per-file.
 pub type FailedJsFile = (String, AnalyzerError);
 
 pub fn analyze_files(
@@ -292,8 +291,6 @@ fn file_backed_module(
     })
 }
 
-/// Pick the single (virtual_path, source) tuple the analyzer runs on.
-///
 /// For SFCs, every `<script>` block is concatenated into one buffer so
 /// the analyzer, OXC parser, and SSA pass each run once per file.
 fn prepared_source(
@@ -393,7 +390,6 @@ fn truncate_identifier(value: &str) -> String {
     if value.len() <= MAX {
         value.to_string()
     } else {
-        // Slice on char boundary: step back from MAX until we hit one.
         let mut end = MAX;
         while end > 0 && !value.is_char_boundary(end) {
             end -= 1;

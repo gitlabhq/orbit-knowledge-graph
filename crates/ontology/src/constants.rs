@@ -1,18 +1,14 @@
-//! Centralized constants for the ontology crate.
-//!
-//! `GL_TABLE_PREFIX` is a compile-time constant whose value is validated
-//! against the embedded ontology YAML by [`validate_ontology_constants`].
-//! `EDGE_TABLE` is derived from it via `concatcp!` and also validated.
+//! `GL_TABLE_PREFIX` is validated against the embedded ontology YAML by
+//! [`validate_ontology_constants`]. `EDGE_TABLE` is derived from it via
+//! `concatcp!` and also validated.
 
 use const_format::concatcp;
 
-/// Primary key field name used by default.
 pub const DEFAULT_PRIMARY_KEY: &str = "id";
 
-/// Reserved columns that exist on all nodes.
 pub const NODE_RESERVED_COLUMNS: &[&str] = &["id"];
 
-/// Reserved columns on the edge table (matches EdgeEntity schema).
+/// Must match EdgeEntity schema.
 pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
     TRAVERSAL_PATH_COLUMN,
     RELATIONSHIP_KIND_COLUMN,
@@ -22,34 +18,24 @@ pub const EDGE_RESERVED_COLUMNS: &[&str] = &[
     TARGET_KIND_COLUMN,
 ];
 
-/// Edge column: type of relationship between two entities.
 pub const RELATIONSHIP_KIND_COLUMN: &str = "relationship_kind";
 
-/// Edge column: ID of the source entity.
 pub const SOURCE_ID_COLUMN: &str = "source_id";
 
-/// Edge column: entity type of the source.
 pub const SOURCE_KIND_COLUMN: &str = "source_kind";
 
-/// Edge column: ID of the target entity.
 pub const TARGET_ID_COLUMN: &str = "target_id";
 
-/// Edge column: entity type of the target.
 pub const TARGET_KIND_COLUMN: &str = "target_kind";
 
-/// Prefix for all ClickHouse graph tables (e.g., `gl_user`, `gl_project`).
 pub const GL_TABLE_PREFIX: &str = "gl_";
 
-/// Edge table name in ClickHouse.
 pub const EDGE_TABLE: &str = concatcp!(GL_TABLE_PREFIX, "edge");
 
-/// Version column name in datalake tables.
 pub const VERSION_COLUMN: &str = "_version";
 
-/// Deleted flag column name in datalake tables.
 pub const DELETED_COLUMN: &str = "_deleted";
 
-/// Traversal path column name for namespace scoping.
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 
 use std::sync::LazyLock;

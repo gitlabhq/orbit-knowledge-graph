@@ -23,7 +23,6 @@ pub struct RedactionOutput {
     pub redacted_count: usize,
 }
 
-/// A compiled query with both parameterized template and rendered SQL.
 #[derive(Debug, Clone, Serialize)]
 pub struct DebugQuery {
     pub sql: String,
@@ -80,7 +79,6 @@ pub struct PipelineOutput {
     pub pagination: Option<PaginationMeta>,
 }
 
-/// Pagination metadata returned when the query includes a cursor.
 pub struct PaginationMeta {
     /// Whether more authorized rows exist beyond the current page.
     pub has_more: bool,

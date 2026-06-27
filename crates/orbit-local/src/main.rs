@@ -415,7 +415,6 @@ pub(crate) fn index_collect(
             git.commit_sha.get(..8).unwrap_or(&git.commit_sha)
         );
 
-        // Mark as indexing before we start parsing.
         {
             let client =
                 duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;

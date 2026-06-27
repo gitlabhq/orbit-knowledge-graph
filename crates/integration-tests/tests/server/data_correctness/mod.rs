@@ -21,7 +21,6 @@ async fn data_correctness() {
 
     run_subtests_shared!(
         &ctx,
-        // search: column value correctness
         search::search_returns_correct_user_properties,
         search::search_returns_correct_project_properties,
         search::search_returns_correct_group_full_path,
@@ -41,7 +40,6 @@ async fn data_correctness() {
         search::search_boolean_columns_have_correct_values,
         search::search_datetime_columns_serialize_as_strings,
         search::search_nullable_datetime_returns_null_when_unset,
-        // search: limits
         search::search_limit_truncates_results,
         search::search_filter_no_match_returns_empty,
         search::search_combined_filter_node_ids_order_by,
@@ -49,17 +47,14 @@ async fn data_correctness() {
         search::search_filter_lte_on_datetime_returns_matching_rows,
         search::search_filter_lt_on_datetime_excludes_same_day_after_midnight,
         search::search_filter_is_not_null_on_datetime_returns_merged_rows,
-        // search: multi-filter range queries
         search::search_multi_filter_date_window,
         search::search_multi_filter_date_window_multiple_results,
         search::search_multi_filter_empty_window_returns_empty,
         search::search_multi_filter_mixed_with_single_filter,
-        // search: virtual column filters (post-hydration)
         search::search_virtual_filter_contains_matching,
         search::search_virtual_filter_eq_no_match,
         search::search_virtual_filter_is_not_null,
         search::search_virtual_filter_combined_with_physical,
-        // traversal
         traversal::traversal_user_group_returns_correct_pairs_and_edges,
         traversal::traversal_three_hop_returns_all_user_group_project_paths,
         traversal::traversal_user_authored_mr_returns_correct_edges,
@@ -79,15 +74,12 @@ async fn data_correctness() {
         traversal::traversal_order_by_node_property,
         traversal::traversal_order_by_source_node_property,
         traversal::traversal_order_by_with_node_ids_filter,
-        // traversal: code graph cascades
         traversal::traversal_code_graph_calls_without_node_ids,
         traversal::traversal_code_graph_calls_with_node_ids,
-        // traversal: code graph project_id/branch edge scoping
         traversal::traversal_code_graph_project_id_filter_scopes_edges,
         traversal::traversal_code_graph_project_id_filter_on_target_scopes_edges,
         traversal::traversal_code_graph_edge_level_project_filter,
         traversal::traversal_code_graph_project_id_filter_no_match_returns_empty,
-        // aggregation
         aggregation::aggregation_count_returns_correct_values,
         aggregation::aggregation_wildcard_user_to_mr_counts_inferred_edges,
         aggregation::aggregation_count_group_contains_projects,
@@ -99,7 +91,6 @@ async fn data_correctness() {
         aggregation::aggregation_min_max_produce_correct_values,
         aggregation::aggregation_min_on_string_column,
         aggregation::aggregation_multiple_functions_in_one_query,
-        // aggregation: traversal path authorization
         aggregation::aggregation_path_single_nested_group,
         aggregation::aggregation_path_multiple_groups,
         aggregation::aggregation_sum_with_restricted_path,
@@ -110,10 +101,8 @@ async fn data_correctness() {
         aggregation::aggregation_empty_security_context_rejects_at_compile,
         aggregation::aggregation_no_group_by_with_filtered_other_node,
         aggregation::aggregation_no_group_by_preserves_relationship_kind,
-        // aggregation: default alias (no user-supplied alias)
         aggregation::aggregation_no_alias_defaults_to_function_name,
         aggregation::aggregation_no_alias_sum_defaults_to_function_name,
-        // path finding
         path_finding::path_finding_returns_valid_complete_paths,
         path_finding::path_finding_filtered_start_endpoint_reaches_project,
         path_finding::path_finding_wildcard_keeps_intermediate_hops_unconstrained,
@@ -126,7 +115,6 @@ async fn data_correctness() {
         path_finding::path_finding_target_entity_constrains_results,
         path_finding::path_finding_entity_filter_excludes_wrong_types,
         path_finding::path_finding_code_filtered_endpoints_stay_on_same_traversal_path,
-        // neighbors
         neighbors::neighbors_outgoing_returns_correct_targets,
         neighbors::neighbors_incoming_returns_correct_sources,
         neighbors::neighbors_rel_types_filter_works,
@@ -140,16 +128,13 @@ async fn data_correctness() {
         neighbors::neighbors_non_default_pk_with_non_denorm_filter,
         neighbors::neighbors_non_default_pk_filter_excludes_non_matching,
         neighbors::neighbors_non_default_pk_redaction_uses_merge_request_id,
-        // edge cases
         edge_cases::giant_string_survives_pipeline,
         edge_cases::sql_injection_string_preserved,
         edge_cases::empty_result_has_valid_schema,
-        // SIP pre-filter correctness
         edge_cases::sip_prefilter_with_node_ids_returns_correct_results,
         edge_cases::sip_prefilter_with_filter_returns_correct_results,
         edge_cases::sip_prefilter_multi_hop_returns_correct_results,
         edge_cases::sip_target_aggregation_with_filter_returns_correct_counts,
-        // cross-namespace correctness
         edge_cases::cross_namespace_user_authors_mr_in_different_group,
         edge_cases::cross_namespace_group_containment_across_depth,
         edge_cases::cross_namespace_isolation_no_leakage,
@@ -157,13 +142,10 @@ async fn data_correctness() {
         edge_cases::cross_namespace_aggregation_respects_scope,
         edge_cases::neighbors_cross_namespace_no_false_positives,
         traversal_scoping::cross_namespace_has_label_returns_cross_group_label,
-        // non-default redaction id_column
         edge_cases::non_default_redaction_id_entity_traversal,
         edge_cases::non_default_redaction_id_denies_unauthorized,
         edge_cases::non_default_redaction_id_with_multiple_mrs,
-        // referential integrity
         edge_cases::traversal_referential_integrity_on_complex_query,
-        // LIKE data correctness
         edge_cases::like_contains_returns_matching_rows,
         edge_cases::like_contains_matches_multiple,
         edge_cases::like_contains_no_match_returns_empty,
@@ -174,11 +156,9 @@ async fn data_correctness() {
         edge_cases::like_underscore_matched_literally,
         edge_cases::like_equality_on_email_returns_correct_row,
         edge_cases::like_in_filter_on_email_works,
-        // filterable: false data correctness
         edge_cases::filterable_traversal_path_readable_as_column,
         edge_cases::filterable_traversal_path_readable_on_project,
         edge_cases::filterable_other_filters_still_work_alongside_traversal_path_column,
-        // security: traversal path scoping for search
         security::search_scoped_path_excludes_other_namespaces,
         security::search_scoped_to_single_project_namespace,
         security::search_multi_path_returns_union_of_scopes,
@@ -188,11 +168,9 @@ async fn data_correctness() {
         security::search_traversal_path_filter_outside_scope_rejects_at_compile,
         security::relationship_traversal_path_filter_returns_matching_edges,
         security::relationship_traversal_path_filter_outside_scope_rejects_at_compile,
-        // security: traversal path scoping for path finding
         security::path_finding_scoped_excludes_paths_through_other_namespaces,
         security::path_finding_multi_path_scope_finds_both,
         security::path_finding_narrow_scope_excludes_all_targets,
-        // security: admin_only field restriction (RestrictPass)
         security::admin_only_non_admin_filter_rejects_at_compile,
         security::admin_only_non_admin_order_by_rejects_at_compile,
         security::admin_only_non_admin_max_aggregation_rejects_at_compile,
@@ -203,21 +181,17 @@ async fn data_correctness() {
         security::admin_only_admin_order_by_compiles,
         security::admin_only_admin_aggregation_compiles,
         security::admin_only_admin_wildcard_columns_includes_admin_fields,
-        // security: admin_only on dynamic hydration (Neighbors / PathFinding)
         security::admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin_fields,
         security::admin_only_non_admin_neighbors_dynamic_center_node_strips_admin_fields,
         security::admin_only_non_admin_path_finding_dynamic_wildcard_strips_admin_fields,
         security::admin_only_admin_neighbors_dynamic_wildcard_includes_admin_fields,
-        // security: cross-organization isolation
         security::cross_org_search_excludes_other_org,
         security::cross_org_traversal_excludes_other_org,
         security::cross_org_aggregation_excludes_other_org,
         security::cross_org_inverse_isolation,
-        // security: aggregation SQL assertions
         security::aggregation_sql_contains_traversal_path_filter,
         security::aggregation_multi_path_sql_contains_both_filters,
         security::aggregation_multi_path_returns_union_of_scopes,
-        // security: globally-scoped entity guard (work_items/347)
         security::aggregation_user_only_rejects_at_compile,
         security::aggregation_user_only_with_pii_filter_rejects_at_compile,
         security::aggregation_user_joined_to_scoped_group_compiles,
@@ -227,7 +201,6 @@ async fn data_correctness() {
         security::aggregation_user_joined_runtime_returns_expected_counts,
         security::aggregation_user_disconnected_scoped_node_rejects_at_compile,
         security::aggregation_user_reachable_via_path_compiles,
-        // security: per-entity role scoping on aggregation target nodes
         security::traversal_vulnerability_reporter_no_filters_sees_nothing,
         security::traversal_vulnerability_security_manager_no_filters_sees_data,
         security::aggregation_vulnerability_reporter_only_sees_zero_counts,
@@ -243,7 +216,6 @@ async fn data_correctness() {
         security::aggregation_vulnerability_traversal_path_filter_reporter_rejects_at_compile,
         security::aggregation_vulnerability_traversal_path_filter_security_manager_counts,
         security::aggregation_vulnerability_sql_drops_reporter_paths,
-        // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,
         pagination::cursor_last_page_partial,
@@ -260,10 +232,8 @@ async fn data_correctness() {
         pagination::cursor_aggregation_without_sort_is_deterministic,
         pagination::cursor_path_finding_pages_cover_all_paths,
         pagination::cursor_path_finding_is_deterministic,
-        // work items: search
         work_items::search_returns_correct_work_item_properties,
         work_items::search_filter_work_item_type_returns_matching_rows,
-        // work items: traversal (all 7 edge types)
         work_items::traversal_user_authored_work_item_returns_correct_edges,
         work_items::traversal_work_item_in_group_returns_correct_edges,
         work_items::traversal_work_item_in_project_returns_correct_edges,

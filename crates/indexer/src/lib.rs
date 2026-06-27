@@ -77,7 +77,6 @@ use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route,
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-/// Runs the indexer until completion or until the token is cancelled.
 pub async fn run(
     config: &IndexerConfig,
     ontology: Arc<ontology::Ontology>,
@@ -248,7 +247,6 @@ pub async fn run(
     result
 }
 
-/// Runs the dispatcher (scheduled task loops + health server) until shutdown.
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     ontology: &ontology::Ontology,

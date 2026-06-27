@@ -27,21 +27,16 @@ pub struct IndexingRequest {
     pub had_prior_checkpoint: bool,
 }
 
-/// Terminal outcome of `CodeIndexingPipeline::index_project`.
-///
 /// The handler records a single `events_processed` outcome label based on
 /// this variant — keeping `indexed` and `empty_repository` mutually exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexOutcome {
-    /// Repository downloaded, parsed, written to the graph, and checkpointed.
     Indexed,
     /// Archive endpoint signalled no repository content (404 or 5xx); the
     /// checkpoint was still set so retries and DLQ are avoided.
     EmptyRepository,
 }
 
-/// Number of indexing slots derived from the concurrency group limit.
-/// Used both for the semaphore and for the `max_inflight` calculation.
 pub fn indexing_slot_count(concurrency_limit: usize) -> usize {
     concurrency_limit / 2
 }
@@ -138,9 +133,8 @@ impl CodeIndexingPipeline {
         };
         tracing::Span::current().record("namespace_id", namespace_id);
 
-        // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
-        // Gitaly with concurrent downloads while still pre-fetching ahead
-        // of the processing phase.
+        // Bounded by fetch_slots so we don't overwhelm Gitaly with concurrent
+        // downloads while still pre-fetching ahead of the processing phase.
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
 
         let fetch_start = Instant::now();
@@ -189,7 +183,6 @@ impl CodeIndexingPipeline {
         // start its Gitaly download while we wait for an indexing slot.
         drop(_fetch_slot);
 
-        // Phase 2: Process — bounded by indexing_slots (CPU-heavy analysis).
         let _indexing_slot = acquire(&self.indexing_slots, "indexing").await?;
 
         context.progress.notify_in_progress().await;

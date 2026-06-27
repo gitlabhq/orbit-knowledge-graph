@@ -30,7 +30,7 @@ pub fn org_id(path: &str) -> Option<i64> {
 /// segment isn't numeric.
 pub fn top_level_namespace_id(path: &str) -> Option<i64> {
     let mut segments = path.split('/').filter(|s| !s.is_empty());
-    segments.next(); // skip org
+    segments.next();
     segments.next().and_then(|s| s.parse().ok())
 }
 

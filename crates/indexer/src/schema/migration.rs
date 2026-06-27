@@ -43,10 +43,8 @@ const MIGRATION_LOCK_KEY: &str = "schema_migration";
 /// TTL for the migration lock. Set high enough to cover DDL execution across all graph tables.
 const MIGRATION_LOCK_TTL: Duration = Duration::from_secs(120);
 
-/// How long to wait between polling for an active lock held by another pod.
 const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Maximum number of lock-poll iterations before giving up.
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 
 #[derive(Debug, Error)]
@@ -64,17 +62,9 @@ pub enum MigrationError {
     LockTimeout { seconds: u64 },
 }
 
-/// Runs the migration check. Called by `run_dispatcher()` at boot, before the
-/// task loops start.
-///
-/// # Behaviour
-///
-/// - **No mismatch** (active version == embedded version): returns immediately.
-/// - **Fresh install** (no active version): creates all graph tables from the
-///   ontology (using the version prefix), records embedded version as active,
-///   and returns. No manual DDL (`graph.sql`) is needed.
-/// - **Version mismatch**: acquires lock, creates new-prefix tables, marks
-///   migrating, releases lock.
+/// Runs the migration check. Must be called at boot, before the task loops
+/// start. Fresh install (no active version) creates all graph tables from the
+/// ontology; no manual DDL (`graph.sql`) is needed.
 pub async fn run_if_needed(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,
@@ -133,7 +123,6 @@ async fn run_migration(
     campaign: &CampaignState,
     active_version: u32,
 ) -> Result<(), MigrationError> {
-    // Phase 1: acquire distributed lock.
     acquire_migration_lock(lock_service, metrics).await?;
 
     // Re-read after acquiring the lock — another pod may have completed the
@@ -155,7 +144,6 @@ async fn run_migration(
     // exist. Reserved for future dual-write scenarios.
     metrics.record("drain", "success");
 
-    // Phase 3: create new-prefix tables.
     let create_result = create_prefixed_tables(graph, source, ontology, metrics).await;
     if let Err(ref e) = create_result {
         warn!(error = %e, "failed to create new-prefix tables — releasing lock");
@@ -163,7 +151,6 @@ async fn run_migration(
         return create_result;
     }
 
-    // Phase 4: mark migrating in gkg_schema_version.
     info!(
         version = *SCHEMA_VERSION,
         "marking schema version as migrating"
@@ -180,7 +167,6 @@ async fn run_migration(
     // clears it on promotion.
     campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
 
-    // Phase 5: release lock.
     let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
     metrics.record("complete", "success");
 

@@ -1,6 +1,4 @@
-//! Integration tests for the ClickHouse destination.
-//!
-//! These tests require a Docker-compatible runtime (Docker, Colima, etc).
+//! Require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::sync::Arc;
 

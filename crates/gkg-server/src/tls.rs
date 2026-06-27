@@ -2,8 +2,6 @@ use gkg_server_config::TlsConfig;
 use tonic::transport::Identity;
 use tonic::transport::server::ServerTlsConfig;
 
-/// Load TLS identity from the paths in [`TlsConfig`].
-///
 /// This lives in `gkg-server` (not `gkg-server-config`) because it depends on
 /// `tonic`, which is a heavy runtime dependency.
 pub async fn load_tls_config(tls: &TlsConfig) -> anyhow::Result<Option<ServerTlsConfig>> {

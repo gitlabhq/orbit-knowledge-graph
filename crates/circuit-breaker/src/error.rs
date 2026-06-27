@@ -2,9 +2,7 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum CircuitBreakerError<E> {
-    /// Call was rejected without executing.
     Open { service: &'static str },
-    /// The wrapped call returned an error.
     Inner(E),
 }
 

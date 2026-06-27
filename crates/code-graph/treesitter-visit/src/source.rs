@@ -1,12 +1,8 @@
-//! Document and content abstractions for tree-sitter parsing.
-
 use crate::Position;
 use crate::node::KindId;
 use std::borrow::Cow;
 use std::ops::Range;
 
-/// Trait for document nodes that can be traversed.
-/// NOTE: Some method names are the same as tree-sitter's methods.
 pub trait SgNode<'r>: Clone {
     fn parent(&self) -> Option<Self>;
     fn children(&self) -> impl ExactSizeIterator<Item = Self>;
@@ -112,7 +108,6 @@ pub trait SgNode<'r>: Clone {
     fn child_by_field_id(&self, field_id: u16) -> Option<Self>;
 }
 
-/// Trait for documents that can be parsed by tree-sitter.
 pub trait Doc: Clone + 'static {
     type Source: Content;
     type Lang: crate::Language;
@@ -127,13 +122,11 @@ pub trait Doc: Clone + 'static {
     fn node_kind<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str>;
 }
 
-/// Trait for source content encoding.
 pub trait Content: Sized {
     type Underlying: Clone + PartialEq;
 
     fn get_range(&self, range: Range<usize>) -> &[Self::Underlying];
 
-    /// Get the character column at the given position
     fn get_char_column(&self, column: usize, offset: usize) -> usize;
 }
 

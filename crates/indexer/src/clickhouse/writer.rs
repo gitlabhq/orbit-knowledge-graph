@@ -54,7 +54,6 @@ impl ClickHouseWriter {
         })
     }
 
-    /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
         Self {
@@ -122,8 +121,6 @@ impl ClickHouseWriter {
         })
     }
 
-    /// Drain `(table, batch)` pairs from a channel, coalesce per table until
-    /// `max_rows`, and write concurrently up to `max_concurrent` in-flight inserts.
     pub async fn write_batches_stream(
         self: &Arc<Self>,
         mut rx: tokio::sync::mpsc::Receiver<(String, RecordBatch)>,

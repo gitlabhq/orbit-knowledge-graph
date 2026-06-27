@@ -125,8 +125,7 @@ impl JsModuleIndex {
 
 /// Normalize a module-index key so the builder and resolver cannot miss
 /// a module just because one called it `./foo/bar.ts` and the other
-/// called it `foo/bar.ts` (or `foo/bar.ts/`). Strips leading `./`,
-/// trims trailing slashes, and canonicalizes path separators to `/`.
+/// called it `foo/bar.ts` (or `foo/bar.ts/`).
 fn normalize_module_key(path: &str) -> String {
     let trimmed = path.strip_prefix("./").unwrap_or(path);
     let trimmed = trimmed.trim_end_matches('/');

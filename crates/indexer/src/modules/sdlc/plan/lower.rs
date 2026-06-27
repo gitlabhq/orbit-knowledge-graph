@@ -1141,9 +1141,6 @@ mod tests {
         );
     }
 
-    // Render every plan derived from the embedded ontology and check the SQL
-    // has no leftover markers, no malformed splice, and the structural pieces
-    // (watermark, _version/_deleted aliases, namespace-only traversal filter).
     #[test]
     fn every_plan_renders_valid_sql() {
         use ontology::EtlScope;
@@ -1226,7 +1223,6 @@ mod tests {
 
         let sql = render_namespaced_extract(plan, "1/2/");
 
-        // _batch CTE wraps the base table scan with LIMIT inside the CTE.
         assert!(sql.contains("WITH _batch AS ("), "sql: {sql}");
         assert!(sql.contains("LIMIT 10000"), "sql: {sql}");
 
@@ -1246,7 +1242,6 @@ mod tests {
             "_batch must not join the metadata table: {batch_body}"
         );
 
-        // Enrichment CTE scopes metadata read to the page's note IDs.
         assert!(
             sql.contains("note_id IN (SELECT DISTINCT id FROM _batch)"),
             "sql: {sql}"

@@ -15,7 +15,6 @@ use crate::passes::security::{SecurityContext, collect_node_aliases};
 
 const STARTS_WITH_FNAME: &str = "startsWith";
 
-/// Verify post-compilation invariants on the final AST.
 pub fn check_ast(node: &Node, ctx: &SecurityContext) -> Result<()> {
     match node {
         Node::Query(q) => {
@@ -47,8 +46,6 @@ fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
     check_derived_tables_in_from(&q.from, ctx)
 }
 
-/// Recurse into derived tables (subqueries, UNION ALL arms) in a FROM clause
-/// and verify each arm's query has valid security filters.
 fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> Result<()> {
     match table_ref {
         TableRef::Subquery { query, .. } => check_query(query, ctx),
@@ -180,7 +177,6 @@ mod tests {
     #[test]
     fn fails_with_wrong_path_literal() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        // Manually construct a startsWith with a path not in the security context
         let wrong_filter = Expr::func(
             STARTS_WITH_FNAME,
             vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("99/")],
@@ -215,10 +211,6 @@ mod tests {
     fn accepts_bool_false_as_dead_alias_filter() {
         use crate::ast::Op;
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        // Simulates the output of apply_security_context when paths_at_least()
-        // returned an empty slice for the Vulnerability alias: the alias's
-        // `startsWith` turns into Bool(false), AND-ed with the rest of the
-        // clause.
         let dead = Expr::param(crate::ast::ChType::Bool, false);
         let node = project_query(Some(Expr::binary(Op::And, dead, Expr::lit(true))));
         assert!(check_ast(&node, &ctx).is_ok());
@@ -237,9 +229,6 @@ mod tests {
     fn rejects_bool_false_nested_inside_comparison() {
         use crate::ast::Op;
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        // `p.archived = false` — a typical boolean column filter. The false
-        // literal sits inside an Eq op, not an AND conjunct, so it does not
-        // scope the alias.
         let eq_false = Expr::binary(
             Op::Eq,
             Expr::col("p", "archived"),
@@ -282,8 +271,6 @@ mod tests {
     fn accepts_bool_false_in_nested_and_chain() {
         use crate::ast::Op;
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        // `startsWith(p, '1/') AND (col = 5 AND Bool(false))`
-        // — Bool(false) is buried under a right-heavy AND, not an OR.
         let dead_conjunct = Expr::binary(
             Op::And,
             Expr::binary(Op::Eq, Expr::col("p", "id"), Expr::lit(5)),
@@ -309,7 +296,6 @@ mod tests {
     fn rejects_and_chain_with_col_eq_false_and_no_starts_with() {
         use crate::ast::Op;
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        // `col = false AND col2 > 0` — no startsWith, no Bool(false) conjunct.
         let where_expr = Expr::binary(
             Op::And,
             Expr::binary(
@@ -388,7 +374,6 @@ mod tests {
             &ontology::Ontology::new(),
         )
         .unwrap();
-        // Re-extract the filtered query from the node
         let filter = Expr::func(
             STARTS_WITH_FNAME,
             vec![
@@ -471,8 +456,6 @@ mod tests {
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
-    // ── UNION ALL arm checks ────────────────────────────────────────
-
     #[test]
     fn rejects_union_all_arm_without_security_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
@@ -534,8 +517,6 @@ mod tests {
         .unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
-
-    // ── CTE security check tests ────────────────────────────────────
 
     #[test]
     fn rejects_cte_with_sensitive_table_missing_filter() {
@@ -607,8 +588,6 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
-
-    // ── TableRef::Union structural enforcement ──────────────────────
 
     #[test]
     fn rejects_union_arm_missing_security_filter() {

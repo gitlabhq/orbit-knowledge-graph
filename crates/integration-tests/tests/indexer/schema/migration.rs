@@ -63,7 +63,6 @@ async fn fresh_install_creates_tables_and_records_version() {
         Some(*SCHEMA_VERSION)
     );
 
-    // Fresh install creates all ontology-driven tables.
     let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
 
@@ -135,7 +134,6 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     .await
     .unwrap();
 
-    // Count tables created (excluding the version control table).
     let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
 
@@ -165,7 +163,6 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
         );
     }
 
-    // Version row should be 'migrating', not 'active'.
     let result = ctx
         .query(&format!(
             "SELECT CAST(status AS String) AS status \
@@ -194,7 +191,6 @@ async fn created_tables_have_correct_columns() {
     .await
     .unwrap();
 
-    // Spot-check a node table, an edge table, and an auxiliary table.
     for (table, expected_col) in [
         (t("gl_user"), "username"),
         (t("gl_edge"), "relationship_kind"),
@@ -232,8 +228,6 @@ async fn idempotent_rerun_succeeds() {
     .await
     .unwrap();
 
-    // Lock is released after success, so second run can acquire it.
-    // It will re-run CREATE TABLE IF NOT EXISTS (idempotent).
     migration::run_if_needed(
         &client,
         &dictionary_source(&ctx.config),

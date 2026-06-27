@@ -19,10 +19,8 @@ use super::EtlSettings;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct NodeYaml {
-    /// Canonical entity name (e.g. `Project`, `MergeRequest`). Mirrors the
-    /// `schema.yaml` registry key the loader actually reads for node identity;
-    /// kept here as human-facing self-documentation so each node file states
-    /// which entity it defines without cross-referencing `schema.yaml`.
+    /// Mirrors the `schema.yaml` registry key, which is the value the loader
+    /// actually reads for node identity; this field is documentation only.
     #[expect(
         dead_code,
         reason = "human-facing self-documentation; the entity name is read from the schema.yaml registry key, this field mirrors it for readability in the node file"
@@ -403,7 +401,6 @@ impl NodeYaml {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Reject field names that collide with the internal redaction column prefix.
         for field in &fields {
             if field.name.starts_with(internal_column_prefix) {
                 return Err(OntologyError::Validation(format!(
@@ -436,8 +433,6 @@ impl NodeYaml {
             }
         }
 
-        // Validate that every depends_on entry on a virtual field references
-        // an existing database-backed column on this same node.
         for field in &fields {
             if let FieldSource::Virtual(vs) = &field.source {
                 for dep in &vs.depends_on {
@@ -928,9 +923,7 @@ mod tests {
 
     #[test]
     fn embedded_ontology_depends_on_references_are_valid() {
-        // The real ontology should pass all validation including depends_on.
         let ontology = Ontology::load_embedded().expect("embedded ontology should load");
-        // File.content has depends_on -- verify the field exists and has deps.
         let file = ontology.get_node("File").expect("File node should exist");
         let content = file.fields.iter().find(|f| f.name == "content");
         assert!(content.is_some(), "File should have a content field");

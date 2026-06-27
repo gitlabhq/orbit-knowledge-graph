@@ -131,8 +131,7 @@ async fn execute_query(
     Ok((batches, execution))
 }
 
-/// Fill `QueryExecutionStats` fields from the `X-ClickHouse-Summary` header
-/// when available.
+/// Stats come from the `X-ClickHouse-Summary` HTTP header.
 pub(crate) fn apply_summary(
     mut stats: QueryExecutionStats,
     summary: Option<&QuerySummary>,

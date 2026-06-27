@@ -1,10 +1,6 @@
 use super::helpers::*;
 use query_engine::compiler::{AccessLevel, TraversalPath};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Search: traversal path scoping
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -210,10 +206,6 @@ pub(super) async fn relationship_traversal_path_filter_outside_scope_rejects_at_
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Path finding: traversal path scoping
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(ctx: &TestContext) {
     // User 1 → Group 100 → Project 1000 is within 1/100/.
     // User 1 → Group 102 → Project 1004 requires 1/102/.
@@ -236,8 +228,6 @@ pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(
     resp.assert_referential_integrity();
 
     let pids = resp.path_ids();
-    // Only the path to 1000 (via Group 100) should survive.
-    // Path to 1004 (via Group 102) should be excluded by traversal_path scoping.
     let destinations: HashSet<i64> = pids
         .iter()
         .filter_map(|&pid| resp.path(pid).last().map(|e| e.to_id))
@@ -309,14 +299,9 @@ pub(super) async fn path_finding_narrow_scope_excludes_all_targets(ctx: &TestCon
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Field-level admin_only restriction (RestrictPass)
-//
-// User.is_admin and User.is_auditor are declared admin_only in the ontology.
-// Non-admin callers must never see their values in any response, and attempts
-// to filter, order, or aggregate by those fields must fail at compile time.
-// Admin callers (JWT claim admin=true) bypass every check.
-// ─────────────────────────────────────────────────────────────────────────────
+// User.is_admin and User.is_auditor are declared admin_only in the ontology:
+// non-admin callers must never see them and filter/order/aggregate on them must
+// reject at compile; admin callers (JWT admin=true) bypass every check.
 
 fn non_admin_ctx() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).unwrap()
@@ -595,15 +580,8 @@ pub(super) async fn admin_only_admin_wildcard_columns_includes_admin_fields(ctx:
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Field-level admin_only restriction on dynamic hydration
-//
-// Neighbors and PathFinding with `dynamic_columns: "*"` resolve entity
-// columns from the ontology at compile time (not from `node.columns`),
-// which historically bypassed `RestrictPass`. These tests ensure the
-// hydration planner strips `admin_only` fields for non-admin callers on
-// both discovered-neighbor nodes and center nodes.
-// ─────────────────────────────────────────────────────────────────────────────
+// `dynamic_columns: "*"` resolves entity columns from the ontology at compile
+// time (not from `node.columns`), which historically bypassed `RestrictPass`.
 
 pub(super) async fn admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin_fields(
     ctx: &TestContext,
@@ -621,7 +599,6 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin
     )
     .await;
 
-    // Group 100 + Users 1, 2, 6 as incoming MEMBER_OF neighbors.
     resp.assert_node_count(4);
     resp.assert_node_ids("Group", &[100]);
     resp.assert_node_ids("User", &[1, 2, 6]);
@@ -651,10 +628,8 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin
 pub(super) async fn admin_only_non_admin_neighbors_dynamic_center_node_strips_admin_fields(
     ctx: &TestContext,
 ) {
-    // Center node (User 1) is a static node in the query. With
-    // `dynamic_columns: "*"` and no explicit columns, the center node is
-    // hydrated via the dynamic plan alongside neighbors. Its admin_only
-    // fields must still be stripped for non-admins.
+    // With `dynamic_columns: "*"` and no explicit columns, the static center
+    // node is hydrated via the dynamic plan alongside neighbors.
     let resp = run_query_with_security(
         ctx,
         r#"{
@@ -668,7 +643,6 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_center_node_strips_ad
     )
     .await;
 
-    // alice (User 1) + her two MEMBER_OF groups.
     resp.assert_node_count(3);
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("Group", &[100, 102]);
@@ -690,9 +664,6 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_center_node_strips_ad
 pub(super) async fn admin_only_non_admin_path_finding_dynamic_wildcard_strips_admin_fields(
     ctx: &TestContext,
 ) {
-    // PathFinding traverses User→Group→Project; dynamic hydration then
-    // fetches properties for every node on the paths. Without the fix,
-    // the User nodes in the path would expose is_admin / is_auditor.
     let resp = run_query_with_security(
         ctx,
         r#"{
@@ -740,9 +711,6 @@ pub(super) async fn admin_only_non_admin_path_finding_dynamic_wildcard_strips_ad
 pub(super) async fn admin_only_admin_neighbors_dynamic_wildcard_includes_admin_fields(
     ctx: &TestContext,
 ) {
-    // Mirror of the non-admin case: admin caller must still see the
-    // admin_only values through dynamic hydration so the filter is
-    // role-gated, not blanket removal.
     let resp = run_query_with_security(
         ctx,
         r#"{
@@ -774,11 +742,6 @@ pub(super) async fn admin_only_admin_neighbors_dynamic_wildcard_includes_admin_f
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cross-organization isolation
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Org 1 user searching for projects must not see org 2's project (id 9000).
 pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -797,8 +760,8 @@ pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
     resp.assert_node_absent("Project", 9000);
 }
 
-/// Org 1 user traversing User->MR must not see org 2's MR (id 9100),
-/// even though User 1 (alice) authored it in org 2.
+/// User 1 (alice) authored MR 9100 in org 2, but an org-1-scoped traversal
+/// must still exclude it.
 pub(super) async fn cross_org_traversal_excludes_other_org(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -816,14 +779,12 @@ pub(super) async fn cross_org_traversal_excludes_other_org(ctx: &TestContext) {
     )
     .await;
 
-    // Alice + her 2 org 1 MRs.
     resp.assert_node_count(3);
     resp.assert_node_ids("MergeRequest", &[2000, 2001]);
     resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001)]);
     resp.assert_node_absent("MergeRequest", 9100);
 }
 
-/// Org 1 aggregation counting groups must not include org 2's group (id 900).
 pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -843,12 +804,10 @@ pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) 
     )
     .await;
 
-    // Org 1 groups should have counts; org 2 group must be absent.
     resp.assert_group_row_value_i64("g", "Group", 100, "member_count", 3);
     resp.assert_group_node_absent("g", "Group", 900);
 }
 
-/// Org 2 user can see their own data and nothing from org 1.
 pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);
@@ -877,12 +836,7 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
     resp.assert_node_absent("Project", 1004);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregation: compiled SQL security assertions
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Aggregation compiled SQL must contain startsWith(traversal_path, ?) for
-/// every gl_* table alias. This asserts the SecurityPass output directly
+/// Asserts the SecurityPass output (startsWith on traversal_path) directly
 /// rather than relying on CheckPass alone.
 pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestContext) {
     let _ = ctx;
@@ -915,7 +869,6 @@ pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestCon
         sql.contains("traversal_path"),
         "aggregation SQL must filter on traversal_path, got:\n{sql}"
     );
-    // The bound parameter for the path prefix must appear.
     let param_strs: Vec<_> = compiled
         .base
         .params
@@ -928,8 +881,8 @@ pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestCon
     );
 }
 
-/// Multi-path SecurityContext with aggregation: compiled SQL must contain
-/// startsWith predicates for both paths (via LCP + OR).
+/// Multi-path SecurityContext must compile to startsWith predicates for both
+/// paths via LCP + OR.
 pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
@@ -958,7 +911,6 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
         "multi-path aggregation SQL must contain startsWith, got:\n{sql}"
     );
 
-    // Both path prefixes must appear in SQL or params.
     let all_text = format!("{sql} {:?}", compiled.base.params);
     assert!(
         all_text.contains("1/100/"),
@@ -970,18 +922,10 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-entity role scoping: aggregation target nodes
-//
-// Vulnerability declares `required_role: security_manager` in its ontology,
-// and the seed places 3 vulnerabilities -- one per project across three
-// namespaces. These tests exercise the aggregation-query oracle pattern:
-// a user with Reporter-only access on a path should not be able to
-// observe Vulnerability rows by grouping on Project and counting on
-// Vulnerability. The compiler drops Reporter paths from the Vulnerability
-// startsWith predicate, so the count comes back as zero (or excludes the
-// project entirely) no matter what filters the attacker attaches.
-// ─────────────────────────────────────────────────────────────────────────────
+// Vulnerability declares `required_role: security_manager`; the seed places one
+// vuln per project across three namespaces (8000/1000, 8001/1001, 8002/1004).
+// The compiler drops below-floor (e.g. Reporter) paths from the Vulnerability
+// startsWith predicate, neutralizing the count-aggregation oracle (work_items/347).
 
 fn reporter_path(path: &str) -> TraversalPath {
     TraversalPath::new(path, 20)
@@ -999,10 +943,6 @@ fn owner_path(path: &str) -> TraversalPath {
     TraversalPath::new(path, AccessLevel::Owner as u32)
 }
 
-/// Reporter on 1/100/ but no Security Manager access anywhere. Counting
-/// vulnerabilities per project must return no rows for Project 1000 — the
-/// Vulnerability scan is filtered to zero traversal paths and produces
-/// `Bool(false)`, so the aggregation sees an empty Vulnerability set.
 pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -1022,20 +962,15 @@ pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx
     )
     .await;
 
-    // Reporter on 1/100/ cannot see any vulnerability — even though Project
-    // 1000 lives in 1/100/1000/ (which is within the Reporter scope), the
-    // Vulnerability scan is dropped to zero eligible paths because Reporter
-    // is below Vulnerability's Security Manager requirement. INNER JOIN against an
-    // empty Vulnerability set produces no rows at all.
+    // Project 1000 is inside the Reporter scope, but Reporter is below the SM
+    // floor so the Vulnerability scan drops to zero paths; the INNER JOIN against
+    // an empty set yields no rows.
     resp.assert_empty_aggregation();
     resp.assert_node_absent("Vulnerability", 8000);
     resp.assert_node_absent("Vulnerability", 8001);
     resp.assert_node_absent("Vulnerability", 8002);
 }
 
-/// Reporter on 1/100/, Developer on 1/101/. The compiler keeps only
-/// 1/101/ in the Vulnerability predicate, so the aggregation surfaces
-/// Project 1001 (vuln 8001) but not Project 1000 (vuln 8000).
 pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_developer_paths(
     ctx: &TestContext,
 ) {
@@ -1061,22 +996,16 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
     )
     .await;
 
-    // Project 1001 (Developer path, which clears the Security Manager floor)
-    // surfaces with count=1.
+    // Developer on 1/101/ clears the SM floor (1001 surfaces); Reporter on
+    // 1/100/ does not (1000 drops); 1004 is out of scope.
     resp.assert_group_row_value_i64("p", "Project", 1001, "vuln_count", 1);
-    // Project 1000 (Reporter-only path) must not appear — the Vulnerability
-    // scan was filtered to paths where the user clears Security Manager, leaving
-    // Project 1000 without any matching vuln row in the INNER JOIN.
     resp.assert_group_node_absent("p", "Project", 1000);
-    // Project 1004 is outside the user's scope entirely.
     resp.assert_group_node_absent("p", "Project", 1004);
 }
 
-/// Traversal with NO filters on Vulnerability. The node gets Skip hydration
-/// but needs_elevated_filter ensures a FilterOnly CTE is emitted for
-/// SecurityPass to inject the role-gated startsWith filter. A Reporter
-/// must not see any Vulnerability IDs even when querying via edge traversal
-/// with no property filters.
+/// With no property filters the Vulnerability node gets Skip hydration, but
+/// needs_elevated_filter still emits a FilterOnly CTE so SecurityPass injects
+/// the role-gated startsWith filter.
 pub(super) async fn traversal_vulnerability_reporter_no_filters_sees_nothing(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -1094,20 +1023,14 @@ pub(super) async fn traversal_vulnerability_reporter_no_filters_sees_nothing(ctx
     )
     .await;
 
-    // Reporter on 1/100/ cannot see Vulnerability nodes — even though the
-    // edge scan finds IN_PROJECT edges for project 1000, the Vulnerability
-    // FilterOnly CTE restricts to paths where the user has Security Manager
-    // access. Reporter is below that floor, so the CTE returns zero IDs.
     resp.assert_node_count(0);
     resp.assert_node_ids("Project", &[]);
     resp.assert_node_ids("Vulnerability", &[]);
     resp.assert_edge_count("IN_PROJECT", 0);
 }
 
-/// Same traversal, but with Security Manager access — should see the vulnerability.
-/// TODO: FK star + elevated center CTE interaction causes 0 results.
-/// The security invariant (Reporter blocked) is enforced; this is an
-/// over-restriction bug, not a security gap. Track in follow-up.
+/// TODO: should see the vuln, but FK star + elevated center CTE interaction
+/// causes 0 results. Over-restriction bug, not a security gap. Track in follow-up.
 pub(super) async fn traversal_vulnerability_security_manager_no_filters_sees_data(
     ctx: &TestContext,
 ) {
@@ -1127,19 +1050,16 @@ pub(super) async fn traversal_vulnerability_security_manager_no_filters_sees_dat
     )
     .await;
 
-    // TODO: Should return 2 nodes (Vulnerability 8000 + Project 1000).
-    // Currently returns 0 due to FK star center CTE interaction with
-    // SecurityPass. Over-restricts (safe), does not under-restrict.
-    // When fixed, change to assert_node_count(2) + assert_node_ids.
+    // TODO: when the over-restriction bug is fixed, this should be
+    // assert_node_count(2) + assert_node_ids (Vulnerability 8000 + Project 1000).
     resp.assert_node_count(0);
     resp.assert_node_ids("Project", &[]);
     resp.assert_node_ids("Vulnerability", &[]);
     resp.assert_edge_count("IN_PROJECT", 0);
 }
 
-/// Security Manager (25) on a path hits the exact floor required by
-/// Vulnerability's `required_role`. This guards the exact floor: an SM-only
-/// user sees their own vuln counts without needing to escalate to Developer.
+/// Security Manager (25) hits the exact floor of Vulnerability's `required_role`;
+/// an SM-only user sees their vuln counts without escalating to Developer.
 pub(super) async fn aggregation_vulnerability_security_manager_meets_the_required_floor(
     ctx: &TestContext,
 ) {
@@ -1161,17 +1081,13 @@ pub(super) async fn aggregation_vulnerability_security_manager_meets_the_require
     )
     .await;
 
-    // Project 1001 lives under 1/101/ and has vuln 8001. Security Manager
-    // is the declared floor (25), so the Vulnerability alias keeps this
-    // path in its startsWith predicate.
     resp.assert_group_row_value_i64("p", "Project", 1001, "vuln_count", 1);
-    // Projects outside 1/101/ are not in the user's scope.
     resp.assert_group_node_absent("p", "Project", 1000);
     resp.assert_group_node_absent("p", "Project", 1004);
 }
 
-/// Developer on all paths: classic aggregation baseline showing the
-/// role-scoping change doesn't over-restrict legitimate access.
+/// Baseline showing the role-scoping change doesn't over-restrict legitimate
+/// access: Developer everywhere sees all counts.
 pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_counts(
     ctx: &TestContext,
 ) {
@@ -1201,16 +1117,13 @@ pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_coun
     )
     .await;
 
-    // All three vuln-bearing projects appear, each with count=1.
     resp.assert_group_row_value_i64("p", "Project", 1000, "vuln_count", 1);
     resp.assert_group_row_value_i64("p", "Project", 1001, "vuln_count", 1);
     resp.assert_group_row_value_i64("p", "Project", 1004, "vuln_count", 1);
 }
 
-/// Search on Vulnerability directly as a Reporter: the base-case read
-/// path (not aggregation) must also drop rows when the required role is
-/// not met, otherwise an attacker can bypass the fix by querying via
-/// search instead of aggregation.
+/// The base-case search path must also drop rows when the required role isn't
+/// met, else an attacker bypasses the fix by querying via search not aggregation.
 pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -1228,10 +1141,9 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
     resp.assert_node_count(0);
 }
 
-/// The filter-based oracle (severity filter + count on a single
-/// project) must not leak: even a count-with-filter targeting a
-/// specific vuln is neutralized because the Vulnerability scan is
-/// filtered to zero paths before any WHERE clause evaluates.
+/// The filter-based oracle (severity filter + count on one project) is
+/// neutralized because the Vulnerability scan is filtered to zero paths before
+/// any WHERE clause evaluates.
 pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -1251,17 +1163,14 @@ pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: 
     )
     .await;
 
-    // Without the fix, this would have returned count=1 (vuln 8000 is
-    // critical in Project 1000) and the attacker could binary-search
-    // severity values. With role scoping, Project 1000 drops out of the
-    // result set entirely.
+    // Without the fix this returns count=1 (vuln 8000 is critical in Project
+    // 1000), letting an attacker binary-search severity values.
     resp.assert_empty_aggregation();
     resp.assert_node_absent("Project", 1000);
 }
 
-/// Property grouping exposes scalar buckets instead of graph nodes, so it
-/// must apply the same role-gated Vulnerability scan before grouping. A
-/// Reporter-only user must not learn that Project 1000 has a critical vuln.
+/// Property grouping exposes scalar buckets instead of graph nodes, so it must
+/// apply the same role-gated Vulnerability scan before grouping.
 pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_sees_no_rows(
     ctx: &TestContext,
 ) {
@@ -1287,9 +1196,8 @@ pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_se
     resp.assert_empty_aggregation();
 }
 
-/// The original #347 oracle pattern also applies to property grouping: a
-/// filtered scalar bucket must not reveal whether an unauthorized
-/// Vulnerability row matched the guessed severity.
+/// The #347 oracle pattern also applies to property grouping: a filtered scalar
+/// bucket must not reveal whether an unauthorized Vulnerability row matched.
 pub(super) async fn aggregation_vulnerability_property_grouping_filter_oracle_is_neutralized(
     ctx: &TestContext,
 ) {
@@ -1315,9 +1223,6 @@ pub(super) async fn aggregation_vulnerability_property_grouping_filter_oracle_is
     resp.assert_empty_aggregation();
 }
 
-/// Security Manager is the exact floor for Vulnerability. Property grouping
-/// should return only the authorized severity bucket, with no graph node IDs
-/// needed in the response.
 pub(super) async fn aggregation_vulnerability_property_grouping_security_manager_sees_bucket(
     ctx: &TestContext,
 ) {
@@ -1345,9 +1250,8 @@ pub(super) async fn aggregation_vulnerability_property_grouping_security_manager
     resp.assert_row_value_i64(0, "vuln_count", 1);
 }
 
-/// Compiled property-group SQL must still keep the Vulnerability alias in
-/// the role-scoped predicate path. This catches a future lowering change
-/// that selects `v.severity` but accidentally skips the SecurityPass filter.
+/// Catches a future lowering change that selects `v.severity` but accidentally
+/// skips the SecurityPass filter on the Vulnerability alias.
 pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_reporter_paths(
     ctx: &TestContext,
 ) {
@@ -1462,10 +1366,8 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_security_man
     resp.assert_group_node_absent("p", "Project", 1004);
 }
 
-/// Compiled SQL must bind `Bool(false)` (no paths) for the Vulnerability
-/// alias when the user has only Reporter access. Asserting the compiled
-/// output directly guards against future passes that might re-introduce
-/// the path list.
+/// Compiled SQL must bind `Bool(false)` (no paths) for the Vulnerability alias
+/// under Reporter-only access; guards against passes re-introducing the path list.
 pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
@@ -1489,16 +1391,14 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
     .unwrap();
 
     let sql = &compiled.base.sql;
-    // Project alias still gets the `1/100/` prefix because Project's
-    // required_role defaults to Reporter.
+    // Project's required_role defaults to Reporter, so its alias still gets `1/100/`.
     let all_text = format!("{sql} {:?}", compiled.base.params);
     assert!(
         all_text.contains("1/100/"),
         "Project predicate must still reference 1/100/, got:\n{all_text}"
     );
-    // At least one parameter bound to the literal boolean `false` — that's
-    // what `build_path_filter(&[])` produces when the Vulnerability alias
-    // has zero eligible paths.
+    // Bool(false) is what build_path_filter(&[]) produces when the Vulnerability
+    // alias has zero eligible paths.
     let has_false_bool = compiled.base.params.iter().any(|(_, p)| {
         matches!(
             (&p.ch_type, &p.value),
@@ -1515,8 +1415,6 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
     );
 }
 
-/// Multi-path aggregation returns correct scoped counts from both namespaces
-/// and excludes groups outside the scope.
 pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
@@ -1540,19 +1438,13 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
     resp.assert_group_row_value_i64("g", "Group", 100, "member_count", 3);
     // Group 102: members 1, 4 (edges in 1/102/) = 2
     resp.assert_group_row_value_i64("g", "Group", 102, "member_count", 2);
-    // Group 101 is outside both paths.
     resp.assert_group_node_absent("g", "Group", 101);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Aggregation: globally-scoped entity guard (work_items/347)
-//
-// The User entity has no traversal_path column and is a `global` node, so it
-// skips the traversal_path filter; direct aggregation on User alone
-// would bypass both the traversal_path filter and the post-query Rails
-// redaction layer (aggregation results are row-less). Reject at compile
-// time unless the query contains at least one traversal_path-scoped node.
-// ─────────────────────────────────────────────────────────────────────────────
+// User is a `global` node with no traversal_path column, so aggregation on User
+// alone bypasses both the traversal_path filter and the post-query Rails
+// redaction layer (aggregation results are row-less). Reject at compile unless
+// the query contains at least one traversal_path-scoped node (work_items/347).
 
 pub(super) async fn aggregation_user_only_rejects_at_compile(ctx: &TestContext) {
     let _ = ctx;
@@ -1680,9 +1572,9 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
 ) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
-    // User and Group are both declared, but no relationship connects them.
-    // The declaration-based guard would accept this; the reachability guard
-    // must reject because the User scan would be unbounded by any edge join.
+    // User and Group are declared but unconnected: the declaration-based guard
+    // accepts this, but the reachability guard must reject because the User scan
+    // would be unbounded by any edge join.
     let result = compile(
         r#"{
             "query_type": "aggregation",
@@ -1714,8 +1606,7 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
 pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestContext) {
     let _ = ctx;
     let ontology = Arc::new(load_ontology());
-    // Reachability is satisfied through the `path` config (path_finding-style
-    // endpoints), not only through `relationships`.
+    // Reachability is satisfied through the `path` config, not only `relationships`.
     compile(
         r#"{
             "query_type": "aggregation",
@@ -1753,9 +1644,7 @@ pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx:
     )
     .await;
 
-    // Group 100: 3 members under the allowlisted path.
     resp.assert_group_row_value_i64("g", "Group", 100, "member_count", 3);
-    // Groups outside 1/100/ must not surface.
     resp.assert_group_node_absent("g", "Group", 101);
     resp.assert_group_node_absent("g", "Group", 102);
 }

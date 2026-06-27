@@ -1,17 +1,12 @@
-//! Semaphore-based concurrency control. Acquire a [`HandlerSlot`] before processing;
-//! it releases automatically when dropped.
-//!
 //! # Why two semaphores?
 //!
-//! The worker pool uses two levels of semaphores: one global, one per concurrency group.
-//!
-//! The global semaphore caps total concurrency across the entire engine. This
-//! protects shared resources like CPU, memory, and database connections.
+//! The global semaphore caps total concurrency across the entire engine, protecting
+//! shared resources like CPU, memory, and database connections.
 //!
 //! Per-group semaphores let you run multiple handler types in a single pod without
-//! one starving the others. For example, if you run both SDLC and Code handlers
-//! together, you can give each group a concurrency limit of 4 while keeping the
-//! global limit at 6. That way neither group can monopolize all workers.
+//! one starving the others. For example, running both SDLC and Code handlers, you
+//! can give each group a limit of 4 while keeping the global limit at 6, so neither
+//! group can monopolize all workers.
 //!
 //! If you only need a global limit, don't configure any concurrency groups and
 //! the engine will skip the group semaphore entirely.
@@ -27,13 +22,10 @@ use tracing::{debug, info};
 use super::metrics::EngineMetrics;
 use gkg_server_config::EngineConfiguration;
 
-/// A permit that reserves capacity for one handler execution.
+/// A permit that reserves capacity for one handler execution; releases on drop.
 ///
-/// Holding a permit allows processing one handler execution. The permit is automatically
-/// released when dropped, freeing capacity for other handlers.
-///
-/// The permit may include both a global permit (always) and a group-specific
-/// permit (when the handler belongs to a configured concurrency group).
+/// Includes a global permit (always) and a group-specific permit (when the handler
+/// belongs to a configured concurrency group).
 pub struct HandlerSlot {
     _global_permit: OwnedSemaphorePermit,
     _group_permit: Option<OwnedSemaphorePermit>,
@@ -51,11 +43,6 @@ impl Drop for HandlerSlot {
     }
 }
 
-/// A pool that controls concurrent message processing.
-///
-/// The worker pool uses semaphores to enforce concurrency limits. It maintains
-/// a global semaphore for overall capacity and optional per-group semaphores
-/// for finer-grained control.
 pub struct WorkerPool {
     global_semaphore: Arc<Semaphore>,
     group_semaphores: HashMap<String, Arc<Semaphore>>,
@@ -63,10 +50,6 @@ pub struct WorkerPool {
 }
 
 impl WorkerPool {
-    /// Creates a new worker pool from the engine configuration.
-    ///
-    /// The global semaphore is sized according to `max_concurrent_workers`.
-    /// Group semaphores are created for each entry in `concurrency_groups`.
     pub fn new(configuration: &EngineConfiguration, metrics: Arc<EngineMetrics>) -> Self {
         let global_semaphore = Arc::new(Semaphore::new(configuration.max_concurrent_workers));
 
@@ -89,14 +72,10 @@ impl WorkerPool {
         }
     }
 
-    /// Acquires capacity for one handler execution.
+    /// Acquires the group permit first, then the global permit. This ordering
+    /// prevents a group waiter from reserving global capacity.
     ///
-    /// If the handler belongs to a concurrency group, acquires the group permit
-    /// first, then the global permit. This prevents a group waiter from reserving
-    /// global capacity.
-    ///
-    /// Returns `None` if the semaphore is closed (which should not happen
-    /// during normal operation).
+    /// Returns `None` if the semaphore is closed (should not happen in normal operation).
     pub async fn acquire_handler_slot(
         &self,
         concurrency_group: Option<&str>,
@@ -264,7 +243,6 @@ mod tests {
 
         let mut handles = Vec::new();
 
-        // Spawn 5 tasks for group-a (has group limit of 2)
         for _ in 0..5 {
             let pool = pool.clone();
             let group_active = group_a_active.clone();
@@ -287,7 +265,6 @@ mod tests {
             }));
         }
 
-        // Spawn 5 tasks with no group (only global)
         for _ in 0..5 {
             let pool = pool.clone();
             let global_active = global_active.clone();
@@ -391,10 +368,8 @@ mod tests {
             panic!("simulated worker failure");
         });
 
-        // Wait for the panic (ignore the JoinError)
         let _ = panicking_task.await;
 
-        // The permit should be released despite the panic, so we can acquire again
         let result =
             tokio::time::timeout(Duration::from_millis(100), pool.acquire_handler_slot(None)).await;
 

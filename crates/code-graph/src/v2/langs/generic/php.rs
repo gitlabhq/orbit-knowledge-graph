@@ -124,15 +124,12 @@ impl DslLanguage for PhpDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // $obj->method()
             reference("member_call_expression")
                 .name_from(field("name"))
                 .receiver("object"),
-            // $obj?->method() (PHP 8.0 nullsafe)
             reference("nullsafe_member_call_expression")
                 .name_from(field("name"))
                 .receiver("object"),
-            // Foo::method(), self::method(), parent::method(), static::method()
             reference("scoped_call_expression")
                 .name_from(field("name"))
                 .receiver_via(field("scope")),
@@ -145,12 +142,9 @@ impl DslLanguage for PhpDsl {
             reference("class_constant_access_expression")
                 .name_from(Extract::terminal(Emit::Text).nth(Child, Named, -1))
                 .receiver_via(Extract::one(Child, Named)),
-            // foo()
             reference("function_call_expression").name_from(field("function")),
-            // new Foo()
             reference("object_creation_expression")
                 .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
-            // Attribute application: #[Route], #[ORM\Entity] (PHP 8.0)
             reference("attribute")
                 .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
             // Bare type references: param/return/property types, instanceof, catch.
@@ -179,7 +173,6 @@ impl DslLanguage for PhpDsl {
                     object: field("object"),
                     member: field("name"),
                 },
-                // $a?->b chains (PHP 8.0 nullsafe property access)
                 FieldAccessEntry {
                     kind: "nullsafe_member_access_expression",
                     object: field("object"),
@@ -474,8 +467,6 @@ fn php_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     }
     None
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct PhpRules;
 

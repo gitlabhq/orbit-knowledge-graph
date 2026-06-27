@@ -1,8 +1,3 @@
-//! Dependency graph for relationship-based generation.
-//!
-//! Builds a directed graph from the config's relationship definitions and
-//! performs topological sort to determine generation order.
-
 use crate::synth::config::{EdgeRatio, GenerationConfig, RelationshipConfig};
 use crate::synth::constants::{PARENT_TO_CHILD_EDGE, PARENT_TO_CHILD_PREFIX};
 use anyhow::{Result, bail};
@@ -14,13 +9,9 @@ const EPSILON_DEPTH_SEPARATOR: char = '@';
 
 #[derive(Debug, Clone)]
 pub struct ParentEdge {
-    /// The edge relationship kind (e.g., "CONTAINS", "IN_PROJECT").
     pub edge_type: String,
-    /// The parent node type (e.g., "Group", "Project").
     pub parent_kind: String,
-    /// The ratio/probability for this relationship.
     pub ratio: EdgeRatio,
-    /// Whether this is a parent-to-child edge (vs child-to-parent).
     /// Parent-to-child: source is parent, target is child (e.g., CONTAINS)
     /// Child-to-parent: source is child, target is parent (e.g., IN_PROJECT)
     pub parent_to_child: bool,
@@ -31,7 +22,6 @@ pub struct DependencyGraph {
     generation_order: Vec<String>,
     parent_edges: HashMap<String, Vec<ParentEdge>>,
     roots: HashSet<String>,
-    /// Entity types that are parents (have children in relationships).
     parent_types: HashSet<String>,
     /// Maps epsilon depth-level node names to their real entity type.
     /// e.g., "Group@1" → "Group", "Group@2" → "Group"
@@ -129,7 +119,6 @@ impl DependencyGraph {
             }
         }
 
-        // Pass 2: non-self-referential edges
         for (edge_type, variants) in &config.relationships.edges {
             for (variant_key, ratio) in variants {
                 let (source, target) = RelationshipConfig::parse_variant_key(variant_key)
@@ -142,7 +131,7 @@ impl DependencyGraph {
                     })?;
 
                 if source == target {
-                    continue; // Handled in pass 1
+                    continue;
                 }
 
                 if matches!(ratio, EdgeRatio::Recursive { .. }) {
@@ -219,7 +208,6 @@ impl DependencyGraph {
             }
         }
 
-        // Collect all entity types that are parents (have children)
         let parent_types: HashSet<String> = parent_edges
             .values()
             .flat_map(|edges| edges.iter().map(|e| e.parent_kind.clone()))
@@ -236,12 +224,10 @@ impl DependencyGraph {
         })
     }
 
-    /// Check if an entity type is a parent (has children in relationships).
     pub fn is_parent_type(&self, node_type: &str) -> bool {
         self.parent_types.contains(node_type)
     }
 
-    /// Validate that a node type exists in the ontology.
     pub fn validate_node(ontology: &Ontology, node_type: &str) -> Result<()> {
         if ontology.get_node(node_type).is_none() {
             bail!(
@@ -253,7 +239,6 @@ impl DependencyGraph {
         Ok(())
     }
 
-    /// Validate that an edge variant (type + source → target) exists in the ontology.
     pub fn validate_edge(
         ontology: &Ontology,
         edge_type: &str,
@@ -276,17 +261,10 @@ impl DependencyGraph {
         Ok(())
     }
 
-    /// Determine edge directionality from the ontology naming convention.
-    ///
-    /// Parent-to-child edges (source is parent, target is child):
-    ///   - `CONTAINS` — Group→Group, Group→Project, etc.
-    ///   - `HAS_*`    — Pipeline→Stage, MergeRequest→Diff, etc.
-    ///
-    /// Child-to-parent edges (source is child, target is parent):
-    ///   - `IN_*`     — MergeRequest→Project, Note→Project, etc.
-    ///
-    /// All other edges are associations and should not appear in
-    /// the relationship config (they belong in associations).
+    /// Edge directionality from the ontology naming convention:
+    /// Parent-to-child (source is parent): `CONTAINS`, `HAS_*`.
+    /// Child-to-parent (source is child): `IN_*`.
+    /// All other edges are associations and must not appear in the relationship config.
     fn is_parent_to_child(edge_type: &str) -> bool {
         edge_type == PARENT_TO_CHILD_EDGE || edge_type.starts_with(PARENT_TO_CHILD_PREFIX)
     }
@@ -297,7 +275,6 @@ impl DependencyGraph {
         parent_edges: &HashMap<String, Vec<ParentEdge>>,
         all_nodes: &HashSet<String>,
     ) -> Result<Vec<String>> {
-        // Build adjacency list (parent -> children)
         let mut children: HashMap<String, Vec<String>> = HashMap::new();
         let mut in_degree: HashMap<String, usize> = HashMap::new();
 
@@ -315,7 +292,6 @@ impl DependencyGraph {
             }
         }
 
-        // Start with nodes that have no incoming edges (roots)
         let mut queue: VecDeque<String> = in_degree
             .iter()
             .filter(|(_, deg)| **deg == 0)
@@ -365,7 +341,6 @@ impl DependencyGraph {
         &self.roots
     }
 
-    /// Resolve a possibly-epsilon node type to its real entity type.
     /// Returns the input unchanged if it's not an epsilon node.
     pub fn resolve_type<'a>(&'a self, node_type: &'a str) -> &'a str {
         self.epsilon_to_real
@@ -374,12 +349,11 @@ impl DependencyGraph {
             .unwrap_or(node_type)
     }
 
-    /// Whether the given node type is an epsilon depth-level node.
     pub fn is_epsilon(&self, node_type: &str) -> bool {
         self.epsilon_to_real.contains_key(node_type)
     }
 
-    /// Get the epsilon-to-real name mapping (for registry compaction).
+    /// For registry compaction.
     pub fn epsilon_to_real(&self) -> &HashMap<String, String> {
         &self.epsilon_to_real
     }
@@ -391,10 +365,8 @@ mod tests {
 
     #[test]
     fn test_is_parent_to_child() {
-        // CONTAINS is always parent-to-child
         assert!(DependencyGraph::is_parent_to_child("CONTAINS"));
 
-        // HAS_* edges are parent-to-child
         assert!(DependencyGraph::is_parent_to_child("HAS_STAGE"));
         assert!(DependencyGraph::is_parent_to_child("HAS_JOB"));
         assert!(DependencyGraph::is_parent_to_child("HAS_DIFF"));
@@ -403,15 +375,12 @@ mod tests {
         assert!(DependencyGraph::is_parent_to_child("HAS_LABEL"));
         assert!(DependencyGraph::is_parent_to_child("HAS_FINDING"));
         assert!(DependencyGraph::is_parent_to_child("HAS_IDENTIFIER"));
-        // Future HAS_* edges would also match automatically
         assert!(DependencyGraph::is_parent_to_child("HAS_FUTURE_EDGE"));
 
-        // IN_* edges are child-to-parent (not parent-to-child)
         assert!(!DependencyGraph::is_parent_to_child("IN_PROJECT"));
         assert!(!DependencyGraph::is_parent_to_child("IN_GROUP"));
         assert!(!DependencyGraph::is_parent_to_child("IN_MILESTONE"));
 
-        // Association edges are not parent-to-child
         assert!(!DependencyGraph::is_parent_to_child("AUTHORED"));
         assert!(!DependencyGraph::is_parent_to_child("MEMBER_OF"));
         assert!(!DependencyGraph::is_parent_to_child("ASSIGNED"));
@@ -449,7 +418,6 @@ mod tests {
 
         let order = DependencyGraph::topological_sort(&roots, &parent_edges, &all_nodes).unwrap();
 
-        // A must come before B, B must come before C
         let pos_a = order.iter().position(|x| x == "A").unwrap();
         let pos_b = order.iter().position(|x| x == "B").unwrap();
         let pos_c = order.iter().position(|x| x == "C").unwrap();
@@ -525,21 +493,18 @@ mod tests {
 
         let graph = DependencyGraph::build(&config, &ontology).unwrap();
 
-        // Epsilon nodes should exist
         assert!(graph.is_epsilon("Group@1"));
         assert!(graph.is_epsilon("Group@2"));
         assert!(graph.is_epsilon("Group@3"));
         assert!(!graph.is_epsilon("Group"));
         assert!(!graph.is_epsilon("Project"));
 
-        // resolve_type maps epsilon to real
         assert_eq!(graph.resolve_type("Group@1"), "Group");
         assert_eq!(graph.resolve_type("Group@2"), "Group");
         assert_eq!(graph.resolve_type("Group@3"), "Group");
         assert_eq!(graph.resolve_type("Group"), "Group");
         assert_eq!(graph.resolve_type("Project"), "Project");
 
-        // Generation order: Group before Group@1 before Group@2 before Group@3
         let order = graph.generation_order();
         let pos_group = order.iter().position(|x| x == "Group").unwrap();
         let pos_g1 = order.iter().position(|x| x == "Group@1").unwrap();
@@ -550,10 +515,8 @@ mod tests {
         assert!(pos_group < pos_g1);
         assert!(pos_g1 < pos_g2);
         assert!(pos_g2 < pos_g3);
-        // Project depends on Group + all epsilon levels, so after Group@3
         assert!(pos_g3 < pos_project);
 
-        // Project should have parent edges from Group, Group@1, Group@2, Group@3
         let project_parents = graph.parent_edges("Project").unwrap();
         let parent_kinds: Vec<&str> = project_parents
             .iter()
@@ -564,13 +527,11 @@ mod tests {
         assert!(parent_kinds.contains(&"Group@2"));
         assert!(parent_kinds.contains(&"Group@3"));
 
-        // Group@1 has parent edge from Group
         let g1_parents = graph.parent_edges("Group@1").unwrap();
         assert_eq!(g1_parents.len(), 1);
         assert_eq!(g1_parents[0].parent_kind, "Group");
         assert_eq!(g1_parents[0].ratio, EdgeRatio::Count(2));
 
-        // Group@2 has parent edge from Group@1
         let g2_parents = graph.parent_edges("Group@2").unwrap();
         assert_eq!(g2_parents.len(), 1);
         assert_eq!(g2_parents[0].parent_kind, "Group@1");

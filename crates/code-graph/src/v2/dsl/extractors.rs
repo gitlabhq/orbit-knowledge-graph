@@ -1,19 +1,13 @@
-//! Domain-specific metadata extraction built on `treesitter_visit::extract`.
-
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-// Re-export Extract type and constructors for lang specs
 pub use treesitter_visit::extract::{
     Extract, child_of_kind, default_name, descendant, field, field_chain, name_or_ident,
     no_extract, text,
 };
 
-// ── Metadata extraction ─────────────────────────────────────────
-
-/// Declarative metadata extraction rules for a scope definition.
 /// Single-value fields use `Extract`. Multi-value fields use `fn(&Node) -> Vec<String>`.
 pub struct MetadataRule {
     pub super_types: Option<fn(&N<'_>) -> Vec<String>>,
@@ -67,8 +61,7 @@ impl MetadataRule {
         self
     }
 
-    /// Extract metadata from a node. The `resolve` closure transforms
-    /// bare type names into FQNs using tree context + import map.
+    /// The `resolve` closure transforms bare type names into FQNs using tree context + import map.
     pub fn extract_metadata(
         &self,
         node: &N<'_>,

@@ -1,11 +1,5 @@
-//! Vue options-API detection and def synthesis.
-//!
-//! The public entry point, `extract_vue_options_api`, walks every
-//! `export default { ... }` (or `defineComponent({ ... })`) in the
-//! file and emits a virtual class def plus method / computed / watch /
-//! lifecycle-hook children. All knowledge of the Vue options vocabulary
-//! routes through `constants::VUE_*` so adding a new option is a single-
-//! site edit.
+//! All knowledge of the Vue options vocabulary routes through
+//! `constants::VUE_*` so adding a new option is a single-site edit.
 
 use crate::utils::Range;
 use oxc::ast::AstKind;
@@ -22,22 +16,12 @@ use super::super::constants::{
 };
 use super::super::types::{JsDef, JsDefKind, JsInvocationSupport};
 
-/// Classification of a property key on a Vue component options object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VueOption {
-    /// `methods` / `computed` / `watch` — value is an object whose
-    /// members are executable.
     ExecutableMap(ExecutableMap),
-    /// `data` / `setup` / `render` — value is itself executable.
     ExecutableFn,
-    /// `props` / `emits` / `inject` / `provide` / `components` —
-    /// contract metadata, not executable but component-identifying.
     Contract,
-    /// `name` etc. — marks the object as a component but contributes
-    /// no executable members.
     Identifier,
-    /// Any recognised Vue lifecycle hook
-    /// (see `constants::VUE_LIFECYCLE_HOOKS`).
     LifecycleHook,
 }
 
@@ -166,7 +150,6 @@ fn is_contract_value(expression: &Expression<'_>) -> bool {
     )
 }
 
-/// Returns `(classification, is_executable, is_contract)` for one property.
 /// `is_executable` and `is_contract` require both a valid classification
 /// *and* a value shape that matches the classification.
 fn classify_property(property: &ObjectProperty<'_>) -> Option<(VueOption, bool, bool)> {
@@ -207,10 +190,6 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
 
         let explicit_name = explicit_component_name(obj);
 
-        // Classify every recognised property once. Unrecognised keys
-        // drop out here; downstream iteration only sees classified
-        // options and reuses the executability / contract booleans
-        // derived during classification.
         struct ClassifiedOption<'a> {
             property: &'a ObjectProperty<'a>,
             key: String,

@@ -17,13 +17,10 @@ pub(in crate::modules::sdlc) struct EnrichmentSql {
     pub select_exprs: Vec<String>,
 }
 
-/// A node property to project onto the edge row during transform.
 pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
-    /// Column in the source MemTable (e.g. "status").
     pub source_column: String,
-    /// Array column on the edge table (e.g. "source_tags").
     pub edge_column: String,
-    /// Tag key prefix (e.g. "status"). Values become `"status:failed"` tokens.
+    /// Values become `"status:failed"` tokens (tag_key prefix + value).
     pub tag_key: String,
     /// For int-based enums: integer → string mapping.
     pub enum_mapping: Option<BTreeMap<i64, String>>,
@@ -77,9 +74,7 @@ pub(in crate::modules::sdlc) struct FkEdgeTransform {
     pub target_kind: EdgeKind,
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
-    /// Resolved edge table for this relationship kind (prefixed).
     pub destination_table: String,
-    /// Node properties projected onto the edge row (denormalized).
     pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
@@ -94,7 +89,6 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
     pub extract: ExtractPlan,
-    /// Node properties projected onto the edge row (denormalized).
     /// Empty for standalone edges (join table lacks node properties).
     pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
@@ -233,8 +227,6 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
     }
 }
 
-/// Collects all extra column names that FK edge transforms need beyond the
-/// node's own fields. This ensures the extract query includes them.
 fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> BTreeSet<String> {
     let mut columns = BTreeSet::from(["id".to_string()]);
 

@@ -1,15 +1,8 @@
 //! Data-correctness tests for project/group traversal_path scoping (#601941).
 //!
-//! These run real queries against seeded ClickHouse and assert on the returned
-//! rows (not the compiled SQL). The path-resolution stage does not run in this
-//! harness, so the resolved/flooded prefixes are supplied directly on the
-//! `SecurityContext` (`with_scope_prefixes`) exactly as `PathResolutionStage`
-//! would in the server. The flood itself is unit-tested in the ontology and
-//! gkg-server crates; here we prove the *results* stay correct:
-//! - a project-scoped multi-edge traversal returns the same rows as the broad
-//!   query (scoping is lossless), and
-//! - a cross-namespace traversal still returns its cross-project entities
-//!   (the prefix never over-prunes a non-scope-preserving edge).
+//! The path-resolution stage does not run in this harness, so the
+//! resolved/flooded prefixes are supplied directly on the `SecurityContext`
+//! (`with_scope_prefixes`) exactly as `PathResolutionStage` would in the server.
 
 use std::collections::HashMap;
 
@@ -107,7 +100,6 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
     .await;
     ctx.optimize_all().await;
 
-    // The flood resolves only the MR anchor; CLOSES does not propagate to the WI.
     let resp = run_query_with_security(
         ctx,
         r#"{
@@ -144,9 +136,8 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
     .await;
     ctx.optimize_all().await;
 
-    // Two anchors with distinct prefixes: mr only scans under 1/100/1000/ and wi
-    // only under 1/101/, so swapping either prefix onto the other node would drop
-    // its row. The cross-namespace CLOSES edge stays unscoped, so the pair joins.
+    // Distinct per-anchor prefixes: swapping either onto the other node drops its
+    // row. The cross-namespace CLOSES edge stays unscoped, so the pair still joins.
     let resp = run_query_with_security(
         ctx,
         r#"{

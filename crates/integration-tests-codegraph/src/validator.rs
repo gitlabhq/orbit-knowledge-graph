@@ -188,8 +188,6 @@ fn expected_value_display(expected: &serde_yaml::Value) -> String {
     }
 }
 
-// -- where filter -----------------------------------------------------------
-
 fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> RecordBatch {
     let matching: Vec<usize> = (0..batch.num_rows())
         .filter(|&row| {
@@ -247,8 +245,6 @@ fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> 
 
     RecordBatch::try_new(schema, columns).unwrap_or_else(|e| panic!("where filter failed: {e}"))
 }
-
-// -- assertion evaluation ----------------------------------------------------
 
 fn check_assertions(
     label: &str,

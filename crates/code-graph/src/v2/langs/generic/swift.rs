@@ -95,8 +95,6 @@ fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bo
     true
 }
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct SwiftDsl;
 
@@ -240,8 +238,6 @@ impl DslLanguage for SwiftDsl {
         }
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct SwiftRules;
 

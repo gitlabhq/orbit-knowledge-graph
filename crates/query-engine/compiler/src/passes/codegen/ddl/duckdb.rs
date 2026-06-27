@@ -1,13 +1,6 @@
-//! DuckDB DDL code generation.
-//!
-//! Emits `CREATE TABLE IF NOT EXISTS` statements from the DDL AST,
-//! targeting DuckDB SQL dialect. ClickHouse-specific features (codecs,
-//! indexes, projections, engine, settings) are omitted.
-
 use crate::ast::ddl::{ColumnType, CreateTable};
 
-/// Recursively checks whether a column type is nullable, handling
-/// wrappers like `LowCardinality(Nullable(String))`.
+/// Unwraps `LowCardinality(Nullable(_))` so the wrapper alone never reads as non-null.
 fn is_nullable(ct: &ColumnType) -> bool {
     match ct {
         ColumnType::Nullable(_) => true,
@@ -33,8 +26,6 @@ fn emit_column_type(ct: &ColumnType) -> String {
     }
 }
 
-/// Assembles DuckDB DDL: a versioned header, caller-supplied external DDL
-/// (e.g. manifest tables), then ontology-driven graph tables.
 pub fn generate_local_ddl(ontology: &ontology::Ontology, external_ddl: &str) -> String {
     let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
     let tables = super::generate_local_tables(ontology);
@@ -50,11 +41,7 @@ pub fn generate_local_ddl(ontology: &ontology::Ontology, external_ddl: &str) -> 
     ddl
 }
 
-/// Emits a `CREATE TABLE IF NOT EXISTS` statement for DuckDB.
-///
-/// Strips ClickHouse-specific features: codecs, indexes, projections,
-/// engine clauses, and settings. Defaults are preserved only when they
-/// are plain literal values (not ClickHouse function calls).
+/// Defaults are preserved only when they are plain literals, not ClickHouse function calls.
 pub fn emit_create_table(table: &CreateTable) -> String {
     let mut col_defs: Vec<String> = Vec::new();
 
@@ -83,10 +70,7 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     )
 }
 
-/// Returns true if a DEFAULT expression is valid in DuckDB.
-///
-/// ClickHouse-specific defaults like `now64(6)` are not valid.
-/// String literals, numeric literals, and `false`/`true` are fine.
+/// True for string/numeric literals and `false`/`true`; false for ClickHouse calls like `now64(6)`.
 fn is_duckdb_compatible_default(default: &str) -> bool {
     let d = default.trim();
     if d.eq_ignore_ascii_case("false") || d.eq_ignore_ascii_case("true") {

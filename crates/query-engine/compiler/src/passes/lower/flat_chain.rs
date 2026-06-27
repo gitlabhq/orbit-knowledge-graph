@@ -1,5 +1,3 @@
-//! Emit: flat edge chain.
-
 use std::collections::HashSet;
 
 use ontology::constants::*;
@@ -125,7 +123,6 @@ fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
     })
 }
 
-/// Collect all edge predicates for a hop into a target vec.
 #[allow(clippy::too_many_arguments)]
 fn collect_edge_predicates(
     target: &mut Vec<Expr>,

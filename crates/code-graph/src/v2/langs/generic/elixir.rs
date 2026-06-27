@@ -216,7 +216,6 @@ impl DslLanguage for ElixirDsl {
     }
 }
 
-/// Emit imports for `alias`/`import`/`require`/`use` calls.
 fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "call" {
         return false;
@@ -240,7 +239,6 @@ fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> b
 
     let keyword_opts = args.find(Child, Kind("keywords"));
 
-    // `as:` option: alias Foo.Bar, as: Fb
     let as_alias = keyword_opts
         .as_ref()
         .and_then(|kw| find_pair(kw, "as:"))
@@ -350,8 +348,6 @@ fn elixir_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
     }
     None
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct ElixirRules;
 

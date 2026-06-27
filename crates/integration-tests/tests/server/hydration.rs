@@ -1,9 +1,3 @@
-//! E2E integration tests for the hydration pipeline.
-//!
-//! Tests the full compile → execute → hydrate → format flow, verifying that
-//! hydrated properties appear on NodeRef for Dynamic plans (PathFinding,
-//! Neighbors) and on flat columns for Static plans (Traversal).
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -94,7 +88,6 @@ async fn setup_test_data(ctx: &TestContext) {
     ctx.optimize_all().await;
 }
 
-/// Compile, execute base query, skip redaction, run hydration.
 async fn compile_execute_hydrate(
     ctx: &TestContext,
     json: &str,
@@ -138,7 +131,6 @@ async fn compile_execute_hydrate(
     (output.query_result, output.result_context, plan)
 }
 
-/// Compile, execute, redact, then hydrate — the actual production flow.
 async fn compile_execute_redact_hydrate(
     ctx: &TestContext,
     json: &str,
@@ -190,10 +182,6 @@ fn make_test_resources(
     let client = Arc::new(ctx.create_client());
     (ontology, client)
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PathFinding Hydration
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn path_finding_dynamic_hydration(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
@@ -274,7 +262,6 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
     let row = result.authorized_rows().next().expect("should have a path");
     let path_nodes = row.path_nodes();
 
-    // User 1 = alice
     let user_props = &path_nodes[0].properties;
     assert_eq!(
         user_props
@@ -291,7 +278,6 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
         "User 1 name should be 'Alice Admin'"
     );
 
-    // Project 1000 = Public Project
     let project = path_nodes.last().unwrap();
     let project_props = &project.properties;
     assert_eq!(
@@ -302,7 +288,6 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
         "Project 1000 name should be 'Public Project'"
     );
 
-    // Group 100 (intermediate)
     if path_nodes.len() == 3 {
         let group_props = &path_nodes[1].properties;
         assert_eq!(
@@ -364,10 +349,6 @@ async fn path_finding_json_format(ctx: &TestContext) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Neighbors Hydration
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn neighbors_dynamic_hydration(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
@@ -407,7 +388,6 @@ async fn neighbors_hydrated_property_values(ctx: &TestContext) {
     let (result, _ctx_ref, _plan) =
         compile_execute_hydrate(ctx, json, &ontology, &security_ctx, &client).await;
 
-    // User 1 is member of Group 100 ("Public Group")
     let neighbor_names: HashSet<&str> = result
         .authorized_rows()
         .filter_map(|r| {
@@ -454,10 +434,6 @@ async fn neighbors_json_format(ctx: &TestContext) {
         obj.keys().collect::<Vec<_>>()
     );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Hydration Plan Selection
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
     let ontology = load_ontology();
@@ -516,16 +492,10 @@ async fn hydration_query_type_rejected_from_user_input(_ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Full Pipeline: Redact → Hydrate
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    // Two paths exist: User 1 → Group 100 → Project 1000
-    //                  User 2 → Group 101 → Project 1001
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -535,7 +505,6 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }"#;
 
-    // Allow User 1's path, deny User 2
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.deny("user", &[2]);
@@ -552,12 +521,10 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
         "some paths should survive redaction"
     );
 
-    // Surviving paths should still have hydrated properties
     for row in result.authorized_rows() {
         let path_nodes = row.path_nodes();
         assert!(path_nodes.len() >= 2);
 
-        // Start node must be User 1 (User 2 was denied)
         assert_eq!(path_nodes[0].id, 1);
         assert_eq!(path_nodes[0].entity_type, "User");
         assert!(
@@ -565,7 +532,6 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
             "surviving path start node should be hydrated"
         );
 
-        // Verify actual property value on surviving path
         assert_eq!(
             path_nodes[0]
                 .properties
@@ -582,7 +548,6 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
         );
     }
 
-    // User 2's paths must not appear
     let start_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.path_nodes().first().map(|n| n.id))
@@ -597,15 +562,12 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    // User 2's outgoing neighbors: Group 101 ("Private Group")
-    // User 3's outgoing neighbors: Group 101 ("Private Group")
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [2, 3]},
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
-    // Allow User 2, deny User 3; allow the neighbor group
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[2]);
     mock_service.deny("user", &[3]);
@@ -628,7 +590,6 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
     assert_eq!(neighbor.entity_type, "Group");
     assert_eq!(neighbor.id, 101);
 
-    // Hydrated properties should be present on the surviving neighbor
     assert!(
         !neighbor.properties.is_empty(),
         "surviving neighbor should be hydrated after redaction"
@@ -656,7 +617,6 @@ async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }"#;
 
-    // Deny everything
     let mock_service = MockRedactionService::new();
 
     let (result, _ctx_ref, redacted_count) =
@@ -671,12 +631,6 @@ async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Consolidated Hydration Data Correctness
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// The consolidated path User→Group→Project hydrates all three entity types
-/// in a single UNION ALL query. Verify each node has the correct property values.
 async fn consolidated_path_hydrates_all_entity_types(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
@@ -723,8 +677,6 @@ async fn consolidated_path_hydrates_all_entity_types(ctx: &TestContext) {
     );
 }
 
-/// Null values from ClickHouse (e.g. full_path=NULL) should be filtered out,
-/// not appear as empty strings or crash the parser.
 async fn consolidated_hydration_filters_null_properties(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
@@ -751,12 +703,10 @@ async fn consolidated_hydration_filters_null_properties(ctx: &TestContext) {
     }
 }
 
-/// When multiple IDs of the same entity type need hydration, all should be returned.
 async fn consolidated_hydration_multiple_ids_same_type(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
 
-    // Both users 1 and 2 are members of groups, producing a path through both
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -793,8 +743,6 @@ async fn consolidated_hydration_multiple_ids_same_type(ctx: &TestContext) {
     }
 }
 
-/// Verify that the consolidated query produces exactly one ClickHouse query
-/// for hydration, regardless of how many entity types are discovered.
 async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
     let (ontology, client) = make_test_resources(ctx);
     let security_ctx = test_security_context();
@@ -848,16 +796,11 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ─── Traversal static hydration with indirect-auth entities ─────────────────
-
-/// Regression test: entities with `redaction.id_column != "id"` (e.g. File,
-/// Definition where auth uses `project_id`) must hydrate using the entity's
-/// own primary key (`_gkg_f_pk`), not the authorization ID (`_gkg_f_id`).
-///
-/// Without the fix, `collect_static_ids` reads `_gkg_f_id` (= project_id 1000)
-/// instead of `_gkg_f_pk` (= file id 5001/5002), causing the hydration query
-/// to look up `gl_file WHERE id = 1000` which returns nothing (or the wrong row).
+/// Entities with `redaction.id_column != "id"` (e.g. File, Definition where auth
+/// uses `project_id`) must hydrate using the entity's own primary key
+/// (`_gkg_f_pk`), not the authorization ID (`_gkg_f_id`). Otherwise
+/// `collect_static_ids` reads `_gkg_f_id` (= project_id 1000) and the hydration
+/// query looks up `gl_file WHERE id = 1000`, returning nothing.
 async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     let ontology = Arc::new(load_ontology());
     let security_ctx = test_security_context();
@@ -888,8 +831,6 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
         "should have 2 authorized rows (File->DEFINES->Definition edges for both files)"
     );
 
-    // Verify EVERY row has hydrated properties — not just any. Catches partial
-    // failures where some rows hydrate and others don't.
     let mut seen_file_names: Vec<String> = Vec::new();
     let mut seen_def_names: Vec<String> = Vec::new();
     for row in &authorized {
@@ -924,19 +865,14 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     );
 }
 
-// ─── Dynamic hydration with indirect-auth entities ──────────────────────────
-
-/// Verify that dynamic hydration (Neighbors) correctly resolves properties for
-/// indirect-auth entities (File, Definition) where the entity PK differs from
-/// the authorization ID. Dynamic hydration uses NodeRef.id which comes from
-/// edge source_id/target_id (the actual entity PK), so this should work
-/// without the static-hydration PK fix — but we test it to be sure.
+/// Dynamic hydration uses NodeRef.id, which comes from edge source_id/target_id
+/// (the actual entity PK), so indirect-auth entities (File, Definition) resolve
+/// without the static-hydration PK fix.
 async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
     let ontology = Arc::new(load_ontology());
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
-    // File 5001 has outgoing DEFINES edges to Definition 6001
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "f", "entity": "File", "node_ids": [5001]},
@@ -957,7 +893,6 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
         "File 5001 should have at least one outgoing neighbor"
     );
 
-    // The neighbor should be Definition 6001 with hydrated properties
     let has_definition_neighbor = authorized.iter().any(|row| {
         row.dynamic_nodes()
             .iter()
@@ -968,7 +903,6 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
         "Definition 6001 should appear as a neighbor with hydrated properties"
     );
 
-    // Verify the actual property value
     for row in &authorized {
         for node in row.dynamic_nodes() {
             if node.entity_type == "Definition" && node.id == 6001 {
@@ -984,16 +918,11 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
     }
 }
 
-/// Verify that dynamic hydration (PathFinding) correctly resolves properties for
-/// indirect-auth entities. The path File->Definition traverses entities where
-/// PK != auth ID. NodeRef.id should carry the entity PK (from edge source_id/
-/// target_id), so hydration queries `gl_file WHERE id = <file_id>`.
 async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
     let ontology = Arc::new(load_ontology());
     let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
 
-    // Path from File 5001 to Definition 6001 (single hop via DEFINES)
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -1018,7 +947,6 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
     let path_nodes = row.path_nodes();
     assert_eq!(path_nodes.len(), 2, "path should be File -> Definition");
 
-    // File 5001 = lib.rs
     let file_node = &path_nodes[0];
     assert_eq!(file_node.entity_type, "File");
     assert_eq!(file_node.id, 5001);
@@ -1035,7 +963,6 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
         "File 5001 name should be 'lib.rs'"
     );
 
-    // Definition 6001 = greet
     let def_node = &path_nodes[1];
     assert_eq!(def_node.entity_type, "Definition");
     assert_eq!(def_node.id, 6001);
@@ -1053,8 +980,6 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
     );
 }
 
-/// Verify that entities where PK == auth ID (User, Group) still hydrate correctly
-/// after the fix (no regression from the PK-fallback logic).
 async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
     let ontology = Arc::new(load_ontology());
     let security_ctx = test_security_context();
@@ -1092,9 +1017,6 @@ async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
     assert!(group_props_found, "Group name should be hydrated");
 }
 
-// Orchestrator
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn hydration_integration() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
@@ -1102,28 +1024,22 @@ async fn hydration_integration() {
 
     run_subtests_shared!(
         &ctx,
-        // path finding hydration
         path_finding_dynamic_hydration,
         path_finding_hydrated_property_values,
         path_finding_json_format,
-        // neighbors hydration
         neighbors_dynamic_hydration,
         neighbors_hydrated_property_values,
         neighbors_json_format,
-        // hydration plan selection
         search_produces_no_hydration_plan,
         traversal_produces_static_hydration_plan,
         hydration_query_type_rejected_from_user_input,
-        // full pipeline: redact then hydrate
         path_finding_hydration_after_partial_redaction,
         neighbors_hydration_after_partial_redaction,
         path_finding_all_denied_then_hydrate,
-        // consolidated hydration data correctness
         consolidated_path_hydrates_all_entity_types,
         consolidated_hydration_filters_null_properties,
         consolidated_hydration_multiple_ids_same_type,
         consolidated_hydration_single_query_execution,
-        // static + dynamic hydration with indirect-auth entities
         traversal_static_hydration_indirect_auth_entities,
         traversal_static_hydration_default_auth_entities,
         neighbors_dynamic_hydration_indirect_auth_entities,

@@ -13,8 +13,6 @@ use crate::v2::linker::rules::{
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct LuaDsl;
 
@@ -32,12 +30,10 @@ impl DslLanguage for LuaDsl {
         // [0] is the unconditional fallback for plain `function foo()`.
         vec![
             scope("function_declaration", "Function").def_kind(DefKind::Function),
-            // function M.helper() — table dot syntax; name = bare field identifier
             scope("function_declaration", "Function")
                 .def_kind(DefKind::Function)
                 .when(field_kind("name", &["dot_index_expression"]))
                 .name_from(field("name").field("field")),
-            // function M:method() — colon syntax with implicit self
             scope("function_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .when(field_kind("name", &["method_index_expression"]))
@@ -47,17 +43,14 @@ impl DslLanguage for LuaDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // obj:method() — colon call; receiver is the table
             reference("function_call")
                 .name_from(field("name").field("method"))
                 .when(field_kind("name", &["method_index_expression"]))
                 .receiver_via(field("name").field("table")),
-            // M.func() — dot call; receiver is the table
             reference("function_call")
                 .name_from(field("name").field("field"))
                 .when(field_kind("name", &["dot_index_expression"]))
                 .receiver_via(field("name").field("table")),
-            // foo() — simple call
             reference("function_call").name_from(field("name")),
         ]
     }
@@ -108,7 +101,6 @@ impl DslLanguage for LuaDsl {
 
     fn bindings() -> Vec<BindingRule> {
         vec![
-            // local x = expr  /  local x, y = e1, e2
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["variable_list"])
                 .value_from("expression_list"),
@@ -139,11 +131,8 @@ impl DslLanguage for LuaDsl {
     }
 }
 
-/// Extract `require("module")` and `require "module"` as runtime imports.
-///
-/// Called for every AST node; returns `true` only for `function_call` nodes
-/// whose `name` field is the identifier `require`, preventing the default
-/// import extractor from also running on those nodes.
+/// Returns `true` for a `require` `function_call` node to prevent the default
+/// import extractor from also running on it.
 fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "function_call" {
         return false;
@@ -194,8 +183,6 @@ fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool
     true
 }
 
-// ── Resolution rules ────────────────────────────────────────────
-
 pub struct LuaRules;
 
 impl HasRules for LuaRules {
@@ -221,8 +208,6 @@ impl HasRules for LuaRules {
         .with_hooks(ResolverHooks::default())
     }
 }
-
-// ── Unit tests ───────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

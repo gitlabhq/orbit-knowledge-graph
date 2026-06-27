@@ -1,17 +1,10 @@
-//! General-purpose string utilities: `StringPool`, `StrId`, `ScratchBuf`.
-
 use std::fmt;
 
-/// Index into [`StringPool`]. 4 bytes, Copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StrId(u32);
 
-/// Pool of strings packed contiguously in a single `String` buffer.
-///
-/// An index `Vec` stores `(offset, len)` pairs for O(1) retrieval. One large
-/// allocation instead of many individual `Box<str>` heap allocs.
-///
-/// No lifetime parameter, no global lock, no unsafe.
+/// One large allocation instead of many individual `Box<str>` heap allocs;
+/// an index `Vec` of `(offset, len)` pairs gives O(1) retrieval.
 pub struct StringPool {
     // `String`, not `Vec<u8>`, so `get` slices in O(1) instead of revalidating
     // UTF-8 on every access (it is the hot accessor for every graph string).
@@ -41,7 +34,6 @@ impl StringPool {
         }
     }
 
-    /// Append a string to the pool. Returns an ID for later retrieval.
     pub fn alloc(&mut self, s: &str) -> StrId {
         let id = StrId(self.index.len() as u32);
         let offset = self.buf.len() as u32;
@@ -50,7 +42,6 @@ impl StringPool {
         id
     }
 
-    /// Retrieve a string by ID.
     #[inline]
     pub fn get(&self, id: StrId) -> &str {
         let (offset, len) = self.index[id.0 as usize];
@@ -75,10 +66,8 @@ impl fmt::Debug for StringPool {
     }
 }
 
-/// Reusable heap `String` for transient lookups.
-///
-/// Allocated once, reused via `clear()` + `write!()` or `push_str()`.
-/// Avoids per-call `format!()` heap allocations in hot paths.
+/// Allocated once, reused via `clear()`; avoids per-call `format!()` heap
+/// allocations in hot paths.
 pub struct ScratchBuf(String);
 
 impl Default for ScratchBuf {
@@ -92,7 +81,6 @@ impl ScratchBuf {
         Self(String::new())
     }
 
-    /// Clear and write formatted content. Returns `&str` for immediate use.
     #[inline]
     pub fn set_fmt(&mut self, args: fmt::Arguments<'_>) -> &str {
         self.0.clear();

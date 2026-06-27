@@ -1,15 +1,6 @@
-//! Cursor pagination correctness tests.
-//!
-//! Verifies that cursor-based pagination slices the authorized
-//! (post-redaction) result set correctly across query types.
-//!
 //! Seed data: 6 users (IDs 1-6), 5 active (1-4, 6), 1 blocked (5).
 
 use super::helpers::*;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Search pagination
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_first_page(ctx: &TestContext) {
     let resp = run_query(
@@ -61,7 +52,6 @@ pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
     )
     .await;
 
-    // 7 users total, offset=4 → users 5, 6, 7
     resp.assert_node_count(3);
     resp.assert_node_order("User", &[5, 6, 7]);
 }
@@ -82,12 +72,7 @@ pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
     resp.assert_node_count(0);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pagination with filters
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn cursor_with_filter(ctx: &TestContext) {
-    // 5 active users (1-4, 6), 1 blocked (5). Cursor pages through active only.
     let resp = run_query(
         ctx,
         r#"{
@@ -122,18 +107,12 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
     )
     .await;
 
-    // 5 active users total, offset=2 → users 3, 4
     resp.assert_node_count(2);
     resp.assert_node_order("User", &[3, 4]);
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pagination with redaction
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
-    // Allow users 1, 3, 5 — deny 2, 4, 6. 3 authorized users total.
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 3, 5]);
     svc.deny("user", &[2, 4, 6]);
@@ -151,7 +130,6 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
     )
     .await;
 
-    // 3 authorized (1, 3, 5), first page = 1, 3
     resp.assert_node_count(2);
     resp.assert_node_order("User", &[1, 3]);
 }
@@ -174,17 +152,11 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
     )
     .await;
 
-    // 3 authorized (1, 3, 5), offset=2 → only user 5
     resp.assert_node_count(1);
     resp.assert_node_order("User", &[5]);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Page coverage: no overlap, no gaps
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
-    // Page through all 7 users in pages of 2, collecting IDs from each page.
     let mut all_ids: Vec<i64> = Vec::new();
 
     for offset in (0u32..).step_by(2) {
@@ -209,7 +181,6 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
 
         let page_ids = resp.node_ids_ordered("User");
 
-        // No overlap with previously seen IDs
         for id in &page_ids {
             assert!(!all_ids.contains(id), "ID {id} appeared in multiple pages");
         }
@@ -226,13 +197,7 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Traversal pagination
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn cursor_traversal(ctx: &TestContext) {
-    // Full traversal has 9 MEMBER_OF edge-rows → 9 result rows.
-    // Page through all of them in pages of 4 and verify total coverage.
     let full = run_query(
         ctx,
         r#"{
@@ -253,7 +218,6 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
     full.assert_node_count(9);
     full.assert_edge_count("MEMBER_OF", 9);
 
-    // First page: offset=0, page_size=4
     let page1 = run_query(
         ctx,
         r#"{
@@ -280,7 +244,6 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         edge_type: "MEMBER_OF".into(),
     });
 
-    // Second page: offset=4, page_size=4
     let page2 = run_query(
         ctx,
         r#"{
@@ -304,7 +267,6 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         edge_type: "MEMBER_OF".into(),
     });
 
-    // Last page: offset=8, page_size=4 → 1 row left
     let page3 = run_query(
         ctx,
         r#"{
@@ -329,13 +291,8 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cursor without explicit order_by: deterministic default ordering
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) {
     // Without explicit order_by, cursor queries now inject a default ORDER BY id ASC.
-    // Run the same query twice and verify identical results.
     let query = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
@@ -358,8 +315,6 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
 }
 
 pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestContext) {
-    // Page through all 7 users in pages of 2 without explicit order_by.
-    // The default ORDER BY id ASC should give stable, non-overlapping pages.
     let mut all_ids: Vec<i64> = Vec::new();
 
     for offset in (0u32..).step_by(2) {
@@ -466,13 +421,7 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Path finding pagination
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext) {
-    // User 1 -> Projects 1000, 1002, 1004 via MEMBER_OF + CONTAINS = 3 paths.
-    // Page through them in pages of 2 and verify full coverage without overlap.
     let full = run_query(
         ctx,
         r#"{
@@ -491,7 +440,6 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
     let full_pids = full.path_ids();
     assert_eq!(full_pids.len(), 3, "3 shortest paths expected");
 
-    // Collect all destination IDs from the full result for comparison.
     let full_destinations: Vec<i64> = {
         let mut dests: Vec<i64> = full_pids
             .iter()
@@ -501,7 +449,6 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
         dests
     };
 
-    // Page 1: offset=0, page_size=2
     let page1 = run_query(
         ctx,
         r#"{
@@ -523,7 +470,6 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
     assert_eq!(p1_pids.len(), 2, "first page should have 2 paths");
     page1.assert_node_count(page1.node_count());
 
-    // Page 2: offset=2, page_size=2
     let page2 = run_query(
         ctx,
         r#"{
@@ -545,7 +491,6 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
     assert_eq!(p2_pids.len(), 1, "second page should have 1 path");
     page2.assert_node_count(page2.node_count());
 
-    // Combine destinations from both pages and verify full coverage.
     let mut all_destinations: Vec<i64> = Vec::new();
     for &pid in p1_pids.iter() {
         if let Some(last) = page1.path(pid).last() {
@@ -566,8 +511,6 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
 }
 
 pub(super) async fn cursor_path_finding_is_deterministic(ctx: &TestContext) {
-    // Run the same cursored path finding query twice and verify both runs
-    // return the same set of destination nodes.
     let query = r#"{
         "query_type": "path_finding",
         "nodes": [

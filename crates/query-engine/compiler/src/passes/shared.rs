@@ -1,5 +1,3 @@
-//! Shared helpers used by both plan and lower (emit), plus neighbors and pathfinding.
-
 use std::collections::HashMap;
 
 use ontology::constants::*;
@@ -7,10 +5,6 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::constants::*;
 use crate::input::*;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Filter / predicate helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(alias, prop);
@@ -68,7 +62,6 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
     }
 }
 
-/// IN-list predicate: `alias.col IN (ids)` or `alias.col = id` for single.
 pub fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
     if ids.len() == 1 {
         Expr::eq(Expr::col(alias, col), Expr::int(ids[0]))
@@ -110,10 +103,6 @@ pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Edge SELECT columns
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub fn edge_select_columns(alias: &str) -> Vec<SelectExpr> {
     edge_select_columns_with_prefix(alias, alias)
 }
@@ -131,10 +120,6 @@ pub fn edge_select_columns_with_prefix(alias: &str, prefix: &str) -> Vec<SelectE
     .collect()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Edge table resolution
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub fn resolve_edge_table(input: &Input, rel_types: &[String]) -> String {
     for t in rel_types {
         if let Some(table) = input.compiler.edge_table_for_rel.get(t) {
@@ -143,10 +128,6 @@ pub fn resolve_edge_table(input: &Input, rel_types: &[String]) -> String {
     }
     input.compiler.default_edge_table.clone()
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Data type conversion
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
     match dt {
@@ -169,11 +150,6 @@ pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared helpers used across lower/ modules
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// `alias._deleted = false` predicate.
 pub fn deleted_false(alias: &str) -> Expr {
     Expr::eq(
         Expr::col(alias, DELETED_COLUMN),
@@ -223,7 +199,6 @@ fn tag_value_opt(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// Convert a denormalized tag filter into a ClickHouse expression.
 /// Returns `None` for unsupported filter ops.
 pub fn denorm_tag_expr(
     edge_alias: &str,
@@ -273,8 +248,6 @@ pub fn denorm_tag_expr(
     }
 }
 
-/// Build a TableRef for an edge scan: single table or UNION ALL across tables.
-///
 /// When multiple tables are involved, each UNION arm projects only the
 /// columns common to all edge tables (the 6 reserved edge columns) so
 /// that tables with extra columns (e.g. gl_code_edge's project_id/branch)
@@ -329,8 +302,6 @@ pub fn edge_table_scan_filtered(
     }
 }
 
-/// Build a latest-row scan over a ReplacingMergeTree node table.
-///
 /// `FINAL` applies the table engine's merge semantics at read time, so filters
 /// are evaluated against the latest row rather than historical matching
 /// versions.
@@ -365,7 +336,6 @@ pub fn dedup_subquery(
     )
 }
 
-/// Whether any filter property lacks a denormalized edge column.
 pub fn has_non_denorm_filters(
     entity: &str,
     filters: &[(String, InputFilter)],

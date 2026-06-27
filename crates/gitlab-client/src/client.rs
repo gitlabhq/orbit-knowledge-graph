@@ -16,18 +16,16 @@ use gkg_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
 
-/// JWT issuer — Rails expects this value when validating incoming tokens.
+/// Rails expects this value when validating incoming tokens.
 pub const JWT_ISSUER: &str = "gitlab";
 
-/// JWT audience — Rails expects this value when validating incoming tokens.
+/// Rails expects this value when validating incoming tokens.
 pub const JWT_AUDIENCE: &str = "gitlab-knowledge-graph";
 
-/// JWT subject — identifies this service. Rails validates that the subject
-/// starts with an expected prefix (e.g. "gkg-").
+/// Rails validates that the subject starts with an expected prefix (e.g. "gkg-").
 pub const JWT_SUBJECT: &str = "gkg-indexer:code";
 
-/// Custom authentication header used by the Knowledge Graph internal API.
-/// The raw JWT token is sent directly as the header value (no `Bearer` prefix).
+/// The raw JWT token is sent directly as this header value (no `Bearer` prefix).
 const AUTH_HEADER: &str = "Gitlab-Orbit-Api-Request";
 
 const JWT_EXPIRY_SECONDS: i64 = 300;

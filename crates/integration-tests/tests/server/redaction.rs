@@ -45,7 +45,6 @@ const ALL_PROJECT_IDS: &[i64] = &[1000, 1001, 1002, 1003, 1004];
 const ALL_MR_IDS: &[i64] = &[2000, 2001, 2002, 2003];
 
 async fn setup_test_data(ctx: &TestContext) {
-    // User.state is string-based enum (enum_type: string), User.user_type is int-based enum
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type) VALUES
          (1, 'alice', 'Alice Admin', 'active', 'human'),
@@ -77,8 +76,6 @@ async fn setup_test_data(ctx: &TestContext) {
     ))
     .await;
 
-    // MergeRequest.state is int-based enum (no enum_type in ontology)
-    // Values: 1=opened, 2=closed, 3=merged, 4=locked
     ctx.execute(&format!(
         "INSERT INTO {} (id, title, state, source_branch, target_branch, traversal_path) VALUES
          (2000, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
@@ -109,10 +106,6 @@ async fn setup_test_data(ctx: &TestContext) {
 
     ctx.optimize_all().await;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Fail-Closed / Core Redaction Subtests
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
     let ontology = load_ontology();
@@ -851,10 +844,8 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
     assert_eq!(unauthorized_ids, HashSet::from([3, 4, 5]));
 }
 
-/// Verifies fail-closed behavior: rows with NULL entity IDs must be denied.
-///
-/// This can occur with outer joins or data inconsistencies. Unverifiable rows
-/// must never pass authorization since we cannot confirm access rights.
+/// A row with a NULL entity ID is unverifiable and must fail closed (it can
+/// arise from outer joins or data inconsistencies).
 #[test]
 fn fail_closed_null_id_denies_row() {
     use arrow::array::{Array, Int64Array, StringArray};
@@ -925,15 +916,10 @@ fn fail_closed_null_id_denies_row() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Path Finding Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Find paths from user 1 to project 1000 (path: User 1 -> Group 100 -> Project 1000)
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -949,7 +935,6 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
 
     assert!(!result.is_empty(), "should find at least one path");
 
-    // Each row should have path_nodes containing (User 1, Group 100, Project 1000)
     for row in result.iter() {
         let path_nodes = row.path_nodes();
         assert!(
@@ -957,16 +942,13 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
             "path should have at least start and end nodes"
         );
 
-        // First node should be User 1
         assert_eq!(path_nodes[0].id, 1);
         assert_eq!(path_nodes[0].entity_type, "User");
 
-        // Last node should be Project 1000
         let last = path_nodes.last().unwrap();
         assert_eq!(last.id, 1000);
         assert_eq!(last.entity_type, "Project");
 
-        // edge_kinds should have one entry per hop (nodes - 1)
         let edge_kinds = row.edge_kinds();
         assert_eq!(
             edge_kinds.len(),
@@ -974,7 +956,6 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
             "edge_kinds should have one entry per hop"
         );
 
-        // User(1) --MEMBER_OF--> Group(100) --CONTAINS--> Project(1000)
         if path_nodes.len() == 3 {
             assert_eq!(edge_kinds[0], "MEMBER_OF");
             assert_eq!(edge_kinds[1], "CONTAINS");
@@ -1013,7 +994,6 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Find paths from user 1 to any project in group 100 or 102
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -1032,13 +1012,12 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
-    mock_service.allow("group", &[100]); // Only allow group 100, deny 102
+    mock_service.allow("group", &[100]);
     mock_service.deny("group", &[102]);
     mock_service.allow("project", &[1000, 1002, 1004]);
 
     run_redaction(&mut result, &mock_service);
 
-    // Only paths through group 100 should remain
     for row in result.authorized_rows() {
         let path_nodes = row.path_nodes();
         for node in path_nodes {
@@ -1049,8 +1028,6 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
         }
     }
 
-    // Paths to 1000 and 1002 (via group 100) should be authorized
-    // Path to 1004 (via group 102) should be denied
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.path_nodes().last().map(|n| n.id))
@@ -1065,7 +1042,6 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
         "path through denied group 102 should be filtered"
     );
 
-    // Surviving paths must have valid edge_kinds
     for row in result.authorized_rows() {
         let path_nodes = row.path_nodes();
         let edge_kinds = row.edge_kinds();
@@ -1115,7 +1091,6 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
     );
     assert_eq!(result.authorized_count(), raw_count);
 
-    // Verify edge_kinds survive redaction intact
     for row in result.authorized_rows() {
         let path_nodes = row.path_nodes();
         let edge_kinds = row.edge_kinds();
@@ -1124,7 +1099,6 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
             path_nodes.len() - 1,
             "edge_kinds length must equal hops after redaction"
         );
-        // Every hop should have a non-empty relationship kind
         for (i, kind) in edge_kinds.iter().enumerate() {
             assert!(!kind.is_empty(), "edge_kinds[{}] should not be empty", i);
         }
@@ -1151,7 +1125,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
     assert!(!result.is_empty());
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.deny("user", &[1]); // Deny the start node
+    mock_service.deny("user", &[1]);
     mock_service.allow("group", ALL_GROUP_IDS);
     mock_service.allow("project", ALL_PROJECT_IDS);
 
@@ -1185,11 +1159,10 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
     mock_service.allow("user", &[1]);
     mock_service.allow("group", ALL_GROUP_IDS);
     mock_service.allow("project", &[1000]);
-    mock_service.deny("project", &[1002]); // Deny one end node
+    mock_service.deny("project", &[1002]);
 
     run_redaction(&mut result, &mock_service);
 
-    // Only paths to project 1000 should remain
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.path_nodes().last().map(|n| n.id))
@@ -1199,16 +1172,10 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
     assert!(!authorized_ends.contains(&1002));
 }
 
-/// Path finding with multiple valid paths to same destination - authorization
-/// must check ALL nodes in EACH path independently. Denying a node in one path
-/// should not affect other paths that don't traverse that node.
 async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // User 1 can reach project 1000 via group 100
-    // User 1 can also reach project 1002 via group 100
-    // These are independent paths that share intermediate nodes
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -1225,16 +1192,14 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
     let raw_count = result.len();
     assert!(raw_count >= 2, "should find paths to both projects");
 
-    // Authorize the path through group 100 to project 1000 only
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.allow("group", &[100]);
     mock_service.allow("project", &[1000]);
-    mock_service.deny("project", &[1002]); // Deny one destination
+    mock_service.deny("project", &[1002]);
 
     run_redaction(&mut result, &mock_service);
 
-    // Only paths ending at 1000 should remain
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.path_nodes().last().map(|n| n.id))
@@ -1250,13 +1215,10 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
     );
 }
 
-/// Verify that path finding correctly handles the case where the same node
-/// appears at different depths. Each path instance is checked independently.
 async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Multiple users can reach the same projects through group 100
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -1273,7 +1235,6 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
     let raw_count = result.len();
     assert!(raw_count >= 2, "should find paths from both users");
 
-    // Authorize user 1's path but deny user 2
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.deny("user", &[2]);
@@ -1282,7 +1243,6 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
 
     run_redaction(&mut result, &mock_service);
 
-    // Only user 1's path should remain
     let authorized_starts: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.path_nodes().first().map(|n| n.id))
@@ -1295,13 +1255,10 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
     );
 }
 
-/// Path finding with max depth traversal - verifies that authorization
-/// is checked for ALL nodes in paths, not just start/end.
 async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Path: User -> Group -> Project (depth 2 is realistic for our data, max allowed is 3)
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -1318,16 +1275,14 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
     let raw_count = result.len();
     assert!(raw_count > 0, "should find some paths");
 
-    // Authorize everything except intermediate group 102
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
-    mock_service.allow("group", &[100]); // Only group 100
-    mock_service.deny("group", &[102]); // Deny group 102
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[102]);
     mock_service.allow("project", ALL_PROJECT_IDS);
 
     run_redaction(&mut result, &mock_service);
 
-    // Verify no paths go through group 102
     for row in result.authorized_rows() {
         for node in row.path_nodes() {
             if node.entity_type == "Group" {
@@ -1339,7 +1294,6 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
         }
     }
 
-    // Paths through group 100 (to 1000, 1002) should work
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.path_nodes().last().map(|n| n.id))
@@ -1355,7 +1309,6 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
     );
 }
 
-/// Verify path finding with zero valid paths after authorization returns empty.
 async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -1375,10 +1328,9 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
 
     assert!(!result.is_empty(), "should have paths before redaction");
 
-    // Deny ALL intermediate nodes - paths cannot complete
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
-    mock_service.deny("group", ALL_GROUP_IDS); // Deny all groups
+    mock_service.deny("group", ALL_GROUP_IDS);
     mock_service.allow("project", &[1000]);
 
     run_redaction(&mut result, &mock_service);
@@ -1390,21 +1342,10 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
     );
 }
 
-/// Verifies that edge_kinds are correctly populated and preserved through redaction.
-///
-/// Tests:
-/// - edge_kinds array length equals path_nodes length - 1
-/// - edge_kinds contain the correct relationship types in path order
-/// - edge_kinds are preserved in authorized paths after partial redaction
-/// - edge_kinds are not leaked through redacted paths
 async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Query paths from users to projects via groups.
-    // User 1 -> Group 100 -> Project 1000 (MEMBER_OF, CONTAINS)
-    // User 1 -> Group 100 -> Project 1002 (MEMBER_OF, CONTAINS)
-    // User 1 -> Group 102 -> Project 1004 (MEMBER_OF, CONTAINS)
     let json = r#"{
         "query_type": "path_finding",
         "nodes": [
@@ -1421,7 +1362,6 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
     let raw_count = result.len();
     assert!(raw_count >= 3, "should find paths to all 3 projects");
 
-    // Verify edge_kinds before redaction
     for row in result.iter() {
         let path_nodes = row.path_nodes();
         let edge_kinds = row.edge_kinds();
@@ -1431,7 +1371,6 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
             "pre-redaction: edge_kinds must have one entry per hop"
         );
 
-        // All paths are 3 nodes: User -> Group -> Project
         if path_nodes.len() == 3 {
             assert_eq!(
                 edge_kinds[0], "MEMBER_OF",
@@ -1444,7 +1383,6 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
         }
     }
 
-    // Authorize only paths through group 100, deny group 102
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.allow("group", &[100]);
@@ -1453,14 +1391,11 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
 
     run_redaction(&mut result, &mock_service);
 
-    // Paths to 1000 and 1002 (via group 100) should survive
-    // Path to 1004 (via group 102) should be denied
     assert!(
         result.authorized_count() >= 2,
         "at least 2 paths through group 100 should survive"
     );
 
-    // Verify edge_kinds are preserved in authorized paths
     for row in result.authorized_rows() {
         let path_nodes = row.path_nodes();
         let edge_kinds = row.edge_kinds();
@@ -1471,7 +1406,6 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
             "post-redaction: edge_kinds length must still match hops"
         );
 
-        // All surviving paths go User(1) -> Group(100) -> Project
         assert_eq!(path_nodes[0].id, 1);
         assert_eq!(path_nodes[0].entity_type, "User");
         assert_eq!(path_nodes[1].id, 100);
@@ -1480,7 +1414,6 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
         assert_eq!(edge_kinds[0], "MEMBER_OF");
         assert_eq!(edge_kinds[1], "CONTAINS");
 
-        // The end project must not be 1004 (denied group 102 path)
         let end_id = path_nodes.last().unwrap().id;
         assert_ne!(
             end_id, 1004,
@@ -1488,7 +1421,6 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
         );
     }
 
-    // Collect surviving end-project IDs
     let authorized_ends: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.path_nodes().last().map(|n| n.id))
@@ -1507,16 +1439,10 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Search Query Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for active users whose names start with a letter in the first half of
-    // the alphabet, using multiple filter operators simultaneously
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -1533,7 +1459,6 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify search queries don't generate JOINs
     assert!(
         !query.base.sql.contains("JOIN"),
         "search queries should not produce JOINs, got: {}",
@@ -1544,8 +1469,6 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
-    // Should find alice, bob, charlie, diana (all active and in the username list)
-    // eve is blocked so filtered out by the state filter
     let raw_usernames: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
     assert_eq!(
         raw_usernames.len(),
@@ -1553,7 +1476,6 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
         "should find 4 active users matching filters"
     );
 
-    // Now apply redaction: only allow users 1 (alice) and 2 (bob)
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 2]);
     mock_service.deny("user", &[3, 4]);
@@ -1575,7 +1497,6 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for projects that are either public or internal
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -1594,8 +1515,6 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let p = result.ctx().get("p").unwrap().clone();
 
-    // Should find: 1000 (public), 1002 (internal), 1004 (public)
-    // Not: 1001, 1003 (private)
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
     assert_eq!(
         raw_ids,
@@ -1603,7 +1522,6 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
         "should find only public and internal projects"
     );
 
-    // Redaction: allow only project 1000
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("project", &[1000]);
     mock_service.deny("project", &[1002, 1004]);
@@ -1622,7 +1540,6 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for all groups by ID range (traversal_path is not user-filterable)
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -1638,7 +1555,6 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let g = result.ctx().get("g").unwrap().clone();
 
-    // All our test groups have paths starting with "1/"
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&g)).collect();
     assert_eq!(
         raw_ids,
@@ -1646,7 +1562,6 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
         "should find all groups under root"
     );
 
-    // Partial authorization
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("group", &[100, 102]);
     mock_service.deny("group", &[101]);
@@ -1665,7 +1580,6 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for users with IDs in a specific range
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -1688,7 +1602,6 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
         "should find users 2, 3, 4 within ID range"
     );
 
-    // Full authorization for this range
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[2, 3, 4]);
 
@@ -1701,7 +1614,6 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for specific projects by ID
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -1724,7 +1636,6 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
         "should find only the specified projects"
     );
 
-    // Allow one, deny the other
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("project", &[1000]);
     mock_service.deny("project", &[1003]);
@@ -1743,7 +1654,6 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for a user that doesn't exist
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -1791,7 +1701,6 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
     let raw_count = result.len();
     assert_eq!(raw_count, 3, "should find all 3 groups");
 
-    // No authorizations at all - fail closed
     let mock_service = MockRedactionService::new();
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -1821,7 +1730,6 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify the SQL includes the required metadata columns
     assert!(
         query.base.sql.contains("_gkg_u_id"),
         "SQL should include _gkg_u_id"
@@ -1835,7 +1743,6 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
-    // Check columns exist before redaction
     for row in result.iter() {
         assert!(row.get_id(&u).is_some(), "ID should exist before redaction");
         assert_eq!(row.get_type(&u), Some("User"), "type should be User");
@@ -1846,14 +1753,12 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
 
     run_redaction(&mut result, &mock_service);
 
-    // Check columns still exist after redaction
     for row in result.authorized_rows() {
         assert_eq!(row.get_id(&u), Some(1));
         assert_eq!(row.get_type(&u), Some("User"));
     }
 }
 
-/// Verifies fail-closed behavior: rows with NULL entity type must be denied.
 #[test]
 fn fail_closed_null_type_denies_row() {
     use arrow::array::{Array, Int64Array, StringArray};
@@ -1906,25 +1811,10 @@ fn fail_closed_null_type_denies_row() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Column Selection Integration Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// These tests verify the column selection feature introduced in the query DSL.
-// Users can now specify which columns to return:
-//   - `"columns": "*"` - all columns for the entity
-//   - `"columns": ["username", "state"]` - specific columns
-//   - omitted - only mandatory columns (_gkg_*_id, _gkg_*_type) for redaction
-//
-// CRITICAL: Mandatory columns must ALWAYS be present for redaction to work.
-
-/// Verify mandatory columns (`_gkg_*_id`, `_gkg_*_type`) are present when
-/// requesting specific columns, and redaction works correctly.
 async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Request only username and state, but mandatory columns must still appear
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -1938,7 +1828,6 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // The generated SQL MUST contain the mandatory redaction columns
     assert!(
         query.base.sql.contains("_gkg_u_id"),
         "SQL must include _gkg_u_id for redaction. Got: {}",
@@ -1950,7 +1839,6 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
         query.base.sql
     );
 
-    // Also verify the requested columns are present
     assert!(
         query.base.sql.contains("u_username"),
         "SQL must include requested column u_username"
@@ -1966,7 +1854,6 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
 
     assert_eq!(result.len(), 5, "should have all 5 users before redaction");
 
-    // Run redaction with partial authorization
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 2, 3]);
     mock_service.deny("user", &[4, 5]);
@@ -1976,7 +1863,6 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     assert_eq!(redacted, 2, "users 4 and 5 should be redacted");
     assert_eq!(result.authorized_count(), 3);
 
-    // Verify authorized rows have correct IDs and types
     let authorized_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get_id(&u))
@@ -1988,14 +1874,10 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     }
 }
 
-/// Verify wildcard `"*"` returns all entity columns plus mandatory columns,
-/// and redaction works correctly with all columns selected.
-/// Uses Group entity which has all ontology columns present in the test schema.
 async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Use Group entity - all its ontology columns exist in gl_group
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -2009,7 +1891,6 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // CRITICAL: Mandatory columns must be present for redaction
     assert!(
         query.base.sql.contains("_gkg_g_id"),
         "wildcard must include _gkg_g_id for redaction"
@@ -2019,7 +1900,6 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
         "wildcard must include _gkg_g_type for redaction"
     );
 
-    // Group entity columns from ontology
     assert!(
         query.base.sql.contains("g_id"),
         "wildcard should include g_id column"
@@ -2043,7 +1923,6 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
 
     assert_eq!(result.len(), 3, "should have all 3 groups before redaction");
 
-    // Run redaction - allow only group 100 (Public Group)
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("group", &[100]);
     mock_service.deny("group", &[101, 102]);
@@ -2053,20 +1932,16 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
     assert_eq!(redacted, 2, "groups 101 and 102 should be redacted");
     assert_eq!(result.authorized_count(), 1);
 
-    // Verify the authorized row is group 100
     let authorized: Vec<_> = result.authorized_rows().collect();
     assert_eq!(authorized.len(), 1);
     assert_eq!(authorized[0].get_id(&g), Some(100));
     assert_eq!(authorized[0].get_type(&g), Some("Group"));
 }
 
-/// Verify omitting `columns` entirely still includes mandatory columns
-/// and redaction works correctly.
 async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // No columns specified - should still work for redaction
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
@@ -2075,7 +1950,6 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Mandatory columns MUST be present even when columns is omitted
     assert!(
         query.base.sql.contains("_gkg_u_id"),
         "mandatory _gkg_u_id must be present when columns omitted"
@@ -2091,7 +1965,6 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 
     assert_eq!(result.len(), 5, "should have all 5 users");
 
-    // Run redaction - allow users 1, 2; deny the rest
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 2]);
     mock_service.deny("user", &[3, 4, 5]);
@@ -2112,21 +1985,10 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
     }
 }
 
-/// Deep test: Verify multi-hop traversal with different column selections
-/// per node still includes mandatory columns for ALL nodes, and redaction
-/// works correctly across the entire path.
-///
-/// This is the most complex case: User -> Group -> Project with different
-/// column selections on each node. Redaction must verify authorization
-/// for every node in the path.
 async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Three-hop traversal with mixed column selections:
-    // - User: specific columns
-    // - Group: specific columns (not wildcard to avoid missing columns)
-    // - Project: specific columns
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -2143,7 +2005,6 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // CRITICAL: ALL nodes must have mandatory columns for redaction
     assert!(
         query.base.sql.contains("_gkg_u_id"),
         "User node must have _gkg_u_id. SQL: {}",
@@ -2179,7 +2040,6 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
     let raw_count = result.len();
     assert!(raw_count > 0, "should have traversal results");
 
-    // Run redaction: allow specific path (user 1 -> group 100 -> project 1000)
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.deny("user", &[2, 3, 4, 5]);
@@ -2192,7 +2052,6 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
 
     assert!(redacted > 0, "some paths should be redacted");
 
-    // Only one path should remain: user 1 -> group 100 -> project 1000
     assert_eq!(
         result.authorized_count(),
         1,
@@ -2208,9 +2067,6 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
     assert_eq!(authorized[0].get_type(&p), Some("Project"));
 }
 
-/// Deep test: Verify redaction works correctly when using specific column selection.
-/// Authorization checks depend on mandatory columns - if they were missing,
-/// redaction would fail or behave incorrectly.
 async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2234,7 +2090,6 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
     let raw_count = result.len();
     assert!(raw_count > 0, "should have raw results");
 
-    // Authorize only user 1 and group 100
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.allow("group", &[100]);
@@ -2243,14 +2098,12 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
 
     let redacted = run_redaction(&mut result, &mock_service);
 
-    // Should have filtered out unauthorized rows
     assert!(redacted > 0, "some rows should be redacted");
     assert!(
         result.authorized_count() < raw_count,
         "authorized count should be less than raw"
     );
 
-    // Verify only authorized combinations remain
     for row in result.authorized_rows() {
         let user_id = row.get_id(&u).expect("user ID must exist after redaction");
         let group_id = row.get_id(&g).expect("group ID must exist after redaction");
@@ -2258,19 +2111,15 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
         assert_eq!(user_id, 1, "only user 1 should be authorized");
         assert_eq!(group_id, 100, "only group 100 should be authorized");
 
-        // Verify types are correct (used for redaction lookup)
         assert_eq!(row.get_type(&u), Some("User"));
         assert_eq!(row.get_type(&g), Some("Group"));
     }
 }
 
-/// Deep test: Verify that denying ANY node in a path filters the entire row,
-/// even when using column selection. This ensures fail-closed behavior.
 async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Three-hop query with column selection
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -2289,16 +2138,13 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // Authorize user and group, but DENY the project
-    // This should filter ALL rows because fail-closed
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", ALL_USER_IDS);
     mock_service.allow("group", ALL_GROUP_IDS);
-    mock_service.deny("project", ALL_PROJECT_IDS); // Deny all projects
+    mock_service.deny("project", ALL_PROJECT_IDS);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
-    // All rows should be filtered because projects are denied
     assert_eq!(
         result.authorized_count(),
         0,
@@ -2311,8 +2157,6 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
     );
 }
 
-/// Deep test: Verify column values are preserved correctly through
-/// the entire query and redaction pipeline.
 async fn column_selection_data_values_preserved_through_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2335,10 +2179,8 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
-    // Before redaction, verify we have data
     assert_eq!(result.len(), 2, "should find alice and bob");
 
-    // Allow both users
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 2]);
 
@@ -2346,28 +2188,21 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
 
     assert_eq!(result.authorized_count(), 2);
 
-    // Collect authorized rows and verify data integrity
     let authorized: Vec<_> = result.authorized_rows().collect();
 
-    // Find alice (user 1) and verify her data
     let alice = authorized.iter().find(|r| r.get_id(&u) == Some(1)).unwrap();
     assert_eq!(alice.get_id(&u), Some(1));
     assert_eq!(alice.get_type(&u), Some("User"));
 
-    // Find bob (user 2) and verify his data
     let bob = authorized.iter().find(|r| r.get_id(&u) == Some(2)).unwrap();
     assert_eq!(bob.get_id(&u), Some(2));
     assert_eq!(bob.get_type(&u), Some("User"));
 }
 
-/// Deep test: Verify that requesting the same column as a mandatory column
-/// (e.g., "id" in the columns list) doesn't cause duplicates or errors,
-/// and redaction still works correctly.
 async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Explicitly request "id" alongside other columns
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -2381,7 +2216,6 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Should have mandatory columns plus requested columns (no duplicates)
     assert!(
         query.base.sql.contains("_gkg_p_id"),
         "mandatory _gkg_p_id must exist"
@@ -2397,7 +2231,6 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
 
     assert_eq!(result.len(), 5, "should have all 5 projects");
 
-    // Run redaction - allow only public projects (1000, 1004)
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("project", &[1000, 1004]);
     mock_service.deny("project", &[1001, 1002, 1003]);
@@ -2418,13 +2251,10 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
     }
 }
 
-/// Deep test: Verify aggregation queries properly handle column selection
-/// and redaction works on the group_by node.
-/// Aggregations only add mandatory columns for the group_by node, not the target.
+/// Aggregations add mandatory columns only for the group_by node, not the target.
 async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    // Insert some additional data for aggregation
     ctx.execute(&format!(
         "INSERT INTO {} (id, iid, title, state, author_id, traversal_path) VALUES
          (10001, 1, 'MR 1', 'merged', 1, '1/100/1000/'),
@@ -2460,7 +2290,6 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // User (group_by node) should have mandatory columns
     assert!(
         query.base.sql.contains("_gkg_u_id"),
         "group_by node must have _gkg_u_id"
@@ -2470,8 +2299,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
         "group_by node must have _gkg_u_type"
     );
 
-    // MergeRequest (target node, being aggregated) should NOT have mandatory columns
-    // because it doesn't appear as individual rows
+    // Aggregated target rows are collapsed, so they carry no redaction columns.
     assert!(
         !query.base.sql.contains("_gkg_mr_id"),
         "aggregated target node should not have _gkg_mr_id"
@@ -2481,7 +2309,6 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
         "aggregated target node should not have _gkg_mr_type"
     );
 
-    // Should have the aggregation
     assert!(
         query.base.sql.contains("COUNT"),
         "should have COUNT aggregation"
@@ -2491,7 +2318,6 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
         "should have GROUP BY clause"
     );
 
-    // User's requested columns should be in SELECT and GROUP BY
     assert!(
         query.base.sql.contains("u_username"),
         "group_by node requested columns should be in SELECT: {}",
@@ -2502,10 +2328,8 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
-    // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
     assert_eq!(result.len(), 2, "should have 2 aggregation rows");
 
-    // Run redaction - only allow user 1
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.deny("user", &[2]);
@@ -2520,12 +2344,9 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     assert_eq!(authorized[0].get_type(&u), Some("User"));
 }
 
-/// Deep test: Verify aggregation with wildcard columns returns all entity fields
-/// for the group_by node.
 async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    // Insert MRs for aggregation
     ctx.execute(&format!(
         "INSERT INTO {} (id, iid, title, state, author_id, traversal_path) VALUES
          (10001, 1, 'MR 1', 'merged', 1, '1/100/1000/'),
@@ -2547,7 +2368,6 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Use wildcard columns to get all user fields
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -2562,7 +2382,6 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // User (group_by node) should have mandatory columns
     assert!(
         query.base.sql.contains("_gkg_u_id"),
         "group_by node must have _gkg_u_id"
@@ -2572,7 +2391,6 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
         "group_by node must have _gkg_u_type"
     );
 
-    // Wildcard should expand to include user columns from ontology
     assert!(
         query.base.sql.contains("u_id"),
         "wildcard should include u_id: {}",
@@ -2584,7 +2402,6 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
         query.base.sql
     );
 
-    // The aggregation query should contain a GROUP BY clause.
     // Dedup subqueries also add GROUP BY, so just verify presence.
     assert!(
         query.base.sql.contains("GROUP BY"),
@@ -2595,10 +2412,8 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
-    // Should have 2 rows (user 1 with 2 MRs, user 2 with 1 MR)
     assert_eq!(result.len(), 2, "should have 2 aggregation rows");
 
-    // Run redaction - only allow user 1
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.deny("user", &[2]);
@@ -2613,13 +2428,10 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     assert_eq!(authorized[0].get_type(&u), Some("User"));
 }
 
-/// Deep test: Verify that column selection with traversal maintains proper
-/// JOIN semantics. Rows should still match correctly across relationships.
 async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Two-hop traversal with specific columns
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -2636,18 +2448,17 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
 
-    // Verify raw data matches expected relationships
     let raw_pairs: HashSet<(i64, i64)> = result
         .iter()
         .filter_map(|r| Some((r.get_id(&g)?, r.get_id(&p)?)))
         .collect();
 
     let expected_pairs = HashSet::from([
-        (100, 1000), // Public Group -> Public Project
-        (100, 1002), // Public Group -> Internal Project
-        (101, 1001), // Private Group -> Private Project
-        (101, 1003), // Private Group -> Secret Project
-        (102, 1004), // Internal Group -> Shared Project
+        (100, 1000),
+        (100, 1002),
+        (101, 1001),
+        (101, 1003),
+        (102, 1004),
     ]);
 
     assert_eq!(
@@ -2655,7 +2466,6 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
         "column selection should not affect JOIN results"
     );
 
-    // Apply redaction and verify it still works
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("group", &[100]);
     mock_service.allow("project", &[1000, 1002]);
@@ -2674,14 +2484,10 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
     );
 }
 
-/// Deep test: Verify filters work correctly with column selection.
-/// Even if a column is used in a filter, it must be explicitly requested
-/// or only mandatory columns appear.
 async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Filter by state, but only select username
     let json = r#"{
         "query_type": "traversal",
         "node": {
@@ -2696,12 +2502,10 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Should have mandatory columns and requested column
     assert!(query.base.sql.contains("_gkg_u_id"));
     assert!(query.base.sql.contains("_gkg_u_type"));
     assert!(query.base.sql.contains("u_username"));
 
-    // Filter by state should be in WHERE clause
     assert!(
         query.base.sql.contains("state") || query.base.sql.contains("WHERE"),
         "query should filter by state"
@@ -2711,10 +2515,8 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
-    // Should find 4 active users (eve is blocked)
     assert_eq!(result.len(), 4, "should find 4 active users");
 
-    // Redaction should work
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 2, 3, 4]);
 
@@ -2727,8 +2529,6 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
     }
 }
 
-/// Deep test: Ensure that column selection with no authorization
-/// still exhibits fail-closed behavior.
 async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2751,7 +2551,6 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
     let raw_count = result.len();
     assert_eq!(raw_count, 5, "should have all 5 users");
 
-    // No authorizations - fail closed
     let mock_service = MockRedactionService::new();
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2759,27 +2558,10 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 0, "nothing should be authorized");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Neighbors Query Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Neighbors queries discover connected nodes dynamically. Unlike traversals where
-// node types are known at query time, neighbors could be any entity type. This
-// requires checking authorization for both the center node AND each neighbor.
-
-/// Comprehensive test for neighbors queries with redaction.
-///
-/// Tests:
-/// - Neighbors query returns expected columns (_gkg_neighbor_id, _gkg_neighbor_type, _gkg_relationship_type)
-/// - Center node has mandatory redaction columns (_gkg_*_id, _gkg_*_type)
-/// - Both center node AND neighbor authorization is required (fail-closed)
-/// - Different directions (outgoing, incoming) work correctly
-/// - Relationship type filtering works with redaction
 async fn neighbors_query_comprehensive(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // --- Test 1: Verify SQL structure and query execution ---
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
@@ -2788,7 +2570,6 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify center node mandatory columns for redaction
     assert!(
         query.base.sql.contains("_gkg_u_id"),
         "neighbors query must include _gkg_u_id for center node. SQL: {}",
@@ -2799,7 +2580,6 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
         "neighbors query must include _gkg_u_type"
     );
 
-    // Verify neighbor columns are present
     assert!(
         query.base.sql.contains("_gkg_neighbor_id"),
         "must include _gkg_neighbor_id"
@@ -2817,14 +2597,12 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let u = result.ctx().get("u").unwrap().clone();
 
-    // User 1 is member of groups 100 and 102
     assert_eq!(
         result.len(),
         2,
         "user 1 should have 2 outgoing neighbors (groups 100, 102)"
     );
 
-    // Verify center node metadata
     for row in result.iter() {
         assert_eq!(row.get_id(&u), Some(1));
         assert_eq!(row.get_type(&u), Some("User"));
@@ -2834,7 +2612,6 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
         );
     }
 
-    // --- Test 2: Fail-closed when NO authorization provided ---
     let mock_service = MockRedactionService::new();
     let redacted = run_redaction(&mut result, &mock_service);
 
@@ -2845,16 +2622,14 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     );
     assert_eq!(redacted, 2, "all rows should be redacted");
 
-    // --- Test 3: Fail-closed when only center node authorized (neighbors not authorized) ---
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
     let mut mock_service = MockRedactionService::new();
-    mock_service.allow("user", &[1]); // Only authorize center node
+    mock_service.allow("user", &[1]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
-    // Neighbors (groups 100, 102) are NOT authorized, so rows should be redacted
     assert_eq!(
         result.authorized_count(),
         0,
@@ -2862,34 +2637,31 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     );
     assert_eq!(redacted, 2);
 
-    // --- Test 4: Both center node AND neighbors authorized ---
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
-    mock_service.allow("group", &[100, 102]); // Authorize both neighbor groups
+    mock_service.allow("group", &[100, 102]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 0, "nothing redacted when all nodes authorized");
     assert_eq!(result.authorized_count(), 2);
 
-    // Verify neighbor data is accessible
     let neighbor_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.neighbor_node().map(|n| n.id))
         .collect();
     assert_eq!(neighbor_ids, HashSet::from([100, 102]));
 
-    // --- Test 5: Partial neighbor authorization filters specific rows ---
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
-    mock_service.allow("group", &[100]); // Only authorize group 100
-    mock_service.deny("group", &[102]); // Deny group 102
+    mock_service.allow("group", &[100]);
+    mock_service.deny("group", &[102]);
 
     run_redaction(&mut result, &mock_service);
 
@@ -2908,7 +2680,6 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     assert_eq!(authorized_neighbor.entity_type, "Group");
 }
 
-/// Tests that denying the center node filters ALL its neighbors.
 async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -2925,7 +2696,6 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
 
     assert_eq!(result.len(), 2, "should have 2 neighbors before redaction");
 
-    // Authorize neighbors but DENY center node
     let mut mock_service = MockRedactionService::new();
     mock_service.deny("user", &[1]);
     mock_service.allow("group", ALL_GROUP_IDS);
@@ -2936,14 +2706,10 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
     assert_eq!(result.authorized_count(), 0);
 }
 
-/// Tests neighbors query with multiple center nodes and mixed authorization.
 async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Query neighbors for users 1 and 3
-    // User 1 -> groups 100, 102
-    // User 3 -> group 101
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1, 3]},
@@ -2961,19 +2727,17 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
         "should have 3 total neighbors (2 for user 1, 1 for user 3)"
     );
 
-    // Authorize user 1 and its neighbors, deny user 3
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.deny("user", &[3]);
-    mock_service.allow("group", &[100, 102]); // User 1's neighbors
-    mock_service.deny("group", &[101]); // User 3's neighbor
+    mock_service.allow("group", &[100, 102]);
+    mock_service.deny("group", &[101]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
     assert_eq!(redacted, 1, "user 3's neighbor row should be redacted");
     assert_eq!(result.authorized_count(), 2);
 
-    // Verify only user 1's neighbors remain
     let authorized_center_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get_id(&u))
@@ -2981,12 +2745,10 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
     assert_eq!(authorized_center_ids, HashSet::from([1]));
 }
 
-/// Tests incoming direction with neighbor authorization.
 async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Find users who are members of group 100 (incoming MEMBER_OF edges)
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "g", "entity": "Group", "node_ids": [100]},
@@ -2997,10 +2759,8 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // Group 100 has incoming MEMBER_OF from users 1 and 2
     assert_eq!(result.len(), 2, "group 100 should have 2 incoming members");
 
-    // Authorize center (group 100) and one neighbor (user 1)
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("group", &[100]);
     mock_service.allow("user", &[1]);
@@ -3023,14 +2783,9 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
     assert_eq!(neighbor.entity_type, "User");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Indirect Auth (Dynamic Nodes) Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// These tests verify redaction for entities that authorize via an owner entity
-// (e.g. Definition authorizes via its owning Project, MergeRequestDiff via
-// its owning MergeRequest). The auth ID must be resolved from the owner entity
-// in the same row, not from the entity's own ID.
+// Indirect-auth entities authorize via an owner entity (e.g. Definition via its
+// owning Project). The auth ID is resolved from the owner in the same row, not
+// from the entity's own ID.
 
 fn table_files() -> String {
     t("gl_file")
@@ -3039,10 +2794,8 @@ fn table_definitions() -> String {
     t("gl_definition")
 }
 
-/// Insert code entities (File, Definition) with edges to an existing Project.
 /// Requires setup_test_data() to have been called first.
 async fn setup_indirect_auth_data(ctx: &TestContext) {
-    // Files belonging to Project 1000 (Public Project, traversal_path '1/100/1000/')
     ctx.execute(&format!(
         "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
          (3000, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust'),
@@ -3051,7 +2804,6 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     ))
     .await;
 
-    // Definitions in those files, also belonging to Project 1000
     ctx.execute(&format!(
         "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
          (5000, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'crate::MyStruct', 'MyStruct', 'class', 10, 50, 100, 500, 0, 0),
@@ -3061,7 +2813,6 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     ))
     .await;
 
-    // File belonging to Project 1001 (Private Project, traversal_path '1/101/1001/')
     ctx.execute(&format!(
         "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
          (3002, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'secret.rs', 'rs', 'Rust')",
@@ -3076,7 +2827,6 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     ))
     .await;
 
-    // Edges: File --DEFINES--> Definition (table derived from ontology)
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 3000, 'File', 'DEFINES', 5000, 'Definition'),
@@ -3088,14 +2838,8 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     .await;
 }
 
-/// Neighbors query where neighbor is an indirect-auth entity (Definition).
-/// Center = File (also indirect auth, owner: Project via project_id).
-/// Authorization checks for both must go through the owning Project.
-///
-/// Tests:
-/// - Allowing the owning Project authorizes the File center and Definition neighbors
-/// - Denying the owning Project denies everything (fail-closed)
-/// - Mixed: allow one project, deny another — only authorized project's entities pass
+/// Center File and neighbor Definition both authorize through the owning Project,
+/// which is not itself a node in the query.
 async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     setup_test_data(ctx).await;
     setup_indirect_auth_data(ctx).await;
@@ -3103,7 +2847,6 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // File 3000's outgoing neighbors: Definition 5000 and 5001 (via DEFINES edges)
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "f", "entity": "File", "node_ids": [3000]},
@@ -3120,10 +2863,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         "File 3000 should have 2 outgoing DEFINES neighbors (Definitions 5000, 5001)"
     );
 
-    // --- Test 1: Authorize the owning Project 1000 → both neighbors pass ---
     let f = result.ctx().get("f").unwrap().clone();
 
-    // Verify center node metadata before redaction.
     // File uses indirect auth — _gkg_f_id holds the owning Project ID (1000),
     // not the File's own ID (3000), because redaction resolves through the owner.
     for row in result.iter() {
@@ -3142,8 +2883,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let mut mock_service = MockRedactionService::new();
     // File and Definition both have resource_type "project", ability "read_code".
-    // Only the owning Project ID is authorized — NOT the File/Definition IDs themselves.
-    // This proves authorization resolves through the indirect owner.
+    // Authorizing only the Project ID (not the File/Definition IDs) proves auth
+    // resolves through the indirect owner.
     mock_service.allow("project", &[1000]);
 
     let redacted = run_redaction(&mut result, &mock_service);
@@ -3153,7 +2894,6 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         "all neighbors should pass when owning Project is authorized"
     );
 
-    // Verify both neighbors survived with correct identity
     let authorized_neighbors: Vec<(i64, &str)> = result
         .authorized_rows()
         .filter_map(|r| r.neighbor_node().map(|n| (n.id, n.entity_type.as_str())))
@@ -3165,11 +2905,9 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         assert_eq!(*entity_type, "Definition");
     }
 
-    // --- Test 2: Deny the owning Project → everything denied ---
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // Confirm both Definitions are present before redaction
     let pre_deny_ids: HashSet<i64> = result
         .iter()
         .filter_map(|r| r.neighbor_node().map(|n| n.id))
@@ -3185,7 +2923,6 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     run_redaction(&mut result, &mock_service);
 
-    // Both Definition neighbors should be denied — their owning Project is denied
     let post_deny_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.neighbor_node().map(|n| n.id))
@@ -3195,7 +2932,6 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         "Definitions 5000/5001 must not survive when owning Project 1000 is denied; got: {:?}",
         post_deny_ids
     );
-    // Verify every row was individually marked unauthorized
     for row in result.rows() {
         assert!(
             !row.is_authorized(),
@@ -3204,11 +2940,9 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         );
     }
 
-    // --- Test 3: No authorization at all → fail-closed ---
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // Capture neighbor IDs before redaction so we can verify they're gone afterward
     let pre_redaction_neighbor_ids: HashSet<i64> = result
         .iter()
         .filter_map(|r| r.neighbor_node().map(|n| n.id))
@@ -3228,7 +2962,6 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     );
     assert_eq!(result.authorized_count(), 0);
 
-    // Verify none of the pre-redaction neighbors survived
     let post_redaction_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.neighbor_node().map(|n| n.id))
@@ -3292,10 +3025,6 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
     assert_eq!(result.authorized_count(), 0);
 }
 
-/// Mixed indirect auth: neighbors from two different projects.
-/// File 3000 (Project 1000) and File 3002 (Project 1001) both have
-/// Definition neighbors. Authorizing only Project 1000 should filter
-/// out Project 1001's definitions.
 async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     setup_test_data(ctx).await;
     setup_indirect_auth_data(ctx).await;
@@ -3303,7 +3032,6 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Query neighbors for both files
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "f", "entity": "File", "node_ids": [3000, 3002]},
@@ -3314,15 +3042,12 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // File 3000 → Def 5000, 5001 (Project 1000)
-    // File 3002 → Def 5003 (Project 1001)
     assert_eq!(
         result.len(),
         3,
         "should have 3 total neighbors across both files"
     );
 
-    // Allow Project 1000, deny Project 1001
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("project", &[1000]);
     mock_service.deny("project", &[1001]);
@@ -3335,7 +3060,6 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
         "only Project 1000's definitions should pass"
     );
 
-    // Verify the surviving neighbors are from Project 1000
     let neighbor_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.neighbor_node().map(|n| n.id))
@@ -3346,27 +3070,12 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
         "only Definitions from authorized Project 1000 should remain"
     );
 
-    // Definition 5003 (Project 1001) must not appear
     assert!(
         !neighbor_ids.contains(&5003),
         "Definition from denied Project 1001 must not appear"
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Edge Column Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// These tests verify that edge columns (relationship metadata) are correctly
-// returned in query results and preserved through the redaction flow.
-
-/// Verifies edge columns are present and preserved through redaction.
-///
-/// Tests:
-/// - Edge columns (e0_type, e0_src, e0_src_type, e0_dst, e0_dst_type) are in SQL
-/// - Edge values correctly reflect the relationship data
-/// - Edge columns are preserved in authorized rows after redaction
-/// - Redacted rows still had valid edge data before being filtered
 async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3383,7 +3092,6 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify edge columns are in the SQL
     assert!(
         query.base.sql.contains("e0_type"),
         "SQL must contain e0_type. SQL: {}",
@@ -3405,10 +3113,8 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
-    // We have 7 MEMBER_OF edges in test data
     assert_eq!(result.len(), 7, "should have 7 user-group memberships");
 
-    // Verify edge columns are present and correct BEFORE redaction
     for row in result.iter() {
         let user_id = row.get_id(&u).expect("user id should be present");
         let group_id = row.get_id(&g).expect("group id should be present");
@@ -3443,18 +3149,15 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         );
     }
 
-    // Now apply redaction - allow only user 1 and group 100
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.allow("group", &[100]);
 
     let redacted = run_redaction(&mut result, &mock_service);
 
-    // User 1 is member of groups 100 and 102, but only 100 is allowed
     assert_eq!(redacted, 6, "6 rows should be redacted");
     assert_eq!(result.authorized_count(), 1, "only 1 row should pass");
 
-    // Verify unauthorized data is NOT present in authorized results
     let authorized_user_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get_id(&u))
@@ -3464,7 +3167,6 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         .filter_map(|r| r.get_id(&g))
         .collect();
 
-    // Unauthorized users (2, 3, 4, 5) must NOT appear
     for unauthorized_user in [2, 3, 4, 5] {
         assert!(
             !authorized_user_ids.contains(&unauthorized_user),
@@ -3473,7 +3175,6 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         );
     }
 
-    // Unauthorized groups (101, 102) must NOT appear
     for unauthorized_group in [101, 102] {
         assert!(
             !authorized_group_ids.contains(&unauthorized_group),
@@ -3482,7 +3183,6 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         );
     }
 
-    // Verify edge columns are preserved in the authorized row
     let authorized_row = result.authorized_rows().next().expect("should have 1 row");
     assert_eq!(authorized_row.get_id(&u), Some(1));
     assert_eq!(authorized_row.get_id(&g), Some(100));
@@ -3508,7 +3208,6 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         "edge target should be group 100"
     );
 
-    // Verify edge data for unauthorized entities is also not exposed
     let authorized_edge_sources: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get("e0_src").and_then(|v| v.as_int64().copied()))
@@ -3518,14 +3217,12 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         .filter_map(|r| r.get("e0_dst").and_then(|v| v.as_int64().copied()))
         .collect();
 
-    // Edge sources should only contain authorized user IDs
     assert_eq!(
         authorized_edge_sources,
         HashSet::from([1]),
         "edge sources should only contain authorized user 1"
     );
 
-    // Edge targets should only contain authorized group IDs
     assert_eq!(
         authorized_edge_targets,
         HashSet::from([100]),
@@ -3533,8 +3230,6 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     );
 }
 
-/// Verifies multi-hop traversals have edge columns for each relationship,
-/// and that edge data is correctly associated with its hop after redaction.
 async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
@@ -3555,7 +3250,6 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify both edge column sets are in SQL
     assert!(
         query.base.sql.contains("e0_type"),
         "SQL must contain e0_type"
@@ -3573,14 +3267,12 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
-    // Should have 12 paths total (see three_hop test for breakdown)
     assert_eq!(
         result.len(),
         12,
         "should have 12 user->group->project paths"
     );
 
-    // Allow specific path: user 1 -> group 100 -> project 1000
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.allow("group", &[100]);
@@ -3591,15 +3283,12 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     assert_eq!(redacted, 11, "11 rows should be redacted");
     assert_eq!(result.authorized_count(), 1, "only 1 path should pass");
 
-    // Verify the surviving row has correct edge data for BOTH hops
     let row = result.authorized_rows().next().expect("should have 1 row");
 
-    // Verify node IDs
     assert_eq!(row.get_id(&u), Some(1), "user should be 1");
     assert_eq!(row.get_id(&g), Some(100), "group should be 100");
     assert_eq!(row.get_id(&p), Some(1000), "project should be 1000");
 
-    // First edge: User 1 -> Group 100 (MEMBER_OF)
     assert_eq!(
         row.get("e0_type")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
@@ -3629,7 +3318,6 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
         "e0 target type should be Group"
     );
 
-    // Second edge: Group 100 -> Project 1000 (CONTAINS)
     assert_eq!(
         row.get("e1_type")
             .and_then(|v| v.as_string().map(|s| s.as_str())),
@@ -3660,18 +3348,11 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     );
 }
 
-/// Tests that neighbors query filters by entity type, preventing ID collisions.
-///
-/// This validates the fix for the bug where neighbors query would return edges
-/// for unrelated entities that happen to share the same numeric ID.
-/// For example, User 1's neighbors should not include edges where source_id=1
-/// but source_kind='Group'.
+/// Neighbors must filter by source_kind: an edge with source_id=1 source_kind='Group'
+/// must not surface when querying User 1's neighbors despite the shared numeric ID.
 async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    // Insert a "colliding" edge: source_id=1 but source_kind='Group'
-    // This simulates a Group with ID=1 having an edge, which should NOT
-    // appear when querying User 1's neighbors.
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/', 1, 'Group', 'CONTAINS', 9999, 'Project')",
@@ -3682,7 +3363,6 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Query User 1's outgoing neighbors
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
@@ -3691,7 +3371,6 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
 
-    // Verify the SQL contains source_kind filter to prevent ID collisions
     // Note: the entity type 'User' is passed as a parameter, not embedded in SQL
     assert!(
         query.base.sql.contains("source_kind"),
@@ -3702,8 +3381,6 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // User 1 has exactly 2 MEMBER_OF edges (to groups 100 and 102)
-    // The "colliding" edge (Group 1 -> Project 9999) should NOT appear
     assert_eq!(
         result.len(),
         2,
@@ -3711,7 +3388,6 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
          The edge with source_id=1, source_kind='Group' must be filtered out."
     );
 
-    // Verify all neighbors are Groups (not the colliding Project 9999)
     for row in result.iter() {
         let neighbor_type = row
             .get("_gkg_neighbor_type")
@@ -3724,7 +3400,6 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
         );
     }
 
-    // Verify redaction works correctly on filtered neighbors
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
     mock_service.allow("group", &[100]);
@@ -3752,25 +3427,13 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     );
 }
 
-/// Comprehensive test for enum filter normalization across int and string enum types.
-///
-/// Tests the query normalization phase which coerces filter values to match ontology types:
-/// - Int-based enums: integer filter values are coerced to string labels (e.g., 1 → "opened")
-/// - String-based enums: string values pass through unchanged (no coercion needed)
-///
-/// This ensures the normalization layer correctly distinguishes between enum storage types
-/// and only applies int→string coercion where appropriate.
+/// Normalization coerces int filter values to string labels for int-based enums
+/// (no enum_type in ontology); string-based enums (enum_type: string) pass through.
 async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PART 1: Int-based enum (User.user_type) - filter by int, coerced to string
-    // ─────────────────────────────────────────────────────────────────────────
-    // User.user_type has no enum_type in ontology (defaults to int-based).
-    // Ontology values: 0=human, 6=project_bot, 11=service_account
-    // Filter by int 0 should be coerced to "human" and match.
-
+    // User.user_type is int-based: 0=human, 6=project_bot, 11=service_account.
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}
@@ -3780,7 +3443,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // We have 3 human users (alice, bob, charlie)
     assert_eq!(
         result.len(),
         3,
@@ -3791,7 +3453,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     mock_service.allow("user", ALL_USER_IDS);
     run_redaction(&mut result, &mock_service);
 
-    // Verify the user_type values are the string labels
     for row in result.authorized_rows() {
         let user_type = row
             .get("u_user_type")
@@ -3803,7 +3464,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         );
     }
 
-    // Filter by int 6 should be coerced to "project_bot"
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}
@@ -3819,13 +3479,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "should find 1 project_bot user when filtering by int 6"
     );
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PART 2: Int-based enum (MergeRequest.state) - filter by int, coerced to string
-    // ─────────────────────────────────────────────────────────────────────────
-    // MergeRequest.state has no enum_type (defaults to int-based).
-    // Ontology values: 1=opened, 2=closed, 3=merged, 4=locked
-    // Filter by int 1 should be coerced to "opened" and match.
-
+    // MergeRequest.state is int-based: 1=opened, 2=closed, 3=merged, 4=locked.
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}
@@ -3835,7 +3489,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // We have 2 opened MRs (2000, 2001)
     assert_eq!(
         result.len(),
         2,
@@ -3853,7 +3506,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         assert_eq!(state, Some("opened"), "MR state should be 'opened' string");
     }
 
-    // Filter by int 3 should be coerced to "merged"
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}
@@ -3869,7 +3521,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "should find 1 merged MR when filtering by int 3"
     );
 
-    // IN operator with int values on int-based enum
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2]}}}
@@ -3879,18 +3530,11 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // 2 opened + 1 closed = 3
     assert_eq!(
         result.len(),
         3,
         "should find 3 MRs with IN filter on int-based enum [1, 2]"
     );
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // PART 3: String-based enum (User.state) - filter by string, no coercion
-    // ─────────────────────────────────────────────────────────────────────────
-    // User.state has enum_type: string in ontology.
-    // String filters pass through unchanged - no int→string coercion.
 
     let json = r#"{
         "query_type": "traversal",
@@ -3901,7 +3545,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // 4 active users (alice, bob, charlie, diana)
     assert_eq!(
         result.len(),
         4,
@@ -3919,7 +3562,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         assert_eq!(state, Some("active"), "state should be 'active' string");
     }
 
-    // Filter blocked user (string enum value)
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": "blocked"}}
@@ -3935,7 +3577,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "should find 1 blocked user with string enum filter"
     );
 
-    // IN operator with string enum values
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": {"op": "in", "value": ["active", "blocked"]}}}
@@ -3952,15 +3593,10 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cursor Pagination Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn cursor_pagination_basic(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // 5 users total. cursor: offset=0, page_size=2 → first 2 users
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
@@ -3979,10 +3615,8 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // All 5 users returned from ClickHouse
     assert_eq!(result.len(), 5, "ClickHouse should return all 5 users");
 
-    // Apply cursor: slice to [0..2]
     let has_more = result.apply_cursor(0, 2);
     assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
@@ -3994,7 +3628,6 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
         .collect();
     assert_eq!(page1_ids, vec![1, 2], "first page should be user IDs 1, 2");
 
-    // cursor: offset=2, page_size=2 → users 3, 4
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let has_more = result.apply_cursor(2, 2);
@@ -4008,7 +3641,6 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
         .collect();
     assert_eq!(page2_ids, vec![3, 4], "second page should be user IDs 3, 4");
 
-    // cursor: offset=4, page_size=2 → user 5, has_more=false
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let has_more = result.apply_cursor(4, 2);
@@ -4027,7 +3659,6 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // 5 users, but redaction will deny 2 of them
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
@@ -4040,7 +3671,6 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // Redact users 2 and 4 → 3 authorized (1, 3, 5)
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 3, 5]);
     mock_service.deny("user", &[2, 4]);
@@ -4052,7 +3682,6 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
         "3 users should survive redaction"
     );
 
-    // Apply cursor on the authorized set: offset=0, page_size=2 → users 1, 3
     let has_more = result.apply_cursor(0, 2);
     assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
@@ -4097,7 +3726,6 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // 4 active users (IDs 1-4), 1 blocked (ID 5)
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
@@ -4121,7 +3749,6 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
         .collect();
     assert_eq!(ids, vec![1, 2], "first page of filtered results");
 
-    // Second page
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     let has_more = result.apply_cursor(2, 2);
@@ -4134,10 +3761,6 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
         .collect();
     assert_eq!(ids, vec![3, 4], "second page of filtered results");
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MergeRequest Redaction Subtests
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_merge_requests_with_redaction(ctx: &TestContext) {
     let (_, mut result) = compile_and_execute(
@@ -4174,10 +3797,6 @@ async fn search_merge_requests_with_redaction(ctx: &TestContext) {
     assert_eq!(authorized_ids, HashSet::from([2000, 2001]));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Order Preservation Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn redaction_preserves_row_order(ctx: &TestContext) {
     let (_, mut result) = compile_and_execute(
         ctx,
@@ -4194,7 +3813,6 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
     let raw_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
     assert_eq!(raw_ids, vec![1, 2, 3, 4, 5]);
 
-    // Remove alternating rows: surviving rows must maintain original order
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 3, 5]);
     mock_service.deny("user", &[2, 4]);
@@ -4245,10 +3863,6 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Empty Path Finding Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn path_finding_no_path_exists_returns_empty(ctx: &TestContext) {
     let (_, mut result) = compile_and_execute(
         ctx,
@@ -4277,14 +3891,10 @@ async fn path_finding_no_path_exists_returns_empty(ctx: &TestContext) {
     assert!(result.resource_checks().is_empty());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cross-Entity ID Collision Subtests
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
-    // Insert a Group with ID=1 (same numeric ID as User 1)
+    // Group ID=1 collides with User ID=1.
     ctx.execute(&format!(
         "INSERT INTO {} (id, name, visibility_level, traversal_path) \
          VALUES (1, 'Collision Group', 'public', '1/1/')",
@@ -4347,10 +3957,6 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Orchestrator Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn redaction_integration() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
@@ -4359,7 +3965,6 @@ async fn redaction_integration() {
     // Read-only subtests share one database (seed once, query many).
     run_subtests_shared!(
         &ctx,
-        // basics
         fail_closed_no_authorization_returns_nothing,
         fail_closed_partial_authorization_denies_unknown_ids,
         fail_closed_explicit_deny_filters_row,
@@ -4375,7 +3980,6 @@ async fn redaction_integration() {
         all_columns_preserved_after_redaction,
         all_columns_preserved_on_three_hop_traversal,
         redacted_rows_filtered_from_authorized_iterator,
-        // path finding
         path_finding_extracts_all_nodes_from_path,
         path_finding_no_authorization_returns_nothing,
         path_finding_denying_intermediate_node_filters_path,
@@ -4387,7 +3991,6 @@ async fn redaction_integration() {
         path_finding_deep_traversal_all_nodes_verified,
         path_finding_all_paths_denied_returns_empty,
         path_finding_edge_kinds_preserved_through_redaction,
-        // search
         search_with_complex_filters_and_redaction,
         search_projects_with_visibility_and_path_filters,
         search_groups_with_traversal_path_starts_with,
@@ -4396,7 +3999,6 @@ async fn redaction_integration() {
         search_no_results_with_impossible_filter,
         search_fail_closed_no_authorization,
         search_preserves_metadata_columns_after_redaction,
-        // column selection
         column_selection_specific_columns_includes_mandatory_columns,
         column_selection_wildcard_returns_all_columns_plus_mandatory,
         column_selection_omitted_includes_mandatory_columns,
@@ -4408,26 +4010,20 @@ async fn redaction_integration() {
         column_selection_traversal_join_semantics_preserved,
         column_selection_filters_work_with_columns,
         column_selection_fail_closed_no_authorization,
-        // neighbors and edges
         neighbors_query_comprehensive,
         neighbors_query_center_node_denied_filters_all,
         neighbors_query_multiple_center_nodes_mixed_authorization,
         neighbors_query_incoming_with_redaction,
-        // edge columns
         traversal_edge_columns_preserved_through_redaction,
         multi_hop_edge_columns_survive_redaction,
         enum_filter_normalization_int_vs_string_enums,
-        // cursor pagination
         cursor_pagination_basic,
         cursor_pagination_with_redaction,
         cursor_pagination_offset_beyond_data,
         cursor_pagination_with_filters,
-        // merge request redaction
         search_merge_requests_with_redaction,
-        // order preservation
         redaction_preserves_row_order,
         redaction_preserves_row_order_desc,
-        // empty path finding
         path_finding_no_path_exists_returns_empty,
     );
 

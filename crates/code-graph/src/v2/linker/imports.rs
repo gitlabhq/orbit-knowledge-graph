@@ -1,5 +1,3 @@
-//! Import resolution strategies.
-//!
 //! All lookups go through `CodeGraph.indexes` (VerifiedMap).
 //! String access goes through `CodeGraph.str(id)` (StringPool).
 
@@ -10,8 +8,6 @@ use super::graph::CodeGraph;
 use super::rules::ImportStrategy;
 use super::state::ScratchBuf;
 use crate::v2::types::ImportBindingKind;
-
-// ── ResolveSettings ─────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct ResolveSettings {
@@ -54,10 +50,6 @@ pub(crate) fn dir_of(path: &str) -> &str {
     }
 }
 
-// ── ImportResolver ──────────────────────────────────────────────
-
-/// Per-file import resolver. Holds shared state so individual
-/// strategy methods don't need to thread graph/sep/scratch/etc.
 pub(crate) struct ImportResolver<'a> {
     pub graph: &'a CodeGraph,
     pub file_node: NodeIndex,
@@ -79,7 +71,6 @@ impl<'a> ImportResolver<'a> {
             .unwrap_or(".")
     }
 
-    /// Run import strategies in order, returning the first non-empty result.
     pub fn apply_strategies(
         &mut self,
         strategies: &[ImportStrategy],
@@ -103,7 +94,6 @@ impl<'a> ImportResolver<'a> {
         vec![]
     }
 
-    /// Resolve a single import node to its target definitions.
     pub fn resolve_import(&mut self, import_idx: NodeIndex) -> Vec<NodeIndex> {
         let import = self.graph.import(import_idx);
         if matches!(import.binding_kind, ImportBindingKind::SideEffect) || import.wildcard {
@@ -160,8 +150,6 @@ impl<'a> ImportResolver<'a> {
         }
         vec![]
     }
-
-    // ── Individual strategies ───────────────────────────────────
 
     fn scope_fqn_walk(&mut self, name: &str) -> Vec<NodeIndex> {
         let sep = self.sep();
@@ -300,8 +288,6 @@ impl<'a> ImportResolver<'a> {
         results
     }
 
-    /// Resolve a bare name via transitive `#include` graph traversal.
-    ///
     /// BFS through the include DAG: starting from this file's includes,
     /// recursively follow each included header's includes. For each
     /// reachable header, also search the paired source file (.h -> .c/.cpp).

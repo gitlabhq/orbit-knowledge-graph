@@ -1,6 +1,3 @@
-//! Code-indexing pipeline metrics (push events, repo fetch, parsing, nodes,
-//! per-stage errors).
-
 use crate::MetricSpec;
 use crate::buckets::{LATENCY_FAST_FINE, LATENCY_SLOW, MEMORY_BYTES};
 

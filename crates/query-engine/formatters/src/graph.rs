@@ -839,9 +839,6 @@ mod tests {
 
     #[test]
     fn property_named_type_does_not_corrupt_entity_type() {
-        // If a ClickHouse column strips to "type" after alias removal
-        // (e.g. `p_type`), it would collide with GraphNode's `entity_type`
-        // field (renamed to "type" via serde). Verify the filter prevents this.
         let schema = Arc::new(Schema::new(vec![
             Field::new("_gkg_p_id", DataType::Int64, false),
             Field::new("_gkg_p_type", DataType::Utf8, false),
@@ -918,7 +915,6 @@ mod tests {
             "non-reserved properties should still be present"
         );
 
-        // Verify serialized JSON has exactly one "type" key with correct value
         let json = serde_json::to_value(node).unwrap();
         assert_eq!(json["type"], "Project");
         assert_eq!(json["id"], "42");
@@ -1027,7 +1023,6 @@ mod tests {
 
         let response = GraphFormatter.build_response(&output);
 
-        // 4 raw rows -> 1 logical path (User -> Group -> Project)
         let path_ids: HashSet<usize> = response.edges.iter().filter_map(|e| e.path_id).collect();
         assert_eq!(
             path_ids.len(),

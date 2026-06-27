@@ -48,9 +48,6 @@ impl std::ops::Not for Pred {
     }
 }
 
-// ── Constructors ────────────────────────────────────────────────
-// Each is just Exists(some Extract pipeline).
-
 fn exists(e: Extract) -> Pred {
     Pred::Exists(Box::new(e))
 }
@@ -87,7 +84,6 @@ pub fn has_descendant(kind: &'static str) -> Pred {
     check_at(Axis::Descendant, Match::Kind(kind))
 }
 
-/// Check if any direct child has exactly the given text (e.g. operator symbols).
 pub fn has_child_text(text: &'static str) -> Pred {
     exists(extract::child_of_text(text))
 }

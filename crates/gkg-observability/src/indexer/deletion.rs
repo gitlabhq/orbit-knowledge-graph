@@ -1,5 +1,3 @@
-//! Namespace-deletion pipeline metrics.
-
 use crate::MetricSpec;
 use crate::buckets::LATENCY;
 

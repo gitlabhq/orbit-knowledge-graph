@@ -1,5 +1,3 @@
-//! ClickHouse integration for data loading and schema management.
-
 mod schema;
 mod utils;
 mod writer;

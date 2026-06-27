@@ -1,5 +1,3 @@
-//! Constants for the code indexing module.
-
 use std::collections::{HashMap, HashSet};
 
 use ontology::{Ontology, OntologyError};
@@ -54,7 +52,6 @@ impl CodeTableNames {
         })
     }
 
-    /// Resolve the prefixed table name for a given relationship kind.
     pub fn edge_table_for(&self, relationship_kind: &str) -> &str {
         self.edge_tables
             .get(relationship_kind)
@@ -66,7 +63,7 @@ impl CodeTableNames {
         &self.default_edge_table
     }
 
-    /// All distinct edge table names (for stale data cleanup).
+    /// For stale data cleanup.
     pub fn edge_table_names(&self) -> Vec<&str> {
         let mut tables: Vec<&str> = self.edge_tables.values().map(|s| s.as_str()).collect();
         tables.sort();

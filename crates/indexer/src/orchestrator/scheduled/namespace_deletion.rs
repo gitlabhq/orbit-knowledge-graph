@@ -436,7 +436,6 @@ mod tests {
         scheduler.run().await.unwrap();
     }
 
-    /// A NatsServices mock that always returns PublishDuplicate.
     struct DuplicateNatsServices;
 
     #[async_trait]

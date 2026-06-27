@@ -1,5 +1,3 @@
-//! Traversal query lowering.
-
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;

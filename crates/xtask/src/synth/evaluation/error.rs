@@ -1,44 +1,25 @@
-//! ClickHouse error parsing and classification.
-
 use serde::{Deserialize, Serialize};
 
-/// Parsed ClickHouse error with structured information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedError {
-    /// Error code from ClickHouse (e.g., 241, 46, 53).
     pub code: Option<u32>,
-    /// Human-readable error category.
     pub category: ErrorCategory,
-    /// The original error message.
     pub message: String,
-    /// Short summary for display.
     pub summary: String,
 }
 
-/// Categories of ClickHouse errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ErrorCategory {
-    /// Memory limit exceeded (code 241).
     MemoryLimit,
-    /// Unknown function (code 46).
     UnknownFunction,
-    /// Type mismatch (code 53).
     TypeMismatch,
-    /// Syntax error (code 62).
     SyntaxError,
-    /// Unknown column (code 47).
     UnknownColumn,
-    /// Unknown table (code 60).
     UnknownTable,
-    /// Timeout/execution time exceeded.
     Timeout,
-    /// Network/connection error.
     NetworkError,
-    /// Parameter substitution failed.
     ParameterError,
-    /// Query compilation failed.
     CompilationError,
-    /// Other/unknown error.
     Other,
 }
 
@@ -61,9 +42,7 @@ impl std::fmt::Display for ErrorCategory {
 }
 
 impl ParsedError {
-    /// Parse an error message into structured form.
     pub fn parse(error: &str) -> Self {
-        // Try to extract ClickHouse error code
         let code = extract_error_code(error);
         let category = categorize_error(code, error);
         let summary = create_summary(&category, error);
@@ -76,7 +55,6 @@ impl ParsedError {
         }
     }
 
-    /// Check if this error is recoverable (transient).
     pub fn is_transient(&self) -> bool {
         matches!(
             self.category,
@@ -84,7 +62,6 @@ impl ParsedError {
         )
     }
 
-    /// Check if this is a query/schema issue that needs fixing.
     pub fn needs_query_fix(&self) -> bool {
         matches!(
             self.category,
@@ -97,9 +74,7 @@ impl ParsedError {
     }
 }
 
-/// Extract ClickHouse error code from message.
 fn extract_error_code(error: &str) -> Option<u32> {
-    // Pattern: "Code: 241." or "Code: 46."
     if let Some(start) = error.find("Code: ") {
         let after_code = &error[start + 6..];
         if let Some(end) = after_code.find('.')
@@ -111,9 +86,7 @@ fn extract_error_code(error: &str) -> Option<u32> {
     None
 }
 
-/// Categorize error based on code and message content.
 fn categorize_error(code: Option<u32>, error: &str) -> ErrorCategory {
-    // First check by error code
     if let Some(c) = code {
         match c {
             241 => return ErrorCategory::MemoryLimit,
@@ -127,7 +100,6 @@ fn categorize_error(code: Option<u32>, error: &str) -> ErrorCategory {
         }
     }
 
-    // Fall back to message content analysis
     let lower = error.to_lowercase();
 
     if lower.contains("memory limit") || lower.contains("memory_limit") {
@@ -155,11 +127,9 @@ fn categorize_error(code: Option<u32>, error: &str) -> ErrorCategory {
     }
 }
 
-/// Create a short summary for display.
 fn create_summary(category: &ErrorCategory, error: &str) -> String {
     match category {
         ErrorCategory::MemoryLimit => {
-            // Extract memory values if present
             if let Some(summary) = extract_memory_details(error) {
                 summary
             } else {
@@ -167,7 +137,6 @@ fn create_summary(category: &ErrorCategory, error: &str) -> String {
             }
         }
         ErrorCategory::UnknownFunction => {
-            // Extract function name
             if let Some(name) = extract_quoted_value(error, "Function with name '", "'") {
                 format!("Unknown function: {}", name)
             } else {
@@ -175,7 +144,6 @@ fn create_summary(category: &ErrorCategory, error: &str) -> String {
             }
         }
         ErrorCategory::TypeMismatch => {
-            // Extract type conversion details
             if error.contains("Cannot convert string") {
                 if let Some(val) = extract_quoted_value(error, "Cannot convert string '", "'") {
                     format!("Type mismatch: '{}' is not a number", val)
@@ -206,7 +174,6 @@ fn create_summary(category: &ErrorCategory, error: &str) -> String {
         ErrorCategory::ParameterError => "Parameter substitution failed".to_string(),
         ErrorCategory::CompilationError => "Query compilation failed".to_string(),
         ErrorCategory::Other => {
-            // Take first 60 chars of error
             if error.len() > 60 {
                 format!("{}...", &error[..60])
             } else {
@@ -216,9 +183,7 @@ fn create_summary(category: &ErrorCategory, error: &str) -> String {
     }
 }
 
-/// Extract memory usage details from error message.
 fn extract_memory_details(error: &str) -> Option<String> {
-    // Pattern: "would use X MiB ... maximum: Y MiB"
     let would_use = extract_memory_value(error, "would use ")?;
     let maximum = extract_memory_value(error, "maximum: ")?;
     Some(format!(
@@ -227,16 +192,13 @@ fn extract_memory_details(error: &str) -> Option<String> {
     ))
 }
 
-/// Extract a memory value in MiB.
 fn extract_memory_value(error: &str, prefix: &str) -> Option<String> {
     let start = error.find(prefix)?;
     let after = &error[start + prefix.len()..];
-    // Find the end of the number (including decimal and unit)
     let end = after.find([',', ':', '('])?;
     Some(after[..end].trim().to_string())
 }
 
-/// Extract a value between two delimiters.
 fn extract_quoted_value(error: &str, prefix: &str, suffix: &str) -> Option<String> {
     let start = error.find(prefix)?;
     let after = &error[start + prefix.len()..];

@@ -1,5 +1,3 @@
-//! Aggregation query lowering.
-
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
@@ -26,8 +24,6 @@ pub fn emit_aggregation(
     Ok(Node::Query(Box::new(q)))
 }
 
-/// Default alias for an aggregation function when the user doesn't supply one.
-/// Lowercase function name (e.g. "count", "sum", "avg").
 fn default_alias(func: AggFunction) -> String {
     func.as_sql().to_lowercase()
 }
@@ -100,14 +96,9 @@ fn build_aggregation(
     (select, group_by, order_by)
 }
 
-/// Build the aggregate expression, using `-If` combinators when `if_cond`
-/// is provided (LIMIT BY dedup path).
-///
-/// - `COUNT()` → `countIf(cond)`
-/// - `COUNT(col)` → `COUNT(col)` (preserved: counts non-null values)
-/// - `SUM(col)` → `sumIf(col, cond)`
-/// - `AVG/MIN/MAX(col)` → `avgIf/minIf/maxIf(col, cond)`
-/// - `groupArray(col)` → `groupArrayIf(col, cond)`
+/// `if_cond` is present only on the LIMIT BY dedup path; it switches the
+/// aggregates to `-If` combinators. `COUNT(col)` is kept as-is rather than
+/// `countIf` because it must count non-null values of the column.
 fn build_agg_expr(plan: &Plan, agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr {
     let count_drops_col = matches!(agg.function, AggFunction::Count)
         && agg
@@ -122,8 +113,6 @@ fn build_agg_expr(plan: &Plan, agg: &InputAggregationMetric, if_cond: Option<&Ex
                 if let (Some(target), Some(prop)) = (&agg.target, &agg.property)
                     && !count_drops_col
                 {
-                    // countIf(col, cond) counts non-null values of col
-                    // where cond is true.
                     Expr::func(
                         agg.function.as_sql_if(),
                         vec![Expr::col(target, prop), cond.clone()],

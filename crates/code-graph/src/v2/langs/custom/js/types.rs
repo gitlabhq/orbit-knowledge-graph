@@ -100,7 +100,6 @@ impl Default for ExportedBinding {
 }
 
 impl ExportedBinding {
-    /// Plain named export pointing at a local definition.
     pub fn local(local_fqn: String, range: Range) -> Self {
         Self {
             local_fqn,
@@ -109,8 +108,7 @@ impl ExportedBinding {
         }
     }
 
-    /// `export default ...` or `module.exports = ...`. The local FQN
-    /// defaults to `"default"` if the caller has no better candidate.
+    /// Local FQN defaults to `"default"` if the caller has no better candidate.
     pub fn primary(local_fqn: Option<String>, range: Range) -> Self {
         Self {
             local_fqn: local_fqn.unwrap_or_else(|| "default".to_string()),
@@ -120,8 +118,6 @@ impl ExportedBinding {
         }
     }
 
-    /// `export { foo } from "./bar"` — name kept from the caller,
-    /// source and optional imported name propagate through resolution.
     pub fn reexport(
         local_fqn: String,
         range: Range,

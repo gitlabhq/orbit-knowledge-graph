@@ -1,5 +1,3 @@
-//! CDC route: per-branch code indexing task requests.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 

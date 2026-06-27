@@ -1,10 +1,3 @@
-//! Structured tracing for the v2 code-graph engine and resolver.
-//!
-//! Captures detailed internal state as the DSL engine parses files (SSA
-//! writes/reads, scope changes, binding writes, ref dispatch) and as the
-//! resolver links references across files (strategy attempts, chain steps,
-//! lookup results).
-//!
 //! One `Tracer` is created at the top level and passed by reference to all
 //! pipeline components. Events accumulate in a `Mutex<Vec>` and are dumped
 //! once after execution completes. In integration tests, set `trace: true`
@@ -13,11 +6,8 @@
 use std::fmt;
 use std::sync::Mutex;
 
-/// Emit a trace event only if the tracer is enabled. The event
-/// expression is not evaluated when tracing is off, avoiding all
+/// The event expression is not evaluated when tracing is off, avoiding all
 /// allocations (`.to_string()`, `format!()`, `.clone()`).
-///
-/// Usage: `trace!(tracer, VariantName { field: expr, ... })`
 #[macro_export]
 macro_rules! trace {
     ($tracer:expr, $variant:ident { $($field:ident : $val:expr),* $(,)? }) => {
@@ -25,44 +15,42 @@ macro_rules! trace {
     };
 }
 
-/// All observable events in the engine + resolver pipeline.
 #[derive(Debug, Clone)]
 pub enum TraceEvent {
-    // ── SSA engine ──────────────────────────────────────────
-    /// A new SSA block was created.
-    SsaBlockCreated { block_id: usize },
-    /// A predecessor edge was added to a block.
-    SsaAddPredecessor { block_id: usize, pred_id: usize },
-    /// A block was sealed (all predecessors known).
-    SsaBlockSealed { block_id: usize },
-    /// A variable was written in a block.
+    SsaBlockCreated {
+        block_id: usize,
+    },
+    SsaAddPredecessor {
+        block_id: usize,
+        pred_id: usize,
+    },
+    SsaBlockSealed {
+        block_id: usize,
+    },
     SsaWrite {
         variable: String,
         block_id: usize,
         value: String,
     },
-    /// A variable was read in a block, producing reaching values.
     SsaRead {
         variable: String,
         block_id: usize,
         values: Vec<String>,
     },
-    /// A phi node was created.
     SsaPhiCreated {
         phi_id: usize,
         block_id: usize,
         variable: String,
     },
-    /// A trivial phi was collapsed to a single value.
-    SsaPhiTrivial { phi_id: usize, replacement: String },
-    /// An SCC of mutually-redundant phis was collapsed.
+    SsaPhiTrivial {
+        phi_id: usize,
+        replacement: String,
+    },
     SsaSccCollapse {
         scc_size: usize,
         replacement: String,
     },
 
-    // ── DSL engine walk ─────────────────────────────────────
-    /// A scope was pushed (class, function, module, etc.)
     ScopePush {
         name: String,
         kind: String,
@@ -70,17 +58,17 @@ pub enum TraceEvent {
         fqn: String,
         block_id: usize,
     },
-    /// A scope was popped.
-    ScopePop { name: String },
-    /// A package node was matched.
-    PackageMatched { name: String },
-    /// A binding was written to SSA (variable declaration).
+    ScopePop {
+        name: String,
+    },
+    PackageMatched {
+        name: String,
+    },
     BindingWrite {
         name: String,
         value: String,
         block_id: usize,
     },
-    /// An import was recorded.
     ImportRecorded {
         path: String,
         name: String,
@@ -89,7 +77,6 @@ pub enum TraceEvent {
         ssa_name: Option<String>,
         block_id: usize,
     },
-    /// A reference was detected and queued for resolution.
     RefQueued {
         name: String,
         chain: Option<Vec<String>>,
@@ -98,36 +85,38 @@ pub enum TraceEvent {
         enclosing_def: Option<u32>,
         is_return: bool,
     },
-    /// A chain was built from a receiver expression.
-    ChainBuilt { steps: Vec<String> },
-    /// Return type was inferred for a definition.
+    ChainBuilt {
+        steps: Vec<String>,
+    },
     ReturnTypeInferred {
         def_index: u32,
         def_fqn: String,
         return_type: String,
     },
-    /// A sibling reference was adopted.
-    SiblingRefAdopted { name: String, def_index: u32 },
-    /// Branch (if/match/switch) started.
-    BranchEnter { node_kind: String, pre_block: usize },
-    /// Branch arm entered.
-    BranchArm { block_id: usize },
-    /// Branch join block created.
+    SiblingRefAdopted {
+        name: String,
+        def_index: u32,
+    },
+    BranchEnter {
+        node_kind: String,
+        pre_block: usize,
+    },
+    BranchArm {
+        block_id: usize,
+    },
     BranchJoin {
         block_id: usize,
         arm_blocks: Vec<usize>,
     },
-    /// Loop started.
     LoopEnter {
         node_kind: String,
         header_block: usize,
         body_block: usize,
     },
-    /// Loop exited.
-    LoopExit { exit_block: usize },
+    LoopExit {
+        exit_block: usize,
+    },
 
-    // ── DSL engine — Phase 1 ───────────────────────────────
-    /// A definition was discovered during Phase 1 parsing.
     DefDiscovered {
         name: String,
         fqn: String,
@@ -136,21 +125,17 @@ pub enum TraceEvent {
         is_top_level: bool,
     },
 
-    // ── DSL engine — ref/chain matching ─────────────────────
-    /// A reference rule was evaluated for a CST node.
     RefEvaluated {
         node_kind: String,
         matched: bool,
         name: Option<String>,
         has_chain: bool,
     },
-    /// A chain step was matched against ChainConfig during build_expression_chain.
     ChainStepMatched {
         node_kind: String,
         category: String,
         text: String,
     },
-    /// Instance attr rewrite attempted (Pass 2).
     InstanceAttrRewrite {
         original_key: String,
         compound_key: String,
@@ -158,34 +143,32 @@ pub enum TraceEvent {
         chain_trimmed: bool,
     },
 
-    // ── Graph construction ──────────────────────────────────
-    /// An extends edge was linked during finalize.
     ExtendsLinked {
         child_fqn: String,
         super_type: String,
         resolved_to: Vec<String>,
     },
-    /// Ancestor chain was built during finalize.
-    AncestorChainBuilt { fqn: String, ancestors: Vec<String> },
+    AncestorChainBuilt {
+        fqn: String,
+        ancestors: Vec<String>,
+    },
 
-    // ── Resolver ────────────────────────────────────────────
-    /// Resolver started processing a reference.
     ResolveStart {
         name: String,
         chain: Option<Vec<String>>,
         reaching: Vec<String>,
         enclosing_def: Option<String>,
     },
-    /// A bare resolution strategy was tried.
     ResolveBareStage {
         stage: String,
         name: String,
         result_count: usize,
         result_fqns: Vec<String>,
     },
-    /// Chain resolution: base type FQNs were resolved.
-    ResolveChainBase { step: String, types: Vec<String> },
-    /// Chain resolution: a step was resolved.
+    ResolveChainBase {
+        step: String,
+        types: Vec<String>,
+    },
     ResolveChainStep {
         depth: usize,
         step: String,
@@ -195,44 +178,44 @@ pub enum TraceEvent {
         found_fqns: Vec<String>,
         next_types: Vec<String>,
     },
-    /// Chain resolution: fallback to bare.
-    ResolveChainFallback { name: String },
-    /// Nested lookup was attempted.
+    ResolveChainFallback {
+        name: String,
+    },
     NestedLookup {
         scope_fqn: String,
         member_name: String,
         found: bool,
         result_fqns: Vec<String>,
     },
-    /// Import resolution was attempted.
     ImportResolve {
         import_fqn: String,
         found: bool,
         result_fqns: Vec<String>,
     },
-    /// Receiver type lookup was attempted.
     ReceiverTypeLookup {
         type_name: String,
         member_name: String,
         found_count: usize,
     },
-    /// Implicit sub-scope lookup was tried.
     ImplicitSubScope {
         scope_fqn: String,
         sub_scope: String,
         member_name: String,
         found: bool,
     },
-    /// SSA reaching def was resolved to graph nodes.
-    ReachingDefResolved { value: String, result: String },
-    /// Final resolution result.
-    ResolveResult { name: String, targets: Vec<String> },
+    ReachingDefResolved {
+        value: String,
+        result: String,
+    },
+    ResolveResult {
+        name: String,
+        targets: Vec<String>,
+    },
 }
 
 impl fmt::Display for TraceEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // SSA
             TraceEvent::SsaBlockCreated { block_id } => {
                 write!(f, "ssa.block_new        B{block_id}")
             }
@@ -290,7 +273,6 @@ impl fmt::Display for TraceEvent {
                 write!(f, "ssa.scc_collapse     {scc_size} phis -> {replacement}")
             }
 
-            // DSL engine
             TraceEvent::ScopePush {
                 name,
                 kind,
@@ -409,7 +391,6 @@ impl fmt::Display for TraceEvent {
                 write!(f, "loop.exit            [B{exit_block}]")
             }
 
-            // Phase 1
             TraceEvent::DefDiscovered {
                 name,
                 fqn,
@@ -424,7 +405,6 @@ impl fmt::Display for TraceEvent {
                 )
             }
 
-            // Ref/chain matching
             TraceEvent::RefEvaluated {
                 node_kind,
                 matched,
@@ -468,7 +448,6 @@ impl fmt::Display for TraceEvent {
                 )
             }
 
-            // Graph construction
             TraceEvent::ExtendsLinked {
                 child_fqn,
                 super_type,
@@ -492,7 +471,6 @@ impl fmt::Display for TraceEvent {
                 )
             }
 
-            // Resolver
             TraceEvent::ResolveStart {
                 name,
                 chain,
@@ -671,8 +649,6 @@ impl Tracer {
         }
     }
 
-    /// Record a trace event, but only construct it if tracing is enabled.
-    /// Use via `trace_event!(tracer, VariantName { field: value, ... })`.
     #[inline]
     pub fn event_if(&self, f: impl FnOnce() -> TraceEvent) {
         if self.enabled {
@@ -680,12 +656,10 @@ impl Tracer {
         }
     }
 
-    /// Drain all events, returning them for display.
     pub fn drain(&self) -> Vec<TraceEvent> {
         self.events.lock().unwrap().drain(..).collect()
     }
 
-    /// Print all events to stderr with a header, then clear.
     pub fn dump(&self, header: &str) {
         if !self.enabled {
             return;
@@ -701,7 +675,6 @@ impl Tracer {
         eprintln!("  └──────────────────────────────────────\n");
     }
 
-    /// Print all events to stderr grouped by file, then clear.
     pub fn dump_grouped(&self, header: &str) {
         if !self.enabled {
             return;
@@ -712,7 +685,6 @@ impl Tracer {
         }
         eprintln!("\n  ┌── TRACE: {header} ({} events) ──", events.len());
 
-        // Group into sections: engine events, then resolver events
         let mut in_resolver = false;
         for (i, event) in events.iter().enumerate() {
             let is_resolve = matches!(

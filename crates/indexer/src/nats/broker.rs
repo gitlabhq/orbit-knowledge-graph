@@ -1,8 +1,3 @@
-//! NATS JetStream message broker.
-//!
-//! Wraps [`nats_client::NatsClient`] and adds indexer-specific functionality:
-//! subscriptions, publishing, dead-letter queues, and message conversion.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -453,7 +448,6 @@ impl NatsBroker {
             ack_wait: self.config.ack_wait(),
             max_deliver,
             durable_name: durable_name.clone(),
-            // ConsumerConfig::max_ack_pending uses 0 to mean "NATS server default" (currently 1000).
             max_ack_pending: max_ack_pending_to_i64(max_ack_pending),
             ..Default::default()
         };
