@@ -96,7 +96,7 @@
             "system_notes_resolve_lookup_batch_size": 1000
           }
         },
-        "max_concurrent_workers": 24,
+        "max_concurrent_workers": 16,
         "modules": [
           "sdlc",
           "code",
@@ -615,7 +615,7 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 24\n- `concurrency_groups`: empty\n- `topics`: empty (no retry/DLQ by default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
+      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `topics`: empty (no retry/DLQ by default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
       "type": "object",
       "properties": {
         "concurrency_groups": {
@@ -674,10 +674,10 @@
           }
         },
         "max_concurrent_workers": {
-          "description": "Maximum concurrent message handlers across all modules. Defaults to 24.",
+          "description": "Maximum concurrent message handlers across all modules. Defaults to 16.",
           "type": "integer",
           "format": "uint",
-          "default": 24,
+          "default": 16,
           "minimum": 0
         },
         "modules": {

@@ -56,10 +56,11 @@ graph:
 #   key_path: "/path/to/key.pem"
 
 engine:
-  max_concurrent_workers: 24
+  # Universal-pool defaults; production splits into per-module pools that override these (gkg-helm-charts `indexer.pools`).
+  max_concurrent_workers: 16
   concurrency_groups:
     sdlc: 12
-    code: 12
+    code: 4
   topics:
     global-handler:
       concurrency_group: sdlc
