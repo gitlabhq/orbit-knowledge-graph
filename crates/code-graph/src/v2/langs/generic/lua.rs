@@ -60,7 +60,7 @@ impl DslLanguage for LuaDsl {
             import("__require")
                 .label("Require")
                 .path_from(child_of_kind("__import_path"))
-                .split_last(".")
+                .name_from_path_tail(".")
                 .runtime(),
         ]
     }

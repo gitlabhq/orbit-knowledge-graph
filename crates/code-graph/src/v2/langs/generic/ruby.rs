@@ -87,16 +87,19 @@ impl DslLanguage for RubyDsl {
                 .when(ruby_lambda_assignment())
                 .name_from(field("left"))
                 .no_scope(),
-            // Synthetic nodes injected by rewrite_ruby
+            // Synthetic nodes injected by rewrite(); their name is their text.
             scope("__property", "Attribute")
                 .def_kind(DefKind::Property)
-                .no_scope(),
+                .no_scope()
+                .name_from(text()),
             scope("__method", "Method")
                 .def_kind(DefKind::Method)
-                .no_scope(),
+                .no_scope()
+                .name_from(text()),
             scope("__static_method", "StaticMethod")
                 .def_kind(DefKind::Method)
-                .no_scope(),
+                .no_scope()
+                .name_from(text()),
         ]
     }
 
@@ -156,18 +159,20 @@ impl DslLanguage for RubyDsl {
                 .label("RequireRelative")
                 .path_from(child_of_kind("__import_path"))
                 .side_effect(),
-            import("__include")
+            // Each mixin member node holds one full constant (e.g. `Gitlab::Tracking`);
+            // path is everything before the last `::`, name the last segment.
+            import("__include_member")
                 .label("Include")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name")),
-            import("__extend")
+                .path_from(text().split_init("::"))
+                .symbol_from(text().split_last("::")),
+            import("__extend_member")
                 .label("Extend")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name")),
-            import("__prepend")
+                .path_from(text().split_init("::"))
+                .symbol_from(text().split_last("::")),
+            import("__prepend_member")
                 .label("Prepend")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name")),
+                .path_from(text().split_init("::"))
+                .symbol_from(text().split_last("::")),
         ]
     }
 
@@ -284,24 +289,15 @@ fn ruby_import_rules() -> Vec<rw::Rule> {
         rw::rename("call", "__require").when(method_is("require")),
         rw::insert("call", require_path(), "__import_path").when(method_is("require_relative")),
         rw::rename("call", "__require_relative").when(method_is("require_relative")),
-        // include
-        rw::insert("call", mixin_args().split_init("::"), "__import_path")
-            .when(method_is("include")),
-        rw::insert("call", mixin_args().split_last("::"), "__import_name")
-            .when(method_is("include")),
-        rw::rename("call", "__include").when(method_is("include")),
-        // extend
-        rw::insert("call", mixin_args().split_init("::"), "__import_path")
-            .when(method_is("extend")),
-        rw::insert("call", mixin_args().split_last("::"), "__import_name")
-            .when(method_is("extend")),
-        rw::rename("call", "__extend").when(method_is("extend")),
-        // prepend
-        rw::insert("call", mixin_args().split_init("::"), "__import_path")
-            .when(method_is("prepend")),
-        rw::insert("call", mixin_args().split_last("::"), "__import_name")
-            .when(method_is("prepend")),
-        rw::rename("call", "__prepend").when(method_is("prepend")),
+        // include / extend / prepend may name several modules (`include A, B`),
+        // so insert one member node per constant and rename the call to a neutral
+        // kind. The walk visits each member, which emits its own import.
+        rw::insert("call", mixin_args(), "__include_member").when(method_is("include")),
+        rw::rename("call", "__mixin_group").when(method_is("include")),
+        rw::insert("call", mixin_args(), "__extend_member").when(method_is("extend")),
+        rw::rename("call", "__mixin_group").when(method_is("extend")),
+        rw::insert("call", mixin_args(), "__prepend_member").when(method_is("prepend")),
+        rw::rename("call", "__mixin_group").when(method_is("prepend")),
     ]
 }
 

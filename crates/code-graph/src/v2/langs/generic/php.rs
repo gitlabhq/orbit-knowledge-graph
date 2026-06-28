@@ -466,21 +466,31 @@ fn rewrite_php_imports(tree: &mut SyntaxTree) {
         }
     }
 
-    for (i, imp) in imports.iter().enumerate() {
+    // Count imports per decl so a single-clause `use` annotates its own node,
+    // while a grouped `use Vendor\{A, B as C}` attaches one synthetic node per
+    // clause. The walk visits children, so each emits its own import.
+    let mut per_decl: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for imp in &imports {
+        *per_decl.entry(imp.decl).or_default() += 1;
+    }
+
+    for imp in imports {
         let kind = if imp.alias.is_some() {
             "__php_aliased_use"
         } else {
             "__php_use"
         };
-        // For the first import from this decl, rename the node. For subsequent ones
-        // from grouped imports, insert siblings.
-        if i == 0 || imports.get(i.wrapping_sub(1)).map(|p| p.decl) != Some(imp.decl) {
+        let target = if per_decl[&imp.decl] > 1 {
+            tree.set_kind(imp.decl, "__php_use_group");
+            tree.insert_child(imp.decl, kind, "")
+        } else {
             tree.set_kind(imp.decl, kind);
-        }
-        tree.insert_child(imp.decl, "__import_path", &imp.path);
-        tree.insert_child(imp.decl, "__import_name", &imp.name);
+            imp.decl
+        };
+        tree.insert_child(target, "__import_path", &imp.path);
+        tree.insert_child(target, "__import_name", &imp.name);
         if let Some(alias) = &imp.alias {
-            tree.insert_child(imp.decl, "__import_alias", alias);
+            tree.insert_child(target, "__import_alias", alias);
         }
     }
 }

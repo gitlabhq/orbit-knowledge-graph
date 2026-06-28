@@ -521,7 +521,11 @@ impl LanguageSpec {
                     });
                 }
             }
-        } else if let Some(raw_path) = rule.extract().apply(node) {
+        } else if let Some(raw_path) = rule.extract().apply(node).or_else(|| {
+            // A name-only import (Ruby `include Foo`) has an empty path but still
+            // binds a symbol; admit it with an empty path.
+            rule.extract_symbol(node).map(|_| String::new())
+        }) {
             let full_path = raw_path;
             let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
@@ -537,6 +541,15 @@ impl LanguageSpec {
 
             let mode = rule.mode;
             if is_wildcard_import {
+                // A wildcard import may still name the module it wildcards
+                // (Elixir `import Enum` binds `Enum` while importing all of it).
+                let name = rule.name_from_path_tail.map(|sep| {
+                    full_path
+                        .rsplit(sep)
+                        .next()
+                        .unwrap_or(&full_path)
+                        .to_string()
+                });
                 imports.push(CanonicalImport {
                     import_type: label,
                     binding_kind: rule
@@ -544,7 +557,7 @@ impl LanguageSpec {
                         .unwrap_or(ImportBindingKind::Named),
                     mode,
                     path: full_path,
-                    name: None,
+                    name,
                     alias: None,
                     scope_fqn: None,
                     range,
@@ -552,7 +565,14 @@ impl LanguageSpec {
                     wildcard: true,
                 });
             } else {
-                let (path, name) = if rule.should_split() {
+                let (path, name) = if let Some(sep) = rule.name_from_path_tail {
+                    let name = full_path
+                        .rsplit(sep)
+                        .next()
+                        .unwrap_or(&full_path)
+                        .to_string();
+                    (full_path, Some(name))
+                } else if rule.should_split() {
                     rule.split_path_name(&full_path)
                 } else {
                     (full_path, rule.extract_symbol(node))

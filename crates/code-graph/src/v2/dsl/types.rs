@@ -279,6 +279,10 @@ pub struct ImportRule {
     /// If set, split a scoped name at this separator into (path, name).
     /// e.g. `"."` splits `java.util.List` → path=`java.util`, name=`List`.
     pub(crate) split_last: Option<&'static str>,
+    /// If set, keep the full path and derive the name from its last segment at
+    /// this separator. e.g. `"."` keeps path `vendor.json`, name `json`; a path
+    /// with no separator becomes its own name (`utils` → name `utils`).
+    pub(crate) name_from_path_tail: Option<&'static str>,
     /// Override the binding kind (default: inferred from name/alias/wildcard).
     pub(crate) override_binding_kind: Option<crate::v2::types::ImportBindingKind>,
     /// Override the import mode (default: Declarative).
@@ -338,6 +342,12 @@ impl ImportRule {
 
     pub fn split_last(mut self, sep: &'static str) -> Self {
         self.split_last = Some(sep);
+        self
+    }
+
+    /// Keep the full path; derive the name from its last `sep`-delimited segment.
+    pub fn name_from_path_tail(mut self, sep: &'static str) -> Self {
+        self.name_from_path_tail = Some(sep);
         self
     }
 
@@ -408,6 +418,7 @@ pub fn import(kind: &'static str) -> ImportRule {
         wildcard_symbol: "*",
         always_wildcard: false,
         split_last: None,
+        name_from_path_tail: None,
         override_binding_kind: None,
         mode: crate::v2::types::ImportMode::Declarative,
     }

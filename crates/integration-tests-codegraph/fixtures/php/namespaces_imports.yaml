@@ -319,10 +319,10 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # KNOWN GAP: an absolute-FQN parameter type `\Vendor\Other\Bare $bare` does
-  # not type the local, so `$bare->run()` does not resolve. The static-call
-  # form `\Vendor\Other\Bare::call()` and `use`-imported types DO resolve.
-  - name: "Known gap: leading-backslash typed-parameter $bare->run()"
+  # Absolute-FQN types resolve once leading-backslash FQNs are normalized, so
+  # both `$x->run()` (new-typed local) and `$bare->run()` (parameter-typed) in
+  # `go()` resolve to `Vendor\Other\Bare\run`.
+  - name: "Leading-backslash FQN: $x->run() and $bare->run() both resolve"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
@@ -330,7 +330,7 @@ tests:
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
-      - { row_count: 0 }
+      - { row_count: 2 }
 
   # ── FQN reference without import ────────────────────────────────
   - name: "Static call by fully-qualified name without use: \\Vendor\\Other\\Bare::call()"
@@ -343,10 +343,9 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # KNOWN GAP: `$b = new \Vendor\Other\Bare(); $b->run()` does not resolve
-  # (absolute-FQN `new` via a local). Imported-name `new` and the static-call
-  # form `\Vendor\Other\Bare::call()` DO resolve.
-  - name: "Known gap: new \\Vendor\\Other\\Bare via local then $b->run()"
+  # `$b = new \Vendor\Other\Bare(); $b->run()` resolves once leading-backslash
+  # FQNs are normalized (absolute-FQN `new` via a local).
+  - name: "Leading-backslash FQN: new \\Vendor\\Other\\Bare via local then $b->run()"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
@@ -354,7 +353,7 @@ tests:
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
-      - { row_count: 0 }
+      - { row_count: 1 }
 
   # ── Cross-file: deep-namespace inheritance + call ───────────────
   - name: "Deep-namespace child extends imported base across files"

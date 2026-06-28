@@ -20,6 +20,13 @@ pub enum Pred {
     And(Box<Pred>, Box<Pred>),
     Or(Box<Pred>, Box<Pred>),
     Not(Box<Pred>),
+    /// True when the string `value` produces appears among the strings `set`
+    /// produces, both evaluated from the tested node. Lets a rule compare a
+    /// node's value against a set collected elsewhere in the tree.
+    Member {
+        value: Box<Extract>,
+        set: Box<Extract>,
+    },
 }
 
 impl Pred {
@@ -29,6 +36,10 @@ impl Pred {
             Pred::And(a, b) => a.test(node) && b.test(node),
             Pred::Or(a, b) => a.test(node) || b.test(node),
             Pred::Not(p) => !p.test(node),
+            Pred::Member { value, set } => match value.apply(node) {
+                Some(v) => set.apply_all(node).contains(&v),
+                None => false,
+            },
         }
     }
 
@@ -96,6 +107,15 @@ pub fn has_child_text(text: &'static str) -> Pred {
 /// True when the node's own text equals `text`.
 pub fn text_is(text: &'static str) -> Pred {
     check(Match::Text(text))
+}
+
+/// True when the string `value` produces is among the strings `set` produces,
+/// both evaluated from the tested node.
+pub fn member(value: Extract, set: Extract) -> Pred {
+    Pred::Member {
+        value: Box::new(value),
+        set: Box::new(set),
+    }
 }
 
 /// True when the node's own text equals any of `texts`.
@@ -212,6 +232,25 @@ mod tests {
         assert!((has_name().and(parent_is("module"))).test(&func));
         assert!((parent_is("class").or(parent_is("module"))).test(&func));
         assert!((!parent_is("class_definition")).test(&func));
+    }
+
+    #[test]
+    fn member_tests_value_against_collected_set() {
+        use crate::extract::{field, text};
+        let root = py("class Foo:\n    def bar(self): pass\n    def baz(self): pass");
+        let cls = root.root().children().next().unwrap();
+        let method_names = || {
+            field("body").each(
+                text()
+                    .where_pred(check(Match::Kind("function_definition")))
+                    .field("name"),
+            )
+        };
+        assert!(!member(field("name"), method_names()).test(&cls));
+        let bar = cls
+            .find(Axis::Descendant, Match::Kind("function_definition"))
+            .unwrap();
+        assert!(member(field("name"), method_names().parent().parent()).test(&bar));
     }
 
     #[test]

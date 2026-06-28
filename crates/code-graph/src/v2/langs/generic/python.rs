@@ -26,7 +26,7 @@ fn in_class_body() -> Pred {
     Pred::Exists(Box::new(
         Extract::one(Parent, Any)
             .nav(Parent, Any)
-            .nav(Parent, Kind("class_definition")),
+            .nav(Parent, AnyKind(&["class_definition", "__decorated_class"])),
     ))
 }
 

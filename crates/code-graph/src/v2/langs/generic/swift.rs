@@ -136,7 +136,7 @@ impl DslLanguage for SwiftDsl {
             import("import_declaration")
                 .label("Import")
                 .path_from(child_of_kind("__import_path"))
-                .split_last("."),
+                .name_from_path_tail("."),
         ]
     }
 

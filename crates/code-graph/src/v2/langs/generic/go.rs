@@ -120,14 +120,17 @@ impl DslLanguage for GoDsl {
             import("__wildcard_go_import")
                 .label("Import")
                 .path_from(child_of_kind("__import_path"))
+                .name_from_path_tail("/")
                 .always_wildcard(),
             import("__aliased_go_import")
                 .label("Import")
                 .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name"))
                 .alias_from(child_of_kind("__import_alias")),
             import("__go_import")
                 .label("Import")
-                .path_from(child_of_kind("__import_path")),
+                .path_from(child_of_kind("__import_path"))
+                .symbol_from(child_of_kind("__import_name")),
         ]
     }
 
@@ -237,10 +240,11 @@ fn go_import_rules() -> Vec<rw::Rule> {
             child_of_kind("package_identifier"),
             "__import_alias",
         ),
-        // Classify by alias type
+        // Classify by alias type; the remaining plain specs become __go_import.
         rw::rename("import_spec", "__blank_import").when(has_child(&["blank_identifier"])),
         rw::rename("import_spec", "__wildcard_go_import").when(has_child(&["dot"])),
         rw::rename("import_spec", "__aliased_go_import").when(has_child(&["package_identifier"])),
+        rw::rename("import_spec", "__go_import"),
     ]
 }
 

@@ -67,7 +67,12 @@ impl DslLanguage for CSharpDsl {
         ));
         rules.push(rw::insert(
             "__aliased_using",
-            target_extract().split_last("."),
+            // Bound name is the target's last segment, with any namespace
+            // qualifier (`global::`) and generic argument (`<int>`) stripped.
+            target_extract()
+                .split_last(".")
+                .split_last("::")
+                .take_before("<"),
             "__import_name",
         ));
         tree.apply_rewrites(&rules);

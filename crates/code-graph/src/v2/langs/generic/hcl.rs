@@ -79,16 +79,19 @@ impl DslLanguage for HclDsl {
                 .when(has_child_text("terraform"))
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
-            // Synthetic nodes injected by rewrite().
+            // Synthetic nodes injected by rewrite(); their name is their text.
             scope("__resource", "Resource")
                 .def_kind(DefKind::Class)
-                .no_scope(),
+                .no_scope()
+                .name_from(text()),
             scope("__data_source", "DataSource")
                 .def_kind(DefKind::Class)
-                .no_scope(),
+                .no_scope()
+                .name_from(text()),
             scope("__local", "Local")
                 .def_kind(DefKind::Property)
-                .no_scope(),
+                .no_scope()
+                .name_from(text()),
         ]
     }
 

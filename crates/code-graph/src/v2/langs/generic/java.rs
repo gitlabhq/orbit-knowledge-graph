@@ -20,12 +20,18 @@ pub struct JavaDsl;
 
 const JAVA_TYPE_KINDS: &[&str] = &["type_identifier", "generic_type", "scoped_type_identifier"];
 
-/// `method_declaration` whose `parameters` field has no real parameters.
-fn no_arg_method() -> Pred {
-    is_kind("method_declaration").and(field_lacks_children(
-        "parameters",
-        &["formal_parameter", "spread_parameter"],
-    ))
+/// Names of no-arg methods declared in the enclosing record body, as seen from a
+/// `formal_parameter`: parameter → formal_parameters → record_declaration →
+/// body → each no-arg method's name. An explicit accessor override.
+fn body_no_arg_method_names() -> Extract {
+    text().parent().parent().field("body").each(
+        text()
+            .where_pred(is_kind("method_declaration").and(field_lacks_children(
+                "parameters",
+                &["formal_parameter", "spread_parameter"],
+            )))
+            .field("name"),
+    )
 }
 
 impl DslLanguage for JavaDsl {
@@ -67,13 +73,13 @@ impl DslLanguage for JavaDsl {
         rules.extend([
             rw::rename("import_declaration", "__static_import").when(has_child_text("static")),
             rw::rename("import_declaration", "__wildcard_import").when(has_child(&["asterisk"])),
-            // Record accessors: param names minus no-arg method names.
-            rw::insert(
-                "record_declaration",
-                field("parameters").collect_field(Kind("formal_parameter"), "name"),
-                "__accessor",
-            )
-            .except(field("body").each(text().where_pred(no_arg_method()).field("name"))),
+            // A record component (a `formal_parameter` whose grandparent is the
+            // record, not a method) becomes an implicit accessor method unless
+            // the body explicitly declares a no-arg method of the same name.
+            rw::rename("formal_parameter", "__record_accessor").when(
+                grandparent_is("record_declaration")
+                    .and(!member(field("name"), body_no_arg_method_names())),
+            ),
         ]);
         tree.apply_rewrites(&rules);
     }
@@ -119,9 +125,14 @@ impl DslLanguage for JavaDsl {
                 .def_kind(DefKind::Lambda)
                 .no_scope()
                 .name_from(field("parameters")),
-            scope("__accessor", "Method")
+            scope("__record_accessor", "Method")
                 .def_kind(DefKind::Method)
-                .no_scope(),
+                .no_scope()
+                .name_from(field("name"))
+                .metadata(
+                    metadata()
+                        .return_type(field("type").inner("type_arguments", "type_identifier")),
+                ),
         ]
     }
 

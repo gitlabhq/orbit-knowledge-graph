@@ -33,9 +33,15 @@ fn kotlin_rewrites() -> Vec<rw::Rule> {
             .when(descendant_text("class_modifier", "value")),
         rw::rename("class_declaration", "__annotation_class_declaration")
             .when(descendant_text("class_modifier", "annotation")),
+        // Supertypes: each `delegation_specifier` child (a bare `user_type` or a
+        // `constructor_invocation` wrapping one) yields its outermost user_type.
         rw::insert(
             "class_declaration",
-            field("delegation_specifiers").collect_shallow(Kind("user_type")),
+            text().each(
+                text()
+                    .where_(Kind("delegation_specifier"))
+                    .collect_shallow(Kind("user_type")),
+            ),
             "__supertype",
         ),
         rw::rename("import_header", "__wildcard_import").when(has_child(&["wildcard_import"])),

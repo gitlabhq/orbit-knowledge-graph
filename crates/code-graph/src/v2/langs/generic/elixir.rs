@@ -153,6 +153,7 @@ impl DslLanguage for ElixirDsl {
             base("__elixir_alias").label("Alias"),
             base("__elixir_import")
                 .label("Import")
+                .name_from_path_tail(".")
                 .wildcard_child("__wildcard"),
             base("__elixir_require").label("Require"),
             base("__elixir_use").label("Use"),
@@ -337,15 +338,30 @@ fn rewrite_elixir_imports(tree: &mut SyntaxTree) {
         });
     }
 
+    // Count imports per call so a single-member call annotates its own node,
+    // while a multi-member call (`alias Foo.{Bar, Baz}`) attaches one synthetic
+    // child node per member. The walk visits children, so each emits its own
+    // import independently.
+    let mut per_call: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for imp in &imports {
+        *per_call.entry(imp.call).or_default() += 1;
+    }
+
     for imp in imports {
-        tree.set_kind(imp.call, imp.kind);
-        tree.insert_child(imp.call, "__import_path", &imp.path);
-        tree.insert_child(imp.call, "__import_name", &imp.name);
+        let target = if per_call[&imp.call] > 1 {
+            tree.set_kind(imp.call, "__elixir_import_group");
+            tree.insert_child(imp.call, imp.kind, "")
+        } else {
+            tree.set_kind(imp.call, imp.kind);
+            imp.call
+        };
+        tree.insert_child(target, "__import_path", &imp.path);
+        tree.insert_child(target, "__import_name", &imp.name);
         if let Some(alias) = &imp.alias {
-            tree.insert_child(imp.call, "__import_alias", alias);
+            tree.insert_child(target, "__import_alias", alias);
         }
         if imp.wildcard {
-            tree.insert_child(imp.call, "__wildcard", "*");
+            tree.insert_child(target, "__wildcard", "*");
         }
     }
 }
