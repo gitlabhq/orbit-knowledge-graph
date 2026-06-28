@@ -100,7 +100,11 @@ engine:
         fetch_concurrency: 6
         write_channel_capacity: 8
         write_slice_rows: 500000
-        write_max_concurrent_writes: 8
+        write_buffer_age_secs: 60
+        write_max_concurrent: 4
+        small_repo_max_files: 650
+        small_indexing_slots: 6
+        big_indexing_slots: 2
 
 schedule:
   tasks:

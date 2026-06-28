@@ -66,6 +66,7 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
+              "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
               "job_timeout_secs": 250,
@@ -77,9 +78,12 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
+              "small_indexing_slots": 6,
+              "small_repo_max_files": 650,
               "worker_threads": 0,
+              "write_buffer_age_secs": 60,
               "write_channel_capacity": 8,
-              "write_max_concurrent_writes": 8,
+              "write_max_concurrent": 4,
               "write_slice_rows": 500000
             }
           },
@@ -400,6 +404,13 @@
     "CodeIndexingPipelineConfig": {
       "type": "object",
       "properties": {
+        "big_indexing_slots": {
+          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.",
+          "type": "integer",
+          "format": "uint",
+          "default": 2,
+          "minimum": 0
+        },
         "cross_file_resolve_timeout_ms": {
           "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). 0 = no timeout.",
           "type": "integer",
@@ -471,10 +482,31 @@
           "default": 100,
           "minimum": 0
         },
+        "small_indexing_slots": {
+          "description": "Concurrent indexing slots for small repositories. Defaults to 6.",
+          "type": "integer",
+          "format": "uint",
+          "default": 6,
+          "minimum": 0
+        },
+        "small_repo_max_files": {
+          "description": "Post-filter file count at or below which a repository runs on the small lane. Defaults to 650.",
+          "type": "integer",
+          "format": "uint",
+          "default": 650,
+          "minimum": 0
+        },
         "worker_threads": {
           "type": "integer",
           "format": "uint",
           "default": 0,
+          "minimum": 0
+        },
+        "write_buffer_age_secs": {
+          "description": "Flush the write coalescer after this many seconds even below `write_slice_rows`, bounding latency. Keep below `nats.ack_wait_secs`. Defaults to 60.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
           "minimum": 0
         },
         "write_channel_capacity": {
@@ -484,11 +516,11 @@
           "default": 8,
           "minimum": 0
         },
-        "write_max_concurrent_writes": {
-          "description": "Concurrent in-flight inserts from the streaming sink. Defaults to 8.",
+        "write_max_concurrent": {
+          "description": "Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput. Defaults to 4.",
           "type": "integer",
           "format": "uint",
-          "default": 8,
+          "default": 4,
           "minimum": 0
         },
         "write_slice_rows": {
@@ -507,6 +539,7 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
+            "big_indexing_slots": 2,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 6,
             "job_timeout_secs": 250,
@@ -518,9 +551,12 @@
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
             "per_file_walk_timeout_ms": 100,
+            "small_indexing_slots": 6,
+            "small_repo_max_files": 650,
             "worker_threads": 0,
+            "write_buffer_age_secs": 60,
             "write_channel_capacity": 8,
-            "write_max_concurrent_writes": 8,
+            "write_max_concurrent": 4,
             "write_slice_rows": 500000
           }
         }
@@ -606,6 +642,7 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
+                "big_indexing_slots": 2,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 6,
                 "job_timeout_secs": 250,
@@ -617,9 +654,12 @@
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
                 "per_file_walk_timeout_ms": 100,
+                "small_indexing_slots": 6,
+                "small_repo_max_files": 650,
                 "worker_threads": 0,
+                "write_buffer_age_secs": 60,
                 "write_channel_capacity": 8,
-                "write_max_concurrent_writes": 8,
+                "write_max_concurrent": 4,
                 "write_slice_rows": 500000
               }
             },
@@ -855,6 +895,7 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
+              "big_indexing_slots": 2,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
               "job_timeout_secs": 250,
@@ -866,9 +907,12 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
+              "small_indexing_slots": 6,
+              "small_repo_max_files": 650,
               "worker_threads": 0,
+              "write_buffer_age_secs": 60,
               "write_channel_capacity": 8,
-              "write_max_concurrent_writes": 8,
+              "write_max_concurrent": 4,
               "write_slice_rows": 500000
             }
           }
