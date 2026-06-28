@@ -1277,9 +1277,20 @@ async fn timed_out_job_writes_no_data() {
         },
     );
     let handler = deps.code_indexing_task_handler();
-    let envelope = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
 
-    let result = handler.handle(handler_context(), envelope).await;
+    // First timeout: transient, so NATS redelivers for one retry.
+    let mut first = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
+    first.attempt = 1;
+    let result = handler.handle(handler_context(), first).await;
+    assert!(
+        matches!(result, Err(indexer::handler::HandlerError::Processing(_))),
+        "first timeout must retry (transient), not dead-letter; got {result:?}"
+    );
+
+    // Second timeout: structurally stuck, so it dead-letters.
+    let mut second = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
+    second.attempt = 2;
+    let result = handler.handle(handler_context(), second).await;
     assert!(
         matches!(
             result,
@@ -1288,7 +1299,7 @@ async fn timed_out_job_writes_no_data() {
                 ..
             })
         ),
-        "a timed-out job must dead-letter, not retry; got {result:?}"
+        "a job that times out twice must dead-letter; got {result:?}"
     );
 
     for table in ["gl_file", "gl_definition"] {

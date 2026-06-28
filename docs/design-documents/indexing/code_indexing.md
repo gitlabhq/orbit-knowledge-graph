@@ -306,7 +306,7 @@ Projects whose Gitaly archive endpoint returns 404 (no refs) or 5xx (no reposito
 
 Tasks with no `branch` field resolve the default branch via `GET /api/v4/internal/orbit/project/:id/info`. When that endpoint returns 404 (project deleted in Rails but still referenced by the dispatcher's datalake view), the task is acked with the same `empty_repository{reason=not_found}` counter and no checkpoint is stored — the branch is unknown, so there is no key to write under. The ack avoids DLQ churn; the dispatcher stopping emission for deleted projects is tracked separately.
 
-A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 250s) is treated as structurally stuck and dead-lettered on the first occurrence rather than retried: the budget is generous, so a job that blows it will almost certainly do so again, and burning the full delivery budget re-attempting it wastes an indexing slot each time. (A transient write failure is different — that is retried in the writer with backoff, above, and does not dead-letter the job.)
+A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 250s) gets one retry to absorb a transient slowdown (a busy pod, a slow Gitaly fetch); a job that times out a second time is treated as structurally stuck and dead-lettered, rather than burning the full delivery budget re-attempting a repo that will almost certainly time out again and wasting an indexing slot each time. (A transient write failure is different — that is retried in the writer with backoff, above, and does not dead-letter the job.)
 
 #### Flow visual representation
 

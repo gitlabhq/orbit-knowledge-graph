@@ -582,7 +582,7 @@ impl IndexerModule {
 ///
 /// # Defaults
 ///
-/// - `max_concurrent_workers`: 16
+/// - `max_concurrent_workers`: 24
 /// - `concurrency_groups`: empty
 /// - `topics`: empty (no retry/DLQ by default)
 /// - `handlers`: defaults for all handlers
@@ -590,7 +590,7 @@ impl IndexerModule {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
-    /// Maximum concurrent message handlers across all modules. Defaults to 16.
+    /// Maximum concurrent message handlers across all modules. Defaults to 24.
     #[serde(default = "EngineConfiguration::default_max_concurrent_workers")]
     pub max_concurrent_workers: usize,
 
@@ -634,7 +634,7 @@ impl Default for EngineConfiguration {
 
 impl EngineConfiguration {
     fn default_max_concurrent_workers() -> usize {
-        16
+        24
     }
 
     /// Returns whether `module` is enabled in this configuration.

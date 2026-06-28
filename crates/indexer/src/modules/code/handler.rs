@@ -27,6 +27,10 @@ use crate::types::{Envelope, Subscription};
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
+/// Delivery attempts a code-indexing job gets before a wall-clock timeout dead-letters it.
+/// `attempt` is 1-based, so a value of 2 means: time out once → retry, time out again → DLQ.
+const MAX_TIMEOUT_ATTEMPTS: u32 = 2;
+
 fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
     let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch);
@@ -105,7 +109,7 @@ impl Handler for CodeIndexingTaskHandler {
             "received code indexing task"
         );
 
-        self.process_task(&context, &request).await
+        self.process_task(&context, &request, message.attempt).await
     }
 }
 
@@ -137,6 +141,7 @@ impl CodeIndexingTaskHandler {
         &self,
         context: &HandlerContext,
         request: &CodeIndexingTaskRequest,
+        attempt: u32,
     ) -> Result<(), HandlerError> {
         let started_at = Utc::now();
 
@@ -221,6 +226,7 @@ impl CodeIndexingTaskHandler {
                 &branch,
                 had_prior_checkpoint,
                 started_at,
+                attempt,
                 &mut observer,
             )
             .await;
@@ -247,6 +253,10 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
+    )]
     async fn index_with_lock(
         &self,
         context: &HandlerContext,
@@ -254,6 +264,7 @@ impl CodeIndexingTaskHandler {
         branch: &str,
         had_prior_checkpoint: bool,
         started_at: DateTime<Utc>,
+        attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
         let project_id = request.project_id;
@@ -299,22 +310,35 @@ impl CodeIndexingTaskHandler {
                 Ok(result) => result,
                 Err(_) => {
                     cancel.cancel();
-                    warn!(
-                        project_id,
-                        branch = %branch,
-                        timeout_secs = timeout.as_secs(),
-                        "code indexing job exceeded wall-clock timeout; dead-lettering"
+                    let message = format!(
+                        "code indexing job exceeded the {}s timeout",
+                        timeout.as_secs()
                     );
-                    // A job that blows the (generous) wall-clock budget is treated as structurally
-                    // stuck: dead-letter it instead of burning the full retry budget re-attempting
-                    // a repo that will almost certainly time out again.
-                    Err(HandlerError::Permanent {
-                        message: format!(
-                            "code indexing job exceeded the {}s timeout",
-                            timeout.as_secs()
-                        ),
-                        action: crate::handler::PermanentAction::DeadLetter,
-                    })
+                    // Allow one retry to absorb a transient slowdown (a busy pod, a slow Gitaly
+                    // fetch); a job that times out again is treated as structurally stuck and
+                    // dead-lettered so it stops burning an indexing slot.
+                    if attempt < MAX_TIMEOUT_ATTEMPTS {
+                        warn!(
+                            project_id,
+                            branch = %branch,
+                            timeout_secs = timeout.as_secs(),
+                            attempt,
+                            "code indexing job exceeded wall-clock timeout; retrying"
+                        );
+                        Err(HandlerError::Processing(message))
+                    } else {
+                        warn!(
+                            project_id,
+                            branch = %branch,
+                            timeout_secs = timeout.as_secs(),
+                            attempt,
+                            "code indexing job exceeded wall-clock timeout again; dead-lettering"
+                        );
+                        Err(HandlerError::Permanent {
+                            message,
+                            action: crate::handler::PermanentAction::DeadLetter,
+                        })
+                    }
                 }
             },
             None => work.await,
