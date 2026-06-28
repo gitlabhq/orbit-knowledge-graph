@@ -289,7 +289,7 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is transient (retried, then DLQ'd).
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is permanent, so the job is dead-lettered on the first occurrence.
         let cancel = CancellationToken::new();
         let work =
             self.pipeline

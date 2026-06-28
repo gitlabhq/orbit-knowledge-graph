@@ -322,7 +322,7 @@ async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
             Ok(report) => break Ok(report),
             Err(e) => match WRITE_RETRY_BACKOFF.get(tries) {
                 Some(delay) => {
-                    warn!(table, attempt = tries, error = %e, "buffered write failed; retrying after backoff");
+                    warn!(table, retry = tries + 1, error = %e, "buffered write failed; retrying after backoff");
                     tokio::time::sleep(*delay).await;
                     tries += 1;
                 }
