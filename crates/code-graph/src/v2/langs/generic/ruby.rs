@@ -1,11 +1,10 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{
-    self, BindingRule, BranchRule, ChainConfig, DslLanguage, FieldAccessEntry, ImportRule,
-    LoopRule, ReferenceRule, ScopeRule, binding, branch, import, loop_rule, reference, scope,
-    scopes,
+    self, BindingRule, BranchRule, ChainConfig, DslLanguage, FieldAccessEntry, LanguageHooks,
+    LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
 };
-use crate::v2::types::{BindingKind, DefKind, ImportBindingKind};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use petgraph::graph::NodeIndex;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -21,7 +20,10 @@ use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 /// `Class` instance. Shared between `SsaConfig` (binding analysis) and
 /// `ResolverHooks` (chain resolution) to ensure consistency.
 const CONSTRUCTOR_METHODS: &[&str] = &["new", "find", "find_by", "create", "first", "last"];
+use treesitter_visit::Node;
 use treesitter_visit::syntax_tree::SyntaxTree;
+
+type N<'a> = Node<'a, SyntaxTree>;
 
 #[derive(Default)]
 pub struct RubyDsl;
@@ -36,9 +38,14 @@ impl DslLanguage for RubyDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        let mut rules = ruby_rewrites();
-        rules.extend(ruby_import_rules());
-        tree.apply_rewrites(&rules);
+        tree.apply_rewrites(&ruby_rewrites());
+    }
+
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            on_import: Some(ruby_extract_imports),
+            ..LanguageHooks::default()
+        }
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -148,34 +155,6 @@ impl DslLanguage for RubyDsl {
         ]
     }
 
-    fn imports() -> Vec<ImportRule> {
-        use treesitter_visit::extract::child_of_kind;
-        vec![
-            import("__require")
-                .label("Require")
-                .path_from(child_of_kind("__import_path"))
-                .side_effect(),
-            import("__require_relative")
-                .label("RequireRelative")
-                .path_from(child_of_kind("__import_path"))
-                .side_effect(),
-            // Each mixin member node holds one full constant (e.g. `Gitlab::Tracking`);
-            // path is everything before the last `::`, name the last segment.
-            import("__include_member")
-                .label("Include")
-                .path_from(text().split_init("::"))
-                .symbol_from(text().split_last("::")),
-            import("__extend_member")
-                .label("Extend")
-                .path_from(text().split_init("::"))
-                .symbol_from(text().split_last("::")),
-            import("__prepend_member")
-                .label("Prepend")
-                .path_from(text().split_init("::"))
-                .symbol_from(text().split_last("::")),
-        ]
-    }
-
     fn bindings() -> Vec<BindingRule> {
         vec![
             binding("assignment", BindingKind::Assignment)
@@ -271,34 +250,87 @@ use treesitter_visit::syntax_tree as rw;
 
 const SEND_METHODS: &[&str] = &["send", "public_send", "__send__"];
 
-fn ruby_import_rules() -> Vec<rw::Rule> {
-    let require_path = || {
-        field("arguments")
-            .child_of_kind("string")
-            .child_of_kind("string_content")
+fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "call" {
+        return false;
+    }
+    let Some(method) = node.field("method").map(|m| m.text().to_string()) else {
+        return false;
     };
-    let mixin_args = || {
-        field("arguments")
-            .collect(AnyKind(&["constant", "scope_resolution"]))
-            .strip_prefix("::")
-    };
+    match method.as_str() {
+        "require" | "require_relative" => {
+            let Some(args) = node.field("arguments") else {
+                return true;
+            };
+            let path = args
+                .find(Child, Kind("string"))
+                .and_then(|s| s.find(Child, Kind("string_content")))
+                .map(|c| c.text().to_string());
+            if let Some(path) = path {
+                imports.push(CanonicalImport {
+                    import_type: if method == "require_relative" {
+                        "RequireRelative"
+                    } else {
+                        "Require"
+                    },
+                    binding_kind: ImportBindingKind::SideEffect,
+                    mode: ImportMode::Runtime,
+                    path,
+                    name: None,
+                    alias: None,
+                    scope_fqn: None,
+                    range: crate::v2::types::Range::empty(),
+                    is_type_only: false,
+                    wildcard: false,
+                });
+            }
+            true
+        }
+        "include" | "extend" | "prepend" => {
+            let Some(args) = node.field("arguments") else {
+                return true;
+            };
+            let import_type = match method.as_str() {
+                "include" => "Include",
+                "extend" => "Extend",
+                _ => "Prepend",
+            };
+            for arg in args.children() {
+                if !matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
+                    continue;
+                }
+                push_named_import(imports, import_type, strip_leading_scope(&arg.text()));
+            }
+            true
+        }
+        _ => false,
+    }
+}
 
-    vec![
-        // require / require_relative
-        rw::insert("call", require_path(), "__import_path").when(method_is("require")),
-        rw::rename("call", "__require").when(method_is("require")),
-        rw::insert("call", require_path(), "__import_path").when(method_is("require_relative")),
-        rw::rename("call", "__require_relative").when(method_is("require_relative")),
-        // include / extend / prepend may name several modules (`include A, B`),
-        // so insert one member node per constant and rename the call to a neutral
-        // kind. The walk visits each member, which emits its own import.
-        rw::insert("call", mixin_args(), "__include_member").when(method_is("include")),
-        rw::rename("call", "__mixin_group").when(method_is("include")),
-        rw::insert("call", mixin_args(), "__extend_member").when(method_is("extend")),
-        rw::rename("call", "__mixin_group").when(method_is("extend")),
-        rw::insert("call", mixin_args(), "__prepend_member").when(method_is("prepend")),
-        rw::rename("call", "__mixin_group").when(method_is("prepend")),
-    ]
+fn strip_leading_scope(name: &str) -> String {
+    name.strip_prefix("::").unwrap_or(name).to_string()
+}
+
+fn push_named_import(imports: &mut Vec<CanonicalImport>, import_type: &'static str, fqn: String) {
+    if fqn.is_empty() {
+        return;
+    }
+    let (path, leaf) = fqn
+        .rsplit_once("::")
+        .map(|(p, l)| (p.to_string(), l.to_string()))
+        .unwrap_or((String::new(), fqn));
+    imports.push(CanonicalImport {
+        import_type,
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
+        path,
+        name: Some(leaf),
+        alias: None,
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard: false,
+    });
 }
 
 const ATTR_METHODS: &[&str] = &[

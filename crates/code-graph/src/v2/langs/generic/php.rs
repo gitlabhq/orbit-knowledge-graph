@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, DefKind};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::Node;
@@ -84,6 +84,7 @@ impl DslLanguage for PhpDsl {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["attribute_list"],
             on_scope: Some(php_on_scope),
+            on_import: Some(php_extract_use),
             ..LanguageHooks::default()
         }
     }
@@ -93,7 +94,6 @@ impl DslLanguage for PhpDsl {
         // Strip leading `\` from fully-qualified names.
         rules.push(rw::set_text("qualified_name", text().strip_prefix("\\")));
         rules.extend(php_self_static_parent_rules());
-        rules.push(rw::custom(rewrite_php_imports));
         tree.apply_rewrites(&rules);
     }
 
@@ -176,21 +176,6 @@ impl DslLanguage for PhpDsl {
             reference("binary_expression")
                 .when(has_child_text("instanceof"))
                 .name_from(field("right")),
-        ]
-    }
-
-    fn imports() -> Vec<ImportRule> {
-        use treesitter_visit::extract::child_of_kind;
-        vec![
-            import("__php_aliased_use")
-                .label("AliasedImport")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name"))
-                .alias_from(child_of_kind("__import_alias")),
-            import("__php_use")
-                .label("Import")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name")),
         ]
     }
 
@@ -408,91 +393,73 @@ fn php_self_static_parent_rules() -> Vec<rw::Rule> {
         .collect()
 }
 
-fn rewrite_php_imports(tree: &mut SyntaxTree) {
-    struct PhpImport {
-        decl: u32,
-        path: String,
-        name: String,
-        alias: Option<String>,
+fn php_extract_use(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "namespace_use_declaration" {
+        return false;
     }
 
-    let mut imports: Vec<PhpImport> = Vec::new();
-
-    for decl in tree
-        .nodes_of_kind("namespace_use_declaration")
-        .collect::<Vec<_>>()
+    if let Some(group) = node
+        .children()
+        .find(|c| c.kind().as_ref() == "namespace_use_group")
     {
-        let group = tree.children_of_kind(decl, "namespace_use_group").next();
-        let prefix = tree
-            .children_of_kind(decl, "namespace_name")
-            .next()
-            .map(|n| tree.text(n).to_string());
-
-        let clauses: Vec<_> = if let Some(g) = group {
-            tree.children_of_kind(g, "namespace_use_clause").collect()
-        } else {
-            tree.children_of_kind(decl, "namespace_use_clause")
-                .collect()
-        };
-
-        for clause in clauses {
-            let target = tree
-                .children(clause)
-                .iter()
-                .copied()
-                .find(|&c| matches!(tree.kind(c), "qualified_name" | "name"));
-            let Some(t) = target else { continue };
-
-            let mut full = tree.text(t).to_string();
-            if let Some(ref pfx) = prefix {
-                full = format!("{pfx}\\{full}");
-            }
-            let full = full.trim_start_matches('\\').to_string();
-            let alias = tree
-                .field(clause, "alias")
-                .map(|a| tree.text(a).to_string());
-
-            let (path, name) = match full.rsplit_once('\\') {
-                Some((p, n)) => (p.to_string(), n.to_string()),
-                None => (String::new(), full),
-            };
-
-            imports.push(PhpImport {
-                decl,
-                path,
-                name,
-                alias,
-            });
+        let prefix = node
+            .children()
+            .find(|c| c.kind().as_ref() == "namespace_name")
+            .map(|n| n.text().to_string());
+        for clause in group
+            .children()
+            .filter(|c| c.kind().as_ref() == "namespace_use_clause")
+        {
+            push_use_clause(&clause, prefix.as_deref(), imports);
         }
+        return true;
     }
 
-    // Count imports per decl so a single-clause `use` annotates its own node,
-    // while a grouped `use Vendor\{A, B as C}` attaches one synthetic node per
-    // clause. The walk visits children, so each emits its own import.
-    let mut per_decl: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-    for imp in &imports {
-        *per_decl.entry(imp.decl).or_default() += 1;
+    for clause in node
+        .children()
+        .filter(|c| c.kind().as_ref() == "namespace_use_clause")
+    {
+        push_use_clause(&clause, None, imports);
     }
+    true
+}
 
-    for imp in imports {
-        let kind = if imp.alias.is_some() {
-            "__php_aliased_use"
-        } else {
-            "__php_use"
-        };
-        let target = if per_decl[&imp.decl] > 1 {
-            tree.set_kind(imp.decl, "__php_use_group");
-            tree.insert_child(imp.decl, kind, "")
-        } else {
-            tree.set_kind(imp.decl, kind);
-            imp.decl
-        };
-        tree.insert_child(target, "__import_path", &imp.path);
-        tree.insert_child(target, "__import_name", &imp.name);
-        if let Some(alias) = &imp.alias {
-            tree.insert_child(target, "__import_alias", alias);
-        }
+fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec<CanonicalImport>) {
+    let Some(target) = clause
+        .children()
+        .find(|c| matches!(c.kind().as_ref(), "qualified_name" | "name"))
+    else {
+        return;
+    };
+
+    let mut full = target.text().to_string();
+    if let Some(prefix) = group_prefix {
+        full = format!("{prefix}\\{full}");
     }
+    let full = full.trim_start_matches('\\').to_string();
+    let alias = clause.field("alias").map(|a| a.text().to_string());
+
+    let (path, name) = match full.rsplit_once('\\') {
+        Some((p, n)) => (p.to_string(), n.to_string()),
+        None => (String::new(), full),
+    };
+
+    imports.push(CanonicalImport {
+        import_type: if alias.is_some() {
+            "AliasedImport"
+        } else {
+            "Import"
+        },
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
+        path,
+        name: Some(name),
+        alias,
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard: false,
+    });
 }
 
 pub struct PhpRules;

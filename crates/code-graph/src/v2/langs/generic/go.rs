@@ -1,7 +1,10 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::*;
-use crate::v2::types::{BindingKind, DefKind};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
+use treesitter_visit::Node;
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
@@ -12,6 +15,8 @@ use crate::v2::linker::rules::{
 use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
+
+type N<'a> = Node<'a, SyntaxTree>;
 
 const GO_PRIMITIVE_TYPES: &[&str] = &[
     "int",
@@ -111,27 +116,11 @@ impl DslLanguage for GoDsl {
         ]
     }
 
-    fn imports() -> Vec<ImportRule> {
-        vec![
-            import("__blank_import")
-                .label("Import")
-                .path_from(child_of_kind("__import_path"))
-                .side_effect(),
-            import("__wildcard_go_import")
-                .label("Import")
-                .path_from(child_of_kind("__import_path"))
-                .name_from_path_tail("/")
-                .always_wildcard(),
-            import("__aliased_go_import")
-                .label("Import")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name"))
-                .alias_from(child_of_kind("__import_alias")),
-            import("__go_import")
-                .label("Import")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name")),
-        ]
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            on_import: Some(go_extract_imports),
+            ..LanguageHooks::default()
+        }
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -188,22 +177,17 @@ impl DslLanguage for GoDsl {
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        let mut rules = go_import_rules();
-        rules.insert(
-            0,
-            rw::insert(
-                "type_spec",
-                field("type").child_of_kind("field_declaration_list").each(
-                    text()
-                        .where_pred(is_kind("field_declaration").and(lacks_field("name")))
-                        .field("type")
-                        .strip_prefix("*"),
-                ),
-                "__supertype",
-            )
-            .when(field_kind("type", &["struct_type"])),
-        );
-        tree.apply_rewrites(&rules);
+        tree.apply_rewrites(&[rw::insert(
+            "type_spec",
+            field("type").child_of_kind("field_declaration_list").each(
+                text()
+                    .where_pred(is_kind("field_declaration").and(lacks_field("name")))
+                    .field("type")
+                    .strip_prefix("*"),
+            ),
+            "__supertype",
+        )
+        .when(field_kind("type", &["struct_type"]))]);
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
@@ -226,26 +210,61 @@ impl DslLanguage for GoDsl {
     }
 }
 
-const QUOTE: &[char] = &['"'];
+fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "import_declaration" {
+        return false;
+    }
+    for child in node.children() {
+        match child.kind().as_ref() {
+            "import_spec" => extract_single_import(&child, imports),
+            "import_spec_list" => {
+                for spec in child.children() {
+                    if spec.kind().as_ref() == "import_spec" {
+                        extract_single_import(&spec, imports);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    true
+}
 
-fn go_import_rules() -> Vec<rw::Rule> {
-    let path = || child_of_kind("interpreted_string_literal").trim_matches(QUOTE);
-    vec![
-        // Extract path and name from ALL import_specs BEFORE renaming
-        rw::insert("import_spec", path(), "__import_path"),
-        rw::insert("import_spec", path().split_last("/"), "__import_name"),
-        // Alias: extract package_identifier text
-        rw::insert(
-            "import_spec",
-            child_of_kind("package_identifier"),
-            "__import_alias",
-        ),
-        // Classify by alias type; the remaining plain specs become __go_import.
-        rw::rename("import_spec", "__blank_import").when(has_child(&["blank_identifier"])),
-        rw::rename("import_spec", "__wildcard_go_import").when(has_child(&["dot"])),
-        rw::rename("import_spec", "__aliased_go_import").when(has_child(&["package_identifier"])),
-        rw::rename("import_spec", "__go_import"),
-    ]
+fn extract_single_import(node: &N<'_>, imports: &mut Vec<CanonicalImport>) {
+    let Some(path_node) = node.find(Child, Kind("interpreted_string_literal")) else {
+        return;
+    };
+    let import_path = path_node.text().trim_matches('"').to_string();
+
+    let alias_node = node
+        .children_matching(AnyKind(&["package_identifier", "blank_identifier", "dot"]))
+        .find(|n| n.range().start < path_node.range().start);
+    let alias = alias_node.map(|n| n.text().to_string());
+    let pkg_name = alias
+        .clone()
+        .filter(|a| a != "_" && a != ".")
+        .or_else(|| import_path.rsplit('/').next().map(|s| s.to_string()));
+
+    let is_blank = alias.as_deref() == Some("_");
+    let is_dot = alias.as_deref() == Some(".");
+    let binding_kind = if is_blank {
+        ImportBindingKind::SideEffect
+    } else {
+        ImportBindingKind::Named
+    };
+
+    imports.push(CanonicalImport {
+        import_type: "Import",
+        binding_kind,
+        mode: ImportMode::Declarative,
+        path: import_path,
+        name: pkg_name,
+        alias: alias.filter(|_| !is_blank && !is_dot),
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard: is_dot,
+    });
 }
 
 pub struct GoRules;

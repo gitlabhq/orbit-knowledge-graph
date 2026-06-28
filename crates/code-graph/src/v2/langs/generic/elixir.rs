@@ -1,18 +1,20 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{
-    ChainConfig, DslLanguage, FieldAccessEntry, ImportRule, ReferenceRule, ScopeRule, import,
-    reference, scope,
+    ChainConfig, DslLanguage, FieldAccessEntry, LanguageHooks, ReferenceRule, ScopeRule, reference,
+    scope,
 };
-use crate::v2::types::DefKind;
+use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::{Pred, field_kind, has_child, has_named_prev_sibling};
+use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage, ResolverHooks};
 use crate::v2::linker::{HasRules, ResolutionRules};
-use treesitter_visit::syntax_tree as rw;
-use treesitter_visit::syntax_tree::SyntaxTree;
+
+type N<'a> = Node<'a, SyntaxTree>;
 
 /// Tree-sitter-elixir parses every keyword construct (`defmodule`,
 /// `def`, `alias`, ...) as a `call` whose `target` field holds the
@@ -137,27 +139,11 @@ impl DslLanguage for ElixirDsl {
         Language::Elixir
     }
 
-    fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[rw::custom(rewrite_elixir_imports)]);
-    }
-
-    fn imports() -> Vec<ImportRule> {
-        use treesitter_visit::extract::child_of_kind;
-        let base = |kind| {
-            import(kind)
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name"))
-                .alias_from(child_of_kind("__import_alias"))
-        };
-        vec![
-            base("__elixir_alias").label("Alias"),
-            base("__elixir_import")
-                .label("Import")
-                .name_from_path_tail(".")
-                .wildcard_child("__wildcard"),
-            base("__elixir_require").label("Require"),
-            base("__elixir_use").label("Use"),
-        ]
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            on_import: Some(elixir_extract_imports),
+            ..LanguageHooks::default()
+        }
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -230,140 +216,111 @@ impl DslLanguage for ElixirDsl {
     }
 }
 
-/// Emit imports for `alias`/`import`/`require`/`use` calls.
-fn rewrite_elixir_imports(tree: &mut SyntaxTree) {
-    struct ElixirImport {
-        call: u32,
-        kind: &'static str,
-        path: String,
-        name: String,
-        alias: Option<String>,
-        wildcard: bool,
+fn elixir_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "call" {
+        return false;
     }
+    let Some(target) = node.field("target") else {
+        return false;
+    };
+    let import_type = match target.text().as_ref() {
+        "alias" => "Alias",
+        "import" => "Import",
+        "require" => "Require",
+        "use" => "Use",
+        _ => return false,
+    };
+    let Some(args) = node.find(Child, Kind("arguments")) else {
+        return true;
+    };
 
-    let mut imports: Vec<ElixirImport> = Vec::new();
+    let keyword_opts = args.find(Child, Kind("keywords"));
+    let as_alias = keyword_opts
+        .as_ref()
+        .and_then(|kw| find_pair(kw, "as:"))
+        .and_then(|p| p.field("value"))
+        .map(|v| v.text().to_string());
 
-    for call in tree.nodes_of_kind("call").collect::<Vec<_>>() {
-        let Some(target) = tree.field(call, "target") else {
-            continue;
-        };
-        let target_text = tree.text(target);
-        let import_type = match target_text {
-            "alias" => "__elixir_alias",
-            "import" => "__elixir_import",
-            "require" => "__elixir_require",
-            "use" => "__elixir_use",
-            _ => continue,
-        };
-
-        let Some(args) = tree.children_of_kind(call, "arguments").next() else {
-            continue;
-        };
-
-        // `as:` option
-        let as_alias = tree
-            .children_of_kind(args, "keywords")
-            .next()
-            .and_then(|kw| {
-                tree.children_of_kind(kw, "pair").find(|&p| {
-                    tree.field(p, "key")
-                        .is_some_and(|k| tree.text(k).trim_end() == "as:")
-                })
-            })
-            .and_then(|p| tree.field(p, "value"))
-            .map(|v| tree.text(v).to_string());
-
-        // Multi-alias: Foo.{Bar, Baz}
-        if let Some(dot) = tree.children_of_kind(args, "dot").next() {
-            let prefix = tree
-                .field(dot, "left")
-                .map(|l| tree.text(l).to_string())
-                .unwrap_or_default();
-            if let Some(tuple) = tree
-                .field(dot, "right")
-                .filter(|&r| tree.kind(r) == "tuple")
-            {
-                for member in tree.children_of_kind(tuple, "alias").collect::<Vec<_>>() {
-                    let full = tree.text(member).to_string();
-                    let (path, name) = match full.rsplit_once('.') {
-                        Some((sub, n)) if prefix.is_empty() => (sub.to_string(), n.to_string()),
-                        Some((sub, n)) => (format!("{prefix}.{sub}"), n.to_string()),
-                        None => (prefix.clone(), full),
-                    };
-                    imports.push(ElixirImport {
-                        call,
-                        kind: import_type,
-                        path,
-                        name,
-                        alias: None,
-                        wildcard: false,
-                    });
+    // Multi-alias `alias Foo.{Bar, Baz}`: dot(left: alias, right: tuple).
+    if let Some(dot) = args.find(Child, Kind("dot")) {
+        let prefix = dot
+            .field("left")
+            .map(|l| l.text().to_string())
+            .unwrap_or_default();
+        if let Some(tuple) = dot.field("right").filter(|r| r.kind().as_ref() == "tuple") {
+            for member in tuple.children() {
+                if member.kind().as_ref() != "alias" {
+                    continue;
                 }
-                continue;
+                let full = member.text().to_string();
+                let (path, name) = match full.rsplit_once('.') {
+                    Some((sub, n)) if prefix.is_empty() => (sub.to_string(), n.to_string()),
+                    Some((sub, n)) => (format!("{prefix}.{sub}"), n.to_string()),
+                    None => (prefix.clone(), full),
+                };
+                push_import(imports, import_type, path, name, None, false);
             }
-        }
-
-        let Some(module) = tree.children_of_kind(args, "alias").next() else {
-            continue;
-        };
-        let full = tree.text(module).to_string();
-
-        if import_type == "__elixir_import" {
-            let last = full
-                .rsplit_once('.')
-                .map_or(full.as_str(), |(_, n)| n)
-                .to_string();
-            imports.push(ElixirImport {
-                call,
-                kind: import_type,
-                path: full,
-                name: last,
-                alias: None,
-                wildcard: true,
-            });
-            continue;
-        }
-
-        let (path, name) = match full.rsplit_once('.') {
-            Some((p, n)) => (p.to_string(), n.to_string()),
-            None => (String::new(), full),
-        };
-        imports.push(ElixirImport {
-            call,
-            kind: import_type,
-            path,
-            name,
-            alias: as_alias.clone(),
-            wildcard: false,
-        });
-    }
-
-    // Count imports per call so a single-member call annotates its own node,
-    // while a multi-member call (`alias Foo.{Bar, Baz}`) attaches one synthetic
-    // child node per member. The walk visits children, so each emits its own
-    // import independently.
-    let mut per_call: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-    for imp in &imports {
-        *per_call.entry(imp.call).or_default() += 1;
-    }
-
-    for imp in imports {
-        let target = if per_call[&imp.call] > 1 {
-            tree.set_kind(imp.call, "__elixir_import_group");
-            tree.insert_child(imp.call, imp.kind, "")
-        } else {
-            tree.set_kind(imp.call, imp.kind);
-            imp.call
-        };
-        tree.insert_child(target, "__import_path", &imp.path);
-        tree.insert_child(target, "__import_name", &imp.name);
-        if let Some(alias) = &imp.alias {
-            tree.insert_child(target, "__import_alias", alias);
-        }
-        if imp.wildcard {
-            tree.insert_child(target, "__wildcard", "*");
+            return true;
         }
     }
+
+    let Some(module) = args.find(Child, Kind("alias")) else {
+        return true;
+    };
+    let full = module.text().to_string();
+
+    if import_type == "Import" {
+        let last = full
+            .rsplit_once('.')
+            .map_or(full.as_str(), |(_, n)| n)
+            .to_string();
+        push_import(imports, import_type, full.clone(), last, None, true);
+        return true;
+    }
+
+    let (path, name) = match full.rsplit_once('.') {
+        Some((p, n)) => (p.to_string(), n.to_string()),
+        None => (String::new(), full),
+    };
+    push_import(imports, import_type, path, name, as_alias, false);
+    true
+}
+
+/// Find the pair in a `keywords` node whose key matches. Keyword tokens include
+/// the trailing colon and whitespace (`as: `).
+fn find_pair<'a>(keywords: &N<'a>, key: &str) -> Option<N<'a>> {
+    keywords
+        .children()
+        .filter(|c| c.kind().as_ref() == "pair")
+        .find(|p| {
+            p.field("key")
+                .is_some_and(|k| k.text().as_ref().trim_end() == key)
+        })
+}
+
+fn push_import(
+    imports: &mut Vec<CanonicalImport>,
+    import_type: &'static str,
+    path: String,
+    name: String,
+    alias: Option<String>,
+    wildcard: bool,
+) {
+    if name.is_empty() {
+        return;
+    }
+    imports.push(CanonicalImport {
+        import_type,
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
+        path,
+        name: Some(name),
+        alias,
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard,
+    });
 }
 
 pub struct ElixirRules;

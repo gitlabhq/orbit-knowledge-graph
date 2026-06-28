@@ -1,10 +1,12 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, DefKind};
-use treesitter_visit::extract::{child_of_kind, field};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use treesitter_visit::Node;
+use treesitter_visit::extract::field;
 use treesitter_visit::predicate::*;
-use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
+
+type N<'a> = Node<'a, SyntaxTree>;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
@@ -55,35 +57,12 @@ impl DslLanguage for LuaDsl {
         ]
     }
 
-    fn imports() -> Vec<ImportRule> {
-        vec![
-            import("__require")
-                .label("Require")
-                .path_from(child_of_kind("__import_path"))
-                .name_from_path_tail(".")
-                .runtime(),
-        ]
-    }
-
     fn hooks() -> LanguageHooks {
         LanguageHooks {
             return_kinds: &["return_statement"],
+            on_import: Some(lua_extract_require),
             ..LanguageHooks::default()
         }
-    }
-
-    fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[
-            rw::insert(
-                "function_call",
-                field("arguments")
-                    .try_child("string")
-                    .try_child("string_content"),
-                "__import_path",
-            )
-            .when(is_require()),
-            rw::rename("function_call", "__require").when(is_require()),
-        ]);
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -149,8 +128,52 @@ impl DslLanguage for LuaDsl {
     }
 }
 
-fn is_require() -> Pred {
-    field_text("name", "require")
+fn lua_extract_require(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "function_call" {
+        return false;
+    }
+    let Some(name_node) = node.field("name") else {
+        return false;
+    };
+    if name_node.kind().as_ref() != "identifier" || name_node.text().as_ref() != "require" {
+        return false;
+    }
+    let Some(args) = node.field("arguments") else {
+        return true;
+    };
+    // `arguments` is either a `string` node directly (require "mod") or
+    // a parenthesized `arguments` node containing a string (require("mod")).
+    let string_node = if args.kind().as_ref() == "string" {
+        args
+    } else {
+        let Some(s) = args.child_of_kind("string") else {
+            return true;
+        };
+        s
+    };
+
+    let raw = string_node.text().to_string();
+    let module_path = raw
+        .trim_matches(|c: char| c == '"' || c == '\'')
+        .to_string();
+    if module_path.is_empty() {
+        return true;
+    }
+
+    let name = module_path.rsplit('.').next().map(|s| s.to_string());
+    imports.push(CanonicalImport {
+        import_type: "Require",
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Runtime,
+        path: module_path,
+        name,
+        alias: None,
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard: false,
+    });
+    true
 }
 
 pub struct LuaRules;

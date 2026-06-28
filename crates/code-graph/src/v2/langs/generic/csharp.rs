@@ -1,13 +1,16 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, DefKind};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::Node;
 use treesitter_visit::extract::{Extract, child_of_kind, field, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
+
+type N<'a> = Node<'a, SyntaxTree>;
 
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
@@ -20,7 +23,7 @@ pub struct CSharpDsl;
 
 const CSHARP_BASE_KINDS: &[&str] = &["identifier", "qualified_name", "generic_name"];
 
-fn csharp_rules() -> Vec<rw::Rule> {
+fn csharp_supertype_rules() -> Vec<rw::Rule> {
     use treesitter_visit::Match::AnyKind;
     let st = |kind| {
         rw::insert(
@@ -34,8 +37,6 @@ fn csharp_rules() -> Vec<rw::Rule> {
         st("struct_declaration"),
         st("record_declaration"),
         st("interface_declaration"),
-        rw::rename("using_directive", "__static_using").when(has_child_text("static")),
-        rw::rename("using_directive", "__aliased_using").when(has_child_text("=")),
     ]
 }
 
@@ -52,30 +53,13 @@ impl DslLanguage for CSharpDsl {
         LanguageHooks {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["attribute_list"],
+            on_import: Some(csharp_extract_alias_using),
             ..LanguageHooks::default()
         }
     }
 
     fn rewrite(tree: &mut SyntaxTree) {
-        use treesitter_visit::extract::text;
-        let target_extract = || text().nth(Child, AnyKind(CSHARP_ALIAS_TARGET_KINDS), 1);
-        let mut rules = csharp_rules();
-        rules.push(rw::insert(
-            "__aliased_using",
-            target_extract(),
-            "__import_path",
-        ));
-        rules.push(rw::insert(
-            "__aliased_using",
-            // Bound name is the target's last segment, with any namespace
-            // qualifier (`global::`) and generic argument (`<int>`) stripped.
-            target_extract()
-                .split_last(".")
-                .split_last("::")
-                .take_before("<"),
-            "__import_name",
-        ));
-        tree.apply_rewrites(&rules);
+        tree.apply_rewrites(&csharp_supertype_rules());
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -142,21 +126,27 @@ impl DslLanguage for CSharpDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        let using_path = || Extract::one(Child, AnyKind(&["qualified_name", "identifier"]));
+        fn csharp_import_classify(node: &N<'_>) -> &'static str {
+            let text = node.text().to_string();
+            if text.contains("static") {
+                "StaticImport"
+            } else if text.contains('=') {
+                "AliasedImport"
+            } else {
+                // Regular using directives are namespace-level wildcards:
+                // `using MyApp.Models;` makes all types in MyApp.Models available.
+                "WildcardImport"
+            }
+        }
+
         vec![
-            import("__static_using")
-                .label("StaticImport")
-                .path_from(using_path())
-                .always_wildcard(),
-            import("__aliased_using")
-                .label("AliasedImport")
-                .path_from(child_of_kind("__import_path"))
-                .symbol_from(child_of_kind("__import_name"))
-                .alias_from(field("name")),
             import("using_directive")
-                .label("WildcardImport")
-                .path_from(using_path())
+                .path_from(Extract::one(
+                    Child,
+                    AnyKind(&["qualified_name", "identifier"]),
+                ))
                 .alias_from(field("name"))
+                .classify(csharp_import_classify)
                 .always_wildcard(),
         ]
     }
@@ -266,12 +256,47 @@ impl DslLanguage for CSharpDsl {
     }
 }
 
-const CSHARP_ALIAS_TARGET_KINDS: &[&str] = &[
-    "qualified_name",
-    "identifier",
-    "generic_name",
-    "alias_qualified_name",
-];
+fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "using_directive" {
+        return false;
+    }
+    let Some(alias_node) = node.field("name") else {
+        return false;
+    };
+    let alias = alias_node.text().to_string();
+    let target = node
+        .children_matching(AnyKind(&[
+            "qualified_name",
+            "identifier",
+            "generic_name",
+            "alias_qualified_name",
+        ]))
+        .find(|child| child.range().start > alias_node.range().end)
+        .map(|child| child.text().to_string());
+
+    let Some(path) = target else {
+        return true;
+    };
+
+    let name = path.rsplit('.').next().map(|seg| {
+        let seg = seg.rsplit("::").next().unwrap_or(seg);
+        seg.split('<').next().unwrap_or(seg).to_string()
+    });
+
+    imports.push(CanonicalImport {
+        import_type: "AliasedImport",
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
+        path,
+        name,
+        alias: Some(alias),
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard: false,
+    });
+    true
+}
 
 pub struct CSharpRules;
 

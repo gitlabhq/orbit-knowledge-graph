@@ -1,22 +1,17 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::DefKind;
+use crate::v2::types::{CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use treesitter_visit::Node;
 use treesitter_visit::extract::field;
-use treesitter_visit::predicate::field_text;
-use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
 
 use crate::v2::linker::rules::{ReceiverMode, ResolutionRules};
 use crate::v2::linker::{HasRules, ResolveSettings};
 
+type N<'a> = Node<'a, SyntaxTree>;
+
 #[derive(Default)]
 pub struct BashDsl;
-
-const QUOTE_CHARS: &[char] = &['"', '\''];
-
-fn is_source_cmd() -> treesitter_visit::predicate::Pred {
-    field_text("name", "source").or(field_text("name", "."))
-}
 
 impl DslLanguage for BashDsl {
     fn name() -> &'static str {
@@ -27,16 +22,11 @@ impl DslLanguage for BashDsl {
         Language::Bash
     }
 
-    fn rewrite(tree: &mut SyntaxTree) {
-        tree.apply_rewrites(&[
-            rw::insert(
-                "command",
-                field("argument").trim_matches(QUOTE_CHARS),
-                "__import_path",
-            )
-            .when(is_source_cmd()),
-            rw::rename("command", "__source_import").when(is_source_cmd()),
-        ]);
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            on_import: Some(bash_extract_imports),
+            ..LanguageHooks::default()
+        }
     }
 
     fn scopes() -> Vec<ScopeRule> {
@@ -47,15 +37,6 @@ impl DslLanguage for BashDsl {
         ]
     }
 
-    fn imports() -> Vec<ImportRule> {
-        vec![
-            import("__source_import")
-                .label("Source")
-                .path_from(treesitter_visit::extract::child_of_kind("__import_path"))
-                .side_effect(),
-        ]
-    }
-
     fn file_scope() -> bool {
         true
     }
@@ -63,6 +44,40 @@ impl DslLanguage for BashDsl {
     fn ssa_config() -> types::SsaConfig {
         types::SsaConfig::default()
     }
+}
+
+fn bash_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "command" {
+        return false;
+    }
+    let Some(command) = node.field("name") else {
+        return false;
+    };
+    if command.text().as_ref() != "source" && command.text().as_ref() != "." {
+        return false;
+    }
+    let path = node
+        .field("argument")
+        .map(|arg| strip_quotes(arg.text().as_ref()).to_string());
+    if let Some(path) = path.filter(|p| !p.is_empty()) {
+        imports.push(CanonicalImport {
+            import_type: "Source",
+            binding_kind: ImportBindingKind::SideEffect,
+            mode: ImportMode::Runtime,
+            path,
+            name: None,
+            alias: None,
+            scope_fqn: None,
+            range: crate::v2::types::Range::empty(),
+            is_type_only: false,
+            wildcard: false,
+        });
+    }
+    true
+}
+
+fn strip_quotes(s: &str) -> &str {
+    s.trim_matches(|c| c == '"' || c == '\'')
 }
 
 // ── Resolution rules ────────────────────────────────────────────

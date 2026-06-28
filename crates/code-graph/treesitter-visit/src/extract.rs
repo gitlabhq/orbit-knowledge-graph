@@ -75,9 +75,6 @@ pub enum TextTransform {
     SplitLast(&'static str),
     /// Split on separator, take everything before the last segment.
     SplitInit(&'static str),
-    /// Take everything before the first occurrence of `sep` (e.g. strip a
-    /// generic-argument suffix: `List<int>` → `List`). No-op when absent.
-    TakeBefore(&'static str),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -317,12 +314,6 @@ impl Extract {
         self
     }
 
-    /// Keep everything before the first occurrence of `sep`.
-    pub fn take_before(mut self, sep: &'static str) -> Self {
-        self.transforms.push(TextTransform::TakeBefore(sep));
-        self
-    }
-
     /// Try this pipeline; if it produces nothing, fall back to `alt`.
     pub fn or_else(self, alt: Extract) -> Self {
         Extract::terminal(Emit::OrElse(Box::new(self), Box::new(alt)))
@@ -372,11 +363,6 @@ impl Extract {
                         s = init.to_string();
                     } else {
                         s = String::new();
-                    }
-                }
-                TextTransform::TakeBefore(sep) => {
-                    if let Some((head, _)) = s.split_once(sep) {
-                        s = head.to_string();
                     }
                 }
             }
@@ -656,24 +642,6 @@ mod tests {
         assert_eq!(
             field("name").or_else(constant("fallback")).apply(&func),
             Some("foo".to_string()),
-        );
-    }
-
-    #[test]
-    fn take_before_strips_suffix() {
-        let root = SupportLang::Python.ast_grep("def foo(): pass");
-        let func = root.root().children().next().unwrap();
-        assert_eq!(
-            field("name")
-                .then(constant("List<int>"))
-                .take_before("<")
-                .apply(&func),
-            Some("List".to_string()),
-        );
-        // no separator: unchanged
-        assert_eq!(
-            constant("Plain").take_before("<").apply(&func),
-            Some("Plain".to_string()),
         );
     }
 

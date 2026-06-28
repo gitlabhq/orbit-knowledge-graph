@@ -1,14 +1,17 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, DefKind};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::Node;
 use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, constant, default_name, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::syntax_tree as rw;
 use treesitter_visit::syntax_tree::SyntaxTree;
+
+type N<'a> = Node<'a, SyntaxTree>;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
@@ -24,18 +27,57 @@ fn swift_supertype_rule(kind: &'static str) -> rw::Rule {
     )
 }
 
-const SWIFT_IMPORT_PREFIXES: &[&str] = &[
-    "import struct ",
-    "import class ",
-    "import enum ",
-    "import var ",
-    "import let ",
-    "import func ",
-    "import typealias ",
-    "import protocol ",
-    "import actor ",
-    "import ",
+const SWIFT_IMPORT_KINDS: &[&str] = &[
+    "struct",
+    "class",
+    "enum",
+    "var",
+    "let",
+    "func",
+    "typealias",
+    "protocol",
+    "actor",
 ];
+
+fn swift_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "import_declaration" {
+        return false;
+    }
+
+    let raw = node.text().to_string();
+    let rest = raw.trim().strip_prefix("import").unwrap_or("").trim();
+
+    // Strip optional import-kind qualifier (e.g. "import struct UIKit.UIColor")
+    let path = SWIFT_IMPORT_KINDS
+        .iter()
+        .find_map(|kind| {
+            let after = rest.strip_prefix(kind)?;
+            after
+                .starts_with(|c: char| c.is_whitespace())
+                .then(|| after.trim())
+        })
+        .unwrap_or(rest)
+        .to_string();
+
+    if path.is_empty() {
+        return false;
+    }
+
+    let name = path.rsplit('.').next().unwrap_or(&path).to_string();
+    imports.push(CanonicalImport {
+        import_type: "Import",
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
+        path,
+        name: Some(name),
+        alias: None,
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard: false,
+    });
+    true
+}
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
@@ -131,15 +173,6 @@ impl DslLanguage for SwiftDsl {
         })
     }
 
-    fn imports() -> Vec<ImportRule> {
-        vec![
-            import("import_declaration")
-                .label("Import")
-                .path_from(child_of_kind("__import_path"))
-                .name_from_path_tail("."),
-        ]
-    }
-
     fn bindings() -> Vec<BindingRule> {
         vec![
             binding("parameter", BindingKind::Parameter)
@@ -172,17 +205,13 @@ impl DslLanguage for SwiftDsl {
         tree.apply_rewrites(&[
             swift_supertype_rule("class_declaration"),
             swift_supertype_rule("protocol_declaration"),
-            rw::insert(
-                "import_declaration",
-                text().strip_any_prefix(SWIFT_IMPORT_PREFIXES),
-                "__import_path",
-            ),
         ]);
     }
 
     fn hooks() -> types::LanguageHooks {
         types::LanguageHooks {
             return_kinds: &["return_statement"],
+            on_import: Some(swift_extract_imports),
             ..Default::default()
         }
     }
