@@ -70,7 +70,8 @@ use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::scheduled::{
     CodeBackfillSweep, GlobalDispatcher, MigrationCompletionChecker, NamespaceDeletionScheduler,
-    NamespaceDispatcher, Scheduled, StaleEdgeReconciliation, TableCleanup,
+    NamespaceDispatcher, NamespaceSweepDispatcher, Scheduled, StaleEdgeReconciliation,
+    TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -326,8 +327,19 @@ pub async fn run_dispatcher(
         Box::new(NamespaceDispatcher::new(
             services.nats.clone(),
             datalake,
+            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
+                config.graph.build_client(),
+            ))),
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
+            campaign.clone(),
+            ontology,
+        )),
+        Box::new(NamespaceSweepDispatcher::new(
+            services.nats.clone(),
+            config.datalake.build_client(),
+            metrics.clone(),
+            config.schedule.tasks.namespace_sweep.clone(),
             campaign.clone(),
         )),
         Box::new(CodeBackfillSweep::new(

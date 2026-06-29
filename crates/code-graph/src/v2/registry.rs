@@ -47,7 +47,7 @@ macro_rules! register_v2_pipelines {
             ctx: &Arc<PipelineContext>,
             btx: &BatchTx<'_>,
         ) -> Option<Result<(), Vec<PipelineError>>> {
-            #[allow(unreachable_patterns)]
+            #[allow(unreachable_patterns, reason = "macro-generated: wildcard is reachable when not all Language variants have a registered pipeline")]
             Some(match language {
                 $(Language::$variant => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
@@ -60,7 +60,7 @@ macro_rules! register_v2_pipelines {
             language: Language,
             ctx: &Arc<PipelineContext>,
         ) -> Option<Arc<LanguageContext>> {
-            #[allow(unreachable_patterns)]
+            #[allow(unreachable_patterns, reason = "macro-generated: wildcard is reachable when not all Language variants have a registered pipeline")]
             match language {
                 $(Language::$variant => <$($pipeline)*>::lang_ctx(ctx),)*
                 _ => None,

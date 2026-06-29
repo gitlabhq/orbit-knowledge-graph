@@ -217,7 +217,10 @@ impl LanguageSpec {
     /// from innermost (base) to outermost (final call).
     /// All node kind recognition is driven by `ChainConfig`.
     /// Type names in `New` steps are resolved via `import_map`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "iterative tree walk threading node, chain, config, imports, prefix, separator, and tracer; a context struct would duplicate the caller's scope"
+    )]
     fn build_expression_chain(
         &self,
         node: &Node<StrDoc<SupportLang>>,

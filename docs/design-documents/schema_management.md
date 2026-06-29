@@ -205,8 +205,17 @@ the version becoming ready (see "Indexer readiness gate" below).
 
 6. **Release lock** — Allow other pods to proceed.
 
-Because new-prefix checkpoints are empty, the dispatcher's normal namespace poll cycle
-re-dispatches backfill work automatically — no explicit trigger is needed.
+The namespace sweep task periodically re-dispatches every enabled namespace regardless of recent
+Siphon changes. Because new-prefix per-namespace checkpoints are empty, each re-dispatched namespace
+backfills from the beginning of the Siphon window into the new-prefix tables; no explicit trigger is
+needed. (The change-detection dispatcher alone would miss namespaces with no recent source changes,
+since its checkpoint is global, not per-prefix.)
+
+On a dispatcher boot with no namespace-change checkpoint, the change-detection dispatcher
+dispatches every enabled namespace once and records a checkpoint; later ticks query Siphon changes
+since that checkpoint, however old it is. The sweep task remains the periodic backstop for missed
+windows and for enabled namespaces with no recent source changes, since the change-detection
+checkpoint is global, not per-prefix.
 
 ### Indexer readiness gate
 
@@ -252,8 +261,8 @@ The metric `gkg_schema_migration_total` (counter) tracks migration phase outcome
 
 ## Migration completion detection
 
-After the dispatcher creates new-prefix tables and marks a version as `migrating`, its normal
-namespace poll cycle re-indexes all enabled namespaces into the new tables. A scheduled task
+After the dispatcher creates new-prefix tables and marks a version as `migrating`, the namespace
+sweep task re-indexes every enabled namespace into the new tables. A scheduled task
 (`MigrationCompletionChecker`) running in `DispatchIndexing` mode periodically checks whether the
 migration is complete.
 
