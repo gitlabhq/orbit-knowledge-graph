@@ -47,29 +47,30 @@ properties:
     description: "Namespace path for authz."
 
 # Dual-written from the merge_requests row (not a Siphon table of its own): the
-# Commit's id and sha are computed with the SAME state_id=3 gate and bytea-decoded
-# COALESCE the MergeRequest node uses for merged_commit_id, so the
-# MERGED_AT_COMMIT FK edge resolves to a node that exists. Only merged MRs with a
-# resolvable SHA produce a commit; the WHERE prunes the rest. Two MRs that land on
-# the same commit emit the same (project_id, sha) -> same id; the gl_commit
-# ReplacingMergeTree identity collapses the duplicate rows.
+# Commit's id and sha are computed with the SAME state_id=3 gate and decoded_sha
+# the MergeRequest node uses for merged_commit_id, so the MERGED_AT_COMMIT FK edge
+# resolves to a node that exists. Only merged MRs with a resolvable SHA produce a
+# commit; the WHERE prunes the rest. Two MRs that land on the same commit emit the
+# same (project_id, sha) -> same id; the gl_commit ReplacingMergeTree identity
+# collapses the duplicate rows.
 #
-# merged_commit_sha and squash_commit_sha are Postgres `bytea` (Siphon stores them
-# as `\x` + hex-of-ASCII, length 82); they are unhex-decoded here, malformed-length
-# rows -> NULL. merge_commit_sha is clean `varchar`. COALESCE stops at
+# decoded_sha (hoisted into the `from` subquery below): merged_commit_sha and
+# squash_commit_sha are Postgres `bytea` (Siphon stores them as `\x` + hex-of-ASCII)
+# and are unhex-decoded; merge_commit_sha is clean `varchar`. COALESCE stops at
 # squash_commit_sha and omits Rails' 4th leg diff_head_sha (not a merge_requests
 # column, and it is the pre-merge source-branch head -- the wrong-SHA source #924
 # exists to avoid).
 #
 # The id masks the sign bit (bitAnd ... 0x7FFFFFFFFFFFFFFF) so the Int64 id is
 # always positive: it is the keyset cursor column (order_by below), and a negative
-# id breaks the monotonic page advance into an infinite paging loop. Mirrors
-# compute_branch_id / compute_commit_id in arrow_converter.rs.
+# id breaks the monotonic page advance into an infinite paging loop. Same sign-bit
+# masking idea as compute_branch_id in arrow_converter.rs (a different, FxHasher-
+# based hash; only the masking is shared).
 #
-# DRIFT WARNING: the decoded-COALESCE in `select` (id + sha) and `where` below must
-# stay BYTE-IDENTICAL with each other AND with merge_request.yaml's merged_commit_id
-# derivation, and the masked-sipHash64 id must match merge_request.yaml's
-# merged_commit_id, or the edge target stops joining its node.
+# DRIFT WARNING: the `decoded_sha` expression and the masked
+# sipHash64(target_project_id, decoded_sha) id must stay BYTE-IDENTICAL with
+# merge_request.yaml's `decoded_sha` and merged_commit_id derivation, or the edge
+# target stops joining its node.
 #
 # Shared-commit transient: `deleted: m.{{deleted_column}}` propagates an MR
 # soft-delete to this shared Commit node. Because one (project_id, sha) can map to
@@ -81,14 +82,14 @@ etl:
   type: query
   source: merge_requests
   select: >-
-    toInt64(bitAnd(sipHash64(m.target_project_id, coalesce(multiIf(m.merged_commit_sha = '', NULL, startsWith(m.merged_commit_sha, '\\x') AND length(m.merged_commit_sha) = 82, unhex(substring(m.merged_commit_sha, 3)), startsWith(m.merged_commit_sha, '\\x'), NULL, m.merged_commit_sha), nullIf(m.merge_commit_sha, ''), multiIf(m.squash_commit_sha = '', NULL, startsWith(m.squash_commit_sha, '\\x') AND length(m.squash_commit_sha) = 82, unhex(substring(m.squash_commit_sha, 3)), startsWith(m.squash_commit_sha, '\\x'), NULL, m.squash_commit_sha))), toUInt64(9223372036854775807))) AS id,
-    coalesce(multiIf(m.merged_commit_sha = '', NULL, startsWith(m.merged_commit_sha, '\\x') AND length(m.merged_commit_sha) = 82, unhex(substring(m.merged_commit_sha, 3)), startsWith(m.merged_commit_sha, '\\x'), NULL, m.merged_commit_sha), nullIf(m.merge_commit_sha, ''), multiIf(m.squash_commit_sha = '', NULL, startsWith(m.squash_commit_sha, '\\x') AND length(m.squash_commit_sha) = 82, unhex(substring(m.squash_commit_sha, 3)), startsWith(m.squash_commit_sha, '\\x'), NULL, m.squash_commit_sha)) AS sha,
+    toInt64(bitAnd(sipHash64(m.target_project_id, m.decoded_sha), toUInt64(9223372036854775807))) AS id,
+    m.decoded_sha AS sha,
     m.target_project_id AS project_id,
     m.traversal_path AS traversal_path
-  from: merge_requests AS m
+  from: >-
+    (SELECT *, coalesce(if(startsWith(merged_commit_sha, '\\x'), unhex(substring(merged_commit_sha, 3)), nullIf(merged_commit_sha, '')), nullIf(merge_commit_sha, ''), if(startsWith(squash_commit_sha, '\\x'), unhex(substring(squash_commit_sha, 3)), nullIf(squash_commit_sha, ''))) AS decoded_sha FROM merge_requests) AS m
   where: >-
-    m.state_id = 3
-    AND coalesce(multiIf(m.merged_commit_sha = '', NULL, startsWith(m.merged_commit_sha, '\\x') AND length(m.merged_commit_sha) = 82, unhex(substring(m.merged_commit_sha, 3)), startsWith(m.merged_commit_sha, '\\x'), NULL, m.merged_commit_sha), nullIf(m.merge_commit_sha, ''), multiIf(m.squash_commit_sha = '', NULL, startsWith(m.squash_commit_sha, '\\x') AND length(m.squash_commit_sha) = 82, unhex(substring(m.squash_commit_sha, 3)), startsWith(m.squash_commit_sha, '\\x'), NULL, m.squash_commit_sha)) IS NOT NULL
+    m.state_id = 3 AND m.decoded_sha IS NOT NULL
   traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
   watermark: m.{{watermark_column}}
   table_alias: m

@@ -145,7 +145,7 @@ properties:
     source: merged_commit_id
     nullable: true
     mutable: false
-    description: "Synthetic Commit id the MR was merged at: sipHash64(target_project_id, bytea-decoded COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha)), NULL unless state is merged. merged_commit_sha and squash_commit_sha are Postgres bytea (Siphon stores them as \\x-hex of the ASCII SHA) and are unhex-decoded; merge_commit_sha is clean. The COALESCE mirrors Rails' MergeRequest#merged_commit_sha fallback but stops at squash_commit_sha: Rails' 4th leg diff_head_sha is the pre-merge source-branch head (the wrong-SHA source #924 exists to avoid) and is not a merge_requests column. Write-once: NULL until merged (merged is terminal in Rails), set once at merge, never rewritten by user action -> immutable, so the stale-edge sweep skips it."
+    description: "Synthetic Commit id the MR was merged at: masked sipHash64(target_project_id, decoded_sha), NULL unless state is merged. decoded_sha is COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha) with the two bytea legs (Siphon stores them as \\x-hex of the ASCII SHA) unhex-decoded; merge_commit_sha is clean. The COALESCE mirrors Rails' MergeRequest#merged_commit_sha fallback but stops at squash_commit_sha: Rails' 4th leg diff_head_sha is the pre-merge source-branch head (the wrong-SHA source #924 exists to avoid) and is not a merge_requests column. Write-once: NULL until merged (merged is terminal in Rails), set once at merge, never rewritten by user action -> immutable, so the stale-edge sweep skips it."
 
   latest_build_started_at:
     type: timestamp
@@ -326,18 +326,19 @@ etl:
   # time because the upstream `merge_requests_mv` only re-fires on parent
   # inserts and routinely leaves those columns NULL on the destination.
   #
-  # merged_commit_id (the MERGED_AT_COMMIT FK target) is derived below from a
-  # bytea-decoded COALESCE of the three commit-SHA columns, gated on state_id=3.
-  # merged_commit_sha and squash_commit_sha are Postgres `bytea` columns: Siphon
-  # replicates them as `\x` + hex-of-ASCII (length 82 for a 40-char SHA), so they
-  # must be unhex-decoded before use; merge_commit_sha is clean `varchar`. The
-  # malformed-length bytea rows (~233 of 7.95M) decode to NULL rather than leak
-  # garbage. The sipHash64 is sign-bit-masked (bitAnd ... 0x7FFFFFFFFFFFFFFF) so the
-  # Int64 stays positive -- commit.yaml's id is the keyset cursor column and a
-  # negative id loops paging forever. This exact decoded-COALESCE + masked
-  # sipHash64(target_project_id, ...) must stay BYTE-IDENTICAL with the two sites in
-  # commit.yaml (the `select` id/sha and the `where`), or the edge target stops
-  # joining its Commit node. See #924.
+  # merged_commit_id (the MERGED_AT_COMMIT FK target) is the masked
+  # sipHash64(target_project_id, decoded_sha) gated on state_id=3, where decoded_sha
+  # is hoisted into the `from` subquery below. merged_commit_sha and
+  # squash_commit_sha are Postgres `bytea` columns (Siphon replicates them as `\x` +
+  # hex-of-ASCII), so they are unhex-decoded; merge_commit_sha is clean `varchar`.
+  # The sipHash64 is sign-bit-masked (bitAnd ... 0x7FFFFFFFFFFFFFFF) so the Int64
+  # stays positive -- commit.yaml's id is the keyset cursor column and a negative id
+  # loops paging forever.
+  #
+  # DRIFT WARNING: the `decoded_sha` expression and the masked
+  # sipHash64(target_project_id, decoded_sha) here must stay BYTE-IDENTICAL with
+  # commit.yaml's `decoded_sha` and id, or the edge target stops joining its Commit
+  # node. See #924.
   type: query
   source: merge_requests
   select: >-
@@ -368,9 +369,8 @@ etl:
     m.merged_commit_sha AS merged_commit_sha,
     m.squash_commit_sha AS squash_commit_sha,
     if(
-      m.state_id = 3
-        AND coalesce(multiIf(m.merged_commit_sha = '', NULL, startsWith(m.merged_commit_sha, '\\x') AND length(m.merged_commit_sha) = 82, unhex(substring(m.merged_commit_sha, 3)), startsWith(m.merged_commit_sha, '\\x'), NULL, m.merged_commit_sha), nullIf(m.merge_commit_sha, ''), multiIf(m.squash_commit_sha = '', NULL, startsWith(m.squash_commit_sha, '\\x') AND length(m.squash_commit_sha) = 82, unhex(substring(m.squash_commit_sha, 3)), startsWith(m.squash_commit_sha, '\\x'), NULL, m.squash_commit_sha)) IS NOT NULL,
-      toInt64(bitAnd(sipHash64(m.target_project_id, coalesce(multiIf(m.merged_commit_sha = '', NULL, startsWith(m.merged_commit_sha, '\\x') AND length(m.merged_commit_sha) = 82, unhex(substring(m.merged_commit_sha, 3)), startsWith(m.merged_commit_sha, '\\x'), NULL, m.merged_commit_sha), nullIf(m.merge_commit_sha, ''), multiIf(m.squash_commit_sha = '', NULL, startsWith(m.squash_commit_sha, '\\x') AND length(m.squash_commit_sha) = 82, unhex(substring(m.squash_commit_sha, 3)), startsWith(m.squash_commit_sha, '\\x'), NULL, m.squash_commit_sha))), toUInt64(9223372036854775807))),
+      m.state_id = 3 AND m.decoded_sha IS NOT NULL,
+      toInt64(bitAnd(sipHash64(m.target_project_id, m.decoded_sha), toUInt64(9223372036854775807))),
       NULL
     ) AS merged_commit_id,
     m.traversal_path AS traversal_path,
@@ -401,7 +401,7 @@ etl:
   # aggregates over every metrics/reviewers/approvals row in the namespace on
   # every batch (~2 GB peak on 1/9970/ for what should be a 30-row batch).
   from: >-
-    merge_requests AS m LEFT JOIN (
+    (SELECT *, coalesce(if(startsWith(merged_commit_sha, '\\x'), unhex(substring(merged_commit_sha, 3)), nullIf(merged_commit_sha, '')), nullIf(merge_commit_sha, ''), if(startsWith(squash_commit_sha, '\\x'), unhex(substring(squash_commit_sha, 3)), nullIf(squash_commit_sha, ''))) AS decoded_sha FROM merge_requests) AS m LEFT JOIN (
       SELECT
         traversal_path AS _mt_tp,
         merge_request_id AS _mt_mr,
