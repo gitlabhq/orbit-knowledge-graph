@@ -31,7 +31,7 @@ const MAX_RETRIES: u32 = 3;
 /// (100ms, 200ms, 400ms) before retries 1..=3; `max_attempts` is one initial try plus
 /// `MAX_RETRIES`.
 const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::InSitu,
+    mode: RetryMode::Local,
     backoff: Backoff::Fixed(&[
         Duration::from_millis(100),
         Duration::from_millis(200),

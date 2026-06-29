@@ -309,11 +309,11 @@ impl Drop for NotifyOnDrop {
     }
 }
 
-/// Bounded in-situ retry for a transient ClickHouse insert failure, so a blip does not cost the
+/// Bounded local retry for a transient ClickHouse insert failure, so a blip does not cost the
 /// project a re-index next sweep tick without stalling the writer through a sustained outage.
 /// Blanket-retries (ClickHouse error codes are not stable enough to classify).
 const WRITE_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::InSitu,
+    mode: RetryMode::Local,
     backoff: Backoff::Fixed(&[Duration::from_secs(2), Duration::from_secs(4)]),
     max_attempts: 3,
     dead_letter: false,

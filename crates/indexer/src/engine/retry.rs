@@ -2,13 +2,13 @@
 //!
 //! A failure is handled in one of two modes:
 //!
-//! - [`RetryMode::InSitu`]: retry on the spot with bounded backoff, in-process. Driven by
+//! - [`RetryMode::Local`]: retry on the spot with bounded backoff, in-process. Driven by
 //!   [`drive`].
 //! - [`RetryMode::Global`]: hand the message back to NATS for redelivery, bounded by delivery
 //!   attempts, then dead-letter. Executed by the engine's `run_handlers` path, which reads the
 //!   same [`RetryPolicy`].
 //!
-//! Both modes are described by one [`RetryPolicy`]. The in-situ executor ([`drive`]) reads the
+//! Both modes are described by one [`RetryPolicy`]. The local executor ([`drive`]) reads the
 //! backoff ladder and attempt cap from the policy; the callback only classifies each attempt's
 //! outcome via [`Step`], so the backoff lives in exactly one place.
 
@@ -18,7 +18,7 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryMode {
     /// Retry in-process with backoff; never leaves the worker.
-    InSitu,
+    Local,
     /// Retry via NATS redelivery; the engine nacks and the broker re-delivers.
     Global,
 }
@@ -240,7 +240,7 @@ mod tests {
     }
 
     const POLICY: RetryPolicy = RetryPolicy {
-        mode: RetryMode::InSitu,
+        mode: RetryMode::Local,
         backoff: Backoff::Fixed(&[Duration::from_secs(1), Duration::from_secs(2)]),
         max_attempts: 3,
         dead_letter: false,

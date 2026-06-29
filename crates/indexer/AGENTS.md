@@ -19,7 +19,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 | NatsBroker | `nats/broker.rs` | JetStream connection |
 | WorkerPool | `engine/worker_pool.rs` | Concurrency control |
 | Retry harness | `engine/retry.rs` | Shared retry vocabulary: `RetryPolicy` (mode + `Backoff` + cap), `Step`/`Loop`, and the `drive`/`drive_with`/`drive_until`/`drive_forever` executors. Global (NATS-redelivery) mode is executed by `run_handlers`, which reads the same policy |
-| ClickHouse writer | `clickhouse/` | `ClickHouseWriter` (one Arrow-IPC `write`) + `BufferedWriter` (per-table coalescing + in-situ write retry) |
+| ClickHouse writer | `clickhouse/` | `ClickHouseWriter` (one Arrow-IPC `write`) + `BufferedWriter` (per-table coalescing + local write retry) |
 
 ### Domain modules
 

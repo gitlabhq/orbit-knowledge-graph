@@ -373,7 +373,7 @@ pub async fn wait_until_ready(
 
     let deadline = Instant::now() + timeout;
     let policy = RetryPolicy {
-        mode: RetryMode::InSitu,
+        mode: RetryMode::Local,
         backoff: Backoff::Exponential {
             base: poll_interval,
             cap: MAX_BACKOFF_INTERVAL,

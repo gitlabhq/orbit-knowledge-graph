@@ -4,7 +4,7 @@ use std::time::Duration;
 /// Flat 100ms backoff for the unbounded fetch supervisor loop: re-poll quickly after a fetch
 /// error, matching the prior hot-poll behavior.
 const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
-    mode: crate::engine::retry::RetryMode::InSitu,
+    mode: crate::engine::retry::RetryMode::Local,
     backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
     max_attempts: u32::MAX,
     dead_letter: false,
