@@ -125,6 +125,41 @@ where
     drive_with(policy, (), move |(), i| attempt(i)).await
 }
 
+/// The outcome of one iteration of an unbounded supervisor loop ([`drive_forever`]).
+pub enum Loop {
+    /// The iteration succeeded; reset the failure counter and run again immediately.
+    Continue,
+    /// The iteration failed; back off (per the policy, escalating with consecutive failures)
+    /// then run again. There is no attempt cap — the loop survives a sustained outage.
+    Backoff,
+    /// Terminal (cancelled, or the downstream consumer closed); leave the loop.
+    Stop,
+}
+
+/// Unbounded supervisor loop: run `step` forever, sleeping the policy's backoff after a
+/// [`Loop::Backoff`] and resetting between successes, until `step` returns [`Loop::Stop`]. Unlike
+/// [`drive`], there is no result and no attempt cap — for a long-lived consumer that must survive
+/// transient outages indefinitely. `step` receives the count of consecutive failures so far (0 on
+/// the first try and after any success), so a [`Backoff::Exponential`] policy escalates the delay
+/// across a run of failures.
+pub async fn drive_forever<F, Fut>(policy: &RetryPolicy, mut step: F)
+where
+    F: FnMut(u32) -> Fut,
+    Fut: Future<Output = Loop>,
+{
+    let mut consecutive_failures = 0u32;
+    loop {
+        match step(consecutive_failures).await {
+            Loop::Continue => consecutive_failures = 0,
+            Loop::Stop => return,
+            Loop::Backoff => {
+                tokio::time::sleep(policy.backoff_for(consecutive_failures)).await;
+                consecutive_failures = consecutive_failures.saturating_add(1);
+            }
+        }
+    }
+}
+
 /// Deadline-bounded retry: poll `attempt` until it yields `Done`/`GiveUp`, sleeping the policy's
 /// backoff (clamped to the time remaining) between tries, until `deadline` passes. Returns
 /// `None` when the deadline is reached while still retrying, so the caller can build a timeout
@@ -291,6 +326,20 @@ mod tests {
             ..POLICY
         };
         assert_eq!(policy.backoff_for(0), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn drive_forever_backs_off_on_failure_and_stops_on_request() {
+        // Two failures (escalating backoff), one success (resets), then stop.
+        let mut script = vec![Loop::Backoff, Loop::Backoff, Loop::Continue, Loop::Stop].into_iter();
+        let mut failure_counts = Vec::new();
+        drive_forever(&POLICY, |failures| {
+            failure_counts.push(failures);
+            std::future::ready(script.next().unwrap())
+        })
+        .await;
+        // 0 on first try, escalates across the failure run, resets to 0 after the success.
+        assert_eq!(failure_counts, vec![0, 1, 2, 0]);
     }
 
     #[test]
