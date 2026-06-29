@@ -72,11 +72,6 @@ Orbit Remote requires GitLab Premium or Ultimate. Access follows your GitLab sub
 and the requesting user's permissions: every query is authorized through GitLab, and what
 Orbit returns changes as that access changes.
 
-Programmatic queries through the REST API and MCP consume GitLab Credits. Reading the
-schema, checking indexing status, and listing tools are free, and queries made through the
-GitLab Duo Agent Platform are zero-rated. If your credits are exhausted, query requests are
-rejected until more credits are available.
-
 ## Programmatic access
 
 Programmatic access uses your existing GitLab authentication, scoped to what the token owner
