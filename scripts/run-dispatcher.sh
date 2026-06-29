@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run the GKG dispatcher locally with the same configuration as the local helm chart.
-# Uses environment variables to override config/default.yaml values.
+# Uses environment variables to override config/example.yaml values.
 #
 # All settings can be overridden via environment variables, e.g.:
 #   GKG_DATALAKE__DATABASE=my_db ./scripts/run-dispatcher.sh
@@ -12,10 +12,10 @@ GDK_ROOT="${GDK_ROOT:-$HOME/gitlab/gdk}"
 
 export RUST_LOG="${RUST_LOG:-info}"
 
-# Datalake ClickHouse — only override database since url/username match default.yaml
+# Datalake ClickHouse — only override database since url/username match example.yaml
 export GKG_DATALAKE__DATABASE="${GKG_DATALAKE__DATABASE:-gitlab_clickhouse_development}"
 
-# Graph ClickHouse — only override database since url/username match default.yaml
+# Graph ClickHouse — only override database since url/username match example.yaml
 export GKG_GRAPH__DATABASE="${GKG_GRAPH__DATABASE:-gkg-development}"
 
 # JWT verifying key (same logic as server:start in mise.toml)

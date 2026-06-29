@@ -99,7 +99,7 @@ impl AppConfig {
 
     fn load_with_secret_dir(secret_dir: &str) -> Result<Self, ConfigError> {
         let config = config::Config::builder()
-            .add_source(config::File::with_name("config/default").required(false))
+            .add_source(config::File::with_name("config/example").required(false))
             .add_source(SecretFileSource::new(secret_dir))
             .add_source(
                 config::Environment::with_prefix("GKG")
@@ -137,7 +137,7 @@ pub enum ConfigError {
     #[error("configuration error: {0}")]
     Config(#[from] config::ConfigError),
     #[error(
-        "gitlab.jwt.verifying_key is required (set GKG_GITLAB__JWT__VERIFYING_KEY, add to config/default.yaml, or mount at /etc/secrets/gitlab/jwt/verifying_key)"
+        "gitlab.jwt.verifying_key is required (set GKG_GITLAB__JWT__VERIFYING_KEY, add to config/example.yaml, or mount at /etc/secrets/gitlab/jwt/verifying_key)"
     )]
     MissingJwtSecret,
 }
@@ -249,9 +249,9 @@ handlers:
         let dir = tempfile::TempDir::new().unwrap();
 
         let config = config::Config::builder()
-            .add_source(config::File::with_name("config/default").required(false))
+            .add_source(config::File::with_name("config/example").required(false))
             .add_source(SecretFileSource::new(dir.path()))
-            // Provide required base config (normally from config/default.yaml)
+            // Provide required base config (normally from config/example.yaml)
             .set_default("nats.url", "localhost:4222")
             .unwrap()
             .set_default("datalake.url", "http://127.0.0.1:8123")
@@ -306,7 +306,7 @@ handlers:
     #[test]
     fn real_env_vars_override_yaml_defaults() {
         let test_bin = std::env::current_exe().unwrap();
-        // The test binary must run from the workspace root so config/default.yaml is found.
+        // The test binary must run from the workspace root so config/example.yaml is found.
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
@@ -349,19 +349,19 @@ handlers:
 
         assert_eq!(
             values["graph_database"], "env_graph_db",
-            "GKG_GRAPH__DATABASE should override config/default.yaml"
+            "GKG_GRAPH__DATABASE should override config/example.yaml"
         );
         assert_eq!(
             values["datalake_database"], "env_datalake_db",
-            "GKG_DATALAKE__DATABASE should override config/default.yaml"
+            "GKG_DATALAKE__DATABASE should override config/example.yaml"
         );
         assert_eq!(
             values["nats_url"], "nats://env-host:4222",
-            "GKG_NATS__URL should override config/default.yaml"
+            "GKG_NATS__URL should override config/example.yaml"
         );
         assert_eq!(
             values["system_notes_enabled"], true,
-            "GKG_FEATURES__SYSTEM_NOTES__ENABLED should override config/default.yaml"
+            "GKG_FEATURES__SYSTEM_NOTES__ENABLED should override config/example.yaml"
         );
         assert_eq!(
             values["system_notes_for_9970"], true,
