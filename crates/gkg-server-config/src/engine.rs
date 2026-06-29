@@ -769,6 +769,13 @@ modules: [sdlc, namespace_deletion]
     }
 
     #[test]
+    fn namespace_dispatcher_reads_snake_case_sweep_interval() {
+        let yaml = "cron: \"*/30 * * * * *\"\nsweep_interval_secs: 7200\n";
+        let cfg: NamespaceDispatcherConfig = serde_yaml::from_str(yaml).expect("valid yaml");
+        assert_eq!(cfg.sweep_interval_secs, 7200);
+    }
+
+    #[test]
     fn entity_handler_streaming_knobs_default_to_pre_tunable_constants() {
         let cfg = EntityHandlerConfig::default();
         assert_eq!(cfg.stream_block_size, 65_536);

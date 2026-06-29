@@ -154,7 +154,9 @@ impl NamespaceDispatcher {
             return Ok(true);
         };
 
-        let interval = chrono::Duration::seconds(self.config.sweep_interval_secs as i64);
+        let interval = chrono::Duration::seconds(
+            i64::try_from(self.config.sweep_interval_secs).unwrap_or(i64::MAX),
+        );
         Ok(upper.signed_duration_since(last_sweep.watermark) >= interval)
     }
 

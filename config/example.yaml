@@ -125,7 +125,7 @@ schedule:
       cron: "0 */1 * * * *"           # every minute
     namespace:
       cron: "*/30 * * * * *"          # every 30 seconds
-      sweep-interval-secs: 3600        # hourly full re-dispatch safety net
+      sweep_interval_secs: 3600        # hourly full re-dispatch safety net
     code-backfill:
       cron: "0 */1 * * * *"           # every minute
     table-cleanup:
