@@ -49,6 +49,16 @@ impl RetryPolicy {
     pub fn backoff_for(&self, attempt: u32) -> Duration {
         self.backoff.delay(attempt)
     }
+
+    /// The common transient-error branch: [`Step::Retry`] with `next` while attempts remain, else
+    /// [`Step::GiveUp`] surfacing the real error on the final attempt. Centralizes the cap check.
+    pub fn retry_or_give_up<T, E, S>(&self, attempt: u32, next: S, give_up: E) -> Step<T, E, S> {
+        if attempt + 1 < self.max_attempts.max(1) {
+            Step::Retry(next)
+        } else {
+            Step::GiveUp(give_up)
+        }
+    }
 }
 
 /// The outcome of one attempt. `Retry` carries the next attempt's state by value, so per-attempt
@@ -306,6 +316,19 @@ mod tests {
         })
         .await;
         assert_eq!(failure_counts, vec![0, 1, 2, 0]);
+    }
+
+    #[test]
+    fn retry_or_give_up_respects_the_cap() {
+        // POLICY.max_attempts == 3: attempts 0 and 1 retry, attempt 2 gives up.
+        assert!(matches!(
+            POLICY.retry_or_give_up::<(), _, ()>(0, (), TestError::GaveUp),
+            Step::Retry(())
+        ));
+        assert!(matches!(
+            POLICY.retry_or_give_up::<(), _, ()>(2, (), TestError::GaveUp),
+            Step::GiveUp(TestError::GaveUp)
+        ));
     }
 
     #[test]

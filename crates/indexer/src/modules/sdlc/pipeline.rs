@@ -369,13 +369,11 @@ impl Pipeline {
                                     None => retry_config.halving_initial_block_size,
                                 }
                             };
-                            if attempt + 1 < DATALAKE_EXTRACT_RETRY.max_attempts {
-                                Step::Retry(Some(next))
-                            } else {
-                                Step::GiveUp(HandlerError::Processing(format!(
-                                    "datalake query failed: {err}"
-                                )))
-                            }
+                            DATALAKE_EXTRACT_RETRY.retry_or_give_up(
+                                attempt,
+                                Some(next),
+                                HandlerError::Processing(format!("datalake query failed: {err}")),
+                            )
                         }
                     }
                 }

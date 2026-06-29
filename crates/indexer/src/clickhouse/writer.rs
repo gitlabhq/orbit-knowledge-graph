@@ -327,12 +327,10 @@ async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
         async move {
             match fut.await {
                 Ok(report) => Step::Done(report),
-                // Surface the real error on the final attempt; otherwise wait and retry.
-                Err(e) if attempt + 1 < WRITE_RETRY.max_attempts => {
-                    warn!(table, retry = attempt + 1, error = %e, "buffered write failed; retrying after backoff");
-                    Step::Retry(())
+                Err(e) => {
+                    warn!(table, attempt = attempt + 1, error = %e, "buffered write failed");
+                    WRITE_RETRY.retry_or_give_up(attempt, (), e)
                 }
-                Err(e) => Step::GiveUp(e),
             }
         }
     })
