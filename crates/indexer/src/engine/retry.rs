@@ -35,8 +35,7 @@ impl Backoff {
     }
 }
 
-/// `max_attempts` is the attempt cap (1 = no retry); under [`drive_until`] the deadline is the
-/// primary exit and the cap is the safety bound. `dead_letter` applies only to [`RetryMode::Global`].
+/// `max_attempts` is the attempt cap (1 = no retry); under [`drive_until`] it is a safety bound and the deadline is the real exit.
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
     pub mode: RetryMode,
@@ -50,8 +49,7 @@ impl RetryPolicy {
         self.backoff.delay(attempt)
     }
 
-    /// The common transient-error branch: [`Step::Retry`] with `next` while attempts remain, else
-    /// [`Step::GiveUp`] surfacing the real error on the final attempt. Centralizes the cap check.
+    /// [`Step::Retry`] with `next` while attempts remain, else [`Step::GiveUp`] with `give_up`.
     pub fn retry_or_give_up<T, E, S>(&self, attempt: u32, next: S, give_up: E) -> Step<T, E, S> {
         if attempt + 1 < self.max_attempts.max(1) {
             Step::Retry(next)
@@ -60,19 +58,12 @@ impl RetryPolicy {
         }
     }
 
-    /// Whether a [`RetryMode::Global`] transient failure on its 1-based delivery `attempt` should
-    /// be redelivered (`true`) or is exhausted (`false`). The engine's redelivery "loop" runs
-    /// across separate NATS deliveries, so this is the per-delivery decision; what an exhausted
-    /// message does next (DLQ vs terminate) follows from `dead_letter`.
+    /// Whether a global failure on its 1-based delivery `attempt` should be redelivered or exhausted.
     pub fn should_redeliver(&self, attempt: u32) -> bool {
         attempt < self.max_attempts.max(1)
     }
 
-    /// Map a [`RetryMode::Global`] failure on its 1-based delivery `attempt` to the [`HandlerError`]
-    /// the engine should propagate: a transient `Processing` while redeliveries remain (the engine
-    /// nacks), else a `Permanent` carrying this policy's terminal action. This is the single place
-    /// the global retry decision is made; handlers report a failure through it rather than picking
-    /// the variant themselves.
+    /// The single source of the global retry decision: map a failure to `Processing` (redeliver) or `Permanent`.
     pub fn global_failure(
         &self,
         attempt: u32,
@@ -94,8 +85,7 @@ impl RetryPolicy {
     }
 }
 
-/// The outcome of one attempt. `Retry` carries the next attempt's state by value, so per-attempt
-/// mutation never borrows across the await (keeps the future `Send`). Stateless callers use `S = ()`.
+/// The outcome of one attempt; `Retry` carries the next attempt's state by value (keeps the future `Send`).
 pub enum Step<T, E, S = ()> {
     Done(T),
     Retry(S),
@@ -126,8 +116,7 @@ where
     drive_with(policy, (), move |(), i| attempt(i)).await
 }
 
-/// Bounded by `deadline` as well as the attempt cap; on deadline, `on_deadline` builds the
-/// terminal error from the last state so the result stays a plain `Result`.
+/// Bounded by `deadline` and the attempt cap; `on_deadline` builds the terminal error from the last state.
 pub async fn drive_until<T, E, S, F, Fut, D>(
     policy: &RetryPolicy,
     deadline: tokio::time::Instant,
@@ -192,8 +181,7 @@ pub enum Loop {
     Stop,
 }
 
-/// Unbounded supervisor loop with no result or cap: runs until `step` returns [`Loop::Stop`].
-/// `step` gets the consecutive-failure count so [`Backoff::Exponential`] escalates and resets on success.
+/// Unbounded supervisor loop until `step` returns [`Loop::Stop`]; `step` gets the consecutive-failure count.
 pub async fn drive_forever<F, Fut>(policy: &RetryPolicy, mut step: F)
 where
     F: FnMut(u32) -> Fut,
@@ -250,8 +238,7 @@ mod tests {
         dead_letter: false,
     };
 
-    /// Run `drive` with a callback that returns `Done(0)` once `attempt` reaches `done_at`, else
-    /// `Retry`/`GiveUp` per `terminal`, counting calls. `done_at = None` means never finish.
+    /// `drive` with a callback returning `Done` at `done_at` (None = never), else `terminal`; counts calls.
     async fn run(
         done_at: Option<u32>,
         terminal: fn() -> Step<u32, TestError>,
@@ -296,8 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn exhaustion_does_not_sleep_after_the_final_attempt() {
-        // Real time (no start_paused), single attempt: a Retry on the last (only) attempt must
-        // exhaust immediately rather than sleeping the 10s backoff first.
+        // Real time (no start_paused): a final-attempt Retry must exhaust without sleeping the 10s backoff.
         const LONG: &[Duration] = &[Duration::from_secs(10)];
         let policy = RetryPolicy {
             backoff: Backoff::Fixed(LONG),

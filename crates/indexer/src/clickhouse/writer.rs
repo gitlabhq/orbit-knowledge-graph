@@ -29,9 +29,7 @@ pub enum WriteError {
 
 impl From<RetryExhausted> for WriteError {
     fn from(e: RetryExhausted) -> Self {
-        // Unreachable in practice: write_part's callback returns GiveUp with the real error on
-        // the final attempt, so the harness never falls through to its cap. Kept to satisfy the
-        // drive bound.
+        // Satisfies the drive bound; write_part GiveUps the real error so the cap is never reached.
         WriteError::Write(e.to_string(), None)
     }
 }

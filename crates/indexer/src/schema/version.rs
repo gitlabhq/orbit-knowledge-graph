@@ -388,8 +388,7 @@ pub async fn wait_until_ready(
         deadline,
         (None, None),
         |_carried, _attempt| async move {
-            // A failed read is treated as "unknown" (None) so the other read can still drive an
-            // outdated/ready decision; both failing falls through to a retry within the budget.
+            // A failed read is "unknown" (None) so the other can still decide; both failing retries.
             let active = read_active_version(graph).await.unwrap_or_else(|error| {
                 warn!(%error, "failed to read active schema version — retrying");
                 None

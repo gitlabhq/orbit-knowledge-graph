@@ -26,8 +26,7 @@ use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
 
-/// Retry a datalake page read, shrinking the block size each time so an oversized page
-/// self-corrects instead of dead-lettering.
+/// Retry a datalake page read, shrinking the block size each time so an oversized page self-corrects.
 const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
     mode: RetryMode::Local,
     backoff: Backoff::Fixed(&[

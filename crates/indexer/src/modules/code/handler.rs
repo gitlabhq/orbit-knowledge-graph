@@ -28,8 +28,7 @@ use crate::types::{Envelope, Subscription};
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
-/// A timed-out job is likely transiently slow: retry once (delivery attempt is 1-based), then
-/// dead-letter. The engine reads this policy to decide redelivery vs DLQ.
+/// A timed-out job is likely transiently slow: retry once, then dead-letter (engine reads this policy).
 const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     mode: RetryMode::Global,
     backoff: Backoff::Fixed(&[]),
