@@ -145,7 +145,7 @@ properties:
     source: merged_commit_id
     nullable: true
     mutable: true
-    description: "Synthetic Commit id the MR was merged at: sipHash64(target_project_id, COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha)). NULL until merged. Drives the MERGED_AT_COMMIT FK edge and is the join key the stale-edge sweep compares against."
+    description: "Synthetic Commit id the MR was merged at: sipHash64(target_project_id, COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha)). NULL until merged. The COALESCE mirrors Rails' MergeRequest#merged_commit_sha fallback but stops at squash_commit_sha: Rails' 4th leg diff_head_sha is the pre-merge source-branch head (the wrong-SHA source #924 exists to avoid) and is not a merge_requests column. Drives the MERGED_AT_COMMIT FK edge and is the join key the stale-edge sweep compares against."
 
   latest_build_started_at:
     type: timestamp

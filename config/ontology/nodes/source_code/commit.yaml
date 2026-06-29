@@ -23,7 +23,7 @@ properties:
     source: id
     nullable: false
     mutable: false
-    description: "Synthetic identifier: sipHash64(project_id, sha). Matches MergeRequest.merged_commit_id so MERGED_AT_COMMIT joins."
+    description: "Synthetic identifier: sipHash64(target_project_id, sha). Matches MergeRequest.merged_commit_id so MERGED_AT_COMMIT joins."
 
   sha:
     type: string
@@ -50,8 +50,12 @@ properties:
 # Commit's id and sha must be computed with the same sipHash64/COALESCE
 # expression the MergeRequest node uses for merged_commit_id, so the
 # MERGED_AT_COMMIT FK edge resolves to a node that exists. Only merged MRs
-# (COALESCE non-empty) produce a commit; the WHERE prunes the rest. argMax
-# de-duplicates the many-MRs-to-one-commit case within a batch.
+# (COALESCE non-empty) produce a commit; the WHERE prunes the rest. Two MRs
+# that land on the same commit emit the same (project_id, sha) -> same id; the
+# gl_commit ReplacingMergeTree identity collapses the duplicate rows.
+# COALESCE intentionally stops at squash_commit_sha and omits Rails' 4th leg
+# diff_head_sha: it is not a merge_requests column, and it is the pre-merge
+# source-branch head -- the wrong-SHA source #924 exists to avoid.
 etl:
   type: query
   source: merge_requests
