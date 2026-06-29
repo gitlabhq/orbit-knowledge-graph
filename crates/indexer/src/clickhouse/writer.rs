@@ -12,6 +12,7 @@ use tokio::task::JoinSet;
 use tracing::warn;
 
 use crate::durability::WriteDurability;
+use crate::engine::retry::{RetryExhausted, RetryMode, RetryPolicy, Step, drive};
 use crate::metrics::EngineMetrics;
 
 #[derive(Debug, Error)]
@@ -24,6 +25,15 @@ pub enum WriteError {
 
     #[error("invalid configuration: {0}")]
     InvalidConfiguration(String),
+}
+
+impl From<RetryExhausted> for WriteError {
+    fn from(e: RetryExhausted) -> Self {
+        // Unreachable in practice: write_part's callback returns GiveUp with the real error on
+        // the final attempt, so the harness never falls through to its cap. Kept to satisfy the
+        // drive bound.
+        WriteError::Write(e.to_string(), None)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -299,10 +309,15 @@ impl Drop for NotifyOnDrop {
     }
 }
 
-/// Backoff before each insert retry. A short, bounded ladder so a transient ClickHouse blip
-/// does not cost the whole project a re-index next sweep tick, without stalling the writer
-/// through a sustained outage.
-const WRITE_RETRY_BACKOFF: &[Duration] = &[Duration::from_secs(2), Duration::from_secs(4)];
+/// Bounded in-situ retry for a transient ClickHouse insert failure, so a blip does not cost the
+/// project a re-index next sweep tick without stalling the writer through a sustained outage.
+/// Blanket-retries (ClickHouse error codes are not stable enough to classify).
+const WRITE_RETRY: RetryPolicy = RetryPolicy {
+    mode: RetryMode::InSitu,
+    backoff: &[Duration::from_secs(2), Duration::from_secs(4)],
+    max_attempts: 3,
+    dead_letter: false,
+};
 
 /// Write one coalesced part, then notify every batch's token of the outcome. A single part can
 /// hold batches from many producers; each is told precisely whether its rows landed. Retries the
@@ -310,26 +325,22 @@ const WRITE_RETRY_BACKOFF: &[Duration] = &[Duration::from_secs(2), Duration::fro
 async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
     let guard = NotifyOnDrop(buf.tokens);
 
-    // Retry the insert with bounded backoff so a transient ClickHouse failure does not cost the
-    // project a re-index next sweep tick. Arrow batches are Arc-backed, so the per-attempt clone
-    // is a refcount bump, not a data copy.
-    let mut tries = 0;
-    let durable = loop {
-        match writer
-            .write(table, buf.batches.clone(), Some(WriteDurability::Durable))
-            .await
-        {
-            Ok(report) => break Ok(report),
-            Err(e) => match WRITE_RETRY_BACKOFF.get(tries) {
-                Some(delay) => {
-                    warn!(table, retry = tries + 1, error = %e, "buffered write failed; retrying after backoff");
-                    tokio::time::sleep(*delay).await;
-                    tries += 1;
+    // Arrow batches are Arc-backed, so the per-attempt clone is a refcount bump, not a data copy.
+    let durable = drive(&WRITE_RETRY, &mut (), |_, attempt| {
+        let fut = writer.write(table, buf.batches.clone(), Some(WriteDurability::Durable));
+        async move {
+            match fut.await {
+                Ok(report) => Step::Done(report),
+                // Surface the real error on the final attempt; otherwise wait and retry.
+                Err(e) if attempt + 1 < WRITE_RETRY.max_attempts => {
+                    warn!(table, retry = attempt + 1, error = %e, "buffered write failed; retrying after backoff");
+                    Step::Retry
                 }
-                None => break Err(e),
-            },
+                Err(e) => Step::GiveUp(e),
+            }
         }
-    };
+    })
+    .await;
 
     let tokens = guard.disarm();
     match durable {
