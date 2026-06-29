@@ -135,7 +135,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 
 ## Code quality
 
-- **Do not write narration comments — including in tests.** A comment must explain *why* (a non-obvious constraint, a gotcha, an ADR/issue link), never restate *what* the next line does. The most common leak is a label on each test or setup block; those are narration, delete them. The test name and the `assert_eq!` already say what is being checked. Write clean as you go, and run a final narration-comment pass over the comments your change added or modified before pushing or opening an MR — this gate is mandatory because clean-as-you-go alone has proven insufficient. Discriminator:
+- **Do not write narration comments — including in tests.** A comment must explain *why* (a non-obvious constraint, a gotcha, an ADR/issue link), never restate *what* the next line does. The most common leak is a label on each test or setup block; those are narration, delete them. The test name and the `assert_eq!` already say what is being checked. Write clean as you go. Clean-as-you-go alone has proven insufficient, so a final narration-comment pass over the comments your change added or modified is required before merge — run it before pushing or opening an MR. Discriminator:
   - ❌ `// Test cross_reference with WorkItem` above `assert_eq!(route("cross_reference", "WorkItem"), Some("MENTIONS"));` — restates the call.
   - ❌ `// merged with WorkItem should return None` above `assert_eq!(route("merged", "WorkItem"), None);` — restates the assertion.
   - ❌ `// Clear env vars` / `// Cleanup` / `// Setup` — block labels for self-evident code.
