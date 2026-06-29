@@ -121,20 +121,16 @@ impl ToolRegistry {
     }
 
     pub(super) fn query_graph() -> ToolDefinition {
-        // Keep the inline TOON for now so existing MCP clients that already
-        // depend on it keep working. The new `get_query_dsl` tool exposes
-        // the same grammar through a dedicated call; a follow-up MR will
-        // strip the inline schema once the new tool has been adopted.
-        let base_description = "Execute graph queries to find nodes, traverse relationships, \
-                                explore neighborhoods, find paths, or aggregate data. \
-                                Use get_query_dsl for the query grammar. \
-                                Use get_graph_schema to discover available entity types and relationships.";
+        // Inline TOON kept for back-compat (one release cycle); a follow-up
+        // strips it once `get_query_dsl` adoption is verified.
+        let base_description = "Execute graph queries. \
+                                The DSL below is STRUCTURE ONLY — you MUST call \
+                                get_graph_schema (with expand_nodes) to discover valid \
+                                node/property/edge names. Use get_query_dsl for the \
+                                full grammar reference.";
 
         let description = match condensed_query_schema() {
-            Ok(schema) => format!(
-                "{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
-                base_description, schema
-            ),
+            Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
             Err(_) => base_description.to_string(),
         };
 

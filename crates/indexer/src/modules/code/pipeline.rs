@@ -67,7 +67,6 @@ impl ProjectCommit {
         }
         tokio::spawn(async move {
             self.finalize().await;
-            self.inflight.fetch_sub(1, Ordering::AcqRel);
         });
     }
 
@@ -113,6 +112,12 @@ impl FlushToken for ProjectCommit {
     fn on_failed(self: Arc<Self>) {
         self.failed.store(true, Ordering::Release);
         self.release();
+    }
+}
+
+impl Drop for ProjectCommit {
+    fn drop(&mut self) {
+        self.inflight.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -726,6 +731,30 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "a failed flush must leave the project un-checkpointed for re-indexing",
+        );
+    }
+
+    #[tokio::test]
+    async fn abandoned_sentinel_drains_inflight_without_checkpointing() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store.clone(), cleaner, inflight.clone(), 2);
+
+        // Dropping `commit` without a third `release()` mimics a run future dropped on timeout:
+        // the sentinel is never released, yet the slot must still be reclaimed.
+        commit.clone().release();
+        commit.clone().release();
+        drop(commit);
+
+        settle(&inflight).await;
+        assert!(
+            store
+                .get_checkpoint("1/7/", 7, "main")
+                .await
+                .unwrap()
+                .is_none(),
+            "an abandoned sentinel must not checkpoint; the sweep re-indexes the project",
         );
     }
 }

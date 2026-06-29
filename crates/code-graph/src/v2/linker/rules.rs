@@ -205,7 +205,10 @@ pub struct ResolutionRules {
 }
 
 impl ResolutionRules {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "builder-style constructor fully initialising a complex config struct; a params struct would add indirection without reducing call-site complexity"
+    )]
     pub fn new(
         name: &'static str,
         scopes: Vec<IsolatedScopeRule>,
@@ -246,7 +249,6 @@ impl ResolutionRules {
     /// Build a `ResolutionRules` without a DSL language spec, used by
     /// pipelines (e.g. the JS custom pipeline) that drive resolution
     /// entirely through hooks instead of scope/reference rules.
-    #[allow(clippy::too_many_arguments)]
     pub fn custom(
         name: &'static str,
         bare_stages: Vec<ResolveStage>,

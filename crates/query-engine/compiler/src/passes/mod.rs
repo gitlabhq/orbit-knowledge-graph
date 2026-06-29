@@ -4,6 +4,7 @@
 pub mod check;
 pub mod codegen;
 pub mod enforce;
+mod errors;
 pub mod hydrate;
 pub mod lower;
 pub mod normalize;

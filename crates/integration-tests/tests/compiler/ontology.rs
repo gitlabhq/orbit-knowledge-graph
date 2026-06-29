@@ -95,9 +95,146 @@ fn invalid_entity_type_rejected() {
         &test_ctx(),
     )
     .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("NonexistentType"), "got: {msg}");
+    // The enrichment must surface valid candidates, not strip or truncate them.
+    assert!(msg.contains("Valid values include:"), "got: {msg}");
+    assert!(msg.contains("Branch"), "got: {msg}");
+    assert!(msg.contains("get_graph_schema"), "got: {msg}");
+}
+
+#[test]
+fn invalid_filter_key_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
+                     "filters": {"project_full_path": "x"}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("project_full_path"), "got: {msg}");
+    assert!(msg.contains("Valid values include:"), "got: {msg}");
+    assert!(msg.contains("username"), "got: {msg}");
+    assert!(msg.contains("get_graph_schema"), "got: {msg}");
+    // The opaque "or N other candidates" truncation must not leak through.
+    assert!(!msg.contains("other candidates"), "got: {msg}");
+}
+
+#[test]
+fn invalid_group_by_property_lists_valid_fields() {
+    let err = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "group_by": [{"kind": "property", "node": "p", "property": "reviewer_count"}],
+            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("reviewer_count"), "got: {msg}");
+    assert!(msg.contains("does not exist"), "got: {msg}");
+    assert!(msg.contains("Valid fields"), "got: {msg}");
+    assert!(msg.contains("name"), "got: {msg}");
+}
+
+#[test]
+fn malformed_group_by_entry_shows_expected_shapes() {
+    let err = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "group_by": [{"node": "p", "property": "name"}],
+            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("/group_by/0"), "got: {msg}");
+    assert!(msg.contains("\"kind\""), "got: {msg}");
     assert!(
-        err.to_string().contains("NonexistentType") && err.to_string().contains("is not one of")
+        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
+        "got: {msg}"
     );
+}
+
+#[test]
+fn bare_string_group_by_entry_shows_expected_shapes() {
+    let err = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "group_by": ["name"],
+            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("/group_by/0"), "got: {msg}");
+    assert!(msg.contains("\"kind\""), "got: {msg}");
+    assert!(
+        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
+        "got: {msg}"
+    );
+}
+
+#[test]
+fn invalid_column_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "columns": ["bogus_col"]},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("bogus_col"), "got: {msg}");
+    assert!(msg.contains("/node/columns"), "got: {msg}");
+    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("username"), "got: {msg}");
+    // The opaque oneOf fallthrough must not leak through.
+    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
+}
+
+#[test]
+fn invalid_relationship_type_lists_valid_candidates() {
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "BOGUS_REL", "from": "u", "to": "n"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("BOGUS_REL"), "got: {msg}");
+    assert!(msg.contains("/relationships/0/type"), "got: {msg}");
+    assert!(msg.contains("Valid values"), "got: {msg}");
+    assert!(msg.contains("AUTHORED"), "got: {msg}");
+    assert!(!msg.contains("under any of the schemas"), "got: {msg}");
 }
 
 #[test]
