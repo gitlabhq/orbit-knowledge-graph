@@ -25,9 +25,10 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - **Layered configuration.** `AppConfig` in `crates/gkg-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
 
+`AGENTS.md` is a symlink to `CLAUDE.md`. Edit `CLAUDE.md` only; the symlink keeps both paths in sync automatically.
+
 ## What CI enforces
 
-- `AGENTS.md` is a symlink to `CLAUDE.md` (no sync needed; edit `CLAUDE.md` only)
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - `cargo fmt` (`fmt-check`)
