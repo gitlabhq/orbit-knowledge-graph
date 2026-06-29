@@ -165,7 +165,7 @@ If the transform is a per-row projection of one extracted batch, express it as a
 1. Run the **reuse-infra checklist above** before writing new code.
 2. Define event type implementing `Event`
 3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
-4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
+4. Add topic config to `engine.topics` in `config/example.yaml` for retry/concurrency policy
 5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
 6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
 
