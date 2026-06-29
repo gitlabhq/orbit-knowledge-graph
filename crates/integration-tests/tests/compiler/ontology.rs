@@ -237,10 +237,6 @@ fn invalid_relationship_type_lists_valid_candidates() {
     assert!(!msg.contains("under any of the schemas"), "got: {msg}");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Full pipeline — SQL structure
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn full_pipeline() {
     let json = r#"{

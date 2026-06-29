@@ -9,9 +9,8 @@ use ontology::errors::format_candidate_list;
 ///
 /// jsonschema's own `Display` truncates enum rejections to three candidates
 /// and renders `oneOf` rejections as opaque prose, both of which leave an agent
-/// guessing the valid values. We read the structured `ValidationErrorKind` to
-/// list enum candidates, unwrap `oneOf`/`PropertyNames` to the enum inside,
-/// and append expected shapes for `group_by` rejections.
+/// guessing the valid values. Reading the structured `ValidationErrorKind`
+/// recovers the full allowlist instead.
 pub(crate) fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
     let path = error.instance_path().to_string();
 
@@ -28,11 +27,10 @@ pub(crate) fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> St
     format!("{error} at {path}")
 }
 
-/// Try to extract an enum allowlist from an error, handling direct `Enum`,
-/// `PropertyNames` wrapping an `Enum`, and `OneOf`/`AnyOf` nesting an `Enum`.
+/// Try to extract an enum allowlist from an error.
 ///
-/// Returns `(instance_display, options)` — for `PropertyNames` the instance is
-/// the offending key name, not the whole object.
+/// For `PropertyNames`, the returned instance is the offending key name, not
+/// the whole object.
 fn extract_enum_options<'a>(
     error: &'a jsonschema::ValidationError<'a>,
 ) -> Option<(String, &'a serde_json::Value)> {
@@ -70,13 +68,10 @@ fn format_enum_rejection(instance: &str, options: &serde_json::Value, path: &str
     format!("{instance} is not an allowed value{candidates} at {path}")
 }
 
-/// Walk a `oneOf` rejection's branch errors (depth-first, including nested
-/// `oneOf`/`anyOf`) and return the first enum's `options`. Filter operators
-/// nest a `oneOf` inside the property-filter `oneOf`, so the search must recurse.
-///
-/// Returns the *first* enum found depth-first. Every `oneOf` the ontology
-/// derives today (`columns`, relationship `type`, filter `op`) carries exactly
-/// one allowlist enum, so "first" is unambiguous.
+/// Filter operators nest a `oneOf` inside the property-filter `oneOf`, so the
+/// search must recurse. Every `oneOf` the ontology derives today (`columns`,
+/// relationship `type`, filter `op`) carries exactly one allowlist enum, so
+/// returning the first enum found is unambiguous.
 fn find_inner_enum_options<'a>(
     context: &'a [Vec<jsonschema::ValidationError<'a>>],
 ) -> Option<&'a serde_json::Value> {
