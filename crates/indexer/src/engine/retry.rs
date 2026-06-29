@@ -87,31 +87,20 @@ pub enum Step<T, E, S = ()> {
 /// Reaching the cap while every step asked to `Retry` returns [`RetryExhausted`] (via `E`'s
 /// `From`). In practice callers return `GiveUp` with the real error once they have nothing left
 /// to try, so the cap is a safety bound, not the primary exit.
-pub async fn drive_with<T, E, S, F, Fut>(
-    policy: &RetryPolicy,
-    init: S,
-    mut attempt: F,
-) -> Result<T, E>
+pub async fn drive_with<T, E, S, F, Fut>(policy: &RetryPolicy, init: S, attempt: F) -> Result<T, E>
 where
     F: FnMut(S, u32) -> Fut,
     Fut: Future<Output = Step<T, E, S>>,
     E: From<RetryExhausted>,
 {
-    let cap = policy.max_attempts.max(1);
-    let mut state = init;
-    for i in 0..cap {
-        match attempt(state, i).await {
-            Step::Done(value) => return Ok(value),
-            Step::GiveUp(error) => return Err(error),
-            Step::Retry(next) => {
-                state = next;
-                if i + 1 < cap {
-                    tokio::time::sleep(policy.backoff_for(i)).await;
-                }
-            }
+    // No deadline: the cap exhaustion supplies the terminal error via E: From<RetryExhausted>.
+    drive_bounded(policy, None, init, attempt, |_| {
+        RetryExhausted {
+            attempts: policy.max_attempts.max(1),
         }
-    }
-    Err(RetryExhausted { attempts: cap }.into())
+        .into()
+    })
+    .await
 }
 
 /// Stateless retry: [`drive_with`] with no carried state. The callback only sees the attempt
@@ -123,6 +112,63 @@ where
     E: From<RetryExhausted>,
 {
     drive_with(policy, (), move |(), i| attempt(i)).await
+}
+
+/// Deadline-bounded retry: like [`drive_with`] but bounded by `deadline` as well as the attempt
+/// cap, sleeping the backoff clamped to the time remaining. When the deadline passes while still
+/// retrying, `on_deadline` builds the terminal error (it carries the caller's context, e.g. the
+/// last-seen state), so the result stays a plain `Result<T, E>`.
+pub async fn drive_until<T, E, S, F, Fut, D>(
+    policy: &RetryPolicy,
+    deadline: tokio::time::Instant,
+    init: S,
+    attempt: F,
+    on_deadline: D,
+) -> Result<T, E>
+where
+    F: FnMut(S, u32) -> Fut,
+    Fut: Future<Output = Step<T, E, S>>,
+    D: FnOnce(&S) -> E,
+{
+    drive_bounded(policy, Some(deadline), init, attempt, on_deadline).await
+}
+
+/// The shared bounded loop behind [`drive_with`] and [`drive_until`]: run `attempt` until it
+/// yields `Done`/`GiveUp`, the attempt cap is hit, or (when set) `deadline` passes. On a bound
+/// hit while still retrying, `on_bound` builds the terminal error from the last carried state.
+async fn drive_bounded<T, E, S, F, Fut, D>(
+    policy: &RetryPolicy,
+    deadline: Option<tokio::time::Instant>,
+    init: S,
+    mut attempt: F,
+    on_bound: D,
+) -> Result<T, E>
+where
+    F: FnMut(S, u32) -> Fut,
+    Fut: Future<Output = Step<T, E, S>>,
+    D: FnOnce(&S) -> E,
+{
+    let cap = policy.max_attempts.max(1);
+    let mut state = init;
+    for i in 0..cap {
+        match attempt(state, i).await {
+            Step::Done(value) => return Ok(value),
+            Step::GiveUp(error) => return Err(error),
+            Step::Retry(next) => {
+                state = next;
+                let mut delay = policy.backoff_for(i);
+                if let Some(deadline) = deadline {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        return Err(on_bound(&state));
+                    }
+                    delay = delay.min(remaining);
+                }
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+    Err(on_bound(&state))
 }
 
 /// The outcome of one iteration of an unbounded supervisor loop ([`drive_forever`]).
@@ -158,40 +204,6 @@ where
             }
         }
     }
-}
-
-/// Deadline-bounded retry: poll `attempt` until it yields `Done`/`GiveUp`, sleeping the policy's
-/// backoff (clamped to the time remaining) between tries, until `deadline` passes. Returns
-/// `None` when the deadline is reached while still retrying, so the caller can build a timeout
-/// error with its own context. `max_attempts` is the safety bound; the deadline is the primary
-/// exit. State is threaded by value via [`Step::Retry`], like [`drive_with`].
-pub async fn drive_until<T, E, S, F, Fut>(
-    policy: &RetryPolicy,
-    deadline: tokio::time::Instant,
-    init: S,
-    mut attempt: F,
-) -> Option<Result<T, E>>
-where
-    F: FnMut(S, u32) -> Fut,
-    Fut: Future<Output = Step<T, E, S>>,
-{
-    let cap = policy.max_attempts.max(1);
-    let mut state = init;
-    for i in 0..cap {
-        match attempt(state, i).await {
-            Step::Done(value) => return Some(Ok(value)),
-            Step::GiveUp(error) => return Some(Err(error)),
-            Step::Retry(next) => {
-                state = next;
-                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                if remaining.is_zero() {
-                    return None;
-                }
-                tokio::time::sleep(policy.backoff_for(i).min(remaining)).await;
-            }
-        }
-    }
-    None
 }
 
 /// Returned by [`drive`] when every attempt asked to `Retry` and the cap was reached. Callers

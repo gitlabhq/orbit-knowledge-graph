@@ -382,12 +382,12 @@ pub async fn wait_until_ready(
         dead_letter: false,
     };
 
-    // Carry the last-seen versions so the timeout branch (drive_until -> None) can report them.
-    let last_seen = (None, None);
-    let outcome = drive_until(
+    // The carried state is the last-seen (active, migrating); on deadline, on_deadline reads it
+    // back to build the timeout report.
+    drive_until(
         &policy,
         deadline,
-        last_seen,
+        (None, None),
         |_carried, _attempt| async move {
             // A failed read is treated as "unknown" (None) so the other read can still drive an
             // outdated/ready decision; both failing falls through to a retry within the budget.
@@ -420,24 +420,14 @@ pub async fn wait_until_ready(
                 }
             }
         },
+        |(active, migrating)| SchemaWaitError::Timeout {
+            target: target_version,
+            seconds: timeout.as_secs(),
+            active: *active,
+            migrating: *migrating,
+        },
     )
-    .await;
-
-    match outcome {
-        Some(result) => result,
-        None => {
-            // Re-read once for the freshest versions in the timeout report; drive_until owns the
-            // carried state internally, so a fresh read is simpler than plumbing it back out.
-            let active = read_active_version(graph).await.unwrap_or(None);
-            let migrating = read_migrating_version(graph).await.unwrap_or(None);
-            Err(SchemaWaitError::Timeout {
-                target: target_version,
-                seconds: timeout.as_secs(),
-                active,
-                migrating,
-            })
-        }
-    }
+    .await
 }
 
 #[cfg(test)]
