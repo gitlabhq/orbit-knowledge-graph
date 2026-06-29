@@ -60,5 +60,12 @@ oxc_resolver = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 
-[lints]
-workspace = true
+# This crate opts into the workspace lints AND additionally denies bare `#[allow(..)]`
+# attributes. A crate-local `[lints.clippy]` table replaces (does not merge with) the
+# workspace `[workspace.lints.clippy]` block, so the workspace lints are re-declared here.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "deny"
