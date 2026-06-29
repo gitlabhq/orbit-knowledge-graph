@@ -14,6 +14,7 @@ use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
@@ -27,9 +28,13 @@ use crate::types::{Envelope, Subscription};
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
-/// Delivery attempts a code-indexing job gets before a wall-clock timeout dead-letters it.
-/// `attempt` is 1-based, so a value of 2 means: time out once → retry, time out again → DLQ.
-const MAX_TIMEOUT_ATTEMPTS: u32 = 2;
+/// A timed-out job is likely transiently slow: retry once, then dead-letter (engine reads this policy).
+const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
+    mode: RetryMode::Global,
+    backoff: Backoff::Fixed(&[]),
+    max_attempts: 2,
+    dead_letter: true,
+};
 
 fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
@@ -300,7 +305,7 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is permanent, so the job is dead-lettered on the first occurrence.
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
         let work =
             self.pipeline
@@ -310,35 +315,19 @@ impl CodeIndexingTaskHandler {
                 Ok(result) => result,
                 Err(_) => {
                     cancel.cancel();
-                    let message = format!(
-                        "code indexing job exceeded the {}s timeout",
-                        timeout.as_secs()
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        timeout_secs = timeout.as_secs(),
+                        "code indexing job exceeded wall-clock timeout"
                     );
-                    // Allow one retry to absorb a transient slowdown (a busy pod, a slow Gitaly
-                    // fetch); a job that times out again is treated as structurally stuck and
-                    // dead-lettered so it stops burning an indexing slot.
-                    if attempt < MAX_TIMEOUT_ATTEMPTS {
-                        warn!(
-                            project_id,
-                            branch = %branch,
-                            timeout_secs = timeout.as_secs(),
-                            attempt,
-                            "code indexing job exceeded wall-clock timeout; retrying"
-                        );
-                        Err(HandlerError::Processing(message))
-                    } else {
-                        warn!(
-                            project_id,
-                            branch = %branch,
-                            timeout_secs = timeout.as_secs(),
-                            attempt,
-                            "code indexing job exceeded wall-clock timeout again; dead-lettering"
-                        );
-                        Err(HandlerError::Permanent {
-                            message,
-                            action: crate::handler::PermanentAction::DeadLetter,
-                        })
-                    }
+                    Err(JOB_TIMEOUT_RETRY.global_failure(
+                        attempt,
+                        format!(
+                            "code indexing job exceeded the {}s timeout",
+                            timeout.as_secs()
+                        ),
+                    ))
                 }
             },
             None => work.await,

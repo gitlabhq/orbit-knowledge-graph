@@ -11,6 +11,7 @@ use futures::stream::FuturesUnordered;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_with};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -24,6 +25,18 @@ use crate::durability::RunDurability;
 use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
+
+/// Retry a datalake page read, shrinking the block size each time so an oversized page self-corrects.
+const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
+    mode: RetryMode::Local,
+    backoff: Backoff::Fixed(&[
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+        Duration::from_millis(400),
+    ]),
+    max_attempts: MAX_RETRIES + 1,
+    dead_letter: false,
+};
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
@@ -306,65 +319,66 @@ impl Pipeline {
         sql: &str,
         params: Value,
     ) -> Result<Page, HandlerError> {
-        let mut last_error = None;
-        let mut max_block_size: Option<u64> = None;
-
-        for attempt in 0..=MAX_RETRIES {
-            if attempt > 0 {
-                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
-                tokio::time::sleep(backoff).await;
-            }
-
-            let query_start = Instant::now();
-            match self
-                .datalake
-                .query_batches_with_summary(sql, params.clone(), max_block_size)
-                .await
-            {
-                Ok((batches, scan_stats)) => {
-                    let extract_elapsed = query_start.elapsed();
-                    let bytes: u64 = batches
-                        .iter()
-                        .map(|b| b.get_array_memory_size() as u64)
-                        .sum();
-                    self.metrics.record_datalake_query(
-                        transform_name,
-                        extract_elapsed.as_secs_f64(),
-                        bytes,
-                    );
-                    return Ok(Page {
-                        batches,
-                        scan_stats,
-                        extract_elapsed,
-                    });
-                }
-                Err(err) => {
-                    warn!(
-                        attempt,
-                        max_retries = MAX_RETRIES,
-                        max_block_size = ?max_block_size,
-                        %err,
-                        "datalake query failed, retrying with smaller block size"
-                    );
-                    let overflow = is_arrow_string_overflow(&err);
-                    last_error = Some(HandlerError::Processing(format!(
-                        "datalake query failed: {err}"
-                    )));
-                    // An overflow only clears once blocks are small, and each halving
-                    // step re-scans the page, so jump straight to the floor.
-                    max_block_size = Some(if overflow {
-                        self.retry_config.halving_min_block_size
-                    } else {
-                        match max_block_size {
-                            Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
-                            None => self.retry_config.halving_initial_block_size,
+        drive_with(
+            &DATALAKE_EXTRACT_RETRY,
+            None::<u64>,
+            |block_size, attempt| {
+                let query_start = Instant::now();
+                let fut = self
+                    .datalake
+                    .query_batches_with_summary(sql, params.clone(), block_size);
+                let metrics = &self.metrics;
+                let retry_config = &self.retry_config;
+                async move {
+                    match fut.await {
+                        Ok((batches, scan_stats)) => {
+                            let extract_elapsed = query_start.elapsed();
+                            let bytes: u64 = batches
+                                .iter()
+                                .map(|b| b.get_array_memory_size() as u64)
+                                .sum();
+                            metrics.record_datalake_query(
+                                transform_name,
+                                extract_elapsed.as_secs_f64(),
+                                bytes,
+                            );
+                            Step::Done(Page {
+                                batches,
+                                scan_stats,
+                                extract_elapsed,
+                            })
                         }
-                    });
+                        Err(err) => {
+                            warn!(
+                                attempt,
+                                max_retries = MAX_RETRIES,
+                                max_block_size = ?block_size,
+                                %err,
+                                "datalake query failed, retrying with smaller block size"
+                            );
+                            // An overflow only clears once blocks are small, and each halving step
+                            // re-scans the page, so jump straight to the floor.
+                            let next = if is_arrow_string_overflow(&err) {
+                                retry_config.halving_min_block_size
+                            } else {
+                                match block_size {
+                                    Some(size) => {
+                                        (size / 2).max(retry_config.halving_min_block_size)
+                                    }
+                                    None => retry_config.halving_initial_block_size,
+                                }
+                            };
+                            DATALAKE_EXTRACT_RETRY.retry_or_give_up(
+                                attempt,
+                                Some(next),
+                                HandlerError::Processing(format!("datalake query failed: {err}")),
+                            )
+                        }
+                    }
                 }
-            }
-        }
-
-        Err(last_error.expect("loop runs once and only exits here after a failure"))
+            },
+        )
+        .await
     }
 
     /// Groups output rows by destination table so each table is written as one bulk insert.

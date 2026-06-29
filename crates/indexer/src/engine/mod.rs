@@ -30,6 +30,7 @@ pub mod dead_letter;
 pub mod durability;
 pub mod handler;
 pub mod metrics;
+pub mod retry;
 pub mod types;
 pub mod worker_pool;
 
@@ -291,7 +292,7 @@ enum HandlerTaskOutcome {
 enum HandlersOutcome {
     Success,
     Failed { retry_delay: Option<Duration> },
-    Exhausted { error: String },
+    Exhausted { error: String, dead_letter: bool },
     Dropped { error: String },
 }
 
@@ -355,8 +356,8 @@ async fn process_message(
             }
             "term"
         }
-        HandlersOutcome::Exhausted { error } => {
-            if subscription.dead_letter_on_exhaustion {
+        HandlersOutcome::Exhausted { error, dead_letter } => {
+            if dead_letter {
                 match message.to_dlq(&broker, &subscription, &error).await {
                     DlqResult::Published => "dead_letter",
                     DlqResult::Nacked => "nack",
@@ -494,7 +495,10 @@ async fn run_handlers(
     }
 
     if let Some(error) = exhausted_error {
-        return HandlersOutcome::Exhausted { error };
+        return HandlersOutcome::Exhausted {
+            error,
+            dead_letter: subscription.dead_letter_on_exhaustion,
+        };
     }
     if let Some(error) = dropped_error {
         return HandlersOutcome::Dropped { error };
@@ -503,14 +507,18 @@ async fn run_handlers(
         return HandlersOutcome::Failed { retry_delay: None };
     }
     if let Some(error) = transient_error {
-        return match subscription.max_attempts {
+        return match subscription.retry_policy() {
             None => HandlersOutcome::Success,
-            Some(max_attempts) if envelope.attempt >= max_attempts => {
+            Some(policy) if !policy.should_redeliver(envelope.attempt) => {
                 warn!(
                     attempt = envelope.attempt,
-                    max_attempts, "retry attempts exhausted"
+                    max_attempts = policy.max_attempts,
+                    "retry attempts exhausted"
                 );
-                HandlersOutcome::Exhausted { error }
+                HandlersOutcome::Exhausted {
+                    error,
+                    dead_letter: policy.dead_letter,
+                }
             }
             Some(_) => HandlersOutcome::Failed {
                 retry_delay: subscription.retry_interval(),
@@ -602,8 +610,50 @@ mod tests {
         .await;
 
         assert!(
-            matches!(outcome, HandlersOutcome::Exhausted { .. }),
-            "expected Exhausted, got {outcome:?}"
+            matches!(
+                outcome,
+                HandlersOutcome::Exhausted {
+                    dead_letter: false,
+                    ..
+                }
+            ),
+            "expected Exhausted without dead-letter, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exhausted_carries_dead_letter_from_the_policy() {
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                dead_letter_on_exhaustion: true,
+                ..Default::default()
+            });
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(
+                outcome,
+                HandlersOutcome::Exhausted {
+                    dead_letter: true,
+                    ..
+                }
+            ),
+            "exhausted transient must carry dead_letter from the policy, got {outcome:?}"
         );
     }
 

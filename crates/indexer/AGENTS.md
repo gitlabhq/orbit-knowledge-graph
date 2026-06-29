@@ -14,12 +14,12 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Engine | `engine.rs` | Message dispatch and lifecycle |
-| HandlerRegistry | `handler.rs` | Handler-to-topic routing |
+| Engine | `engine/mod.rs` | Message dispatch and lifecycle |
+| HandlerRegistry | `engine/handler.rs` | Handler-to-topic routing |
 | NatsBroker | `nats/broker.rs` | JetStream connection |
-| WorkerPool | `worker_pool.rs` | Concurrency control |
-| Destination | `destination.rs` | Output abstraction |
-| ClickHouse | `clickhouse/` | ClickHouse destination implementation |
+| WorkerPool | `engine/worker_pool.rs` | Concurrency control |
+| Retry harness | `engine/retry.rs` | Shared retry vocabulary: `RetryPolicy` (mode + `Backoff` + cap), `Step`/`Loop`, and the `drive`/`drive_with`/`drive_until`/`drive_forever` executors. Global (NATS-redelivery) mode is executed by `run_handlers`, which reads the same policy |
+| ClickHouse writer | `clickhouse/` | `ClickHouseWriter` (one Arrow-IPC `write`) + `BufferedWriter` (per-table coalescing + local write retry) |
 
 ### Domain modules
 
@@ -32,7 +32,6 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 ### Traits
 
 - **Handler**: Message processor (`name`, `subscription`, `handle`)
-- **Destination**: Provides BatchWriter or StreamWriter
 - **Event**: Type-safe message serialization
 
 ### Schema migration
@@ -102,7 +101,7 @@ cargo test --test '*'
 
 Located in `testkit/`:
 
-- `MockNatsServices`, `MockDestination`, `MockHandler`
+- `MockNatsServices`, `MockHandler`
 - `TestEngineBuilder` for integration tests
 - `TestEnvelopeFactory` for message creation
 
