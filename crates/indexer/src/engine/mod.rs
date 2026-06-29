@@ -30,6 +30,7 @@ pub mod dead_letter;
 pub mod durability;
 pub mod handler;
 pub mod metrics;
+pub mod retry;
 pub mod types;
 pub mod worker_pool;
 
