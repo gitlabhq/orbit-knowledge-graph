@@ -140,58 +140,17 @@ where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
 {
     let mut out = EmittedRows::default();
-    let edges = &mut out.edges;
-    let commits = &mut out.commits;
     for row in rows {
         match row.action {
             Action::Closed | Action::Merged => {
-                let Some(author_id) = row.author_id else {
-                    continue;
-                };
-                // Edge YAML declares `merged` only on MergeRequest, `closed`
-                // on MR or WorkItem; drop anything else.
-                let declared_target = match row.action {
-                    Action::Merged => row.noteable_kind == NoteableKind::MergeRequest,
-                    _ => matches!(
-                        row.noteable_kind,
-                        NoteableKind::MergeRequest | NoteableKind::WorkItem
-                    ),
-                };
-                if !declared_target {
-                    continue;
+                if let Some(edge) = lifecycle_edge(row) {
+                    out.edges.push(edge);
                 }
-                // Skip (don't `unreachable!`) on an unexpected action: a
-                // panic here would crash-loop the worker on one bad row.
-                // See "no panics in the indexer data path" in AGENTS.md.
-                let Some(kind) = lifecycle_edge_kind(row.action) else {
-                    warn!(
-                        action = ?row.action,
-                        noteable_id = row.noteable_id,
-                        "system_notes: unexpected action in lifecycle arm, skipping row"
-                    );
-                    continue;
-                };
-                edges.push(EmittedEdge {
-                    traversal_path: row.traversal_path.clone(),
-                    relationship_kind: kind,
-                    source_id: author_id,
-                    source_kind: "User",
-                    target_id: row.noteable_id,
-                    target_kind: row.noteable_kind.as_str(),
-                });
             }
-
             // `opened` produces no edge: there is no source-of-truth FK for
             // who opened, and the entity's `created_at` already covers the
             // lifecycle point. ADR 013: out of scope.
             Action::Opened => {}
-
-            // Edge points from the parsed ref (source) to the noteable
-            // (target), matching the ontology's directional mentioner →
-            // mentioned. It lands in the noteable's namespace partition
-            // (`row.traversal_path`) so inbound-degree queries on the target
-            // hit the right partition. All collapse to MENTIONS in v1;
-            // link-type taxonomy is an open question in the ADR.
             Action::CrossReference
             | Action::Relate
             | Action::Unrelate
@@ -201,90 +160,139 @@ where
             | Action::UnrelateFromChild
             | Action::Moved
             | Action::Cloned
-            | Action::Duplicate => {
-                for r in &row.references {
-                    let Some(resolved) = resolve(r, row.default_project.as_str()) else {
-                        continue;
-                    };
-                    // Skip self-loops (MR !100 "mentioned in !100"): they
-                    // pollute degree counts.
-                    let ref_kind = NoteableKind::from(r.kind);
-                    if ref_kind == row.noteable_kind && resolved.id == row.noteable_id {
-                        continue;
-                    }
-                    edges.push(EmittedEdge {
-                        traversal_path: row.traversal_path.clone(),
-                        relationship_kind: edge_kinds::MENTIONS,
-                        source_id: resolved.id,
-                        source_kind: ref_kind.as_str(),
-                        target_id: row.noteable_id,
-                        target_kind: row.noteable_kind.as_str(),
-                    });
-                }
-            }
-
-            // `adds_commit.yaml` only declares MergeRequest → Commit, so a
-            // commit-action note on a non-MR noteable must drop rather than
-            // emit an undeclared variant.
-            Action::Commit => {
-                if row.noteable_kind != NoteableKind::MergeRequest {
-                    continue;
-                }
-                for r in &row.references {
-                    if let Some(commit) = build_commit_node(row, r) {
-                        edges.push(commit_edge(row, edge_kinds::ADDS_COMMIT, commit.id));
-                        commits.push(commit);
-                    }
-                }
-            }
-
-            // `merge` has two body shapes: a SHA-bearing auto-merge variant
-            // ("enabled an automatic merge ... for <sha> pass") → MERGED_AT_COMMIT,
-            // and a "created merge request !123" variant that stays MENTIONS
-            // (semantically a cross-reference). The parser already returns the
-            // commit ref for the first and the MR/issue ref for the second.
-            Action::Merge => {
-                for r in &row.references {
-                    match r.kind {
-                        RefKind::Commit => {
-                            // `merged_at_commit.yaml` only declares
-                            // MergeRequest → Commit, so a non-MR noteable must
-                            // drop (mirrors the `Action::Commit` guard above).
-                            if row.noteable_kind != NoteableKind::MergeRequest {
-                                continue;
-                            }
-                            if let Some(commit) = build_commit_node(row, r) {
-                                edges.push(commit_edge(
-                                    row,
-                                    edge_kinds::MERGED_AT_COMMIT,
-                                    commit.id,
-                                ));
-                                commits.push(commit);
-                            }
-                        }
-                        RefKind::MergeRequest | RefKind::Issue => {
-                            let Some(resolved) = resolve(r, row.default_project.as_str()) else {
-                                continue;
-                            };
-                            let target_kind = NoteableKind::from(r.kind);
-                            if target_kind == row.noteable_kind && resolved.id == row.noteable_id {
-                                continue;
-                            }
-                            edges.push(EmittedEdge {
-                                traversal_path: resolved.traversal_path.clone(),
-                                relationship_kind: edge_kinds::MENTIONS,
-                                source_id: row.noteable_id,
-                                source_kind: row.noteable_kind.as_str(),
-                                target_id: resolved.id,
-                                target_kind: target_kind.as_str(),
-                            });
-                        }
-                    }
-                }
-            }
+            | Action::Duplicate => push_mention_edges(row, &mut out.edges, &mut resolve),
+            Action::Commit => push_commit_edges(row, &mut out),
+            Action::Merge => push_merge_edges(row, &mut out, &mut resolve),
         }
     }
     out
+}
+
+/// `Closed`/`Merged` → a User → noteable lifecycle edge, or `None` when the row
+/// lacks an author or the noteable kind is not a declared target.
+fn lifecycle_edge(row: &NoteRow) -> Option<EmittedEdge> {
+    let author_id = row.author_id?;
+    // Edge YAML declares `merged` only on MergeRequest, `closed` on MR or
+    // WorkItem; drop anything else.
+    let declared_target = match row.action {
+        Action::Merged => row.noteable_kind == NoteableKind::MergeRequest,
+        _ => matches!(
+            row.noteable_kind,
+            NoteableKind::MergeRequest | NoteableKind::WorkItem
+        ),
+    };
+    if !declared_target {
+        return None;
+    }
+    // Skip (don't `unreachable!`) on an unexpected action: a panic here would
+    // crash-loop the worker on one bad row. See "no panics in the indexer data
+    // path" in AGENTS.md.
+    let Some(kind) = lifecycle_edge_kind(row.action) else {
+        warn!(
+            action = ?row.action,
+            noteable_id = row.noteable_id,
+            "system_notes: unexpected action in lifecycle arm, skipping row"
+        );
+        return None;
+    };
+    Some(EmittedEdge {
+        traversal_path: row.traversal_path.clone(),
+        relationship_kind: kind,
+        source_id: author_id,
+        source_kind: "User",
+        target_id: row.noteable_id,
+        target_kind: row.noteable_kind.as_str(),
+    })
+}
+
+/// The cross-reference family: each resolved reference (mentioner) gets a
+/// MENTIONS edge to the noteable (mentioned), matching the ontology's
+/// directional mentioner → mentioned. The edge lands in the noteable's
+/// namespace partition (`row.traversal_path`) so inbound-degree queries on the
+/// target hit the right partition. All link types collapse to MENTIONS in v1;
+/// the link-type taxonomy is an open question in the ADR.
+fn push_mention_edges<R>(row: &NoteRow, edges: &mut Vec<EmittedEdge>, resolve: &mut R)
+where
+    R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
+{
+    for r in &row.references {
+        let Some(resolved) = resolve(r, row.default_project.as_str()) else {
+            continue;
+        };
+        // Skip self-loops (MR !100 "mentioned in !100"): they pollute degree
+        // counts.
+        let ref_kind = NoteableKind::from(r.kind);
+        if ref_kind == row.noteable_kind && resolved.id == row.noteable_id {
+            continue;
+        }
+        edges.push(EmittedEdge {
+            traversal_path: row.traversal_path.clone(),
+            relationship_kind: edge_kinds::MENTIONS,
+            source_id: resolved.id,
+            source_kind: ref_kind.as_str(),
+            target_id: row.noteable_id,
+            target_kind: row.noteable_kind.as_str(),
+        });
+    }
+}
+
+/// `adds_commit.yaml` only declares MergeRequest → Commit, so a commit-action
+/// note on a non-MR noteable drops rather than emit an undeclared variant.
+fn push_commit_edges(row: &NoteRow, out: &mut EmittedRows) {
+    if row.noteable_kind != NoteableKind::MergeRequest {
+        return;
+    }
+    for r in &row.references {
+        if let Some(commit) = build_commit_node(row, r) {
+            out.edges
+                .push(commit_edge(row, edge_kinds::ADDS_COMMIT, commit.id));
+            out.commits.push(commit);
+        }
+    }
+}
+
+/// `merge` has two body shapes: a SHA-bearing auto-merge variant ("enabled an
+/// automatic merge ... for <sha> pass") → MERGED_AT_COMMIT, and a "created
+/// merge request !123" variant that stays MENTIONS (semantically a
+/// cross-reference). The parser already returns the commit ref for the first
+/// and the MR/issue ref for the second.
+fn push_merge_edges<R>(row: &NoteRow, out: &mut EmittedRows, resolve: &mut R)
+where
+    R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
+{
+    for r in &row.references {
+        match r.kind {
+            RefKind::Commit => {
+                // `merged_at_commit.yaml` only declares MergeRequest → Commit,
+                // so a non-MR noteable must drop (mirrors `push_commit_edges`).
+                if row.noteable_kind != NoteableKind::MergeRequest {
+                    continue;
+                }
+                if let Some(commit) = build_commit_node(row, r) {
+                    out.edges
+                        .push(commit_edge(row, edge_kinds::MERGED_AT_COMMIT, commit.id));
+                    out.commits.push(commit);
+                }
+            }
+            RefKind::MergeRequest | RefKind::Issue => {
+                let Some(resolved) = resolve(r, row.default_project.as_str()) else {
+                    continue;
+                };
+                let target_kind = NoteableKind::from(r.kind);
+                if target_kind == row.noteable_kind && resolved.id == row.noteable_id {
+                    continue;
+                }
+                out.edges.push(EmittedEdge {
+                    traversal_path: resolved.traversal_path.clone(),
+                    relationship_kind: edge_kinds::MENTIONS,
+                    source_id: row.noteable_id,
+                    source_kind: row.noteable_kind.as_str(),
+                    target_id: resolved.id,
+                    target_kind: target_kind.as_str(),
+                });
+            }
+        }
+    }
 }
 
 /// Build the `Commit` node row for a commit reference on `row`, or `None` when
