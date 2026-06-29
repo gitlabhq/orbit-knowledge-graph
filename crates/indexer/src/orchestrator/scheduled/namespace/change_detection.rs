@@ -93,7 +93,7 @@ struct NamespaceChangeQuery {
 
 impl NamespaceChangeQuery {
     fn from_ontology(ontology: &ontology::Ontology) -> Self {
-        Self::new(collect_reindex_sources(ontology))
+        Self::new(ontology.reindex_sources())
     }
 
     fn new(reindex_sources: impl IntoIterator<Item = ReindexSource>) -> Self {
@@ -101,24 +101,6 @@ impl NamespaceChangeQuery {
             sql: render_change_query(&reindex_sources.into_iter().collect()),
         }
     }
-}
-
-fn collect_reindex_sources(ontology: &ontology::Ontology) -> BTreeSet<ReindexSource> {
-    let node_sources = ontology
-        .nodes()
-        .filter_map(|node| node.etl.as_ref())
-        .flat_map(|etl| etl.reindex_on().iter().cloned());
-    let derived_sources = ontology
-        .derived_entities()
-        .flat_map(|derived| derived.etl.reindex_on().iter().cloned());
-    let edge_sources = ontology
-        .edge_etl_configs()
-        .flat_map(|(_, config)| config.reindex_on.iter().cloned());
-
-    node_sources
-        .chain(derived_sources)
-        .chain(edge_sources)
-        .collect()
 }
 
 fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
@@ -257,7 +239,7 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
     #[test]
     fn ontology_reindex_sources_cover_data_tables_not_the_enabled_table() {
         let ontology = ontology::Ontology::load_embedded().unwrap();
-        let sources = collect_reindex_sources(&ontology);
+        let sources = ontology.reindex_sources();
         let tables: BTreeSet<&str> = sources.iter().map(|s| s.table.as_str()).collect();
         assert!(tables.contains("work_items"));
         assert!(!tables.contains(ENABLED_NAMESPACE_TABLE));

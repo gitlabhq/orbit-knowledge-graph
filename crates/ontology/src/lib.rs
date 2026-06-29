@@ -43,7 +43,7 @@ pub use etl::{
     ReindexSource,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
@@ -749,6 +749,24 @@ impl Ontology {
 
     pub fn derived_entities(&self) -> impl Iterator<Item = &DerivedEntity> {
         self.derived_entities.values()
+    }
+
+    pub fn reindex_sources(&self) -> BTreeSet<ReindexSource> {
+        let node_sources = self
+            .nodes()
+            .filter_map(|node| node.etl.as_ref())
+            .flat_map(|etl| etl.reindex_on().iter().cloned());
+        let derived_sources = self
+            .derived_entities()
+            .flat_map(|derived| derived.etl.reindex_on().iter().cloned());
+        let edge_sources = self
+            .edge_etl_configs()
+            .flat_map(|(_, config)| config.reindex_on.iter().cloned());
+
+        node_sources
+            .chain(derived_sources)
+            .chain(edge_sources)
+            .collect()
     }
 
     pub fn edges(&self) -> impl Iterator<Item = &EdgeEntity> {
