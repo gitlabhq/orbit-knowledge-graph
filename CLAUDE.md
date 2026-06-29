@@ -27,7 +27,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 ## What CI enforces
 
-- `AGENTS.md` and `CLAUDE.md` must be identical (`agent-file-sync-check`)
+- `AGENTS.md` is a symlink to `CLAUDE.md` (no sync needed; edit `CLAUDE.md` only)
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - `cargo fmt` (`fmt-check`)

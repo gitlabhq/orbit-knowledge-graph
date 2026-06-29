@@ -31,11 +31,6 @@ pre-commit:
     - name: narration
       run: ./scripts/comment-guard/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
-    - name: agent-file-sync
-      run: diff AGENTS.md CLAUDE.md
-      glob:
-        - "AGENTS.md"
-        - "CLAUDE.md"
     - name: orbit-skill-docs-sync
       run: diff docs/source/remote/queries/query-language.md skills/orbit/references/query_language.md
       glob:

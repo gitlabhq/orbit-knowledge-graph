@@ -178,7 +178,7 @@ Three-layer defence:
 
     Catalog regeneration via `metrics-catalog-check`. The two new instruments land in `gkg-observability/src/indexer/sdlc.rs` (not in a system-notes-specific module) so the catalog stays domain-aligned.
 9. Bump `config/SCHEMA_VERSION` (currently 44 → 45).
-10. Update `docs/design-documents/data_model.md`, `docs/design-documents/indexing/sdlc_indexing.md`, `AGENTS.md`, and `CLAUDE.md` in the same MR (per the AGENTS.md design-doc sync rule).
+10. Update `docs/design-documents/data_model.md`, `docs/design-documents/indexing/sdlc_indexing.md`, and `CLAUDE.md` in the same MR (per the AGENTS.md design-doc sync rule).
 11. Integration test `crates/integration-tests/tests/indexer/sdlc/notes.rs::materialises_cross_reference_edges`, plus a lifecycle test ported from the closed !1109. The full source of the !1109 lifecycle test is preserved alongside the research package at [`dgruzd/droid-workspace/task/2685`](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/) so future implementers do not need to spelunk a closed-MR branch.
 12. Feature flag (config-driven) defaulting to off; staging-only first. The flag is handler-config-driven and lives where the rest of the handler config lives under ADR 014's entity-dispatch model:
 

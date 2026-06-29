@@ -17,7 +17,7 @@ Documentation lives in three tiers:
 2. **Design documents** — `docs/design-documents/` (architecture, data model, security, querying, indexing, schema, observability)
 3. **Dev guides** — `docs/dev/` (local development, infrastructure, runbook)
 
-`AGENTS.md` and `CLAUDE.md` must be identical (CI enforces this).
+`AGENTS.md` is a symlink to `CLAUDE.md` (edit `CLAUDE.md` only).
 
 ## How to work through the MR
 
