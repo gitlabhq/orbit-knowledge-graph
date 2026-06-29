@@ -35,6 +35,10 @@ an ADR/issue link. "What the next line does" is never a reason to keep it — an
 neither is a *why* that a well-named symbol or the surrounding structure already
 makes obvious (see "A true *why* can still go").
 
+**Out of scope — never touch these regardless of the discriminator:** license
+headers and links to issues, specs, or external docs. A license header carries
+no *why* and a literal reading would delete it; don't. Leave both as-is.
+
 The easy cases (pure narration) are below. The cases that actually leak through
 review are the three after them: **tighten**, **de-duplicate**, and **redundant
 with the code**. Learn those.
@@ -103,6 +107,10 @@ reclaim story lives once on the type doc:
 // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so
 // the commit can't finalize mid-stream even if every flushed part drains first.
 ```
+
+These sections are sequential passes, not independent rules: a later pass may
+delete even this surviving type-doc comment — see "A true *why* can still go" —
+once a named symbol carries it.
 
 ## A true *why* can still go — when a named symbol carries it
 
