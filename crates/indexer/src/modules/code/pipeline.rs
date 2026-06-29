@@ -51,11 +51,6 @@ impl IndexOutcome {
 /// stale-clean its prior version then checkpoint, unless any part failed (then the sweep and
 /// NATS redelivery retry it). This makes the checkpoint the single durable record, with no
 /// watermark to track.
-///
-/// `inflight` is reclaimed in [`Drop`], not in `finalize`, so every terminal path frees the
-/// slot — including a job whose run future is dropped on timeout after submitting batches, where
-/// the sentinel's `release()` never runs so `finalize` never fires. Reclaiming it in `finalize`
-/// would leak the slot on that path and hang the `flush()` drain loop.
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
@@ -70,8 +65,6 @@ impl ProjectCommit {
         if self.remaining.fetch_sub(1, Ordering::AcqRel) != 1 {
             return;
         }
-        // Hold the last token across `finalize` so `inflight` stays non-zero until the checkpoint
-        // lands, making `flush()` wait for the checkpoint and not just for the writes.
         tokio::spawn(async move {
             self.finalize().await;
         });
