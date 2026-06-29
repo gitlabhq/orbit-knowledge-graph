@@ -213,67 +213,47 @@ mod tests {
         dead_letter: false,
     };
 
-    #[tokio::test(start_paused = true)]
-    async fn done_on_first_attempt_returns_immediately() {
+    /// Run `drive` with a callback that returns `Done(0)` once `attempt` reaches `done_at`, else
+    /// `Retry`/`GiveUp` per `terminal`, counting calls. `done_at = None` means never finish.
+    async fn run(
+        done_at: Option<u32>,
+        terminal: fn() -> Step<u32, TestError>,
+    ) -> (Result<u32, TestError>, u32) {
         let calls = AtomicU32::new(0);
-        let result: Result<u32, TestError> = drive(&POLICY, |_| {
+        let result = drive(&POLICY, |attempt| {
             calls.fetch_add(1, Ordering::SeqCst);
-            std::future::ready(Step::Done(7))
+            std::future::ready(match done_at {
+                Some(n) if attempt >= n => Step::Done(attempt),
+                _ => terminal(),
+            })
         })
         .await;
-        assert_eq!(result, Ok(7));
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        (result, calls.load(Ordering::SeqCst))
     }
 
     #[tokio::test(start_paused = true)]
-    async fn retries_then_succeeds() {
-        // State carried in the callback's own captured environment, not through the harness.
-        let mut seen = 0u32;
-        let result: Result<u32, TestError> = drive(&POLICY, |attempt| {
-            seen = attempt;
-            if attempt < 2 {
-                std::future::ready(Step::Retry(()))
-            } else {
-                std::future::ready(Step::Done(attempt))
-            }
-        })
-        .await;
-        assert_eq!(result, Ok(2));
+    async fn done_returns_on_the_first_success() {
+        assert_eq!(run(Some(0), || Step::Retry(())).await, (Ok(0), 1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retries_until_success() {
+        assert_eq!(run(Some(2), || Step::Retry(())).await, (Ok(2), 3));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn give_up_is_terminal_on_the_first_attempt() {
         assert_eq!(
-            seen, 2,
-            "callback mutates its own captured state across attempts"
+            run(None, || Step::GiveUp(TestError::GaveUp)).await,
+            (Err(TestError::GaveUp), 1)
         );
     }
 
     #[tokio::test(start_paused = true)]
-    async fn give_up_is_terminal_without_consuming_the_cap() {
-        let calls = AtomicU32::new(0);
-        let result: Result<u32, TestError> = drive(&POLICY, |_| {
-            calls.fetch_add(1, Ordering::SeqCst);
-            std::future::ready(Step::GiveUp(TestError::GaveUp))
-        })
-        .await;
-        assert_eq!(result, Err(TestError::GaveUp));
+    async fn retry_only_runs_exactly_max_attempts_then_exhausts() {
         assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "GiveUp stops on the first attempt"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn exhausting_the_cap_yields_retry_exhausted() {
-        let calls = AtomicU32::new(0);
-        let result: Result<u32, TestError> = drive(&POLICY, |_| {
-            calls.fetch_add(1, Ordering::SeqCst);
-            std::future::ready(Step::Retry(()))
-        })
-        .await;
-        assert_eq!(result, Err(TestError::Exhausted));
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            3,
-            "a Retry-only callback runs exactly max_attempts times"
+            run(None, || Step::Retry(())).await,
+            (Err(TestError::Exhausted), 3)
         );
     }
 
