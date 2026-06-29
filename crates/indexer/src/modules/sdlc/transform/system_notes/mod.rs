@@ -68,11 +68,10 @@ pub(in crate::modules::sdlc) struct SystemNotesTransform {
     resolve_lookup_batch_size: usize,
 }
 
-/// Output index of the `gl_edge` batch in [`SystemNotesTransform::outputs`].
 const EDGE_OUTPUT_INDEX: usize = 0;
-/// Output index of the `gl_commit` node batch. The transform dual-writes the
-/// commit node rows here alongside the edge rows, mirroring the code indexer's
-/// inline Branch-row emission (`arrow_converter.rs`).
+/// The transform dual-writes commit node rows at this index alongside the edge
+/// rows, mirroring the code indexer's inline Branch-row emission
+/// (`arrow_converter.rs`).
 const COMMIT_OUTPUT_INDEX: usize = 1;
 
 impl SystemNotesTransform {
@@ -512,10 +511,6 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
     .map_err(|e| HandlerError::Processing(format!("failed to build gl_edge batch: {e}")))
 }
 
-// ---------------------------------------------------------------------------
-// Commit → RecordBatch
-// ---------------------------------------------------------------------------
-
 /// Build the `gl_commit` node batch. Column order matches the ontology storage
 /// declaration in `nodes/source_code/commit.yaml` (and the generated DDL):
 /// `id, traversal_path, project_id, sha, _version, _deleted`.
@@ -797,7 +792,6 @@ mod tests {
         assert_eq!(out.edges.len(), 1);
         assert_eq!(out.commits.len(), 1);
         assert_eq!(out.edges[0].relationship_kind, "ADDS_COMMIT");
-        // make_note seeds project_id = 100.
         assert_eq!(out.commits[0].project_id, 100);
         assert_eq!(out.edges[0].target_id, out.commits[0].id);
 

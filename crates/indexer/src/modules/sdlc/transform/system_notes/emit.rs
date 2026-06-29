@@ -68,7 +68,7 @@ pub fn compute_commit_id(project_id: i64, sha: &str) -> i64 {
     let mut hasher = rustc_hash::FxHasher::default();
     project_id.hash(&mut hasher);
     sha.hash(&mut hasher);
-    // Mask clears the sign bit so the result is always a positive i64.
+    // Clear the sign bit so the id is always a positive i64.
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
@@ -94,8 +94,6 @@ pub struct EmittedCommit {
     pub sha: String,
 }
 
-/// The output of [`build_edges`]: edge rows for `gl_edge` plus the commit node
-/// rows for `gl_commit` that the commit-bearing actions reference.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EmittedRows {
     pub edges: Vec<EmittedEdge>,
@@ -225,10 +223,9 @@ where
                 }
             }
 
-            // "added N commits" → MergeRequest --ADDS_COMMIT--> Commit.
-            // `adds_commit.yaml` only declares MergeRequest → Commit, so drop
-            // the (rare) case where a commit-action note lands on a non-MR
-            // noteable rather than emit an undeclared variant.
+            // `adds_commit.yaml` only declares MergeRequest → Commit, so a
+            // commit-action note on a non-MR noteable must drop rather than
+            // emit an undeclared variant.
             Action::Commit => {
                 if row.noteable_kind != NoteableKind::MergeRequest {
                     continue;
@@ -251,10 +248,8 @@ where
                     match r.kind {
                         RefKind::Commit => {
                             // `merged_at_commit.yaml` only declares
-                            // MergeRequest → Commit, so drop a SHA-bearing
-                            // merge note on a non-MR noteable rather than emit
-                            // an undeclared variant. Mirrors the Action::Commit
-                            // guard above.
+                            // MergeRequest → Commit, so a non-MR noteable must
+                            // drop (mirrors the `Action::Commit` guard above).
                             if row.noteable_kind != NoteableKind::MergeRequest {
                                 continue;
                             }
@@ -512,7 +507,6 @@ mod tests {
             assert_eq!(c.project_id, 2);
             assert_eq!(c.id, compute_commit_id(2, &c.sha));
         }
-        // Edge target ids must match the emitted node ids.
         assert_eq!(out.edges[0].target_id, out.commits[0].id);
         assert_eq!(out.edges[1].target_id, out.commits[1].id);
     }
@@ -549,10 +543,8 @@ mod tests {
 
     #[test]
     fn merge_action_sha_variant_on_non_mr_noteable_is_dropped() {
-        // merged_at_commit.yaml only declares MergeRequest → Commit. A merge
-        // note carrying a SHA on a non-MR noteable must drop rather than emit
-        // an undeclared <NonMR> → Commit variant (mirrors the Action::Commit
-        // WorkItem-drop guard).
+        // merged_at_commit.yaml only declares MergeRequest → Commit, so a
+        // SHA-bearing merge note on a non-MR noteable must drop.
         let row = row_for(
             Action::Merge,
             "enabled an automatic merge when all merge checks for 1a2b3c4d5e pass",
