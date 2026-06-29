@@ -134,6 +134,12 @@ async fn indexes_file_nodes_for_all_archive_files() {
     assert_eq!(language_for(&files, "assets/logo.png"), Some("unknown"));
     assert_eq!(language_for(&files, "src/main.py"), Some("python"));
 
+    assert_eq!(
+        file_size_bytes(&clickhouse, project_id, "src/main.py").await,
+        Some(26),
+        "size_bytes must record the file's uncompressed byte length"
+    );
+
     assert_directory_is_active(&clickhouse, project_id, "config").await;
     assert_directory_is_active(&clickhouse, project_id, "docs/only").await;
     assert_contains_edge_between_directory_and_file(
@@ -1034,6 +1040,24 @@ fn language_for<'a>(rows: &'a [(String, String, String)], path: &str) -> Option<
     rows.iter()
         .find(|row| row.0 == path)
         .map(|row| row.2.as_str())
+}
+
+async fn file_size_bytes(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    path: &str,
+) -> Option<i64> {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT size_bytes FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_file")
+        ))
+        .await;
+    let batch = result.into_iter().find(|b| b.num_rows() > 0)?;
+    let col = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&batch, "size_bytes")
+        .expect("size_bytes column");
+    Some(col.value(0))
 }
 
 async fn assert_directory_is_active(

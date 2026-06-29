@@ -87,6 +87,13 @@ properties:
     description: "Programming language (e.g., ruby, python, java)."
     selectivity: low
 
+  size_bytes:
+    type: int64
+    source: size_bytes
+    nullable: false
+    mutable: false
+    description: "Uncompressed file size in bytes, measured at index time."
+
   content:
     type: string
     virtual:
@@ -118,6 +125,7 @@ storage:
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
     - {name: extension, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: language, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
