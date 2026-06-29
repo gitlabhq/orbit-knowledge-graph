@@ -87,26 +87,5 @@ Languages not currently indexed: Swift, COBOL, Terraform, YAML.
 - Files in archived projects (SDLC metadata for archived projects is still indexed)
 - Private content the requesting user does not have access to (authorization is enforced at query time)
 
-## Permissions
-
-Orbit has no separate permission model. A query runs as you and returns only the
-entities you can already see in GitLab. Enabling Orbit on a group does not give anyone
-access they did not already have. Access is hierarchical: a role on a top-level group
-applies to every subgroup and project beneath it.
-
-To query a group, you need the Reporter role or higher on it. This matches the access
-level other GitLab Analytics features require.
-
-Security data has a higher floor. The security domain (vulnerabilities, security findings,
-security scans, scanners, and CVE/CWE identifiers) requires the Security Manager role. A
-user with only the Reporter role still queries the rest of the graph, but security entities
-are dropped from the results, including from aggregate counts.
-
-| Data domain | Minimum role |
-|---|---|
-| Core, code review, CI/CD, planning | Reporter |
-| Security | Security Manager |
-
-These floors apply to every access method: the REST API, MCP, `glab`, and the GitLab Duo
-Agent Platform, including the Security Analyst Agent. Enabling Orbit on a group is a
-separate action that requires the Owner role. See [Get started](getting-started.md#prerequisites).
+For the roles required to query, and the Security Manager role needed for security data,
+see [Permissions](permissions.md).

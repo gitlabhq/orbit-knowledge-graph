@@ -89,8 +89,8 @@ All queries go through the same path:
 1. Orbit compiles the JSON DSL to ClickHouse SQL.
 1. ClickHouse executes the query against the graph tables.
 1. Orbit applies authorization filtering: results are scoped to entities the
-   requesting user has access to in GitLab. See [Permissions](indexing.md#permissions)
-   for the role floors that govern this.
+   requesting user has access to in GitLab. See [Permissions](permissions.md)
+   for the roles this requires.
 1. Orbit returns typed JSON results.
 
 You can request the compiled SQL in query responses by setting `options.include_debug_sql: true`.
