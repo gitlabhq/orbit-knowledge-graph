@@ -22,7 +22,6 @@ async fn stale_edge_reconciliation() {
         &ctx,
         reconciles_has_latest_diff,
         reconciles_has_head_pipeline,
-        reconciles_merged_at_commit,
         reconciles_last_edited_by,
         reconciles_updated_by,
         reconciles_in_milestone_for_merge_request,
@@ -181,29 +180,6 @@ async fn reconciles_has_head_pipeline(ctx: &TestContext) {
             owner_is_source: true,
             current_fk: 500,
             stale_fk: 400,
-        },
-    )
-    .await;
-}
-
-// A force-push / rebase / squash rewrites the landed SHA, so the MR's
-// merged_commit_id (sipHash64 of the new SHA) changes and the prior
-// (MR, old commit) edge orphans. current_fk/stale_fk stand in for the
-// synthetic Commit ids of the new and old SHAs.
-async fn reconciles_merged_at_commit(ctx: &TestContext) {
-    assert_reconciles(
-        ctx,
-        Case {
-            relationship_kind: "MERGED_AT_COMMIT",
-            owner_table: "gl_merge_request",
-            owner_id: 10,
-            owner_fk_column: "merged_commit_id",
-            edge_table: "gl_edge",
-            source_kind: "MergeRequest",
-            target_kind: "Commit",
-            owner_is_source: true,
-            current_fk: 222,
-            stale_fk: 111,
         },
     )
     .await;

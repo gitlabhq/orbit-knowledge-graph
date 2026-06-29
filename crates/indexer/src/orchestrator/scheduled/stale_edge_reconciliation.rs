@@ -345,19 +345,6 @@ mod tests {
     }
 
     #[test]
-    fn merged_at_commit_reconciles_against_synthetic_fk() {
-        let specs = specs();
-        let merged = find(&specs, "MERGED_AT_COMMIT", "gl_merge_request");
-        assert_eq!(merged.owner_id_column, "source_id");
-        assert_eq!(merged.other_id_column, "target_id");
-        assert_eq!(merged.source_kind, "MergeRequest");
-        assert_eq!(merged.target_kind, "Commit");
-        // The sweep compares edge.target_id against this column, so it must be
-        // the synthetic id the MR node stores, not the raw SHA string.
-        assert_eq!(merged.owner_fk_column, "merged_commit_id");
-    }
-
-    #[test]
     fn incoming_edge_owner_is_target() {
         let specs = specs();
         let edited = find(&specs, "LAST_EDITED_BY", "gl_merge_request");
@@ -379,7 +366,6 @@ mod tests {
                 "HAS_LATEST_DIFF",
                 "IN_MILESTONE",
                 "LAST_EDITED_BY",
-                "MERGED_AT_COMMIT",
                 "UPDATED_BY"
             ]
             .into_iter()
@@ -390,7 +376,14 @@ mod tests {
     #[test]
     fn immutable_fk_kinds_are_not_marked_mutable() {
         let specs = specs();
-        for immutable in ["IN_PROJECT", "AUTHORED", "HAS_JOB", "IN_PIPELINE", "CLOSED"] {
+        for immutable in [
+            "IN_PROJECT",
+            "AUTHORED",
+            "HAS_JOB",
+            "IN_PIPELINE",
+            "CLOSED",
+            "MERGED_AT_COMMIT",
+        ] {
             assert!(
                 !specs.iter().any(|s| s.relationship_kind == immutable),
                 "{immutable} is not marked mutable in the ontology and must not be swept",
