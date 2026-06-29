@@ -1,0 +1,41 @@
+# KG #924: MERGED_AT_COMMIT is sourced from the scalar FK
+# COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha), mirroring
+# Rails' own fallback for legacy rows. Each MR here exercises one COALESCE leg
+# and asserts the Commit node carries the resolved SHA (never a pre-squash
+# head from a system note). The un-merged MR emits neither edge nor node.
+description: MERGED_AT_COMMIT resolves through the merged/merge/squash COALESCE fallback
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 1000, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/1000/" }
+  merge_requests:
+    # merged_commit_sha present -> first leg wins (merge-commit strategy).
+    - { id: 1, iid: 101, title: Merge commit MR, source_branch: a, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: mergeAAA, merged_commit_sha: mergedAAA, squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
+    # merged_commit_sha NULL, merge_commit_sha present -> second leg (legacy row).
+    - { id: 2, iid: 102, title: Legacy merge MR, source_branch: b, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: mergeBBB, merged_commit_sha: null, squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
+    # Only squash_commit_sha present -> third leg. The edge must point at the
+    # squash commit (the landed commit), which is exactly the case the
+    # auto-merge note would have gotten wrong (it carries the pre-squash head).
+    - { id: 3, iid: 103, title: Squash MR, source_branch: c, target_branch: main, state_id: 3, merge_status: merged, draft: true, squash: true, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: null, squash_commit_sha: squashCCC, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
+    # Un-merged: all three SHAs NULL -> no edge, no commit node.
+    - { id: 4, iid: 104, title: Open MR, source_branch: d, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: null, squash_commit_sha: null, author_id: 1, merge_user_id: null, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_commit:
+      count: 3
+      rows:
+        - { sha: mergedAAA, project_id: 1000, traversal_path: "1/100/1000/" }
+        - { sha: mergeBBB, project_id: 1000, traversal_path: "1/100/1000/" }
+        - { sha: squashCCC, project_id: 1000, traversal_path: "1/100/1000/" }
+  edges:
+    - kind: MERGED_AT_COMMIT
+      from: MergeRequest
+      to: Commit
+      traversal_path: "1/100/1000/"
+      count: 3
+      rows:
+        - { source_id: 1, source_kind: MergeRequest, target_kind: Commit }
+        - { source_id: 2, source_kind: MergeRequest, target_kind: Commit }
+        - { source_id: 3, source_kind: MergeRequest, target_kind: Commit }

@@ -140,6 +140,13 @@ properties:
     nullable: false
     description: "Squash commit SHA, if squashed."
 
+  merged_commit_id:
+    type: int64
+    source: merged_commit_id
+    nullable: true
+    mutable: true
+    description: "Synthetic Commit id the MR was merged at: sipHash64(target_project_id, COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha)). NULL until merged. Drives the MERGED_AT_COMMIT FK edge and is the join key the stale-edge sweep compares against."
+
   latest_build_started_at:
     type: timestamp
     source: metric_latest_build_started_at
@@ -347,6 +354,11 @@ etl:
     m.milestone_id AS milestone_id,
     m.merged_commit_sha AS merged_commit_sha,
     m.squash_commit_sha AS squash_commit_sha,
+    if(
+      coalesce(nullIf(m.merged_commit_sha, ''), nullIf(m.merge_commit_sha, ''), nullIf(m.squash_commit_sha, '')) IS NULL,
+      NULL,
+      sipHash64(m.target_project_id, coalesce(nullIf(m.merged_commit_sha, ''), nullIf(m.merge_commit_sha, ''), nullIf(m.squash_commit_sha, '')))
+    ) AS merged_commit_id,
     m.traversal_path AS traversal_path,
     metrics.metric_latest_build_started_at AS metric_latest_build_started_at,
     metrics.metric_latest_build_finished_at AS metric_latest_build_finished_at,
@@ -486,6 +498,11 @@ etl:
       as: HAS_HEAD_PIPELINE
       direction: outgoing
       mutable: true
+    merged_commit_id:
+      to: Commit
+      as: MERGED_AT_COMMIT
+      direction: outgoing
+      mutable: true
     latest_merge_request_diff_id:
       to: MergeRequestDiff
       as: HAS_LATEST_DIFF
@@ -579,6 +596,7 @@ storage:
     - {name: source_project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: head_pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: latest_merge_request_diff_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: merged_commit_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(6)", granularity: 2}
@@ -609,3 +627,4 @@ storage:
     - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_head_pipeline_id, column: head_pipeline_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_latest_merge_request_diff_id, column: latest_merge_request_diff_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_merged_commit_id, column: merged_commit_id, type: "bloom_filter(0.0001)", granularity: 1}

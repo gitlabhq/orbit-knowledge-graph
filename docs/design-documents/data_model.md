@@ -152,6 +152,7 @@ graph TD
 | `ASSIGNED`                          | `User`         | `MergeRequest`, `WorkItem` | A user is assigned to a merge request or work item.                                         |
 | `FIXES`                             | `MergeRequest` | `Vulnerability`| A merge request fixes a vulnerability.                                                                  |
 | `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | A work item is related to or blocks another work item (edge property `link_type`: `relates_to`, `blocks`). |
+| `MERGED_AT_COMMIT`                  | `MergeRequest` | `Commit`       | The commit a merge request was merged at, sourced from the scalar FK `COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha)` on the `merge_requests` row (never the auto-merge system note). Absent until the MR merges. |
 | `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
 | `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
 | `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
@@ -167,6 +168,7 @@ The Code Graph represents the structure and relationships within the source code
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
+| `Commit`              | A Git commit a merge request was merged at. Dual-written from the `merge_requests` row; synthetic `id` = `sipHash64(project_id, sha)` (no Siphon source table of its own). | `id`, `sha`, `project_id`                                  |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
 | `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |

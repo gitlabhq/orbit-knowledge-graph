@@ -374,6 +374,7 @@ domains:
     description: "Entities related to source code structure, definitions, and imports."
     nodes:
       Branch: nodes/source_code/branch.yaml
+      Commit: nodes/source_code/commit.yaml
       Directory: nodes/source_code/directory.yaml
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
@@ -445,3 +446,4 @@ edges:
   BUILT_BY: edges/built_by.yaml
   MENTIONS: edges/mentions.yaml
   REOPENED: edges/reopened.yaml
+  MERGED_AT_COMMIT: edges/merged_at_commit.yaml

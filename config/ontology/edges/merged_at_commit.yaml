@@ -1,0 +1,14 @@
+# config/ontology/edges/merged_at_commit.yaml
+
+description: >-
+  The commit a merge request was merged at, sourced from the scalar FK
+  COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha) on the
+  merge_requests row (KG #924) — never the auto-merge system note, whose SHA
+  is the enable-time source-branch head, not the landed commit.
+
+variants:
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Commit, id: id }
+    fk_column: merged_commit_id
+    scope: same_namespace
+    description: "MergeRequest was merged at this commit."

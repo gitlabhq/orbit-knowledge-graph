@@ -1,0 +1,84 @@
+# config/ontology/nodes/source_code/commit.yaml
+
+node_type: Commit
+domain: source_code
+description: A Git commit a merge request was merged at
+label: sha
+destination_table: gl_commit
+default_columns: [id, sha, project_id]
+sort_key: [traversal_path, project_id, id]
+
+style:
+  size: 24
+  color: "#8B5CF6"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Synthetic identifier: sipHash64(project_id, sha). Matches MergeRequest.merged_commit_id so MERGED_AT_COMMIT joins."
+
+  sha:
+    type: string
+    source: sha
+    nullable: false
+    mutable: false
+    description: "Commit SHA the merge request landed on, from COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha)."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+# Dual-written from the merge_requests row (not a Siphon table of its own): the
+# Commit's id and sha must be computed with the same sipHash64/COALESCE
+# expression the MergeRequest node uses for merged_commit_id, so the
+# MERGED_AT_COMMIT FK edge resolves to a node that exists. Only merged MRs
+# (COALESCE non-empty) produce a commit; the WHERE prunes the rest. argMax
+# de-duplicates the many-MRs-to-one-commit case within a batch.
+etl:
+  type: query
+  source: merge_requests
+  select: >-
+    sipHash64(m.target_project_id, coalesce(nullIf(m.merged_commit_sha, ''), nullIf(m.merge_commit_sha, ''), nullIf(m.squash_commit_sha, ''))) AS id,
+    coalesce(nullIf(m.merged_commit_sha, ''), nullIf(m.merge_commit_sha, ''), nullIf(m.squash_commit_sha, '')) AS sha,
+    m.target_project_id AS project_id,
+    m.traversal_path AS traversal_path
+  from: merge_requests AS m
+  where: >-
+    coalesce(nullIf(m.merged_commit_sha, ''), nullIf(m.merge_commit_sha, ''), nullIf(m.squash_commit_sha, '')) IS NOT NULL
+  traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
+  watermark: m.{{watermark_column}}
+  table_alias: m
+  deleted: m.{{deleted_column}}
+  order_by: [traversal_path, project_id, id]
+  reindex_on: [merge_requests]
+
+storage:
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: sha, type: "String", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_sha, column: sha, type: "bloom_filter(0.001)", granularity: 1}
