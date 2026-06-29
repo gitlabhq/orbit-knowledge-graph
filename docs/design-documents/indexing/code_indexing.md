@@ -296,7 +296,7 @@ Concurrency is split into two lanes by post-filter file count: a wide lane (`sma
 
 A project is checkpointed only after its rows are durable. The handler attaches a per-project `ProjectCommit` token to every batch it submits and holds a `+1` sentinel; the writer decrements the token as each part lands, and whichever decrement reaches zero (a flushed part, or the sentinel the pipeline drops after the parse finishes) finalizes the project: it tombstones the prior version's stale rows, then writes the checkpoint. If any of the project's parts failed to flush, the token is marked failed and the checkpoint is skipped, so the once-a-minute backfill sweep re-dispatches it and NATS redelivery bounds the retries (re-indexing is idempotent). A crash before a part lands has the same effect, as does a job that hits its wall-clock timeout after submitting batches: its run future is dropped before the sentinel is released, so the project never finalizes and is re-indexed (the `ProjectCommit` frees its in-flight slot on drop regardless, so the shutdown drain never wedges). This keeps the checkpoint the single durable record: no watermark, no durability handshake, no lease heartbeat, no lock renewal.
 
-Parts that span many namespaces within one bucket are safe to query: the edge sort key is `(traversal_path, relationship_kind, …)`, so ClickHouse still prunes by primary key within a mixed part.
+Parts that span many namespaces are safe to query: the edge sort key is `(traversal_path, relationship_kind, …)`, so ClickHouse still prunes by primary key within a mixed part.
 
 #### Checkpoint tracking
 
