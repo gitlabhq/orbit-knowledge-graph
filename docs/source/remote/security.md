@@ -32,10 +32,9 @@ cannot see something in the GitLab UI, they cannot see it in the graph. Enabling
 group grants no one access they did not already have, and access is hierarchical: a role on
 a top-level group applies to every subgroup and project beneath it.
 
-## Roles required to query
+## Roles required to query Orbit
 
-To query a group, you need the Reporter role or higher on it. This matches the access level
-other GitLab Analytics features require.
+To query a group, you must have the Reporter role or higher for that group.
 
 Security data has a higher requirement: the Security Manager role. The security domain
 covers vulnerabilities, security findings, security scans, scanners, and CVE/CWE
@@ -54,12 +53,12 @@ the graph, but security entities are dropped from results, including from aggreg
 Orbit never invents permissions. GitLab is the single source of truth for who can see what,
 and every query is authorized through GitLab.
 
-Access is enforced in layers:
+Access is enforced in the following layers:
 
-- **Organization isolation.** A query only ever sees data in your own organization.
-- **Hierarchical, role-based scoping.** Results are limited to the groups, subgroups, and
+- Organization isolation. A query only ever sees data in your own organization.
+- Hierarchical, role-based scoping. Results are limited to the groups, subgroups, and
   projects where you hold the required role. Sibling groups stay out of scope.
-- **Per-result checks.** Before results are returned, GitLab re-checks your permission on
+- Checks on each result. Before results are returned, GitLab re-checks your permission on
   each item and removes anything you cannot access. This catches confidential items and
   runtime controls such as SAML group links and IP restrictions.
 
@@ -78,7 +77,7 @@ Programmatic access uses your existing GitLab authentication, scoped to what the
 can see in GitLab.
 
 - REST API: a standard (legacy) personal access token with the `read_api` scope, sent as a
-  Bearer token. Fine-grained personal access tokens are not yet supported. See
-  [REST API](access/api.md).
-- MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. See [MCP](access/mcp.md).
-- GitLab Duo Agent Platform: no token to configure. See [GitLab Duo Agent Platform](access/duo.md).
+  Bearer token. Fine-grained personal access tokens are not supported. For more information,
+  see [REST API](access/api.md).
+- MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
+- GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
