@@ -113,7 +113,7 @@ ClickHouse from your GDK installation.
    producer and consumer sides — from that single source. In general you do
    **not** hand-write `config.yml`; add or remove table files and let GDK
    regenerate it. (One exception, the hardcoded Prometheus port, is covered under
-   [Troubleshooting](#siphon-prometheus-port-conflict).)
+   [Siphon Prometheus port conflict](#siphon-prometheus-port-conflict).)
 
    The GitLab repo already ships the tables the live indexing path needs,
    including the system-notes / commit-edge path: `notes`,
