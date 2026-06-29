@@ -13,7 +13,9 @@ use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
-use tokio::time::{Instant, sleep};
+use tokio::time::Instant;
+
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_until};
 use tracing::{info, warn};
 
 const VERSION_TABLE: &str = "gkg_schema_version";
@@ -370,67 +372,72 @@ pub async fn wait_until_ready(
     );
 
     let deadline = Instant::now() + timeout;
-    let mut attempt: u32 = 0;
+    let policy = RetryPolicy {
+        mode: RetryMode::InSitu,
+        backoff: Backoff::Exponential {
+            base: poll_interval,
+            cap: MAX_BACKOFF_INTERVAL,
+        },
+        max_attempts: u32::MAX, // the deadline is the real bound
+        dead_letter: false,
+    };
 
-    loop {
-        // A failed read is treated as "unknown" (None) so the other read can
-        // still drive an outdated/ready decision; both failing falls through to
-        // a retry within the budget.
-        let active = match read_active_version(graph).await {
-            Ok(version) => version,
-            Err(error) => {
+    // Carry the last-seen versions so the timeout branch (drive_until -> None) can report them.
+    let last_seen = (None, None);
+    let outcome = drive_until(
+        &policy,
+        deadline,
+        last_seen,
+        |_carried, _attempt| async move {
+            // A failed read is treated as "unknown" (None) so the other read can still drive an
+            // outdated/ready decision; both failing falls through to a retry within the budget.
+            let active = read_active_version(graph).await.unwrap_or_else(|error| {
                 warn!(%error, "failed to read active schema version — retrying");
                 None
-            }
-        };
-        let migrating = match read_migrating_version(graph).await {
-            Ok(version) => version,
-            Err(error) => {
+            });
+            let migrating = read_migrating_version(graph).await.unwrap_or_else(|error| {
                 warn!(%error, "failed to read migrating schema version — retrying");
                 None
-            }
-        };
+            });
 
-        match classify_readiness(active, migrating, target_version) {
-            SchemaReadiness::Ready => {
-                info!(target_version, "schema version is ready — proceeding");
-                return Ok(());
-            }
-            SchemaReadiness::Outdated => {
-                return Err(SchemaWaitError::Outdated {
+            match classify_readiness(active, migrating, target_version) {
+                SchemaReadiness::Ready => {
+                    info!(target_version, "schema version is ready — proceeding");
+                    Step::Done(())
+                }
+                SchemaReadiness::Outdated => Step::GiveUp(SchemaWaitError::Outdated {
                     embedded: target_version,
                     active: active.expect("Outdated requires a known active version"),
-                });
+                }),
+                SchemaReadiness::Pending => {
+                    info!(
+                        target_version,
+                        active_version = ?active,
+                        migrating_version = ?migrating,
+                        "schema version not ready yet — dispatcher has not prepared it"
+                    );
+                    Step::Retry((active, migrating))
+                }
             }
-            SchemaReadiness::Pending => {
-                info!(
-                    target_version,
-                    active_version = ?active,
-                    migrating_version = ?migrating,
-                    "schema version not ready yet — dispatcher has not prepared it"
-                );
-            }
-        }
+        },
+    )
+    .await;
 
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(SchemaWaitError::Timeout {
+    match outcome {
+        Some(result) => result,
+        None => {
+            // Re-read once for the freshest versions in the timeout report; drive_until owns the
+            // carried state internally, so a fresh read is simpler than plumbing it back out.
+            let active = read_active_version(graph).await.unwrap_or(None);
+            let migrating = read_migrating_version(graph).await.unwrap_or(None);
+            Err(SchemaWaitError::Timeout {
                 target: target_version,
                 seconds: timeout.as_secs(),
                 active,
                 migrating,
-            });
+            })
         }
-
-        let backoff = backoff_interval(poll_interval, attempt).min(remaining);
-        sleep(backoff).await;
-        attempt = attempt.saturating_add(1);
     }
-}
-
-fn backoff_interval(base: Duration, attempt: u32) -> Duration {
-    base.saturating_mul(2u32.saturating_pow(attempt.min(16)))
-        .min(MAX_BACKOFF_INTERVAL)
 }
 
 #[cfg(test)]
@@ -558,15 +565,5 @@ mod tests {
             classify_readiness(Some(3), Some(2), 2),
             SchemaReadiness::Outdated
         );
-    }
-
-    #[test]
-    fn backoff_grows_exponentially_then_caps() {
-        let base = Duration::from_secs(5);
-        assert_eq!(backoff_interval(base, 0), Duration::from_secs(5));
-        assert_eq!(backoff_interval(base, 1), Duration::from_secs(10));
-        assert_eq!(backoff_interval(base, 2), Duration::from_secs(20));
-        assert_eq!(backoff_interval(base, 3), MAX_BACKOFF_INTERVAL);
-        assert_eq!(backoff_interval(base, 99), MAX_BACKOFF_INTERVAL);
     }
 }

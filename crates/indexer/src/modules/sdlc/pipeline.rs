@@ -11,7 +11,7 @@ use futures::stream::FuturesUnordered;
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::engine::retry::{RetryMode, RetryPolicy, Step, drive_with};
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_with};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -32,11 +32,11 @@ const MAX_RETRIES: u32 = 3;
 /// `MAX_RETRIES`.
 const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
     mode: RetryMode::InSitu,
-    backoff: &[
+    backoff: Backoff::Fixed(&[
         Duration::from_millis(100),
         Duration::from_millis(200),
         Duration::from_millis(400),
-    ],
+    ]),
     max_attempts: MAX_RETRIES + 1,
     dead_letter: false,
 };

@@ -12,7 +12,7 @@ use tokio::task::JoinSet;
 use tracing::warn;
 
 use crate::durability::WriteDurability;
-use crate::engine::retry::{RetryExhausted, RetryMode, RetryPolicy, Step, drive};
+use crate::engine::retry::{Backoff, RetryExhausted, RetryMode, RetryPolicy, Step, drive};
 use crate::metrics::EngineMetrics;
 
 #[derive(Debug, Error)]
@@ -314,7 +314,7 @@ impl Drop for NotifyOnDrop {
 /// Blanket-retries (ClickHouse error codes are not stable enough to classify).
 const WRITE_RETRY: RetryPolicy = RetryPolicy {
     mode: RetryMode::InSitu,
-    backoff: &[Duration::from_secs(2), Duration::from_secs(4)],
+    backoff: Backoff::Fixed(&[Duration::from_secs(2), Duration::from_secs(4)]),
     max_attempts: 3,
     dead_letter: false,
 };

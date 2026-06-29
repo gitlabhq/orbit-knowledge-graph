@@ -23,26 +23,46 @@ pub enum RetryMode {
     Global,
 }
 
-/// The retry parameters for one failure class. `backoff` is the per-attempt delay ladder; the
-/// attempt at index `i` waits `backoff[min(i, len-1)]` before retrying. `max_attempts` caps the
-/// total attempts (1 means no retry). `dead_letter` only applies to [`RetryMode::Global`].
+/// How the delay before each retry is computed from the 0-based failed-attempt index.
+#[derive(Debug, Clone, Copy)]
+pub enum Backoff {
+    /// A fixed ladder; attempt `i` waits `ladder[min(i, len-1)]`. Empty = no wait.
+    Fixed(&'static [Duration]),
+    /// `base * 2^attempt`, clamped to `cap`.
+    Exponential { base: Duration, cap: Duration },
+}
+
+impl Backoff {
+    pub fn delay(&self, attempt: u32) -> Duration {
+        match self {
+            Backoff::Fixed(ladder) => {
+                if ladder.is_empty() {
+                    return Duration::ZERO;
+                }
+                ladder[(attempt as usize).min(ladder.len() - 1)]
+            }
+            Backoff::Exponential { base, cap } => base
+                .saturating_mul(2u32.saturating_pow(attempt.min(16)))
+                .min(*cap),
+        }
+    }
+}
+
+/// The retry parameters for one failure class. `max_attempts` caps the total attempts (1 means
+/// no retry); for deadline-bounded callers ([`drive_until`]) it is the safety bound and the
+/// deadline is the primary exit. `dead_letter` only applies to [`RetryMode::Global`].
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
     pub mode: RetryMode,
-    pub backoff: &'static [Duration],
+    pub backoff: Backoff,
     pub max_attempts: u32,
     pub dead_letter: bool,
 }
 
 impl RetryPolicy {
-    /// Backoff before the retry that follows a 0-based failed-attempt index. Clamps to the last
-    /// ladder entry so a short ladder still bounds a longer attempt budget. Empty ladder = no wait.
+    /// Delay before the retry that follows a 0-based failed-attempt index.
     pub fn backoff_for(&self, attempt: u32) -> Duration {
-        if self.backoff.is_empty() {
-            return Duration::ZERO;
-        }
-        let idx = (attempt as usize).min(self.backoff.len() - 1);
-        self.backoff[idx]
+        self.backoff.delay(attempt)
     }
 }
 
@@ -105,6 +125,40 @@ where
     drive_with(policy, (), move |(), i| attempt(i)).await
 }
 
+/// Deadline-bounded retry: poll `attempt` until it yields `Done`/`GiveUp`, sleeping the policy's
+/// backoff (clamped to the time remaining) between tries, until `deadline` passes. Returns
+/// `None` when the deadline is reached while still retrying, so the caller can build a timeout
+/// error with its own context. `max_attempts` is the safety bound; the deadline is the primary
+/// exit. State is threaded by value via [`Step::Retry`], like [`drive_with`].
+pub async fn drive_until<T, E, S, F, Fut>(
+    policy: &RetryPolicy,
+    deadline: tokio::time::Instant,
+    init: S,
+    mut attempt: F,
+) -> Option<Result<T, E>>
+where
+    F: FnMut(S, u32) -> Fut,
+    Fut: Future<Output = Step<T, E, S>>,
+{
+    let cap = policy.max_attempts.max(1);
+    let mut state = init;
+    for i in 0..cap {
+        match attempt(state, i).await {
+            Step::Done(value) => return Some(Ok(value)),
+            Step::GiveUp(error) => return Some(Err(error)),
+            Step::Retry(next) => {
+                state = next;
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    return None;
+                }
+                tokio::time::sleep(policy.backoff_for(i).min(remaining)).await;
+            }
+        }
+    }
+    None
+}
+
 /// Returned by [`drive`] when every attempt asked to `Retry` and the cap was reached. Callers
 /// that always end in `GiveUp` never see this; it is the safety bound for a callback that only
 /// ever returns `Retry`.
@@ -140,7 +194,7 @@ mod tests {
 
     const POLICY: RetryPolicy = RetryPolicy {
         mode: RetryMode::InSitu,
-        backoff: &[Duration::from_secs(1), Duration::from_secs(2)],
+        backoff: Backoff::Fixed(&[Duration::from_secs(1), Duration::from_secs(2)]),
         max_attempts: 3,
         dead_letter: false,
     };
@@ -233,9 +287,21 @@ mod tests {
     #[test]
     fn empty_backoff_waits_zero() {
         let policy = RetryPolicy {
-            backoff: &[],
+            backoff: Backoff::Fixed(&[]),
             ..POLICY
         };
         assert_eq!(policy.backoff_for(0), Duration::ZERO);
+    }
+
+    #[test]
+    fn exponential_backoff_doubles_and_caps() {
+        let backoff = Backoff::Exponential {
+            base: Duration::from_secs(1),
+            cap: Duration::from_secs(10),
+        };
+        assert_eq!(backoff.delay(0), Duration::from_secs(1));
+        assert_eq!(backoff.delay(1), Duration::from_secs(2));
+        assert_eq!(backoff.delay(2), Duration::from_secs(4));
+        assert_eq!(backoff.delay(99), Duration::from_secs(10), "clamped to cap");
     }
 }
