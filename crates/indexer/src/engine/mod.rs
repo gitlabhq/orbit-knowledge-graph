@@ -504,12 +504,13 @@ async fn run_handlers(
         return HandlersOutcome::Failed { retry_delay: None };
     }
     if let Some(error) = transient_error {
-        return match subscription.max_attempts {
+        return match subscription.retry_policy() {
             None => HandlersOutcome::Success,
-            Some(max_attempts) if envelope.attempt >= max_attempts => {
+            Some(policy) if envelope.attempt >= policy.max_attempts => {
                 warn!(
                     attempt = envelope.attempt,
-                    max_attempts, "retry attempts exhausted"
+                    max_attempts = policy.max_attempts,
+                    "retry attempts exhausted"
                 );
                 HandlersOutcome::Exhausted { error }
             }
