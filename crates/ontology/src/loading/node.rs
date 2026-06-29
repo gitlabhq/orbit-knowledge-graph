@@ -606,10 +606,12 @@ pub(crate) fn convert_reindex_on(
         .map(|entry| match entry {
             ReindexOnYaml::Bare(table) => Ok(ReindexSource {
                 table,
+                target: entity_name.to_string(),
                 traversal_path: PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string()),
             }),
             ReindexOnYaml::Detailed(detailed) => Ok(ReindexSource {
                 table: detailed.table,
+                target: entity_name.to_string(),
                 traversal_path: convert_path_resolution(entity_name, detailed.traversal_path)?,
             }),
         })

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -6,8 +6,8 @@ use clickhouse_client::FromArrowColumn;
 use gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
 use ontology::{PathResolution, ReindexSource};
 
-use super::DispatchNamespace;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::orchestrator::dispatch::NamespaceDispatchRequest;
 use crate::orchestrator::scheduled::TaskError;
 
 const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
@@ -21,11 +21,11 @@ const CHANGE_QUERY_SQL: &str = r#"WITH
   changed AS (
 {{branches}}
   )
-SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path
+SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#;
 
-const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path
+const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target
     FROM {{table}}
     WHERE {{watermark_column}} > {lower:String}
       AND {{watermark_column}} <= {upper:String}
@@ -37,7 +37,7 @@ pub(super) trait NamespaceChangeDetector: Send + Sync {
         &self,
         lower: DateTime<Utc>,
         upper: DateTime<Utc>,
-    ) -> Result<Vec<DispatchNamespace>, TaskError>;
+    ) -> Result<Vec<NamespaceDispatchRequest>, TaskError>;
 }
 
 pub(super) struct DatalakeChangeDetector {
@@ -60,7 +60,7 @@ impl NamespaceChangeDetector for DatalakeChangeDetector {
         &self,
         lower: DateTime<Utc>,
         upper: DateTime<Utc>,
-    ) -> Result<Vec<DispatchNamespace>, TaskError> {
+    ) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         let lower = lower.format(TIMESTAMP_FORMAT).to_string();
         let upper = upper.format(TIMESTAMP_FORMAT).to_string();
         let batches = self
@@ -74,14 +74,27 @@ impl NamespaceChangeDetector for DatalakeChangeDetector {
 
         let namespace_ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
         let traversal_paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
+        let targets = String::extract_column(&batches, 2).map_err(TaskError::new)?;
 
-        Ok(namespace_ids
+        let mut by_namespace: BTreeMap<(i64, String), Vec<String>> = BTreeMap::new();
+        for ((namespace_id, traversal_path), target) in
+            namespace_ids.into_iter().zip(traversal_paths).zip(targets)
+        {
+            by_namespace
+                .entry((namespace_id, traversal_path))
+                .or_default()
+                .push(target);
+        }
+
+        Ok(by_namespace
             .into_iter()
-            .zip(traversal_paths)
-            .map(|(namespace_id, traversal_path)| DispatchNamespace {
-                namespace_id,
-                traversal_path,
-            })
+            .map(
+                |((namespace_id, traversal_path), targets)| NamespaceDispatchRequest {
+                    namespace_id,
+                    traversal_path,
+                    targets,
+                },
+            )
             .collect())
     }
 }
@@ -121,6 +134,7 @@ fn render_change_branch(source_table: &ReindexSource) -> String {
 
     CHANGE_BRANCH_SQL
         .replace("{{root_path}}", &root_path_expression(&path))
+        .replace("{{target}}", &source_table.target)
         .replace("{{table}}", &source_table.table)
         .replace("{{watermark_column}}", ontology::siphon_watermark_column())
         .replace("{{path}}", &path)
@@ -143,6 +157,55 @@ fn root_path_expression(path: &str) -> String {
     format!("concat(splitByChar('/', {path})[1], '/', splitByChar('/', {path})[2], '/')")
 }
 
+#[async_trait]
+pub(super) trait EnabledNamespaceReader: Send + Sync {
+    async fn enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError>;
+}
+
+pub(super) struct DatalakeEnabledNamespaceReader {
+    datalake: ArrowClickHouseClient,
+    sql: String,
+}
+
+impl DatalakeEnabledNamespaceReader {
+    pub(super) fn new(datalake: ArrowClickHouseClient) -> Self {
+        Self {
+            datalake,
+            sql: format!(
+                "SELECT root_namespace_id, traversal_path \
+                 FROM {ENABLED_NAMESPACE_TABLE} \
+                 WHERE {deleted} = false AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')",
+                deleted = ontology::siphon_deleted_column()
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
+    async fn enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
+        let batches = self
+            .datalake
+            .query(&self.sql)
+            .fetch_arrow()
+            .await
+            .map_err(TaskError::new)?;
+
+        let namespace_ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
+        let traversal_paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
+
+        Ok(namespace_ids
+            .into_iter()
+            .zip(traversal_paths)
+            .map(|(namespace_id, traversal_path)| NamespaceDispatchRequest {
+                namespace_id,
+                traversal_path,
+                targets: Vec::new(),
+            })
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +213,7 @@ mod tests {
     fn column_source(table: &str) -> ReindexSource {
         ReindexSource {
             table: table.to_string(),
+            target: "WorkItem".to_string(),
             traversal_path: PathResolution::Column("traversal_path".to_string()),
         }
     }
@@ -196,13 +260,13 @@ mod tests {
     WHERE _siphon_deleted = false AND traversal_path != ''
   ),
   changed AS (
-    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path
+    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target
     FROM work_items
     WHERE _siphon_watermark > {lower:String}
       AND _siphon_watermark <= {upper:String}
       AND match(traversal_path, '^[0-9]+/[0-9]+/')
   )
-SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path
+SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
         );
@@ -212,6 +276,7 @@ INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
     fn change_query_renders_dictionary_lookup() {
         let query = NamespaceChangeQuery::new([ReindexSource {
             table: "siphon_projects".to_string(),
+            target: "Project".to_string(),
             traversal_path: PathResolution::Dictionary {
                 dictionary: "project_traversal_paths_dict".to_string(),
                 key_column: "id".to_string(),

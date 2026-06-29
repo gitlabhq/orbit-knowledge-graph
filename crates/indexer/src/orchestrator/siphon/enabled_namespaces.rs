@@ -7,7 +7,9 @@ use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, warn};
 
-use crate::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
+use crate::orchestrator::dispatch::{
+    CodeBackfill, NamespaceDispatchRequest, NamespaceIndexingDispatch,
+};
 use crate::orchestrator::scheduled::TaskError;
 use crate::orchestrator::siphon::decoder::ColumnExtractor;
 use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
@@ -93,9 +95,17 @@ impl Route for EnabledNamespacesRoute {
         events: &[LogicalReplicationEvents],
     ) -> Result<RouteOutcome, TaskError> {
         let enabled = extract_enabled_namespaces(events);
+        let sdlc_requests: Vec<NamespaceDispatchRequest> = enabled
+            .iter()
+            .map(|(namespace_id, traversal_path)| NamespaceDispatchRequest {
+                namespace_id: *namespace_id,
+                traversal_path: traversal_path.clone(),
+                targets: Vec::new(),
+            })
+            .collect();
         let sdlc = self
             .namespace_indexing
-            .dispatch_for_namespaces(&enabled, chrono::Utc::now(), ctx.campaign_id.clone())
+            .dispatch_for_namespaces(&sdlc_requests, chrono::Utc::now(), ctx.campaign_id.clone())
             .await?;
         let code = self
             .code_backfill
