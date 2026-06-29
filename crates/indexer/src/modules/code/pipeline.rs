@@ -52,11 +52,10 @@ impl IndexOutcome {
 /// NATS redelivery retry it). This makes the checkpoint the single durable record, with no
 /// watermark to track.
 ///
-/// `inflight` is reclaimed in [`Drop`], not in `finalize`, so it is released on every terminal
-/// path — including a job whose run future is dropped on timeout after it already submitted
-/// batches: the sentinel's `release()` never runs, so `remaining` never reaches zero and
-/// `finalize` never fires, but the last `Arc` still drops and frees the slot. Tying it to
-/// `release` instead would leak the slot and hang the `flush()` drain loop.
+/// `inflight` is reclaimed in [`Drop`], not in `finalize`, so every terminal path frees the
+/// slot — including a job whose run future is dropped on timeout after submitting batches, where
+/// the sentinel's `release()` never runs so `finalize` never fires. Reclaiming it in `finalize`
+/// would leak the slot on that path and hang the `flush()` drain loop.
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
@@ -71,8 +70,8 @@ impl ProjectCommit {
         if self.remaining.fetch_sub(1, Ordering::AcqRel) != 1 {
             return;
         }
-        // `self` is the last live token; holding it across `finalize` keeps `inflight` non-zero
-        // (its Drop reclaims the slot) so `flush()` waits for the checkpoint, not just the writes.
+        // Hold the last token across `finalize` so `inflight` stays non-zero until the checkpoint
+        // lands, making `flush()` wait for the checkpoint and not just for the writes.
         tokio::spawn(async move {
             self.finalize().await;
         });
@@ -455,9 +454,7 @@ impl CodeIndexingPipeline {
         ));
 
         // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so
-        // the commit can't finalize mid-stream even if every flushed part drains first. The
-        // matching `inflight` slot is reclaimed by `ProjectCommit::drop`, so a timeout that drops
-        // the run future before the sentinel release still frees it.
+        // the commit can't finalize mid-stream even if every flushed part drains first.
         self.inflight.fetch_add(1, Ordering::AcqRel);
         let commit = Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1),
@@ -751,9 +748,8 @@ mod tests {
         let inflight = Arc::new(AtomicUsize::new(0));
         let commit = commit(store.clone(), cleaner, inflight.clone(), 2);
 
-        // A timed-out job's submitted parts still drain (the writer owns them) while the run
-        // future is dropped before it can release the sentinel. Dropping `commit` here without a
-        // third `release()` mimics that: the slot must still be reclaimed and nothing checkpointed.
+        // Dropping `commit` without a third `release()` mimics a run future dropped on timeout:
+        // the sentinel is never released, yet the slot must still be reclaimed.
         commit.clone().release();
         commit.clone().release();
         drop(commit);
