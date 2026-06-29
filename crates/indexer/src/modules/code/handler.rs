@@ -28,7 +28,8 @@ use crate::types::{Envelope, Subscription};
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
-/// A timed-out job is likely transiently slow: retry once (attempt is 1-based), then dead-letter.
+/// A timed-out job is likely transiently slow: retry once (delivery attempt is 1-based), then
+/// dead-letter. The engine reads this policy to decide redelivery vs DLQ.
 const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     mode: RetryMode::Global,
     backoff: Backoff::Fixed(&[]),
@@ -315,32 +316,19 @@ impl CodeIndexingTaskHandler {
                 Ok(result) => result,
                 Err(_) => {
                     cancel.cancel();
-                    let message = format!(
-                        "code indexing job exceeded the {}s timeout",
-                        timeout.as_secs()
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        timeout_secs = timeout.as_secs(),
+                        "code indexing job exceeded wall-clock timeout"
                     );
-                    if attempt < JOB_TIMEOUT_RETRY.max_attempts {
-                        warn!(
-                            project_id,
-                            branch = %branch,
-                            timeout_secs = timeout.as_secs(),
-                            attempt,
-                            "code indexing job exceeded wall-clock timeout; retrying"
-                        );
-                        Err(HandlerError::Processing(message))
-                    } else {
-                        warn!(
-                            project_id,
-                            branch = %branch,
-                            timeout_secs = timeout.as_secs(),
-                            attempt,
-                            "code indexing job exceeded wall-clock timeout again; dead-lettering"
-                        );
-                        Err(HandlerError::Permanent {
-                            message,
-                            action: crate::handler::PermanentAction::DeadLetter,
-                        })
-                    }
+                    Err(JOB_TIMEOUT_RETRY.global_failure(
+                        attempt,
+                        format!(
+                            "code indexing job exceeded the {}s timeout",
+                            timeout.as_secs()
+                        ),
+                    ))
                 }
             },
             None => work.await,

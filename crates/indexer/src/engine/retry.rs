@@ -59,6 +59,39 @@ impl RetryPolicy {
             Step::GiveUp(give_up)
         }
     }
+
+    /// Whether a [`RetryMode::Global`] transient failure on its 1-based delivery `attempt` should
+    /// be redelivered (`true`) or is exhausted (`false`). The engine's redelivery "loop" runs
+    /// across separate NATS deliveries, so this is the per-delivery decision; what an exhausted
+    /// message does next (DLQ vs terminate) follows from `dead_letter`.
+    pub fn should_redeliver(&self, attempt: u32) -> bool {
+        attempt < self.max_attempts.max(1)
+    }
+
+    /// Map a [`RetryMode::Global`] failure on its 1-based delivery `attempt` to the [`HandlerError`]
+    /// the engine should propagate: a transient `Processing` while redeliveries remain (the engine
+    /// nacks), else a `Permanent` carrying this policy's terminal action. This is the single place
+    /// the global retry decision is made; handlers report a failure through it rather than picking
+    /// the variant themselves.
+    pub fn global_failure(
+        &self,
+        attempt: u32,
+        message: String,
+    ) -> crate::engine::handler::HandlerError {
+        use crate::engine::handler::{HandlerError, PermanentAction};
+        if self.should_redeliver(attempt) {
+            HandlerError::Processing(message)
+        } else {
+            HandlerError::Permanent {
+                message,
+                action: if self.dead_letter {
+                    PermanentAction::DeadLetter
+                } else {
+                    PermanentAction::Drop
+                },
+            }
+        }
+    }
 }
 
 /// The outcome of one attempt. `Retry` carries the next attempt's state by value, so per-attempt

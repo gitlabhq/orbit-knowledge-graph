@@ -506,7 +506,7 @@ async fn run_handlers(
     if let Some(error) = transient_error {
         return match subscription.retry_policy() {
             None => HandlersOutcome::Success,
-            Some(policy) if envelope.attempt >= policy.max_attempts => {
+            Some(policy) if !policy.should_redeliver(envelope.attempt) => {
                 warn!(
                     attempt = envelope.attempt,
                     max_attempts = policy.max_attempts,

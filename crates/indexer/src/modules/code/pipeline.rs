@@ -373,13 +373,10 @@ impl CodeIndexingPipeline {
             // sentinel so it never checkpoints and the project is re-indexed.
             commit.failed.store(true, Ordering::Release);
             commit.release();
-            return Err(HandlerError::Permanent {
-                message: format!(
-                    "fatal code indexing pipeline error during {} for {}: {}",
-                    error.stage, error.file_path, error.error
-                ),
-                action: crate::handler::PermanentAction::DeadLetter,
-            });
+            return Err(HandlerError::dead_letter(format!(
+                "fatal code indexing pipeline error during {} for {}: {}",
+                error.stage, error.file_path, error.error
+            )));
         }
 
         context.progress.notify_in_progress().await;
