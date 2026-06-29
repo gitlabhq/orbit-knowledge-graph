@@ -208,3 +208,17 @@ graph TD
 ## Cross-Graph Relationships
 
 The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` exists in the SDLC graph, while a `Branch` belongs to that project via `IN_PROJECT` and contains the root-level `Directory` and `File` nodes via `CONTAINS`. Cross-graph queries can traverse shared project, branch, and review entities even when edges live in different physical tables, because the compiler emits `UNION ALL` across all relevant edge tables for wildcard and multi-table relationship queries.
+
+## Namespace partitioning
+
+Every graph table that carries `traversal_path` (all node tables except the global hubs `User` and `Runner`, plus every edge table) is `PARTITION BY` a hash bucket of the top-level namespace. The expression is declared once in `config/ontology/schema.yaml` under `settings.partition.partition_by` and emitted verbatim into `config/graph.sql`:
+
+```sql
+PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50)
+```
+
+`splitByChar('/', '42/100/1000/')[2]` is the top-level namespace id (`100`); global edges write `traversal_path = '0/'`, so they hash to bucket 0 and co-locate there. ClickHouse derives the bucket from `traversal_path` at insert and merge time, so there is no stored partition column and no write-side code: the indexer writes exactly the columns it always has.
+
+The goal is **ingest/merge isolation**, not query latency. Without partitioning, all ~1,100 top-level namespaces share one part budget per table, so one tenant's reindex burst can exhaust `parts_to_throw_insert` and dead-letter inserts for every tenant. Bucketing gives each bucket its own part budget and merge scope, so a busy tenant throttles only its own bucket. Because the partition is a deterministic function of `traversal_path` and every sort key leads with `traversal_path`, all versions of a row land in the same bucket, so `ReplacingMergeTree FINAL` dedup stays correct.
+
+The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone does not prune partitions. Partition pruning for namespace-scoped queries requires the compiler to emit the bucket predicate explicitly; that pushdown is a planned follow-up.

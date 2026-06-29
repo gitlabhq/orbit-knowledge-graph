@@ -132,6 +132,19 @@ pub struct StatisticsExclude {
     pub columns: Vec<String>,
 }
 
+/// Hash-bucket partitioning for tables carrying `traversal_path`. The DDL emits
+/// `PARTITION BY (<expression>)`, so ClickHouse derives the bucket at
+/// insert/merge time with no stored column and no write-side code. Each bucket
+/// gets its own part budget, so one tenant's insert burst no longer exhausts
+/// the whole table's. Global tables (User, Runner) have no `traversal_path` and
+/// stay unpartitioned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartitionConfig {
+    /// ClickHouse `PARTITION BY` expression over `traversal_path`, e.g.
+    /// `sipHash64(...) % 50`. Emitted verbatim into the DDL.
+    pub partition_by: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryTable {
     pub name: String,

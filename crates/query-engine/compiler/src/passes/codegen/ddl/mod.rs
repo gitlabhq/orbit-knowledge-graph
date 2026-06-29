@@ -9,8 +9,8 @@ pub mod duckdb;
 use std::collections::BTreeMap;
 
 use ontology::{
-    AuxiliaryTable, MaterializedViewDefinition, Ontology, StorageColumn, StorageIndex,
-    StorageProjection,
+    AuxiliaryTable, MaterializedViewDefinition, Ontology, PartitionConfig, StorageColumn,
+    StorageIndex, StorageProjection,
 };
 
 use crate::ast::ddl::*;
@@ -24,15 +24,16 @@ pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
 pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> Vec<CreateTable> {
     let mut tables: Vec<CreateTable> = Vec::new();
 
+    let partition = ontology.partition();
     for aux in ontology.auxiliary_tables() {
         tables.push(build_auxiliary_table(aux).with_prefix(prefix));
     }
     for node in ontology.nodes() {
-        tables.push(build_node_table(node).with_prefix(prefix));
+        tables.push(build_node_table(node, partition).with_prefix(prefix));
     }
     for name in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(name) {
-            tables.push(build_edge_table(name, config).with_prefix(prefix));
+            tables.push(build_edge_table(name, config, partition).with_prefix(prefix));
         }
     }
 
@@ -334,7 +335,16 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     }
 }
 
-fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
+fn partition_by(partition: Option<&PartitionConfig>) -> Vec<String> {
+    partition
+        .map(|p| vec![p.partition_by.clone()])
+        .unwrap_or_default()
+}
+
+fn build_node_table(
+    node: &ontology::NodeEntity,
+    partition: Option<&PartitionConfig>,
+) -> CreateTable {
     let mut columns: Vec<ColumnDef> = node
         .storage
         .columns
@@ -342,6 +352,8 @@ fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
         .map(storage_col_to_def)
         .collect();
     columns.extend(system_columns(None));
+    // Global hubs (User, Runner) have no traversal_path to bucket on.
+    let partition_by = partition_by(partition.filter(|_| node.has_traversal_path));
 
     let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
     let projections: Vec<ProjectionDef> = node
@@ -363,13 +375,18 @@ fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
         indexes,
         projections: projections.clone(),
         engine,
+        partition_by,
         order_by: node.sort_key.clone(),
         primary_key: node.storage.primary_key.clone(),
         settings: table_settings(Some(1024), !projections.is_empty(), &node.storage.settings),
     }
 }
 
-fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTable {
+fn build_edge_table(
+    name: &str,
+    config: &ontology::EdgeTableConfig,
+    partition: Option<&PartitionConfig>,
+) -> CreateTable {
     let mut columns: Vec<ColumnDef> = config
         .storage
         .columns
@@ -385,6 +402,9 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
             .map(storage_col_to_def),
     );
     columns.extend(system_columns(None));
+    // Unlike nodes, every edge table carries traversal_path (global edges write
+    // '0/'), so all edge tables partition.
+    let partition_by = partition_by(partition);
 
     let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
     indexes.extend(
@@ -407,6 +427,7 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
         indexes,
         projections: projections.clone(),
         engine: Engine::replacing_merge_tree("_version", "_deleted"),
+        partition_by,
         order_by: config.sort_key.clone(),
         primary_key: config.storage.primary_key.clone(),
         settings: table_settings(
@@ -451,6 +472,7 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
         indexes: vec![],
         projections: projections.clone(),
         engine,
+        partition_by: vec![],
         order_by: aux.order_by.clone(),
         primary_key: None,
         settings: table_settings(None, !projections.is_empty(), &empty_settings),
@@ -511,6 +533,7 @@ fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<Crea
             name: String::new(),
             args: vec![],
         },
+        partition_by: vec![],
         order_by: node
             .sort_key
             .iter()
@@ -542,6 +565,7 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
             name: String::new(),
             args: vec![],
         },
+        partition_by: vec![],
         order_by: ontology
             .local_edge_columns()
             .iter()
@@ -664,6 +688,41 @@ mod tests {
             assert!(sql.contains("LAYOUT(HASHED())"), "HASHED layout: {sql}");
             assert!(sql.contains("LIFETIME(MIN 60 MAX 300)"), "{sql}");
         }
+    }
+
+    #[test]
+    fn namespaced_tables_partition_global_tables_do_not() {
+        let ontology = ontology();
+        let expr = ontology
+            .partition_by()
+            .expect("embedded ontology declares partitioning");
+        let tables = generate_graph_tables(&ontology);
+
+        let edge = tables.iter().find(|t| t.name == "gl_edge").unwrap();
+        assert_eq!(edge.partition_by, vec![expr.to_string()]);
+
+        let mr = tables
+            .iter()
+            .find(|t| t.name == "gl_merge_request")
+            .unwrap();
+        assert_eq!(mr.partition_by, vec![expr.to_string()]);
+
+        let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
+        assert!(user.partition_by.is_empty());
+        let runner = tables.iter().find(|t| t.name == "gl_runner").unwrap();
+        assert!(runner.partition_by.is_empty());
+    }
+
+    #[test]
+    fn partition_by_is_emitted_between_engine_and_order_by() {
+        use super::clickhouse::emit_create_table;
+        let tables = generate_graph_tables(&ontology());
+        let edge = tables.iter().find(|t| t.name == "gl_edge").unwrap();
+        let sql = emit_create_table(edge);
+        let engine_at = sql.find("ENGINE =").unwrap();
+        let partition_at = sql.find("PARTITION BY").unwrap();
+        let order_at = sql.find("ORDER BY").unwrap();
+        assert!(engine_at < partition_at && partition_at < order_at, "{sql}");
     }
 
     #[test]

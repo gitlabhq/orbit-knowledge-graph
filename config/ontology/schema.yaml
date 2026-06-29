@@ -264,6 +264,15 @@ settings:
     # Use exclude to skip noisy or irrelevant columns.
     exclude:
       - {node: Note, columns: [st_diff]}
+  # Hash-bucket partitioning for namespaced tables. Every table carrying
+  # traversal_path gets PARTITION BY (partition_by); ClickHouse derives the
+  # bucket from traversal_path at insert/merge time (no stored column, no
+  # write-side code), so one tenant's insert burst contends only for its own
+  # bucket's part budget. Global tables (User, Runner) have no traversal_path
+  # and stay unpartitioned. splitByChar('/', '42/100/1000/')[2] is the
+  # top-level namespace; global edges write '0/' so they hash to bucket 0.
+  partition:
+    partition_by: "sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50"
   internal_column_prefix: "_gkg_"
   local_db:
     entities:

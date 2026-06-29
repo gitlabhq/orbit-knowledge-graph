@@ -103,6 +103,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec![],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -132,6 +133,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec![],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -157,6 +159,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec![],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -185,6 +188,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec![],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -216,6 +220,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec![],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -255,6 +260,7 @@ mod tests {
             }],
             engine: Engine::replacing_merge_tree("_version", "_deleted"),
             order_by: vec!["id".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![TableSetting {
                 key: "index_granularity".into(),
@@ -295,6 +301,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec![],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };

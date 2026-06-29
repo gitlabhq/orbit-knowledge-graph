@@ -57,6 +57,7 @@ fn version_table_ddl() -> CreateTable {
         indexes: vec![],
         projections: vec![],
         engine: Engine::replacing_merge_tree_version_only("created_at"),
+        partition_by: vec![],
         order_by: vec!["version".into()],
         primary_key: None,
         settings: vec![],
