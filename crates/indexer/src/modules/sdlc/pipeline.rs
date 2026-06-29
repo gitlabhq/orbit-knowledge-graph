@@ -26,10 +26,8 @@ use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
 
-/// In-situ retry for a datalake page read: each retry shrinks the block size (carried as state)
-/// so an oversized page self-corrects instead of dead-lettering. Backoff is the per-retry delay
-/// (100ms, 200ms, 400ms) before retries 1..=3; `max_attempts` is one initial try plus
-/// `MAX_RETRIES`.
+/// Retry a datalake page read, shrinking the block size each time so an oversized page
+/// self-corrects instead of dead-lettering.
 const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
     mode: RetryMode::Local,
     backoff: Backoff::Fixed(&[
@@ -322,8 +320,6 @@ impl Pipeline {
         sql: &str,
         params: Value,
     ) -> Result<Page, HandlerError> {
-        // The block size is the "op changes per attempt" state, threaded by value through the
-        // harness: each Retry carries the shrunken size for the next attempt.
         drive_with(
             &DATALAKE_EXTRACT_RETRY,
             None::<u64>,

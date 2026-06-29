@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Flat 100ms backoff for the unbounded fetch supervisor loop: re-poll quickly after a fetch
-/// error, matching the prior hot-poll behavior.
+/// Flat 100ms hot-poll for the unbounded fetch supervisor loop.
 const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
     mode: crate::engine::retry::RetryMode::Local,
     backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
@@ -318,9 +317,7 @@ impl NatsBroker {
         let cancel_token = self.cancellation_token.clone();
 
         let handle = tokio::spawn(async move {
-            // Unbounded supervisor loop on the engine retry harness: each fetch error is
-            // forwarded downstream and backed off (escalating with consecutive failures), and the
-            // loop runs until cancellation or the downstream consumer closes.
+            // Forward each fetch error downstream, back off, and run until cancel/consumer-close.
             drive_forever(&FETCH_RETRY, |_failures| {
                 let consumer = &consumer;
                 let sender = &sender;

@@ -1,32 +1,21 @@
-//! One retry vocabulary for the indexer.
-//!
-//! A failure is handled in one of two modes:
-//!
-//! - [`RetryMode::Local`]: retry on the spot with bounded backoff, in-process. Driven by
-//!   [`drive`].
-//! - [`RetryMode::Global`]: hand the message back to NATS for redelivery, bounded by delivery
-//!   attempts, then dead-letter. Executed by the engine's `run_handlers` path, which reads the
-//!   same [`RetryPolicy`].
-//!
-//! Both modes are described by one [`RetryPolicy`]. The local executor ([`drive`]) reads the
-//! backoff ladder and attempt cap from the policy; the callback only classifies each attempt's
-//! outcome via [`Step`], so the backoff lives in exactly one place.
+//! One retry vocabulary for the indexer: a [`RetryPolicy`] describes a failure class, [`drive`]
+//! and friends run it locally (in-process backoff), and `run_handlers` runs the [`RetryMode::Global`]
+//! ones via NATS redelivery.
 
 use std::future::Future;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryMode {
-    /// Retry in-process with backoff; never leaves the worker.
+    /// Retry in-process with backoff.
     Local,
-    /// Retry via NATS redelivery; the engine nacks and the broker re-delivers.
+    /// Retry via NATS redelivery, then dead-letter.
     Global,
 }
 
-/// How the delay before each retry is computed from the 0-based failed-attempt index.
 #[derive(Debug, Clone, Copy)]
 pub enum Backoff {
-    /// A fixed ladder; attempt `i` waits `ladder[min(i, len-1)]`. Empty = no wait.
+    /// Attempt `i` waits `ladder[min(i, len-1)]`; empty = no wait.
     Fixed(&'static [Duration]),
     /// `base * 2^attempt`, clamped to `cap`.
     Exponential { base: Duration, cap: Duration },
@@ -35,12 +24,10 @@ pub enum Backoff {
 impl Backoff {
     pub fn delay(&self, attempt: u32) -> Duration {
         match self {
-            Backoff::Fixed(ladder) => {
-                if ladder.is_empty() {
-                    return Duration::ZERO;
-                }
-                ladder[(attempt as usize).min(ladder.len() - 1)]
-            }
+            Backoff::Fixed(ladder) => ladder
+                .get((attempt as usize).min(ladder.len().saturating_sub(1)))
+                .copied()
+                .unwrap_or(Duration::ZERO),
             Backoff::Exponential { base, cap } => base
                 .saturating_mul(2u32.saturating_pow(attempt.min(16)))
                 .min(*cap),
@@ -48,9 +35,8 @@ impl Backoff {
     }
 }
 
-/// The retry parameters for one failure class. `max_attempts` caps the total attempts (1 means
-/// no retry); for deadline-bounded callers ([`drive_until`]) it is the safety bound and the
-/// deadline is the primary exit. `dead_letter` only applies to [`RetryMode::Global`].
+/// `max_attempts` is the attempt cap (1 = no retry); under [`drive_until`] the deadline is the
+/// primary exit and the cap is the safety bound. `dead_letter` applies only to [`RetryMode::Global`].
 #[derive(Debug, Clone, Copy)]
 pub struct RetryPolicy {
     pub mode: RetryMode,
@@ -60,51 +46,34 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    /// Delay before the retry that follows a 0-based failed-attempt index.
     pub fn backoff_for(&self, attempt: u32) -> Duration {
         self.backoff.delay(attempt)
     }
 }
 
-/// The outcome of one attempt. The callback returns this; the harness decides what to do with it.
-/// `Retry` carries the state for the next attempt, so any per-attempt mutation is threaded by
-/// value through the harness rather than borrowed across the await point (keeps the future
-/// `Send` and sidesteps the lending-closure problem). Stateless callers use `S = ()`.
+/// The outcome of one attempt. `Retry` carries the next attempt's state by value, so per-attempt
+/// mutation never borrows across the await (keeps the future `Send`). Stateless callers use `S = ()`.
 pub enum Step<T, E, S = ()> {
-    /// Finished successfully; return the value.
     Done(T),
-    /// Not done, not terminal; wait and try again with `S` as the next attempt's state.
     Retry(S),
-    /// Terminal failure; return the error without further retries.
     GiveUp(E),
 }
 
-/// Stateful retry: the harness owns the carried state `S`, moves it into each attempt by value,
-/// and receives the next state back via [`Step::Retry`]. Runs until [`Step::Done`]/[`Step::GiveUp`]
-/// or the policy's attempt cap, sleeping the policy's backoff between tries. `attempt` receives
-/// the current state and the 0-based attempt index.
-///
-/// Reaching the cap while every step asked to `Retry` returns [`RetryExhausted`] (via `E`'s
-/// `From`). In practice callers return `GiveUp` with the real error once they have nothing left
-/// to try, so the cap is a safety bound, not the primary exit.
+/// Bounded retry that threads state by value through [`Step::Retry`].
 pub async fn drive_with<T, E, S, F, Fut>(policy: &RetryPolicy, init: S, attempt: F) -> Result<T, E>
 where
     F: FnMut(S, u32) -> Fut,
     Fut: Future<Output = Step<T, E, S>>,
     E: From<RetryExhausted>,
 {
-    // No deadline: the cap exhaustion supplies the terminal error via E: From<RetryExhausted>.
+    let cap = policy.max_attempts.max(1);
     drive_bounded(policy, None, init, attempt, |_| {
-        RetryExhausted {
-            attempts: policy.max_attempts.max(1),
-        }
-        .into()
+        RetryExhausted { attempts: cap }.into()
     })
     .await
 }
 
-/// Stateless retry: [`drive_with`] with no carried state. The callback only sees the attempt
-/// index and returns [`Step`] with `S = ()`.
+/// Bounded retry with no carried state.
 pub async fn drive<T, E, F, Fut>(policy: &RetryPolicy, mut attempt: F) -> Result<T, E>
 where
     F: FnMut(u32) -> Fut,
@@ -114,10 +83,8 @@ where
     drive_with(policy, (), move |(), i| attempt(i)).await
 }
 
-/// Deadline-bounded retry: like [`drive_with`] but bounded by `deadline` as well as the attempt
-/// cap, sleeping the backoff clamped to the time remaining. When the deadline passes while still
-/// retrying, `on_deadline` builds the terminal error (it carries the caller's context, e.g. the
-/// last-seen state), so the result stays a plain `Result<T, E>`.
+/// Bounded by `deadline` as well as the attempt cap; on deadline, `on_deadline` builds the
+/// terminal error from the last state so the result stays a plain `Result`.
 pub async fn drive_until<T, E, S, F, Fut, D>(
     policy: &RetryPolicy,
     deadline: tokio::time::Instant,
@@ -133,9 +100,6 @@ where
     drive_bounded(policy, Some(deadline), init, attempt, on_deadline).await
 }
 
-/// The shared bounded loop behind [`drive_with`] and [`drive_until`]: run `attempt` until it
-/// yields `Done`/`GiveUp`, the attempt cap is hit, or (when set) `deadline` passes. On a bound
-/// hit while still retrying, `on_bound` builds the terminal error from the last carried state.
 async fn drive_bounded<T, E, S, F, Fut, D>(
     policy: &RetryPolicy,
     deadline: Option<tokio::time::Instant>,
@@ -171,23 +135,18 @@ where
     Err(on_bound(&state))
 }
 
-/// The outcome of one iteration of an unbounded supervisor loop ([`drive_forever`]).
+/// One iteration of an unbounded supervisor loop.
 pub enum Loop {
-    /// The iteration succeeded; reset the failure counter and run again immediately.
+    /// Succeeded; reset the failure counter and run again immediately.
     Continue,
-    /// The iteration failed; back off (per the policy, escalating with consecutive failures)
-    /// then run again. There is no attempt cap — the loop survives a sustained outage.
+    /// Failed; back off then run again (no cap).
     Backoff,
-    /// Terminal (cancelled, or the downstream consumer closed); leave the loop.
+    /// Terminal; leave the loop.
     Stop,
 }
 
-/// Unbounded supervisor loop: run `step` forever, sleeping the policy's backoff after a
-/// [`Loop::Backoff`] and resetting between successes, until `step` returns [`Loop::Stop`]. Unlike
-/// [`drive`], there is no result and no attempt cap — for a long-lived consumer that must survive
-/// transient outages indefinitely. `step` receives the count of consecutive failures so far (0 on
-/// the first try and after any success), so a [`Backoff::Exponential`] policy escalates the delay
-/// across a run of failures.
+/// Unbounded supervisor loop with no result or cap: runs until `step` returns [`Loop::Stop`].
+/// `step` gets the consecutive-failure count so [`Backoff::Exponential`] escalates and resets on success.
 pub async fn drive_forever<F, Fut>(policy: &RetryPolicy, mut step: F)
 where
     F: FnMut(u32) -> Fut,
@@ -206,9 +165,7 @@ where
     }
 }
 
-/// Returned by [`drive`] when every attempt asked to `Retry` and the cap was reached. Callers
-/// that always end in `GiveUp` never see this; it is the safety bound for a callback that only
-/// ever returns `Retry`.
+/// The safety-bound error when a callback only ever returns `Retry` until the cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryExhausted {
     pub attempts: u32,
@@ -312,7 +269,6 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn stateful_threads_state_through_retry() {
-        // Each Retry carries a shrinking value; the next attempt receives it by value.
         let result: Result<u64, TestError> = drive_with(&POLICY, 100u64, |size, attempt| {
             std::future::ready(if attempt < 2 {
                 Step::Retry(size / 2)
@@ -342,7 +298,6 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn drive_forever_backs_off_on_failure_and_stops_on_request() {
-        // Two failures (escalating backoff), one success (resets), then stop.
         let mut script = vec![Loop::Backoff, Loop::Backoff, Loop::Continue, Loop::Stop].into_iter();
         let mut failure_counts = Vec::new();
         drive_forever(&POLICY, |failures| {
@@ -350,7 +305,6 @@ mod tests {
             std::future::ready(script.next().unwrap())
         })
         .await;
-        // 0 on first try, escalates across the failure run, resets to 0 after the success.
         assert_eq!(failure_counts, vec![0, 1, 2, 0]);
     }
 

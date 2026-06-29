@@ -28,10 +28,7 @@ use crate::types::{Envelope, Subscription};
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
-/// Global (NATS-redelivery) retry policy for a wall-clock timeout: a job that times out is
-/// believed transiently slow and gets one retry, then dead-letters on the second timeout. This
-/// is the job-level class (depth 2), distinct from the subscription's general delivery cap; the
-/// engine owns the depth. `attempt` is 1-based, so `max_attempts = 2` means retry once then DLQ.
+/// A timed-out job is likely transiently slow: retry once (attempt is 1-based), then dead-letter.
 const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     mode: RetryMode::Global,
     backoff: Backoff::Fixed(&[]),
@@ -308,7 +305,7 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is permanent, so the job is dead-lettered on the first occurrence.
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
         let work =
             self.pipeline
@@ -322,9 +319,6 @@ impl CodeIndexingTaskHandler {
                         "code indexing job exceeded the {}s timeout",
                         timeout.as_secs()
                     );
-                    // Allow one retry to absorb a transient slowdown (a busy pod, a slow Gitaly
-                    // fetch); a job that times out again is treated as structurally stuck and
-                    // dead-lettered so it stops burning an indexing slot.
                     if attempt < JOB_TIMEOUT_RETRY.max_attempts {
                         warn!(
                             project_id,

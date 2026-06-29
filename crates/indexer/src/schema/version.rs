@@ -382,8 +382,7 @@ pub async fn wait_until_ready(
         dead_letter: false,
     };
 
-    // The carried state is the last-seen (active, migrating); on deadline, on_deadline reads it
-    // back to build the timeout report.
+    // Carried state is the last-seen (active, migrating), read back by on_deadline for the report.
     drive_until(
         &policy,
         deadline,
