@@ -207,12 +207,19 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Task | Config path | Default cron | Description |
 |------|-------------|-------------|-------------|
 | Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
-| Namespace dispatch | `schedule.tasks.namespace.cron` | `0 */1 * * * *` (every minute) | Publishes per-namespace requests |
+| Namespace dispatch | `schedule.tasks.namespace.cron` | `*/30 * * * * *` (every 30 seconds) | Publishes requests for enabled root namespaces with Siphon changes |
+| Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.namespace-code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
+
+The namespace change dispatcher is checkpoint-driven. With no checkpoint it
+dispatches every enabled namespace once (cold start) and records a checkpoint;
+every later tick queries Siphon changes since that checkpoint, however old it is.
+The hourly namespace sweep re-dispatches every enabled namespace regardless of
+recent Siphon activity, backstopping migration backfill and missed windows.
 
 ### Code dispatch task settings
 

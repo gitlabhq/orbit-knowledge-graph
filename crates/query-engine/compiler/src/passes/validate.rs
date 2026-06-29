@@ -16,6 +16,8 @@ use crate::input::{
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
 
+use super::errors::format_schema_error;
+
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
@@ -35,7 +37,7 @@ fn collect_schema_errors(
 ) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
-        .map(|e| sanitize_schema_error(&format!("{} at {}", e, e.instance_path())))
+        .map(|e| format_schema_error(&e))
         .collect();
 
     if errors.is_empty() {
@@ -43,16 +45,6 @@ fn collect_schema_errors(
     } else {
         Err(QueryError::Validation(errors.join("; ")))
     }
-}
-
-/// Strip enumerated valid values from jsonschema enum-rejection messages.
-/// Matches `is not one of ["quoted","values",...]` — requires at least one
-/// quoted element to avoid false positives on non-enum bracket content.
-fn sanitize_schema_error(msg: &str) -> String {
-    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r#"is not one of \["[^"]*".*?\]"#).expect("valid regex")
-    });
-    RE.replace_all(msg, "is not an allowed value").to_string()
 }
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
@@ -237,8 +229,7 @@ impl<'a> Validator<'a> {
                 input.relationships.len()
             )));
         }
-        // A single node with no relationships is a search (one table scan); only
-        // multi-node traversals must satisfy the n-1 relationship rule.
+        // Multi-node traversal requires exactly n-1 relationships (1 node + 0 rels is a search).
         if input.query_type == QueryType::Traversal
             && !input.nodes.is_empty()
             && !(input.nodes.len() == 1 && input.relationships.is_empty())
@@ -263,10 +254,8 @@ impl<'a> Validator<'a> {
             )));
         }
         for rel in &input.relationships {
-            // direction: "both" generates OR join conditions that defeat
-            // ClickHouse index and projection usage. The JSON schema also
-            // rejects this for aggregation, but this guard covers code paths
-            // that bypass schema validation (CLI, internal tests, gRPC).
+            // "both" generates OR joins that defeat CH index usage; schema also rejects it,
+            // but this guard covers code paths that bypass schema validation.
             if rel.direction == crate::input::Direction::Both
                 && input.query_type == QueryType::Aggregation
             {
@@ -415,8 +404,6 @@ impl<'a> Validator<'a> {
         }
 
         for (i, rel) in input.relationships.iter().enumerate() {
-            // Validate filters against this relationship's physical edge table,
-            // not the union across all edge tables.
             let edge_table = rel
                 .types
                 .first()
@@ -563,8 +550,7 @@ impl<'a> Validator<'a> {
             return Ok(());
         };
 
-        // traversal_path is exempt: short paths like "1/" are valid hierarchical
-        // scopes, no broader than SecurityPass's required predicate.
+        // traversal_path is exempt: short paths like "1/" are valid hierarchical scopes.
         if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
@@ -626,7 +612,6 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // Neighbors without selectivity on the center node scans all edges.
             QueryType::Neighbors => {
                 if let Some(ref nb) = input.neighbors {
                     let node = input.nodes.iter().find(|n| n.id == nb.node);
@@ -639,8 +624,6 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-
-            // Traversal/aggregation without selectivity scans entire edge tables.
             QueryType::Traversal | QueryType::Aggregation
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
@@ -2093,7 +2076,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // Wide id_range on endpoint exceeds MAX_PATH_ANCHOR_RANGE (500).
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2141,7 +2123,6 @@ mod tests {
             }"#,
             "requires rel_types",
         );
-        // Pinned endpoints still reject without rel_types: hub nodes fan out.
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2311,7 +2292,6 @@ mod tests {
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
-        // span 100 is within MAX_PATH_ANCHOR_RANGE (500).
         assert_ok(
             r#"{
                 "query_type": "path_finding",
@@ -2323,7 +2303,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // span 1000 exceeds MAX_PATH_ANCHOR_RANGE (500).
         assert_rejects(
             r#"{
                 "query_type": "path_finding",

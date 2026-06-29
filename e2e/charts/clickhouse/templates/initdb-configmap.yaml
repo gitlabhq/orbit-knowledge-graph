@@ -18,6 +18,7 @@ data:
     GRANT ALL ON datalake.* TO siphon;
     GRANT ALL ON datalake.* TO gitlab;
     GRANT SELECT ON datalake.* TO gkg_siphon_reader;
+    GRANT dictGet ON datalake.* TO gkg_siphon_reader;
     GRANT ALL ON gkg.* TO gkg_writer;
     GRANT SELECT ON gkg.* TO gkg_reader;
     GRANT SELECT ON gkg.* TO gkg_writer;

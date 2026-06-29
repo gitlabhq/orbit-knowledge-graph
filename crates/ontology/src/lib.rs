@@ -18,6 +18,7 @@
 
 pub mod constants;
 mod entities;
+pub mod errors;
 pub mod etl;
 pub mod introspection;
 mod json_schema;
@@ -43,7 +44,7 @@ pub use etl::{
     ReindexSource,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
@@ -146,6 +147,8 @@ impl Default for Ontology {
         Self::new()
     }
 }
+
+use errors::describe_valid_fields;
 
 impl Ontology {
     #[must_use]
@@ -749,6 +752,24 @@ impl Ontology {
 
     pub fn derived_entities(&self) -> impl Iterator<Item = &DerivedEntity> {
         self.derived_entities.values()
+    }
+
+    pub fn reindex_sources(&self) -> BTreeSet<ReindexSource> {
+        let node_sources = self
+            .nodes()
+            .filter_map(|node| node.etl.as_ref())
+            .flat_map(|etl| etl.reindex_on().iter().cloned());
+        let derived_sources = self
+            .derived_entities()
+            .flat_map(|derived| derived.etl.reindex_on().iter().cloned());
+        let edge_sources = self
+            .edge_etl_configs()
+            .flat_map(|(_, config)| config.reindex_on.iter().cloned());
+
+        node_sources
+            .chain(derived_sources)
+            .chain(edge_sources)
+            .collect()
     }
 
     pub fn edges(&self) -> impl Iterator<Item = &EdgeEntity> {
@@ -1410,7 +1431,8 @@ impl Ontology {
         }
 
         Err(OntologyError::Validation(format!(
-            "field \"{field_name}\" does not exist on node type \"{node_name}\""
+            "field \"{field_name}\" does not exist on node type \"{node_name}\". {}",
+            describe_valid_fields(node)
         )))
     }
 
@@ -1779,10 +1801,32 @@ mod tests {
         assert!(err.to_string().contains("unknown node type"));
 
         let err = ontology.validate_field("User", "nonexistent").unwrap_err();
-        assert!(err.to_string().contains("does not exist"));
+        let msg = err.to_string();
+        assert!(msg.contains("does not exist"), "got: {msg}");
+        assert!(msg.contains("Valid fields: id, username"), "got: {msg}");
 
         let err = Ontology::new().validate_field("", "field").unwrap_err();
         assert!(err.to_string().contains("without an entity type"));
+    }
+
+    #[test]
+    fn validate_field_truncates_long_field_lists() {
+        let fields: Vec<(String, DataType)> = (0..20)
+            .map(|i| (format!("field_{i}"), DataType::Int))
+            .collect();
+        let ontology = Ontology::new()
+            .with_nodes(["Wide"])
+            .with_fields("Wide", fields);
+
+        let msg = ontology
+            .validate_field("Wide", "missing")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("Valid fields include:"), "got: {msg}");
+        assert!(msg.contains("more"), "got: {msg}");
+        assert!(msg.contains("get_graph_schema"), "got: {msg}");
+        // Reserved "id" must not be duplicated even when a field is also named differently.
+        assert_eq!(msg.matches("field_0").count(), 1, "got: {msg}");
     }
 
     #[test]
