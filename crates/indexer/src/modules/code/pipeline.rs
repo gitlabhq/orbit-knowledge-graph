@@ -51,6 +51,12 @@ impl IndexOutcome {
 /// stale-clean its prior version then checkpoint, unless any part failed (then the sweep and
 /// NATS redelivery retry it). This makes the checkpoint the single durable record, with no
 /// watermark to track.
+///
+/// `inflight` is reclaimed in [`Drop`], not in `finalize`, so it is released on every terminal
+/// path — including a job whose run future is dropped on timeout after it already submitted
+/// batches: the sentinel's `release()` never runs, so `remaining` never reaches zero and
+/// `finalize` never fires, but the last `Arc` still drops and frees the slot. Tying it to
+/// `release` instead would leak the slot and hang the `flush()` drain loop.
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
@@ -65,9 +71,10 @@ impl ProjectCommit {
         if self.remaining.fetch_sub(1, Ordering::AcqRel) != 1 {
             return;
         }
+        // `self` is the last live token; holding it across `finalize` keeps `inflight` non-zero
+        // (its Drop reclaims the slot) so `flush()` waits for the checkpoint, not just the writes.
         tokio::spawn(async move {
             self.finalize().await;
-            self.inflight.fetch_sub(1, Ordering::AcqRel);
         });
     }
 
@@ -113,6 +120,12 @@ impl FlushToken for ProjectCommit {
     fn on_failed(self: Arc<Self>) {
         self.failed.store(true, Ordering::Release);
         self.release();
+    }
+}
+
+impl Drop for ProjectCommit {
+    fn drop(&mut self) {
+        self.inflight.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -442,7 +455,9 @@ impl CodeIndexingPipeline {
         ));
 
         // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so
-        // the commit can't finalize mid-stream even if every flushed part drains first.
+        // the commit can't finalize mid-stream even if every flushed part drains first. The
+        // matching `inflight` slot is reclaimed by `ProjectCommit::drop`, so a timeout that drops
+        // the run future before the sentinel release still frees it.
         self.inflight.fetch_add(1, Ordering::AcqRel);
         let commit = Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1),
@@ -726,6 +741,31 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "a failed flush must leave the project un-checkpointed for re-indexing",
+        );
+    }
+
+    #[tokio::test]
+    async fn abandoned_sentinel_drains_inflight_without_checkpointing() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store.clone(), cleaner, inflight.clone(), 2);
+
+        // A timed-out job's submitted parts still drain (the writer owns them) while the run
+        // future is dropped before it can release the sentinel. Dropping `commit` here without a
+        // third `release()` mimics that: the slot must still be reclaimed and nothing checkpointed.
+        commit.clone().release();
+        commit.clone().release();
+        drop(commit);
+
+        settle(&inflight).await;
+        assert!(
+            store
+                .get_checkpoint("1/7/", 7, "main")
+                .await
+                .unwrap()
+                .is_none(),
+            "an abandoned sentinel must not checkpoint; the sweep re-indexes the project",
         );
     }
 }
