@@ -32,7 +32,7 @@ title: Get started with Orbit Remote
 - Reporter role or higher, to query a group once it is indexed
 
 Security data has a higher requirement: the Security Manager role. For how access maps to
-results, see [Permissions](permissions.md).
+results, see [Security](security.md).
 
 Orbit indexes top-level groups only. Subgroups and projects inherit indexing automatically.
 

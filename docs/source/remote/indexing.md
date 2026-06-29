@@ -88,4 +88,4 @@ Languages not currently indexed: Swift, COBOL, Terraform, YAML.
 - Private content the requesting user does not have access to (authorization is enforced at query time)
 
 For the roles required to query, and the Security Manager role needed for security data,
-see [Permissions](permissions.md).
+see [Security](security.md).
