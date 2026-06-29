@@ -132,17 +132,21 @@ pub struct StatisticsExclude {
     pub columns: Vec<String>,
 }
 
-/// Hash-bucket partitioning for tables carrying `traversal_path`. The DDL emits
-/// `PARTITION BY (<expression>)`, so ClickHouse derives the bucket at
-/// insert/merge time with no stored column and no write-side code. Each bucket
-/// gets its own part budget, so one tenant's insert burst no longer exhausts
-/// the whole table's. Global tables (User, Runner) have no `traversal_path` and
-/// stay unpartitioned.
+/// Hash-bucket partitioning. The DDL emits `PARTITION BY (<expression>)` on
+/// every table whose columns include all of `required_columns`, so ClickHouse
+/// derives the bucket at insert/merge time with no stored column and no
+/// write-side code. Each bucket gets its own part budget, so one tenant's
+/// insert burst no longer exhausts the whole table's. Tables missing a required
+/// column (global hubs like User and Runner, which lack `traversal_path`) stay
+/// unpartitioned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionConfig {
-    /// ClickHouse `PARTITION BY` expression over `traversal_path`, e.g.
-    /// `sipHash64(...) % 50`. Emitted verbatim into the DDL.
+    /// ClickHouse `PARTITION BY` expression, e.g. `sipHash64(...) % 50`.
+    /// Emitted verbatim into the DDL.
     pub partition_by: String,
+    /// Columns the expression reads. A table partitions only if its storage
+    /// columns include all of these.
+    pub required_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

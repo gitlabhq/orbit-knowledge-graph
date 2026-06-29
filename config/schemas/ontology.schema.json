@@ -668,9 +668,15 @@
               "type": "string",
               "minLength": 1,
               "description": "ClickHouse PARTITION BY expression over traversal_path, e.g. \"sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50\"."
+            },
+            "required_columns": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "Columns the expression reads. A table partitions only if its storage columns include all of these."
             }
           },
-          "required": ["partition_by"],
+          "required": ["partition_by", "required_columns"],
           "additionalProperties": false
         },
         "internal_column_prefix": {

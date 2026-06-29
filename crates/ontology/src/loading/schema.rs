@@ -110,6 +110,7 @@ pub(super) struct StatisticsExcludeYaml {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct PartitionYaml {
     pub partition_by: String,
+    pub required_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -335,10 +335,16 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     }
 }
 
-fn partition_by(partition: Option<&PartitionConfig>) -> Vec<String> {
-    partition
-        .map(|p| vec![p.partition_by.clone()])
-        .unwrap_or_default()
+fn partition_by(partition: Option<&PartitionConfig>, columns: &[StorageColumn]) -> Vec<String> {
+    let Some(p) = partition else {
+        return vec![];
+    };
+    let present = |name: &str| columns.iter().any(|c| c.name == name);
+    if p.required_columns.iter().all(|c| present(c)) {
+        vec![p.partition_by.clone()]
+    } else {
+        vec![]
+    }
 }
 
 fn build_node_table(
@@ -352,8 +358,7 @@ fn build_node_table(
         .map(storage_col_to_def)
         .collect();
     columns.extend(system_columns(None));
-    // Global hubs (User, Runner) have no traversal_path to bucket on.
-    let partition_by = partition_by(partition.filter(|_| node.has_traversal_path));
+    let partition_by = partition_by(partition, &node.storage.columns);
 
     let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
     let projections: Vec<ProjectionDef> = node
@@ -402,9 +407,7 @@ fn build_edge_table(
             .map(storage_col_to_def),
     );
     columns.extend(system_columns(None));
-    // Unlike nodes, every edge table carries traversal_path (global edges write
-    // '0/'), so all edge tables partition.
-    let partition_by = partition_by(partition);
+    let partition_by = partition_by(partition, &config.storage.columns);
 
     let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
     indexes.extend(

@@ -273,6 +273,7 @@ settings:
   # top-level namespace; global edges write '0/' so they hash to bucket 0.
   partition:
     partition_by: "sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50"
+    required_columns: [traversal_path]
   internal_column_prefix: "_gkg_"
   local_db:
     entities:
