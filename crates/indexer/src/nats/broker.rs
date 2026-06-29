@@ -1,15 +1,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Backoff for the unbounded fetch supervisor loop: starts at 100ms (the prior flat delay) and
-/// escalates with consecutive failures, capped at 5s, so a sustained NATS outage is not polled
-/// at a hot 100ms while a brief blip still recovers fast.
+/// Flat 100ms backoff for the unbounded fetch supervisor loop: re-poll quickly after a fetch
+/// error, matching the prior hot-poll behavior.
 const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
     mode: crate::engine::retry::RetryMode::InSitu,
-    backoff: crate::engine::retry::Backoff::Exponential {
-        base: Duration::from_millis(100),
-        cap: Duration::from_secs(5),
-    },
+    backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
     max_attempts: u32::MAX,
     dead_letter: false,
 };
