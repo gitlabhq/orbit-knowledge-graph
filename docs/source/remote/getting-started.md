@@ -28,7 +28,11 @@ title: Get started with Orbit Remote
 
 ## Prerequisites
 
-- Owner role on the top-level group you want to enable Orbit on
+- Owner role on the top-level group, to enable Orbit on it
+- Reporter role or higher, to query a group once it is indexed
+
+Security data has a higher floor: the Security Manager role. For how access maps to
+results, see [Permissions](indexing.md#permissions).
 
 Orbit indexes top-level groups only. Subgroups and projects inherit indexing automatically.
 
