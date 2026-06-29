@@ -56,6 +56,12 @@ pub enum HandlerError {
     Deserialization(#[from] serde_json::Error),
 }
 
+impl From<crate::engine::retry::RetryExhausted> for HandlerError {
+    fn from(e: crate::engine::retry::RetryExhausted) -> Self {
+        HandlerError::Processing(e.to_string())
+    }
+}
+
 impl HandlerError {
     pub fn error_kind(&self) -> &'static str {
         match self {

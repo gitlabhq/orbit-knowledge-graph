@@ -46,51 +46,63 @@ impl RetryPolicy {
     }
 }
 
-/// The outcome of one attempt. The callback returns this; [`drive`] decides what to do with it.
-pub enum Step<T, E> {
+/// The outcome of one attempt. The callback returns this; the harness decides what to do with it.
+/// `Retry` carries the state for the next attempt, so any per-attempt mutation is threaded by
+/// value through the harness rather than borrowed across the await point (keeps the future
+/// `Send` and sidesteps the lending-closure problem). Stateless callers use `S = ()`.
+pub enum Step<T, E, S = ()> {
     /// Finished successfully; return the value.
     Done(T),
-    /// Not done, not terminal; wait and try again (subject to the policy's attempt cap).
-    Retry,
+    /// Not done, not terminal; wait and try again with `S` as the next attempt's state.
+    Retry(S),
     /// Terminal failure; return the error without further retries.
     GiveUp(E),
 }
 
-/// Run `attempt` until it yields [`Step::Done`] or [`Step::GiveUp`], or the policy's attempt cap
-/// is hit, sleeping the policy's backoff between tries. The callback owns all variation (what is
-/// "done", what state carries forward); the harness only runs, matches, sleeps, repeats.
+/// Stateful retry: the harness owns the carried state `S`, moves it into each attempt by value,
+/// and receives the next state back via [`Step::Retry`]. Runs until [`Step::Done`]/[`Step::GiveUp`]
+/// or the policy's attempt cap, sleeping the policy's backoff between tries. `attempt` receives
+/// the current state and the 0-based attempt index.
 ///
-/// On exhausting `max_attempts` while the last step was [`Step::Retry`], the most recent
-/// `GiveUp` error is returned; if no `GiveUp` was ever produced, the callback must encode the
-/// terminal error itself by returning `GiveUp` on the final attempt. In practice callers return
-/// `GiveUp` once they have nothing left to try, so the cap is a safety bound, not the primary
-/// exit.
-pub async fn drive<T, E, S, F, Fut>(
+/// Reaching the cap while every step asked to `Retry` returns [`RetryExhausted`] (via `E`'s
+/// `From`). In practice callers return `GiveUp` with the real error once they have nothing left
+/// to try, so the cap is a safety bound, not the primary exit.
+pub async fn drive_with<T, E, S, F, Fut>(
     policy: &RetryPolicy,
-    state: &mut S,
+    init: S,
     mut attempt: F,
 ) -> Result<T, E>
 where
-    F: FnMut(&mut S, u32) -> Fut,
-    Fut: Future<Output = Step<T, E>>,
+    F: FnMut(S, u32) -> Fut,
+    Fut: Future<Output = Step<T, E, S>>,
     E: From<RetryExhausted>,
 {
     let cap = policy.max_attempts.max(1);
-    let mut last_retry = false;
+    let mut state = init;
     for i in 0..cap {
         match attempt(state, i).await {
             Step::Done(value) => return Ok(value),
             Step::GiveUp(error) => return Err(error),
-            Step::Retry => {
-                last_retry = true;
+            Step::Retry(next) => {
+                state = next;
                 if i + 1 < cap {
                     tokio::time::sleep(policy.backoff_for(i)).await;
                 }
             }
         }
     }
-    debug_assert!(last_retry);
     Err(RetryExhausted { attempts: cap }.into())
+}
+
+/// Stateless retry: [`drive_with`] with no carried state. The callback only sees the attempt
+/// index and returns [`Step`] with `S = ()`.
+pub async fn drive<T, E, F, Fut>(policy: &RetryPolicy, mut attempt: F) -> Result<T, E>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: Future<Output = Step<T, E>>,
+    E: From<RetryExhausted>,
+{
+    drive_with(policy, (), move |(), i| attempt(i)).await
 }
 
 /// Returned by [`drive`] when every attempt asked to `Retry` and the cap was reached. Callers
@@ -136,8 +148,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn done_on_first_attempt_returns_immediately() {
         let calls = AtomicU32::new(0);
-        let mut state = ();
-        let result: Result<u32, TestError> = drive(&POLICY, &mut state, |_, _| {
+        let result: Result<u32, TestError> = drive(&POLICY, |_| {
             calls.fetch_add(1, Ordering::SeqCst);
             std::future::ready(Step::Done(7))
         })
@@ -148,25 +159,28 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn retries_then_succeeds() {
-        let mut state = 0u32;
-        let result: Result<u32, TestError> = drive(&POLICY, &mut state, |s, attempt| {
-            *s = attempt;
+        // State carried in the callback's own captured environment, not through the harness.
+        let mut seen = 0u32;
+        let result: Result<u32, TestError> = drive(&POLICY, |attempt| {
+            seen = attempt;
             if attempt < 2 {
-                std::future::ready(Step::Retry)
+                std::future::ready(Step::Retry(()))
             } else {
                 std::future::ready(Step::Done(attempt))
             }
         })
         .await;
         assert_eq!(result, Ok(2));
-        assert_eq!(state, 2, "callback observes the attempt index via state");
+        assert_eq!(
+            seen, 2,
+            "callback mutates its own captured state across attempts"
+        );
     }
 
     #[tokio::test(start_paused = true)]
     async fn give_up_is_terminal_without_consuming_the_cap() {
         let calls = AtomicU32::new(0);
-        let mut state = ();
-        let result: Result<u32, TestError> = drive(&POLICY, &mut state, |_, _| {
+        let result: Result<u32, TestError> = drive(&POLICY, |_| {
             calls.fetch_add(1, Ordering::SeqCst);
             std::future::ready(Step::GiveUp(TestError::GaveUp))
         })
@@ -182,10 +196,9 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn exhausting_the_cap_yields_retry_exhausted() {
         let calls = AtomicU32::new(0);
-        let mut state = ();
-        let result: Result<u32, TestError> = drive(&POLICY, &mut state, |_, _| {
+        let result: Result<u32, TestError> = drive(&POLICY, |_| {
             calls.fetch_add(1, Ordering::SeqCst);
-            std::future::ready(Step::Retry)
+            std::future::ready(Step::Retry(()))
         })
         .await;
         assert_eq!(result, Err(TestError::Exhausted));
@@ -194,6 +207,20 @@ mod tests {
             3,
             "a Retry-only callback runs exactly max_attempts times"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stateful_threads_state_through_retry() {
+        // Each Retry carries a shrinking value; the next attempt receives it by value.
+        let result: Result<u64, TestError> = drive_with(&POLICY, 100u64, |size, attempt| {
+            std::future::ready(if attempt < 2 {
+                Step::Retry(size / 2)
+            } else {
+                Step::Done(size)
+            })
+        })
+        .await;
+        assert_eq!(result, Ok(25), "100 -> 50 -> 25 across two retries");
     }
 
     #[test]

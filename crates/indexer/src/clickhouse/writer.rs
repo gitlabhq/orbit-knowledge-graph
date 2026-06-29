@@ -326,7 +326,7 @@ async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
     let guard = NotifyOnDrop(buf.tokens);
 
     // Arrow batches are Arc-backed, so the per-attempt clone is a refcount bump, not a data copy.
-    let durable = drive(&WRITE_RETRY, &mut (), |_, attempt| {
+    let durable = drive(&WRITE_RETRY, |attempt| {
         let fut = writer.write(table, buf.batches.clone(), Some(WriteDurability::Durable));
         async move {
             match fut.await {
@@ -334,7 +334,7 @@ async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
                 // Surface the real error on the final attempt; otherwise wait and retry.
                 Err(e) if attempt + 1 < WRITE_RETRY.max_attempts => {
                     warn!(table, retry = attempt + 1, error = %e, "buffered write failed; retrying after backoff");
-                    Step::Retry
+                    Step::Retry(())
                 }
                 Err(e) => Step::GiveUp(e),
             }
