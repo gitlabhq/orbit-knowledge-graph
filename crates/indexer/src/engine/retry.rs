@@ -163,15 +163,19 @@ where
             Step::GiveUp(error) => return Err(error),
             Step::Retry(next) => {
                 state = next;
-                let mut delay = policy.backoff_for(i);
-                if let Some(deadline) = deadline {
-                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                    if remaining.is_zero() {
-                        return Err(on_bound(&state));
+                // No sleep after the final attempt: it would be pure latency before exhaustion.
+                if i + 1 < cap {
+                    let mut delay = policy.backoff_for(i);
+                    if let Some(deadline) = deadline {
+                        let remaining =
+                            deadline.saturating_duration_since(tokio::time::Instant::now());
+                        if remaining.is_zero() {
+                            return Err(on_bound(&state));
+                        }
+                        delay = delay.min(remaining);
                     }
-                    delay = delay.min(remaining);
+                    tokio::time::sleep(delay).await;
                 }
-                tokio::time::sleep(delay).await;
             }
         }
     }
@@ -287,6 +291,26 @@ mod tests {
         assert_eq!(
             run(None, || Step::Retry(())).await,
             (Err(TestError::Exhausted), 3)
+        );
+    }
+
+    #[tokio::test]
+    async fn exhaustion_does_not_sleep_after_the_final_attempt() {
+        // Real time (no start_paused), single attempt: a Retry on the last (only) attempt must
+        // exhaust immediately rather than sleeping the 10s backoff first.
+        const LONG: &[Duration] = &[Duration::from_secs(10)];
+        let policy = RetryPolicy {
+            backoff: Backoff::Fixed(LONG),
+            max_attempts: 1,
+            ..POLICY
+        };
+        let start = std::time::Instant::now();
+        let result: Result<u32, TestError> =
+            drive(&policy, |_| std::future::ready(Step::Retry(()))).await;
+        assert_eq!(result, Err(TestError::Exhausted));
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "exhaustion must not sleep the backoff after the last attempt"
         );
     }
 

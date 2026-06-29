@@ -5,7 +5,7 @@ use std::time::Duration;
 const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
     mode: crate::engine::retry::RetryMode::Local,
     backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
-    max_attempts: u32::MAX,
+    max_attempts: u32::MAX, // unused by drive_forever; the loop is unbounded by design
     dead_letter: false,
 };
 const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
