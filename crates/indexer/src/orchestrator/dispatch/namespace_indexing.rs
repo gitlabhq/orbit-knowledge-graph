@@ -10,6 +10,14 @@ use crate::orchestrator::scheduled::TaskError;
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamespaceDispatchRequest {
+    pub namespace_id: i64,
+    pub traversal_path: String,
+    /// Entity targets to reindex; empty means all (a full sweep).
+    pub targets: Vec<String>,
+}
+
 pub struct NamespaceIndexingDispatch {
     nats: Arc<dyn NatsServices>,
 }
@@ -21,7 +29,7 @@ impl NamespaceIndexingDispatch {
 
     pub async fn dispatch_for_namespaces(
         &self,
-        namespaces: &[(i64, String)],
+        namespaces: &[NamespaceDispatchRequest],
         watermark: DateTime<Utc>,
         campaign_id: Option<String>,
     ) -> Result<DispatchOutcome, TaskError> {
@@ -30,10 +38,11 @@ impl NamespaceIndexingDispatch {
             skipped: 0,
         };
 
-        for (namespace_id, traversal_path) in namespaces {
+        for namespace in namespaces {
+            let traversal_path = &namespace.traversal_path;
             if !gkg_utils::traversal_path::is_valid(traversal_path) {
                 warn!(
-                    namespace_id = *namespace_id,
+                    namespace_id = namespace.namespace_id,
                     %traversal_path,
                     "skipping namespace with invalid traversal_path"
                 );
@@ -41,12 +50,12 @@ impl NamespaceIndexingDispatch {
             }
 
             let request = NamespaceIndexingRequest {
-                namespace: *namespace_id,
+                namespace: namespace.namespace_id,
                 traversal_path: traversal_path.clone(),
                 watermark,
                 dispatch_id: Uuid::new_v4(),
                 campaign_id: campaign_id.clone(),
-                targets: Vec::new(),
+                targets: namespace.targets.clone(),
             };
             let subscription = request.publish_subscription();
             let envelope = Envelope::new(&request).map_err(TaskError::new)?;
@@ -55,7 +64,7 @@ impl NamespaceIndexingDispatch {
                 Ok(()) => {
                     outcome.dispatched += 1;
                     debug!(
-                        namespace_id = *namespace_id,
+                        namespace_id = namespace.namespace_id,
                         %traversal_path,
                         "dispatched namespace indexing request"
                     );
@@ -81,7 +90,18 @@ mod tests {
 
         let outcome = dispatch
             .dispatch_for_namespaces(
-                &[(100, "1/100/".to_string()), (200, "2/200/".to_string())],
+                &[
+                    NamespaceDispatchRequest {
+                        namespace_id: 100,
+                        traversal_path: "1/100/".to_string(),
+                        targets: Vec::new(),
+                    },
+                    NamespaceDispatchRequest {
+                        namespace_id: 200,
+                        traversal_path: "2/200/".to_string(),
+                        targets: Vec::new(),
+                    },
+                ],
                 Utc::now(),
                 None,
             )
@@ -98,7 +118,15 @@ mod tests {
         let dispatch = NamespaceIndexingDispatch::new(nats.clone());
 
         let outcome = dispatch
-            .dispatch_for_namespaces(&[(1, "0/".to_string())], Utc::now(), None)
+            .dispatch_for_namespaces(
+                &[NamespaceDispatchRequest {
+                    namespace_id: 1,
+                    traversal_path: "0/".to_string(),
+                    targets: Vec::new(),
+                }],
+                Utc::now(),
+                None,
+            )
             .await
             .unwrap();
 

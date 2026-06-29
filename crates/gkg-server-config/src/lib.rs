@@ -30,8 +30,8 @@ pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
     DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
     GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceSweepConfig,
-    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
+    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
+    ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
     StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};

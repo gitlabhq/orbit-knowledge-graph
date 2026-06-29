@@ -219,4 +219,26 @@ mod tests {
         assert!(template.contains("ORDER BY traversal_path, id"));
         assert_eq!(system_note.watermark_column, "sn._siphon_watermark");
     }
+
+    #[test]
+    fn every_reindex_target_maps_to_a_dispatch_plan() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+
+        let dispatch_targets: std::collections::BTreeSet<&str> =
+            plans.namespaced.iter().map(|p| p.target.as_str()).collect();
+
+        let orphans: Vec<String> = ontology
+            .reindex_sources()
+            .into_iter()
+            .map(|source| source.target)
+            .filter(|target| !dispatch_targets.contains(target.as_str()))
+            .collect();
+
+        assert!(
+            orphans.is_empty(),
+            "reindex_on targets without a namespaced dispatch plan would be silently \
+             skipped by incremental dispatch: {orphans:?}"
+        );
+    }
 }
