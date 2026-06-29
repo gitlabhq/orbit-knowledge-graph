@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: How Orbit Remote secures your data, including the roles required to query, the authorization model, licensing, and programmatic access.
+description: How Orbit Remote secures your data, including the roles required to query, the authorization model, and programmatic access.
 title: Orbit Remote security
 ---
 
@@ -26,22 +26,29 @@ title: Orbit Remote security
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit reuses the existing GitLab permissions of the user making a query. A query runs as
-that user and returns only what they can already see in GitLab. If your user or agent
-cannot see something in the GitLab UI, they cannot see it in the graph. Enabling Orbit on a
-group grants no one access they did not already have, and access is hierarchical: a role on
-a top-level group applies to every subgroup and project beneath it.
+Responses from queries made to Orbit include only the information that is available to
+your role. If you or an agent try to access a part of GitLab that requires a higher user
+role, related information will not be displayed in the graph.
+
+Access in Orbit is hierarchical. A role assigned at the top-level group applies to every
+subgroup and project beneath it. Turning on Orbit does not change existing access.
 
 ## Roles required to query Orbit
 
 To query a group, you must have the Reporter role or higher for that group.
 
-Security data has a higher requirement: the Security Manager role. The security domain
-covers vulnerabilities, security findings, security scans, scanners, and CVE/CWE
-identifiers. The higher requirement keeps aggregations secure: a count or group-by cannot
-be filtered row by row after it runs, so without it a Reporter could infer security details
-from aggregate results alone. A user with only the Reporter role still queries the rest of
-the graph, but security entities are dropped from results, including from aggregate counts.
+Access to security data requires the Security Manager role. This includes the following data:
+
+- Vulnerabilities
+- Security findings
+- Security scans
+- Scanners
+- CVE/CWE identifiers
+
+The Security Manager role is required because aggregate results cannot be filtered after
+query execution, which could otherwise expose security details to users with the Reporter
+role. A user with the Reporter role can query the rest of the graph, but security entities
+are dropped from results, including from aggregate counts.
 
 | Data domain | Minimum role |
 |---|---|
@@ -64,12 +71,6 @@ Access is enforced in the following layers:
 
 Orbit is read-only. It reads changes from GitLab and never writes back, runs in a separate
 environment, and stores no permission data of its own.
-
-## Licensing
-
-Orbit Remote requires GitLab Premium or Ultimate. Access follows your GitLab subscription
-and the requesting user's permissions: every query is authorized through GitLab, and what
-Orbit returns changes as that access changes.
 
 ## Programmatic access
 
