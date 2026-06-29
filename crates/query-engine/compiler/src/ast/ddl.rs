@@ -9,7 +9,6 @@ pub struct CreateTable {
     pub indexes: Vec<IndexDef>,
     pub projections: Vec<ProjectionDef>,
     pub engine: Engine,
-    /// `PARTITION BY (...)` columns/expressions. Empty means unpartitioned.
     pub partition_by: Vec<String>,
     pub order_by: Vec<String>,
     /// When absent, PRIMARY KEY defaults to ORDER BY.
