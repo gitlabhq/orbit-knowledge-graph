@@ -84,7 +84,7 @@ engine:
       retry_interval_secs: 60
     code-indexing-task:
       concurrency_group: code
-      max_attempts: 5  # event-driven, must retry to avoid data loss
+      max_attempts: 3  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
       dead_letter_on_exhaustion: true
     namespace-deletion:
