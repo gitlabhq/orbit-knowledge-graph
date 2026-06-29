@@ -325,6 +325,9 @@ impl NatsBroker {
                 {
                     Ok(batch) => batch,
                     Err(e) => {
+                        // Not on the engine retry harness: this is an unbounded stream-resume
+                        // supervisor loop that forwards each error downstream and runs until
+                        // cancellation, not a bounded retry-to-result.
                         warn!(error = %e, "fetch batch error");
                         metrics.record_nats_fetch_duration(
                             fetch_start.elapsed().as_secs_f64(),
