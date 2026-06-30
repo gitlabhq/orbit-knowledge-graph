@@ -104,6 +104,7 @@
             },
             "description": {
               "type": "string",
+              "maxLength": 200,
               "description": "Human-readable description of the property."
             },
             "values": {
@@ -179,6 +180,7 @@
             },
             "description": {
               "type": "string",
+              "maxLength": 200,
               "description": "Human-readable description of the property."
             }
           },
@@ -898,6 +900,7 @@
       "properties": {
         "description": {
           "type": "string",
+          "maxLength": 200,
           "description": "Human-readable description of the domain."
         },
         "nodes": {
@@ -966,6 +969,7 @@
         },
         "description": {
           "type": "string",
+          "maxLength": 200,
           "description": "Human-readable description of the node."
         },
         "label": {
@@ -1052,6 +1056,7 @@
         },
         "description": {
           "type": "string",
+          "maxLength": 200,
           "description": "Human-readable description of this edge variant."
         }
       },
@@ -1137,6 +1142,7 @@
       "properties": {
         "description": {
           "type": "string",
+          "maxLength": 200,
           "description": "Human-readable description of the relationship."
         },
         "table": {
@@ -1175,6 +1181,7 @@
         },
         "description": {
           "type": "string",
+          "maxLength": 200,
           "description": "Human-readable description of the derived entity."
         },
         "emits": {
