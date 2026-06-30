@@ -194,6 +194,10 @@ yaml_test!(
     python_reexport_resolution,
     "python/reexport_resolution.yaml"
 );
+yaml_test!(
+    python_init_relative_reexport,
+    "python/init_relative_reexport.yaml"
+);
 
 // Java
 yaml_test!(java_records, "java/records.yaml");

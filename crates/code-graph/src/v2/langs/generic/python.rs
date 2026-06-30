@@ -411,10 +411,16 @@ impl PythonImportRewriter {
         import: &mut CanonicalImport,
         module_scope: Option<&str>,
         sep: &str,
+        file_path: &str,
     ) -> Option<String> {
         let module_scope = module_scope?;
 
-        if let Some(path) = resolve_python_relative_import(&import.path, module_scope, sep) {
+        if let Some(path) = resolve_python_relative_import(
+            &import.path,
+            module_scope,
+            sep,
+            is_package_init(file_path),
+        ) {
             import.path = path;
             return None;
         }
@@ -443,7 +449,9 @@ impl PythonImportRewriter {
 
 fn build_python_import_rewriter(paths: &[&str], sep: &str) -> Box<ImportRewriter> {
     let rewriter = PythonImportRewriter::from_paths(paths.iter().copied(), sep);
-    Box::new(move |import, module_scope, sep| rewriter.rewrite(import, module_scope, sep))
+    Box::new(move |import, module_scope, sep, file_path| {
+        rewriter.rewrite(import, module_scope, sep, file_path)
+    })
 }
 
 /// Index every `from M import ...` (named or `import *`) keyed by the declaring
@@ -501,7 +509,12 @@ fn insert_importable_path_prefixes(
 /// Resolve Python relative import paths against the current module scope.
 /// `from .models import User` in module `pkg.sub.mod` → `pkg.sub.models`
 /// `from ..services import Auth` in `pkg.sub.mod` → `pkg.services`
-fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+fn resolve_python_relative_import(
+    raw_path: &str,
+    module_scope: &str,
+    sep: &str,
+    is_package_init: bool,
+) -> Option<String> {
     if !raw_path.starts_with('.') {
         return None;
     }
@@ -511,10 +524,14 @@ fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str)
     // Module scope is the file's module (e.g. "pkg.sub.module").
     // 1 dot = same package (drop last component), 2 dots = parent, etc.
     let parts: Vec<&str> = module_scope.split(sep).collect();
-    if dots > parts.len() {
+    // An `__init__.py` *is* its package: its module scope already equals
+    // `__package__`, with no module leaf for the first dot to drop. A regular
+    // module's scope ends in the module name, which the first dot drops.
+    let drop = dots - usize::from(is_package_init);
+    if drop > parts.len() {
         return None;
     }
-    let base = &parts[..parts.len() - dots];
+    let base = &parts[..parts.len() - drop];
     if suffix.is_empty() {
         let joined = base.join(sep);
         if joined.is_empty() {
@@ -554,6 +571,12 @@ fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
         return None;
     }
     Some(module.to_string())
+}
+
+fn is_package_init(file_path: &str) -> bool {
+    std::path::Path::new(file_path)
+        .file_name()
+        .is_some_and(|name| name == "__init__.py")
 }
 
 fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> {
@@ -605,7 +628,7 @@ mod tests {
             is_type_only: false,
             wildcard: false,
         };
-        let scope_name = rewriter.rewrite(&mut import, Some(module_scope), ".");
+        let scope_name = rewriter.rewrite(&mut import, Some(module_scope), ".", "module.py");
         (import.path, scope_name)
     }
 
@@ -844,5 +867,31 @@ mod tests {
             ),
             ("src.package.models".to_string(), None)
         );
+    }
+
+    #[test]
+    fn relative_imports_in_a_package_init_resolve_against_the_package() {
+        let transformer = PythonImportRewriter::from_paths(std::iter::empty(), ".");
+        let resolve = |path: &str| {
+            let mut import = CanonicalImport {
+                import_type: "FromImport",
+                binding_kind: ImportBindingKind::Named,
+                mode: ImportMode::Declarative,
+                path: path.to_string(),
+                name: Some("Thing".to_string()),
+                alias: None,
+                scope_fqn: None,
+                range: Range::empty(),
+                is_type_only: false,
+                wildcard: false,
+            };
+            transformer.rewrite(&mut import, Some("pkg.sub"), ".", "pkg/sub/__init__.py");
+            import.path
+        };
+
+        assert_eq!(resolve(".base"), "pkg.sub.base");
+        assert_eq!(resolve("..other"), "pkg.other");
+        assert_eq!(resolve("...top"), "top");
+        assert_eq!(resolve("....deep"), "....deep");
     }
 }
