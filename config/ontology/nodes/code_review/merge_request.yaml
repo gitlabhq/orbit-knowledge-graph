@@ -145,7 +145,7 @@ properties:
     source: merged_commit_id
     nullable: true
     mutable: false
-    description: "Synthetic Commit id the MR was merged at: masked sipHash64(target_project_id, decoded_sha), NULL unless state is merged. decoded_sha is COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha) with the two bytea legs (Siphon stores them as \\x-hex of the ASCII SHA) unhex-decoded; merge_commit_sha is clean. The COALESCE mirrors Rails' MergeRequest#merged_commit_sha fallback but stops at squash_commit_sha: Rails' 4th leg diff_head_sha is the pre-merge source-branch head (the wrong-SHA source #924 exists to avoid) and is not a merge_requests column. Write-once: NULL until merged (merged is terminal in Rails), set once at merge, never rewritten by user action -> immutable, so the stale-edge sweep skips it."
+    description: "Synthetic Commit id the MR was merged at. The approach mirrors Rails' MergeRequest#merged_commit_sha fallback but stops at squash_commit_sha. Write-once: NULL until merged, set once at merge, never rewritten by user action -> immutable, so the stale-edge sweep skips it."
 
   latest_build_started_at:
     type: timestamp
