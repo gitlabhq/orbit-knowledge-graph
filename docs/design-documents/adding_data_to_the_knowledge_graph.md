@@ -157,6 +157,7 @@ Skip this for edges — an edge needs no registration as long as both endpoint
    policy already exists, mirror it and **reuse an existing ability** to avoid the
    custom-permission documentation regeneration pipeline. Example
    (`app/policies/packages/dependency_policy.rb`):
+
    ```ruby
    # frozen_string_literal: true
    module Packages
@@ -165,6 +166,7 @@ Skip this for edges — an edge needs no registration as long as both endpoint
      end
    end
    ```
+
    This reuses the project-level `read_package` ability — **no new permission**, so
    no `custom_roles` / GraphQL / OpenAPI doc regen.
 2. **Register** in `redaction_service.rb`:
@@ -197,6 +199,7 @@ Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Requ
 ### 5.2 Edge YAML — `config/ontology/edges/<edge>.yaml`
 
 For a **join-table edge**, model on `edges/built_by.yaml`:
+
 ```yaml
 description: <Subject> <verbs> <object>
 variants:
@@ -211,10 +214,11 @@ etl:
     from: { id: <from_fk_column>, type: <From> }
     to:   { id: <to_fk_column>,   type: <To> }
 ```
+
 If either FK column is `Nullable` in the source, the ETL can emit null-target edges —
 filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
-### 5.3 ⚠️ Register in `config/ontology/schema.yaml` (the step that's easy to miss)
+### 5.3 Register in `config/ontology/schema.yaml` (the step that's easy to miss)
 
 Node/edge files are **NOT auto-discovered** — they're loaded from a registry in
 `schema.yaml`. If you skip this, your YAML is silently ignored and the DDL/indexer
@@ -241,6 +245,7 @@ config/SCHEMA_VERSION        # e.g. 64 -> 65
 # regenerate (do NOT hand-edit graph.sql):
 mise run schema:generate:ddl
 ```
+
 This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql`
 (local/DuckDB). Expect:
 - `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block + the version stamp.
@@ -255,6 +260,7 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 
 - **`fixtures/siphon.sql`** — add a `CREATE TABLE … siphon_<table>` for each new source table, using the simplified fixture form (mirror the existing `siphon_packages_build_infos` block: no CODECs, `PROJECTION pg_pkey_ordered`). The scenario harness seeds rows into these.
 - **SDLC scenario YAML** — entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. These moved from Rust to **YAML**; add a `.yaml` scenario, not a Rust function. Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
+
   ```yaml
   description: ...
   scope: { namespace: 100 }
@@ -283,6 +289,7 @@ relationship diagram, the `IN_PROJECT` source list, and a new relationship-types
 cargo +<pinned> test -p ontology                          # ~128 tests: load, constants, references
 cargo +<pinned> test -p integration-tests scenario_indexing   # end-to-end siphon->graph (needs Docker ClickHouse)
 ```
+
 - Find the pinned version in `rust-toolchain.toml` (e.g. `1.95.0`). Running via
   `mise run …` uses the right toolchain automatically.
 - `integration-tests` pulls in heavy code-graph deps that require the **newer**
