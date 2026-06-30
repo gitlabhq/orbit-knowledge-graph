@@ -25,7 +25,7 @@ pub fn apply_partition_pruning(node: &mut Node, ontology: &Ontology) -> Result<(
 
 fn prune_query(q: &mut Query, strategy: &PartitionStrategy) {
     if let Some(where_clause) = &q.where_clause {
-        let preds: Vec<Expr> = pinning_prefixes(where_clause, strategy)
+        let preds: Vec<Expr> = single_prefix_aliases(where_clause, strategy)
             .into_iter()
             .map(|(alias, prefix)| bucket_predicate(strategy, &alias, &prefix))
             .collect();
@@ -64,15 +64,21 @@ fn prune_query_from(from: &mut TableRef, strategy: &PartitionStrategy) {
     }
 }
 
-/// Collects `(alias, prefix)` for every `startsWith(alias.traversal_path,
-/// '<prefix>')` in `expr` whose prefix pins the strategy's partition input.
-/// Deduplicated so an alias filtered more than once yields one predicate.
-fn pinning_prefixes(expr: &Expr, strategy: &PartitionStrategy) -> Vec<(String, String)> {
+/// `(alias, prefix)` for aliases confined to exactly one pinning prefix. An
+/// alias filtered by several prefixes (a multi-path `OR`) spans buckets, so it
+/// is excluded: ANDing one bucket would contradict the others and drop all
+/// rows. The single survivor is the only case where one bucket is provably
+/// exhaustive.
+fn single_prefix_aliases(expr: &Expr, strategy: &PartitionStrategy) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = Vec::new();
     collect_pinning(expr, strategy, &mut found);
     found.sort();
     found.dedup();
     found
+        .iter()
+        .filter(|(alias, _)| found.iter().filter(|(a, _)| a == alias).count() == 1)
+        .cloned()
+        .collect()
 }
 
 fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(String, String)>) {
@@ -216,6 +222,20 @@ mod tests {
     fn no_prune_without_startswith() {
         let where_clause = where_with(Expr::eq(Expr::col("p", "id"), Expr::int(1))).unwrap();
         assert!(!has_modulo_over(&where_clause, "p"));
+    }
+
+    #[test]
+    fn no_prune_for_multi_path_or() {
+        let filter = Expr::binary(
+            crate::ast::Op::Or,
+            starts_with("p", "1/100/1000/"),
+            starts_with("p", "1/200/2000/"),
+        );
+        let where_clause = where_with(filter).unwrap();
+        assert!(
+            !has_modulo_over(&where_clause, "p"),
+            "an alias spanning two namespaces must not be pinned to one bucket"
+        );
     }
 
     #[test]
