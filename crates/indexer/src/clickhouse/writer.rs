@@ -9,6 +9,7 @@ use gkg_server_config::ClickHouseConfiguration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tracing::warn;
 
 use crate::durability::WriteDurability;
@@ -153,29 +154,38 @@ enum Msg {
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
-/// Coalesces tagged writes into well-sized parts. A table flushes at `max_rows` or after
-/// `max_age`. Each batch carries a [`FlushToken`] the writer notifies once the batch's part is
-/// durable or has failed, so a producer can finalize work (checkpointing) per part.
+/// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
+/// writes pools into one part instead of one tiny part per flush tick. Each batch carries a
+/// [`FlushToken`] the writer notifies once the batch's part is durable or has failed.
 #[derive(Clone)]
 pub struct BufferedWriter {
     tx: mpsc::Sender<Msg>,
 }
 
+/// Tunables for [`BufferedWriter::spawn`]. Named fields so callers can't transpose the several
+/// `usize`/`Duration` knobs.
+pub struct BufferedWriterConfig {
+    pub channel_capacity: usize,
+    pub max_rows: usize,
+    pub flush_interval: Duration,
+    pub min_flush_rows: usize,
+    pub max_age: Duration,
+    pub max_concurrent: usize,
+}
+
 impl BufferedWriter {
-    pub fn spawn(
-        writer: Arc<ClickHouseWriter>,
-        channel_capacity: usize,
-        max_rows: usize,
-        max_age: Duration,
-        max_concurrent: usize,
-    ) -> Self {
-        let (tx, rx) = mpsc::channel(channel_capacity.max(1));
+    pub fn spawn(writer: Arc<ClickHouseWriter>, config: BufferedWriterConfig) -> Self {
+        let (tx, rx) = mpsc::channel(config.channel_capacity.max(1));
         tokio::spawn(drain(
             writer,
             rx,
-            max_rows.max(1),
-            max_age,
-            max_concurrent.max(1),
+            DrainLimits {
+                max_rows: config.max_rows.max(1),
+                flush_interval: config.flush_interval,
+                min_flush_rows: config.min_flush_rows,
+                max_age: config.max_age,
+            },
+            config.max_concurrent.max(1),
         ));
         Self { tx }
     }
@@ -212,13 +222,20 @@ struct TableBuffer {
     batches: Vec<RecordBatch>,
     tokens: Vec<Token>,
     rows: usize,
+    first_buffered_at: Option<Instant>,
+}
+
+struct DrainLimits {
+    max_rows: usize,
+    flush_interval: Duration,
+    min_flush_rows: usize,
+    max_age: Duration,
 }
 
 async fn drain(
     writer: Arc<ClickHouseWriter>,
     mut rx: mpsc::Receiver<Msg>,
-    max_rows: usize,
-    max_age: Duration,
+    limits: DrainLimits,
     max_concurrent: usize,
 ) {
     let mut pending: HashMap<String, TableBuffer> = HashMap::new();
@@ -228,7 +245,7 @@ async fn drain(
     // `indexed_at`, so neither correctness nor dedup depends on insert order.
     let mut writes = JoinSet::new();
 
-    let mut ticker = tokio::time::interval(max_age);
+    let mut ticker = tokio::time::interval(limits.flush_interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ticker.tick().await;
 
@@ -245,17 +262,30 @@ async fn drain(
                 }
                 Some(Msg::Submit(table, batch, token)) => {
                     let buf = pending.entry(table.clone()).or_default();
+                    buf.first_buffered_at.get_or_insert_with(Instant::now);
                     buf.rows += batch.num_rows();
                     buf.batches.push(batch);
                     buf.tokens.push(token);
-                    if buf.rows >= max_rows {
+                    if buf.rows >= limits.max_rows {
                         let buf = pending.remove(&table).unwrap();
                         spawn_write(&mut writes, &sem, &writer, table, buf);
                     }
                 }
             },
             _ = ticker.tick() => {
-                for (table, buf) in std::mem::take(&mut pending) {
+                let now = Instant::now();
+                let ripe: Vec<String> = pending
+                    .iter()
+                    .filter(|(_, buf)| {
+                        buf.rows >= limits.min_flush_rows
+                            || buf
+                                .first_buffered_at
+                                .is_some_and(|t| now.duration_since(t) >= limits.max_age)
+                    })
+                    .map(|(table, _)| table.clone())
+                    .collect();
+                for table in ripe {
+                    let buf = pending.remove(&table).unwrap();
                     spawn_write(&mut writes, &sem, &writer, table, buf);
                 }
             }
@@ -401,21 +431,23 @@ mod tests {
     async fn size_flush_notifies_each_batch_token_once_its_part_lands() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
-            16,
-            100,
-            Duration::from_secs(3600),
-            1,
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 100,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
-        // One batch in each of two tables. gl_edge crosses max_rows and flushes immediately;
-        // gl_code_edge stays buffered, so only one notification has fired.
+        // gl_edge crosses max_rows and flushes immediately; gl_code_edge stays buffered.
         submit(&w, "gl_edge", batch(100), token.clone()).await;
         submit(&w, "gl_code_edge", batch(10), token.clone()).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
 
-        // An explicit flush drains gl_code_edge, notifying the second batch.
         w.flush().await.unwrap();
         assert_eq!(token.flushed.load(Ordering::SeqCst), 2);
         assert_eq!(token.failed.load(Ordering::SeqCst), 0);
@@ -425,10 +457,14 @@ mod tests {
     async fn flush_waits_for_concurrent_in_flight_writes() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
-            64,
-            100,
-            Duration::from_secs(3600),
-            4,
+            BufferedWriterConfig {
+                channel_capacity: 64,
+                max_rows: 100,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 4,
+            },
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -440,6 +476,83 @@ mod tests {
         w.flush().await.unwrap();
         assert_eq!(token.flushed.load(Ordering::SeqCst), 4);
         assert_eq!(token.failed.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn soft_tick_holds_a_table_below_the_floor() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 1_000_000,
+                flush_interval: Duration::from_millis(20),
+                min_flush_rows: 500,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
+        );
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+
+        submit(&w, "gl_definition", batch(10), token.clone()).await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(
+            token.flushed.load(Ordering::SeqCst),
+            0,
+            "a sub-floor buffer must survive repeated soft ticks"
+        );
+
+        w.flush().await.unwrap();
+        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hard_cap_force_flushes_a_table_below_the_floor() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 1_000_000,
+                flush_interval: Duration::from_millis(20),
+                min_flush_rows: 500,
+                max_age: Duration::from_millis(60),
+                max_concurrent: 1,
+            },
+        );
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+
+        submit(&w, "gl_definition", batch(10), token.clone()).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            token.flushed.load(Ordering::SeqCst),
+            1,
+            "the oldest row aging past the cap force-flushes despite being below the floor"
+        );
+        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn size_flush_still_fires_below_the_floor_age() {
+        let w = BufferedWriter::spawn(
+            Arc::new(ClickHouseWriter::noop()),
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 100,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1_000_000,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
+        );
+        let token: Arc<CountToken> = Arc::new(CountToken::default());
+
+        submit(&w, "gl_definition", batch(100), token.clone()).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            token.flushed.load(Ordering::SeqCst),
+            1,
+            "reaching max_rows flushes immediately, independent of floor or cap"
+        );
     }
 
     #[test]

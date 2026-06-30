@@ -22,6 +22,17 @@ pub struct FamilyFileInput {
     pub path: FileInput,
 }
 
+/// Count the files [`group_parseable_inventory`] would parse (minus its `max_files` cap), so a
+/// repository is sized by parse work rather than raw file count.
+pub fn parseable_file_count(inventory: &[FileInventoryEntry]) -> usize {
+    inventory
+        .iter()
+        .filter(|entry| {
+            entry.decision == Decision::Parse && detect_language_from_path(&entry.path).is_some()
+        })
+        .count()
+}
+
 /// Select the parse candidates (loaded, language-detected, under `max_files`;
 /// `0` = unlimited) and group them by language family. Also returns the path →
 /// language map for the structural graph.
@@ -122,6 +133,39 @@ mod tests {
             grouped_count(&inventory, 0),
             1,
             "only Keep files are parse candidates"
+        );
+    }
+
+    fn with_decision(path: &str, decision: Decision) -> FileInventoryEntry {
+        FileInventoryEntry {
+            path: path.into(),
+            size: 10,
+            decision,
+        }
+    }
+
+    #[test]
+    fn parseable_count_excludes_non_parse_decisions() {
+        let inventory = [
+            keep("a.rs"),
+            keep("b.rs"),
+            with_decision("Cargo.lock", Decision::Load),
+            with_decision("logo.png", Decision::ListOnly),
+            with_decision("ignored", Decision::Drop),
+        ];
+        assert_eq!(parseable_file_count(&inventory), 2);
+    }
+
+    #[test]
+    fn parseable_count_ignores_parse_flagged_files_of_unknown_extension() {
+        let inventory = [
+            keep("a.rs"),
+            with_decision("generated.xyz", Decision::Parse),
+        ];
+        assert_eq!(
+            parseable_file_count(&inventory),
+            1,
+            "a Parse entry with no language mapping produces no parse work, matching group_parseable_inventory"
         );
     }
 }
