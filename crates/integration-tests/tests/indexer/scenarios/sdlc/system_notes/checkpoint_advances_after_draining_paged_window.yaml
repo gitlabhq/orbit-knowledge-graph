@@ -23,7 +23,8 @@ seed:
     - { id: 2, note_id: 2, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
     - { id: 3, note_id: 3, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
 
-run: system_notes
+run: namespace
+targets: [SystemNote]
 
 expect:
   edges:

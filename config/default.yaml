@@ -194,9 +194,3 @@ billing:
     fallback_cache_ttl_secs: 3600
     # api_user: ""
     # api_token: ""
-
-features:
-  system_notes:
-    enabled: false
-    # Root namespace ids the flag applies to. Empty = every namespace.
-    namespaces: []
