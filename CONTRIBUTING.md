@@ -69,7 +69,8 @@ Examples: `fix(compiler): correct aggregation undercount`, `docs: add CONTRIBUTI
 
 - [Open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues) — the
   `orbit::hackathon` label marks good entry points.
-- [AGENTS.md](AGENTS.md) — full developer reference: architecture overview, crate map,
-  code-quality conventions, and where to find things.
+- [AGENTS.md](AGENTS.md) — developer entry point: architecture overview, CI gates,
+  code-quality conventions, and links to the [crate map](docs/dev/agents-crate-map.md)
+  and [reference index](docs/dev/agents-reference-index.md).
 - [CONTEXT.md](CONTEXT.md) — domain glossary. Use the canonical terms when writing code,
   docs, or MR descriptions.

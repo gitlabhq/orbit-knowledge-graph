@@ -143,7 +143,7 @@ The `code` module could be extracted to its own crate. This is orthogonal to the
 4. Add `templates/code-indexer/` to the Helm chart (deployment, configmap, podmonitor)
 5. Update `templates/indexer/` to remove code-specific config and reduce resources
 6. Update `templates/health-check/configmap.yaml` to add the new deployment target
-7. Update `AGENTS.md` / `CLAUDE.md` crate map and mode descriptions
+7. Update `docs/dev/agents-crate-map.md` crate map and `AGENTS.md` / `CLAUDE.md` mode descriptions
 8. Update `docs/design-documents/indexing/README.md` architecture diagram to show the split
 9. Update `docs/design-documents/indexing/code_indexing.md` to reflect the new mode
 
