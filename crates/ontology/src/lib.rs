@@ -35,9 +35,9 @@ pub use entities::{
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
-    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig,
-    StatisticsExclude, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
-    TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    NodeEntity, NodeStorage, NodeStyle, PartitionConfig, RedactionConfig, RequiredRole,
+    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
+    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
@@ -135,6 +135,7 @@ pub struct Ontology {
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
     pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
     pub(crate) statistics: Option<StatisticsConfig>,
+    pub(crate) partition: Option<PartitionConfig>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
     /// Regex patterns for `v<N>_*` objects that the GC sweep must never drop.
     /// Matched against the base name (after stripping the `v<N>_` prefix).
@@ -194,6 +195,7 @@ impl Ontology {
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
             statistics: None,
+            partition: None,
             traversal_path_lookups: Vec::new(),
             gc_preserve_patterns: Vec::new(),
         }
@@ -1131,6 +1133,16 @@ impl Ontology {
     #[must_use]
     pub fn statistics(&self) -> Option<&StatisticsConfig> {
         self.statistics.as_ref()
+    }
+
+    #[must_use]
+    pub fn partition(&self) -> Option<&PartitionConfig> {
+        self.partition.as_ref()
+    }
+
+    #[must_use]
+    pub fn partition_by(&self) -> Option<&str> {
+        self.partition.as_ref().map(|p| p.partition_by.as_str())
     }
 
     /// Returns the partition key column for a given entity's statistics MV,

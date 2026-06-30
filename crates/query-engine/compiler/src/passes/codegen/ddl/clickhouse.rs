@@ -128,6 +128,11 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         engine_args,
     ));
 
+    // PARTITION BY must precede ORDER BY in ClickHouse CREATE TABLE syntax.
+    if !table.partition_by.is_empty() {
+        parts.push(format!("PARTITION BY ({})", table.partition_by.join(", ")));
+    }
+
     // MergeTree-family engines require ORDER BY. Emit `ORDER BY tuple()` as fallback.
     if table.order_by.is_empty() {
         if table.engine.name.contains("MergeTree") {
@@ -351,6 +356,7 @@ mod tests {
             projections: vec![],
             engine: Engine::replacing_merge_tree("_version", "_deleted"),
             order_by: vec!["key".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![TableSetting {
                 key: "allow_experimental_replacing_merge_with_cleanup".into(),
@@ -392,6 +398,7 @@ mod tests {
             }],
             engine: Engine::replacing_merge_tree("_version", "_deleted"),
             order_by: vec!["traversal_path".into(), "id".into()],
+            partition_by: vec![],
             primary_key: Some(vec!["traversal_path".into(), "id".into()]),
             settings: vec![
                 TableSetting {
@@ -443,6 +450,7 @@ mod tests {
             }],
             engine: Engine::replacing_merge_tree("_version", "_deleted"),
             order_by: vec!["traversal_path".into(), "source_id".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -483,6 +491,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec!["vis".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -504,6 +513,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec!["id".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -527,6 +537,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec![],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -550,6 +561,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec!["version".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -573,6 +585,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec!["created_at".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };
@@ -607,6 +620,7 @@ mod tests {
                 args: vec![],
             },
             order_by: vec!["status".into()],
+            partition_by: vec![],
             primary_key: None,
             settings: vec![],
         };

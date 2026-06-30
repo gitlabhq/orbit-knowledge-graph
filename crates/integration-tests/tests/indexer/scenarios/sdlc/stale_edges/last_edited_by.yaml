@@ -1,0 +1,19 @@
+description: A stale LAST_EDITED_BY edge (incoming, owner is the target) is tombstoned and the current one kept
+
+seed:
+  gl_merge_request:
+    - { id: 10, traversal_path: "1/9970/", last_edited_by_id: 7, _version: "2099-01-01 00:00:00.000000", _deleted: false }
+  gl_edge:
+    - { traversal_path: "1/9970/", source_id: 6, source_kind: User, relationship_kind: LAST_EDITED_BY, target_id: 10, target_kind: MergeRequest, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+    - { traversal_path: "1/9970/", source_id: 7, source_kind: User, relationship_kind: LAST_EDITED_BY, target_id: 10, target_kind: MergeRequest, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+
+run: stale_edge_reconciliation
+
+expect:
+  edges:
+    - kind: LAST_EDITED_BY
+      from: User
+      to: MergeRequest
+      count: 1
+      rows:
+        - { source_id: 7, target_id: 10 }

@@ -7,6 +7,15 @@ use crate::indexer::common::{
     handler_context, namespace_envelope,
 };
 
+async fn insert_user_at(ctx: &TestContext, id: i64, replicated_at: &str) {
+    ctx.execute(&format!(
+        "INSERT INTO siphon_users \
+         (id, email, username, name, state, organization_id, _siphon_replicated_at) \
+         VALUES ({id}, 'u{id}@t', 'u{id}', 'User {id}', 'active', 1, '{replicated_at}')"
+    ))
+    .await;
+}
+
 pub async fn partitioned_initial_load_indexes_all_rows_and_consolidates(ctx: &TestContext) {
     for id in 1..=12 {
         create_user(ctx, id).await;
@@ -153,8 +162,8 @@ pub async fn present_parent_takes_single_pull_path_and_honors_floor(ctx: &TestCo
     ))
     .await;
 
-    super::windowing::insert_user_at(ctx, 3, "2024-01-05 00:00:00").await;
-    super::windowing::insert_user_at(ctx, 4, "2024-01-15 00:00:00").await;
+    insert_user_at(ctx, 3, "2024-01-05 00:00:00").await;
+    insert_user_at(ctx, 4, "2024-01-15 00:00:00").await;
 
     entity_handler_with_partitions(ctx, "User", 4)
         .await

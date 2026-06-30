@@ -1,0 +1,19 @@
+description: Incremental dispatch targets the namespace of a changed standalone edge source
+
+seed:
+  checkpoint:
+    - { key: dispatch.sdlc.namespace.changes, watermark: "2024-01-19 00:00:00.000000", cursor_values: "null" }
+    - { key: dispatch.sdlc.namespace.sweep, watermark: { sql: "now64(6)" }, cursor_values: "null" }
+  siphon_knowledge_graph_enabled_namespaces:
+    - { id: 1, root_namespace_id: 100, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  siphon_label_links:
+    - { id: 1, label_id: 1, target_id: 1, target_type: MergeRequest, traversal_path: "1/100/" }
+
+dispatch: namespace
+
+expect:
+  dispatched:
+    - kind: namespace
+      count: 1
+      rows:
+        - { namespace: 100, traversal_path: "1/100/", targets: { contains: HAS_LABEL } }

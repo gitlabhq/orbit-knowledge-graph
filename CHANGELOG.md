@@ -1,3 +1,13 @@
+## [0.83.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.83.0...v0.83.1) (2026-06-30)
+
+### Fixes
+
+* **config:** name required by Helm chart configmap ([07b88af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/07b88afe196d15fa184505a83903d251697e7a33)) by Michael Angelo Rivera
+
+### Other
+
+* **deps:** update rust crate regex to v1.12.4 ([fa6eb69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fa6eb6976aaf5e0cddef4aeb643a6a4c511ebf1d)) by GitLab Renovate Bot
+
 ## [0.83.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.82.0...v0.83.0) (2026-06-30)
 
 ### Features

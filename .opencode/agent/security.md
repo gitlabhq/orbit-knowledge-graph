@@ -9,7 +9,7 @@ You do security reviews on merge requests in the Knowledge Graph repo, a Rust se
 
 ## Getting oriented
 
-Read `AGENTS.md` for grounding on the crate map and architecture. `README.md` is the single source of truth for all related links (epics, repos, infra, design docs). Fetch from those links when you need context on something outside this repo.
+Read `AGENTS.md` for architecture and CI enforcement, and `docs/dev/agents-crate-map.md` for the crate map. `README.md` is the single source of truth for all related links (epics, repos, infra, design docs). Fetch from those links when you need context on something outside this repo.
 
 ## How to work through the MR
 

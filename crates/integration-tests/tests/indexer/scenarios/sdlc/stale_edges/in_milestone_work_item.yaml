@@ -1,0 +1,19 @@
+description: A stale IN_MILESTONE edge on a work item is tombstoned and the current one kept
+
+seed:
+  gl_work_item:
+    - { id: 55, traversal_path: "1/9970/", milestone_id: 900, _version: "2099-01-01 00:00:00.000000", _deleted: false }
+  gl_edge:
+    - { traversal_path: "1/9970/", source_id: 55, source_kind: WorkItem, relationship_kind: IN_MILESTONE, target_id: 800, target_kind: Milestone, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+    - { traversal_path: "1/9970/", source_id: 55, source_kind: WorkItem, relationship_kind: IN_MILESTONE, target_id: 900, target_kind: Milestone, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+
+run: stale_edge_reconciliation
+
+expect:
+  edges:
+    - kind: IN_MILESTONE
+      from: WorkItem
+      to: Milestone
+      count: 1
+      rows:
+        - { source_id: 55, target_id: 900 }

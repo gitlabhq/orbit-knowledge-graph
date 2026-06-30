@@ -376,7 +376,14 @@ mod tests {
     #[test]
     fn immutable_fk_kinds_are_not_marked_mutable() {
         let specs = specs();
-        for immutable in ["IN_PROJECT", "AUTHORED", "HAS_JOB", "IN_PIPELINE", "CLOSED"] {
+        for immutable in [
+            "IN_PROJECT",
+            "AUTHORED",
+            "HAS_JOB",
+            "IN_PIPELINE",
+            "CLOSED",
+            "MERGED_AT_COMMIT",
+        ] {
             assert!(
                 !specs.iter().any(|s| s.relationship_kind == immutable),
                 "{immutable} is not marked mutable in the ontology and must not be swept",

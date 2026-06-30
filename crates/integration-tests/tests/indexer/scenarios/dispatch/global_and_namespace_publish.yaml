@@ -1,0 +1,22 @@
+description: The global and namespace dispatchers each publish their request in a single run
+
+seed:
+  checkpoint:
+    - { key: dispatch.sdlc.namespace.changes, watermark: "2024-01-19 00:00:00.000000", cursor_values: "null" }
+    - { key: dispatch.sdlc.namespace.sweep, watermark: { sql: "now64(6)" }, cursor_values: "null" }
+  siphon_knowledge_graph_enabled_namespaces:
+    - { id: 1, root_namespace_id: 100, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+    - { id: 2, root_namespace_id: 200, traversal_path: "2/200/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  projects:
+    - { id: 2000, namespace_id: 200, traversal_path: "2/200/2000/" }
+
+dispatch: [global, namespace]
+
+expect:
+  dispatched:
+    - kind: global
+      count: 1
+    - kind: namespace
+      count: 1
+      rows:
+        - { namespace: 200, traversal_path: "2/200/" }

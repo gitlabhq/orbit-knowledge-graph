@@ -9,6 +9,7 @@ pub struct CreateTable {
     pub indexes: Vec<IndexDef>,
     pub projections: Vec<ProjectionDef>,
     pub engine: Engine,
+    pub partition_by: Vec<String>,
     pub order_by: Vec<String>,
     /// When absent, PRIMARY KEY defaults to ORDER BY.
     pub primary_key: Option<Vec<String>>,
@@ -210,6 +211,7 @@ impl CreateTable {
             indexes: vec![],
             projections: vec![],
             engine,
+            partition_by: vec![],
             order_by: vec![],
             primary_key: None,
             settings: vec![],

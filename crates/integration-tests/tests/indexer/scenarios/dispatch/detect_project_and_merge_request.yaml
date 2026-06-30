@@ -1,0 +1,24 @@
+description: Incremental dispatch targets the namespaces of changed projects and merge requests
+
+seed:
+  # A changes checkpoint below the rows' replicated_at + a now() sweep cursor select the incremental path.
+  checkpoint:
+    - { key: dispatch.sdlc.namespace.changes, watermark: "2024-01-19 00:00:00.000000", cursor_values: "null" }
+    - { key: dispatch.sdlc.namespace.sweep, watermark: { sql: "now64(6)" }, cursor_values: "null" }
+  siphon_knowledge_graph_enabled_namespaces:
+    - { id: 1, root_namespace_id: 100, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+    - { id: 2, root_namespace_id: 200, traversal_path: "2/200/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  merge_requests:
+    - { id: 2000, target_branch: main, source_branch: feature, title: MR 2000, description: "", target_project_id: 1, iid: 2000, traversal_path: "2/200/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+
+dispatch: namespace
+
+expect:
+  dispatched:
+    - kind: namespace
+      count: 2
+      rows:
+        - { namespace: 100, traversal_path: "1/100/", targets: { contains: Project } }
+        - { namespace: 200, traversal_path: "2/200/", targets: { contains: MergeRequest } }

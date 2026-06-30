@@ -10,7 +10,7 @@ title: Orbit Remoteを使ってみる
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -83,25 +83,31 @@ glab skills install --global orbit
 
 `your-group`をOrbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、Orbitの選択性検証を通過させます。
 
+リクエストボディを`request.json`に保存してください。
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "columns": ["name", "full_path"],
+      "filters": {
+        "full_path": {"op": "starts_with", "value": "your-group/"}
+      }
+    },
+    "limit": 10
+  },
+  "format": "raw"
+}
+```
+
 ```shell
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{
-    "query": {
-      "query_type": "traversal",
-      "node": {
-        "id": "p",
-        "entity": "Project",
-        "columns": ["name", "full_path"],
-        "filters": {
-          "full_path": {"op": "starts_with", "value": "your-group/"}
-        }
-      },
-      "limit": 10
-    },
-    "format": "raw"
-  }' \
+  --data @request.json \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 

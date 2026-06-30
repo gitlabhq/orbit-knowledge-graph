@@ -16,16 +16,40 @@ use crate::collect_subtest_results;
 use crate::context::TestContext;
 
 pub use format::{
-    ContainsMatcher, EdgeExpect, Expect, Matcher, NodeExpect, RunSpec, Scenario, Scope, Seed,
-    SeedSettings, Step,
+    CdcEvent, CdcOperation, ContainsMatcher, DispatchExpect, DispatchKind, DispatchSpec,
+    EdgeExpect, Expect, Matcher, NodeExpect, RunSpec, Scenario, Scope, Seed, SeedSettings, Step,
 };
+pub use seed::DEFAULT_REPLICATED_AT;
+
+/// A request a dispatch handler published, drained back for `expect.dispatched`.
+/// `kind` is the logical request type, free of the versioned NATS subject.
+#[derive(Debug, Clone)]
+pub struct DispatchedMessage {
+    pub kind: String,
+    pub payload: serde_json::Value,
+}
+
+/// Per-step inputs a handler may consume, folded into one argument so the trait
+/// stays stable as scenarios grow new inputs.
+#[derive(Clone, Copy)]
+pub struct HandlerInput<'a> {
+    pub scope: Option<Scope>,
+    pub targets: &'a [String],
+    pub cdc: &'a [CdcEvent],
+}
 
 /// Maps a scenario `run:` handler name to an actual indexer handler
 /// invocation. Implemented by test crates because handler construction
 /// depends on the `indexer` crate, which this crate must not depend on.
+/// Returns the requests a dispatch handler published; empty for graph handlers.
 #[async_trait]
 pub trait ScenarioHandlers: Send + Sync {
-    async fn run(&self, ctx: &TestContext, handler: &str, scope: Option<Scope>);
+    async fn run(
+        &self,
+        ctx: &TestContext,
+        handler: &str,
+        input: HandlerInput<'_>,
+    ) -> Vec<DispatchedMessage>;
 }
 
 /// Discover and run every scenario under `root` as a concurrent subtest
@@ -100,11 +124,17 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
     for (index, step) in steps.iter().enumerate() {
         let location = format!("{name} (step {})", index + 1);
         seed::apply_seed(ctx, &step.seed, &step.seed_settings, &columns, &location).await;
+        let input = HandlerInput {
+            scope,
+            targets: &step.targets,
+            cdc: &step.cdc,
+        };
+        let mut dispatched = Vec::new();
         for handler in step.handlers() {
-            handlers.run(ctx, handler, scope).await;
+            dispatched.extend(handlers.run(ctx, handler, input).await);
         }
         if let Some(expect) = &step.expect {
-            expect::check_expect(ctx, expect, &location).await;
+            expect::check_expect(ctx, expect, &dispatched, &location).await;
         }
     }
 }

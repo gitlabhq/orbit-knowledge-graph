@@ -6,7 +6,7 @@ Reference for all configurable knobs in the GKG server. All four modes (Webserve
 
 Config is loaded in layers, each overriding the previous:
 
-1. **Configuration file**: Example `config/example.yaml`
+1. **Configuration file**: Example `config/default.yaml`
 2. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
 3. **Environment variables**: Prefixed with `GKG_`, using `__` as a separator for nested keys and `,` for lists
 
@@ -143,7 +143,7 @@ Each NATS subscription has retry and concurrency settings under `engine.topics.<
 
 ### Default topic settings
 
-From `config/example.yaml`:
+From `config/default.yaml`:
 
 ```yaml
 engine:

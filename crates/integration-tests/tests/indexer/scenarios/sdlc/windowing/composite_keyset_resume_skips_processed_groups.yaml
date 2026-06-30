@@ -1,0 +1,23 @@
+description: A composite keyset cursor skips already-processed groups and resumes the rest
+
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+    - { id: 101, traversal_path: "1/100/101/", parent_id: 100 }
+    - { id: 102, traversal_path: "1/100/102/", parent_id: 100 }
+    - { id: 103, traversal_path: "1/100/103/", parent_id: 100 }
+    - { id: 104, traversal_path: "1/100/104/", parent_id: 100 }
+  checkpoint:
+    - { key: ns.100.Group, watermark: "2024-01-21 00:00:00.000000", cursor_values: '{"c":["1/100/102/", "102"]}' }
+
+run: namespace
+
+expect:
+  nodes:
+    gl_group:
+      count: 2
+      rows:
+        - { id: 103 }
+        - { id: 104 }

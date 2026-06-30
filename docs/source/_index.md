@@ -41,6 +41,9 @@ Query the graph to answer questions your instance cannot answer directly:
 
 *Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.*
 
+For a click-through demo, see [GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/).
+<!-- Demo published on 2026-06-30 -->
+
 ## Orbit Remote
 
 On GitLab.com, Orbit Remote runs as a separate service on GitLab infrastructure. Enable it on a top-level group

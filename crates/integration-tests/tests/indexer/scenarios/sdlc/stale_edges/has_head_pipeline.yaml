@@ -1,0 +1,19 @@
+description: A stale HAS_HEAD_PIPELINE edge is tombstoned and the current one kept
+
+seed:
+  gl_merge_request:
+    - { id: 10, traversal_path: "1/9970/", head_pipeline_id: 500, _version: "2099-01-01 00:00:00.000000", _deleted: false }
+  gl_ci_edge:
+    - { traversal_path: "1/9970/", source_id: 10, source_kind: MergeRequest, relationship_kind: HAS_HEAD_PIPELINE, target_id: 400, target_kind: Pipeline, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+    - { traversal_path: "1/9970/", source_id: 10, source_kind: MergeRequest, relationship_kind: HAS_HEAD_PIPELINE, target_id: 500, target_kind: Pipeline, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+
+run: stale_edge_reconciliation
+
+expect:
+  edges:
+    - kind: HAS_HEAD_PIPELINE
+      from: MergeRequest
+      to: Pipeline
+      count: 1
+      rows:
+        - { source_id: 10, target_id: 500 }

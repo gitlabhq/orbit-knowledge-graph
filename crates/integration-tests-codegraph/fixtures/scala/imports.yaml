@@ -1,0 +1,97 @@
+name: Scala import extraction
+
+fixtures:
+  - path: com/example/Service.scala
+    content: |
+      package com.example
+
+      import com.example.models.User
+      import com.example.utils._
+      import com.example.{A, B}
+
+      class Service {}
+
+  - path: com/example/Aliased.scala
+    content: |
+      package com.example
+
+      import com.example.models.{Animal => BaseAnimal}
+
+      class Aliased {}
+
+  - path: com/example/Mixed.scala
+    content: |
+      package com.example
+
+      import com.example.{C, _}
+
+      class Mixed {}
+
+tests:
+  - name: Simple import is extracted correctly
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.name = 'User'
+      RETURN i.path AS path, i.name AS name, i.import_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "com.example.models", name: "User", type: "Import" } }
+
+  - name: Wildcard import is extracted correctly
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'WildcardImport'
+      AND i.file_path = 'com/example/Service.scala'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "com.example.utils" } }
+
+  - name: Grouped imports are extracted correctly
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'GroupedImport'
+      AND i.file_path = 'com/example/Service.scala'
+      RETURN i.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "A" } }
+      - { row: { name: "B" } }
+
+  - name: Total imports count
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'com/example/Service.scala'
+      RETURN count(i) AS total
+    assert:
+      - { row: { total: 4 } }
+
+  - name: Aliased import is extracted correctly
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'AliasedImport'
+      AND i.file_path = 'com/example/Aliased.scala'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "com.example.models", name: "Animal" } }
+
+  - name: Mixed import — grouped symbol is extracted correctly
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'GroupedImport'
+      AND i.file_path = 'com/example/Mixed.scala'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "com.example", name: "C" } }
+
+  - name: Mixed import — wildcard is also extracted alongside grouped
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.import_type = 'WildcardImport'
+      AND i.file_path = 'com/example/Mixed.scala'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "com.example" } }

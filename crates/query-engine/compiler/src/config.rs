@@ -8,7 +8,7 @@ use gkg_server_config::QueryConfig;
 use ontology::Ontology;
 
 /// Pathfinding hard ceilings. Config can tighten but never exceed these.
-/// Kept in sync with config/example.yaml `path_finding:` block.
+/// Kept in sync with config/default.yaml `path_finding:` block.
 const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
 

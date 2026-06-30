@@ -3,6 +3,7 @@ use std::sync::{Arc, Once};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::IndexerConfig;
 use indexer::clickhouse::ClickHouseWriter;
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
@@ -180,14 +181,39 @@ pub fn default_test_watermark() -> DateTime<Utc> {
 }
 
 pub fn namespace_envelope(org_id: i64, namespace_id: i64) -> Envelope {
+    namespace_envelope_with_targets(org_id, namespace_id, &[])
+}
+
+pub fn namespace_envelope_with_targets(
+    org_id: i64,
+    namespace_id: i64,
+    targets: &[String],
+) -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
             "namespace": namespace_id,
             "traversal_path": format!("{org_id}/{namespace_id}/"),
             "watermark": default_test_watermark().to_rfc3339(),
             "dispatch_id": uuid::Uuid::new_v4(),
+            "targets": targets,
         })
         .to_string(),
+    )
+}
+
+pub fn stale_edge_task(
+    ctx: &TestContext,
+) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
+        Arc::new(ctx.config.build_client()),
+    ));
+    indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
+        ctx.config.build_client(),
+        &ontology,
+        checkpoint_store,
+        indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),
+        gkg_server_config::StaleEdgeReconciliationConfig::default(),
     )
 }
 

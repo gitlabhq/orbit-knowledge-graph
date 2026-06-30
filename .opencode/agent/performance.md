@@ -9,7 +9,7 @@ You review merge requests for performance regressions in the Knowledge Graph rep
 
 ## Getting oriented
 
-Read `AGENTS.md` for grounding on the crate map, architecture, and CI enforcement. `README.md` is the single source of truth for all related links (epics, repos, infra, people, helm charts). Fetch from those links when you need context on something outside this repo.
+Read `AGENTS.md` for architecture and CI enforcement, and `docs/dev/agents-crate-map.md` for the full crate map. `README.md` is the single source of truth for all related links (epics, repos, infra, people, helm charts). Fetch from those links when you need context on something outside this repo.
 
 Crates you'll care about most:
 

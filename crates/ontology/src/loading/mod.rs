@@ -619,6 +619,27 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .transpose()?;
 
+    ontology.partition = schema
+        .settings
+        .partition
+        .map(|p| -> Result<_, OntologyError> {
+            if p.partition_by.trim().is_empty() {
+                return Err(OntologyError::Validation(
+                    "partition.partition_by must be a non-empty ClickHouse expression".to_string(),
+                ));
+            }
+            if p.required_columns.is_empty() {
+                return Err(OntologyError::Validation(
+                    "partition.required_columns must list at least one column".to_string(),
+                ));
+            }
+            Ok(crate::entities::PartitionConfig {
+                partition_by: p.partition_by,
+                required_columns: p.required_columns,
+            })
+        })
+        .transpose()?;
+
     ontology.traversal_path_lookups = ontology
         .nodes
         .values()

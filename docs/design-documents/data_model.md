@@ -36,7 +36,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Group`               | Represents a GitLab group namespace.                                                                    | `id`, `name`, `full_path`, `visibility_level`                                 |
 | `Project`             | Represents a GitLab project/repository.                                                                 | `id`, `name`, `full_path`, `namespace_id`                                   |
-| `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id`, `merged_commit_sha`, `squash_commit_sha`, denormalized `metric_*` snapshot columns |
+| `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id`, `merged_commit_id`, denormalized `metric_*` snapshot columns |
 | `Pipeline`            | Represents a CI/CD pipeline.                                                                            | `id`, `status`, `source`, `project_id`, `user_id`                             |
 | `Deployment`          | Represents a deployment of a commit to a CI/CD environment.                                             | `id`, `iid`, `project_id`, `status`, `ref`, `sha`                             |
 | `Environment`         | Represents a CI/CD deployment target (production, staging, review app, etc.).                           | `id`, `project_id`, `name`, `slug`, `state`, `tier`, `environment_type`       |
@@ -57,6 +57,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence (`Vulnerabilities::Finding` in Rails).              | `id`, `uuid`, `report_type`, `severity`, `location`                           |
 | `Package` | Represents a package published to the package registry (npm, Maven, PyPI, NuGet, and other formats). | `id`, `name`, `version`, `package_type`, `status`, `project_id` |
 | `ContainerRepository` | Represents a container image repository in a project's container registry. | `id`, `name`, `status`, `project_id` |
+| `Dependency` | Represents a dependency declared by a package (npm, Maven, NuGet, Composer, and other formats). | `id`, `name`, `version_pattern`, `project_id` |
 | `VulnerabilityScanner` | Represents the scanner that produced vulnerability data.                                               | `id`, `external_id`, `name`, `vendor`                                         |
 | `VulnerabilityIdentifier` | Represents a vulnerability identifier such as CVE or GHSA.                                         | `id`, `external_type`, `external_id`, `name`                                  |
 
@@ -95,7 +96,9 @@ graph TD
 
     Package -- IN_PROJECT --> Project
     Package -- BUILT_BY --> Pipeline
+    Package -- DECLARES_DEPENDENCY --> Dependency
     ContainerRepository -- IN_PROJECT --> Project
+    Dependency -- IN_PROJECT --> Project
 ```
 
 ### Implemented Relationship Types
@@ -103,8 +106,9 @@ graph TD
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`, `User`, `Project`, `WorkItem` | `Group`, `Project`, `Branch`, `WorkItem` | A group contains a subgroup or project; a user namespace contains a project; a project contains a branch; a work item contains a child work item. |
-| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `ContainerRepository` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
 | `BUILT_BY`                          | `Package`      | `Pipeline`     | A package was built by a CI/CD pipeline (sourced from the `packages_build_infos` join table).           |
+| `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
 | `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
 | `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
 | `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
@@ -152,6 +156,7 @@ graph TD
 | `ASSIGNED`                          | `User`         | `MergeRequest`, `WorkItem` | A user is assigned to a merge request or work item.                                         |
 | `FIXES`                             | `MergeRequest` | `Vulnerability`| A merge request fixes a vulnerability.                                                                  |
 | `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | A work item is related to or blocks another work item (edge property `link_type`: `relates_to`, `blocks`). |
+| `MERGED_AT_COMMIT`                  | `MergeRequest` | `Commit`       | The commit a merge request was merged at. Write-once FK (immutable). |
 | `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
 | `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
 | `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
@@ -167,6 +172,7 @@ The Code Graph represents the structure and relationships within the source code
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
+| `Commit`              | A Git commit, shared target for commit-related edges. | `id`, `sha`, `project_id`                                  |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
 | `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |
@@ -208,3 +214,17 @@ graph TD
 ## Cross-Graph Relationships
 
 The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` exists in the SDLC graph, while a `Branch` belongs to that project via `IN_PROJECT` and contains the root-level `Directory` and `File` nodes via `CONTAINS`. Cross-graph queries can traverse shared project, branch, and review entities even when edges live in different physical tables, because the compiler emits `UNION ALL` across all relevant edge tables for wildcard and multi-table relationship queries.
+
+## Namespace partitioning
+
+Every graph table that carries `traversal_path` (all node tables except the global hubs `User` and `Runner`, plus every edge table) is `PARTITION BY` a hash bucket of the top-level namespace. The expression is declared once in `config/ontology/schema.yaml` under `settings.partition.partition_by` and emitted verbatim into `config/graph.sql`:
+
+```sql
+PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50)
+```
+
+`splitByChar('/', '42/100/1000/')[2]` is the top-level namespace id (`100`); global edges write `traversal_path = '0/'`, so they hash to bucket 0 and co-locate there. ClickHouse derives the bucket from `traversal_path` at insert and merge time, so there is no stored partition column and no write-side code: the indexer writes exactly the columns it always has.
+
+The goal is **ingest/merge isolation**, not query latency. Without partitioning, all ~1,100 top-level namespaces share one part budget per table, so one tenant's reindex burst can exhaust `parts_to_throw_insert` and dead-letter inserts for every tenant. Bucketing gives each bucket its own part budget and merge scope, so a busy tenant throttles only its own bucket. Because the partition is a deterministic function of `traversal_path` and every sort key leads with `traversal_path`, all versions of a row land in the same bucket, so `ReplacingMergeTree FINAL` dedup stays correct.
+
+The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone does not prune partitions. Partition pruning for namespace-scoped queries requires the compiler to emit the bucket predicate explicitly; that pushdown is a planned follow-up.

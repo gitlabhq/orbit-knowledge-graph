@@ -128,17 +128,12 @@ properties:
     mutable: false
     description: "Owning project ID. Stored on the node for redaction without an edge lookup."
 
-  merged_commit_sha:
-    type: string
-    source: merged_commit_sha
-    nullable: false
-    description: "Commit SHA landed on target branch (may differ from merge_commit_sha for fast-forward merges)."
-
-  squash_commit_sha:
-    type: string
-    source: squash_commit_sha
-    nullable: false
-    description: "Squash commit SHA, if squashed."
+  merged_commit_id:
+    type: int64
+    source: merged_commit_id
+    nullable: true
+    mutable: false
+    description: "Synthetic Commit id the MR was merged at. NULL until merged, then immutable."
 
   latest_build_started_at:
     type: timestamp
@@ -318,6 +313,13 @@ etl:
   # Resolves metric_*, reviewers and approvals from siphon sources at extract
   # time because the upstream `merge_requests_mv` only re-fires on parent
   # inserts and routinely leaves those columns NULL on the destination.
+  #
+  # MERGED_AT_COMMIT: synthetic FK (sipHash64(target_project_id, decoded_sha),
+  # sign-bit-masked positive) because Siphon has no commit table. Only merged MRs
+  # emit it. Bytea decode details: see siphon#248.
+  #
+  # DRIFT WARNING: keep decoded_sha and the masked hash in sync with commit.yaml,
+  # or MERGED_AT_COMMIT points at a Commit node that was never emitted. See #924.
   type: query
   source: merge_requests
   select: >-
@@ -345,8 +347,11 @@ etl:
     m.updated_by_id AS updated_by_id,
     m.last_edited_by_id AS last_edited_by_id,
     m.milestone_id AS milestone_id,
-    m.merged_commit_sha AS merged_commit_sha,
-    m.squash_commit_sha AS squash_commit_sha,
+    if(
+      m.state_id = 3 AND m.decoded_sha IS NOT NULL,
+      toInt64(bitAnd(sipHash64(m.target_project_id, m.decoded_sha), toUInt64(9223372036854775807))),
+      NULL
+    ) AS merged_commit_id,
     m.traversal_path AS traversal_path,
     metrics.metric_latest_build_started_at AS metric_latest_build_started_at,
     metrics.metric_latest_build_finished_at AS metric_latest_build_finished_at,
@@ -375,7 +380,24 @@ etl:
   # aggregates over every metrics/reviewers/approvals row in the namespace on
   # every batch (~2 GB peak on 1/9970/ for what should be a 30-row batch).
   from: >-
-    merge_requests AS m LEFT JOIN (
+    (
+      SELECT
+        *,
+        coalesce(
+          if(
+            startsWith(merged_commit_sha, '\\x'),
+            unhex(substring(merged_commit_sha, 3)),
+            nullIf(merged_commit_sha, '')
+          ),
+          nullIf(merge_commit_sha, ''),
+          if(
+            startsWith(squash_commit_sha, '\\x'),
+            substring(squash_commit_sha, 3),
+            lower(hex(nullIf(squash_commit_sha, '')))
+          )
+        ) AS decoded_sha
+      FROM merge_requests
+    ) AS m LEFT JOIN (
       SELECT
         traversal_path AS _mt_tp,
         merge_request_id AS _mt_mr,
@@ -486,6 +508,10 @@ etl:
       as: HAS_HEAD_PIPELINE
       direction: outgoing
       mutable: true
+    merged_commit_id:
+      to: Commit
+      as: MERGED_AT_COMMIT
+      direction: outgoing
     latest_merge_request_diff_id:
       to: MergeRequestDiff
       as: HAS_LATEST_DIFF
@@ -551,8 +577,6 @@ storage:
     - {name: discussion_locked, type: "Nullable(Bool)"}
     - {name: prepared_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
-    - {name: merged_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: squash_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: latest_build_started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: latest_build_finished_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: first_deployed_to_production_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -579,6 +603,7 @@ storage:
     - {name: source_project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: head_pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: latest_merge_request_diff_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: merged_commit_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(6)", granularity: 2}
@@ -609,3 +634,4 @@ storage:
     - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_head_pipeline_id, column: head_pipeline_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_latest_merge_request_diff_id, column: latest_merge_request_diff_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_merged_commit_id, column: merged_commit_id, type: "bloom_filter(0.0001)", granularity: 1}
