@@ -12,6 +12,10 @@ use crate::orchestrator::scheduled::TaskError;
 
 const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
 
+// A path-less enable row gets its traversal_path backfilled by the reconciler as
+// a watermark bump, not a CDC event, so the enabled table is its own change source.
+const FULL_REINDEX_TARGET: &str = "*";
+
 const CHANGE_QUERY_SQL: &str = r#"WITH
   enabled AS (
     SELECT DISTINCT root_namespace_id, traversal_path
@@ -92,7 +96,7 @@ impl NamespaceChangeDetector for DatalakeChangeDetector {
                 |((namespace_id, traversal_path), targets)| NamespaceDispatchRequest {
                     namespace_id,
                     traversal_path,
-                    targets,
+                    targets: collapse_full_reindex(targets),
                 },
             )
             .collect())
@@ -117,16 +121,35 @@ impl NamespaceChangeQuery {
 }
 
 fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
-    let branches = reindex_sources
+    let mut branches = reindex_sources
         .iter()
         .map(render_change_branch)
-        .collect::<Vec<_>>()
-        .join("\nUNION ALL\n");
+        .collect::<Vec<_>>();
+    branches.push(render_enabled_namespace_branch());
+    let branches = branches.join("\nUNION ALL\n");
 
     CHANGE_QUERY_SQL
         .replace("{{enabled_namespace_table}}", ENABLED_NAMESPACE_TABLE)
         .replace("{{deleted_column}}", ontology::siphon_deleted_column())
         .replace("{{branches}}", &branches)
+}
+
+fn collapse_full_reindex(targets: Vec<String>) -> Vec<String> {
+    if targets.iter().any(|t| t == FULL_REINDEX_TARGET) {
+        Vec::new()
+    } else {
+        targets
+    }
+}
+
+fn render_enabled_namespace_branch() -> String {
+    CHANGE_BRANCH_SQL
+        .replace("{{root_path}}", &root_path_expression("traversal_path"))
+        .replace("{{target}}", FULL_REINDEX_TARGET)
+        .replace("{{table}}", ENABLED_NAMESPACE_TABLE)
+        .replace("{{watermark_column}}", ontology::siphon_watermark_column())
+        .replace("{{path}}", "traversal_path")
+        .replace("{{root_namespace_path_pattern}}", TOP_LEVEL_PREFIX_REGEX)
 }
 
 fn render_change_branch(source_table: &ReindexSource) -> String {
@@ -265,11 +288,25 @@ mod tests {
     WHERE _siphon_watermark > {lower:String}
       AND _siphon_watermark <= {upper:String}
       AND match(traversal_path, '^[0-9]+/[0-9]+/')
+UNION ALL
+    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, '*' AS target
+    FROM siphon_knowledge_graph_enabled_namespaces
+    WHERE _siphon_watermark > {lower:String}
+      AND _siphon_watermark <= {upper:String}
+      AND match(traversal_path, '^[0-9]+/[0-9]+/')
   )
 SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
         );
+    }
+
+    #[test]
+    fn change_query_self_triggers_on_enabled_namespace_change() {
+        let query = NamespaceChangeQuery::new([column_source("work_items")]);
+        assert!(query.sql.contains(&format!(
+            "'{FULL_REINDEX_TARGET}' AS target\n    FROM {ENABLED_NAMESPACE_TABLE}"
+        )));
     }
 
     #[test]

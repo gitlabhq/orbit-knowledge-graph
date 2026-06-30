@@ -163,18 +163,34 @@ impl TestContext {
     }
 
     async fn given_enabled_namespaces(&self, namespaces: impl IntoIterator<Item = Namespace>) {
+        // Backdated before the change window: an already-enabled namespace must not self-trigger.
+        let replicated_at = (self.created_at
+            - chrono::Duration::seconds(CLOCK_SKEW_MARGIN_SECS * 2))
+        .format("%Y-%m-%d %H:%M:%S%.6f");
         for (i, ns) in namespaces.into_iter().enumerate() {
             self.clickhouse
                 .execute(&format!(
                     "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
-                     (id, root_namespace_id, traversal_path, created_at, updated_at) \
-                     VALUES ({}, {}, '{}', now(), now())",
+                     (id, root_namespace_id, traversal_path, created_at, updated_at, _siphon_replicated_at) \
+                     VALUES ({}, {}, '{}', now(), now(), '{replicated_at}')",
                     i + 1,
                     ns.id,
                     ns.traversal_path
                 ))
                 .await;
         }
+    }
+
+    async fn given_recently_enabled_namespace(&self, ns: Namespace) {
+        // Default watermark now() lands inside the change window, like a fresh reconciler backfill.
+        self.clickhouse
+            .execute(&format!(
+                "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
+                 (id, root_namespace_id, traversal_path, created_at, updated_at) \
+                 VALUES (1, {}, '{}', now(), now())",
+                ns.id, ns.traversal_path
+            ))
+            .await;
     }
 
     async fn given_changed_work_item(&self, traversal_path: &str) {
@@ -621,6 +637,24 @@ async fn namespace_dispatcher_sweeps_all_enabled_on_cold_start() {
     let namespaces = context.dispatch_namespace_cold_start().await;
 
     assert_dispatched_namespaces(&namespaces, &[(100, "1/100/"), (200, "2/200/")]);
+}
+
+#[tokio::test]
+async fn namespace_dispatcher_dispatches_recently_enabled_namespace() {
+    let context = TestContext::new().await;
+
+    context
+        .given_recently_enabled_namespace(namespace(100, "1/100/"))
+        .await;
+
+    let namespaces = context.dispatch_namespace_changes().await;
+
+    assert_dispatched_namespaces(&namespaces, &[(100, "1/100/")]);
+    let request = namespaces
+        .iter()
+        .find(|r| r.namespace == 100)
+        .expect("namespace dispatched");
+    assert!(request.targets.is_empty());
 }
 
 #[tokio::test]
