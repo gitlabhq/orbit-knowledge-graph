@@ -23,14 +23,14 @@ properties:
     source: id
     nullable: false
     mutable: false
-    description: "Canonical identity: sipHash64(target_project_id, sha). Any edge into this node (MERGED_AT_COMMIT now, CONTAINS_COMMIT in #925) must derive its target_id with the same formula."
+    description: "Synthetic id: sipHash64(target_project_id, sha). Edges must derive target_id with the same formula."
 
   sha:
     type: string
     source: sha
     nullable: false
     mutable: false
-    description: "Clean commit SHA (40-char SHA-1 or 64-char SHA-256). Currently sourced from the merge_requests bytea-decoded COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha); merged_commit_sha is hex-of-ASCII bytea (unhex-decoded), squash_commit_sha is raw-binary bytea (format-robust across siphon!475: \\x-strip legacy, lower(hex()) raw binary), merge_commit_sha is clean varchar."
+    description: "Clean hex commit SHA (40-char SHA-1 or 64-char SHA-256)."
 
   project_id:
     type: int64
@@ -46,30 +46,16 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-# Emitted from merge_requests because Siphon does not expose commits as a table.
-# The id/sha derivation mirrors MergeRequest.merged_commit_id so MERGED_AT_COMMIT
-# has a target node. Duplicate (project_id, sha) rows collapse in gl_commit.
+# Emitted from merge_requests (Siphon has no commit table). Duplicate
+# (project_id, sha) rows collapse in gl_commit via ReplacingMergeTree.
+# Commit.id is sign-bit-masked so the Int64 keyset cursor stays positive.
+# Bytea decode details: see siphon#248.
 #
-# decoded_sha is COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha);
-# merged_commit_sha is hex-of-ASCII bytea (pre-siphon!475: `\x` + hex encoding of
-# the SHA string, decoded via unhex; post-fix: clean ASCII string, pass-through).
-# squash_commit_sha is raw-binary bytea, format-robust across siphon!475:
-# pre-fix `\x`-prefixed rows -> strip `\x` (payload is already hex text);
-# post-fix raw-binary rows -> lower(hex()) to produce the hex SHA. See siphon#248.
-# merge_commit_sha is clean varchar.
-# Rails' diff_head_sha fallback is intentionally omitted: it is not on
-# merge_requests and points at the pre-merge source-branch head. See #924.
+# DRIFT WARNING: keep decoded_sha and the masked hash in sync with
+# merge_request.yaml, or MERGED_AT_COMMIT points at a non-existent node.
 #
-# Commit.id masks the sign bit so the Int64 keyset cursor stays positive; a
-# negative id breaks page advancement.
-#
-# Keep decoded_sha and the masked hash expression in sync with
-# merge_request.yaml, or MERGED_AT_COMMIT points at a Commit node that was never
-# emitted.
-#
-# Shared-commit transient: deleting one MR can tombstone a Commit still referenced
-# by another MR on the same (project_id, sha). The next merge_requests re-index of
-# a remaining MR re-inserts it.
+# Shared-commit transient: deleting one MR can tombstone a Commit still
+# referenced by another MR. The next re-index re-inserts it.
 etl:
   type: query
   source: merge_requests

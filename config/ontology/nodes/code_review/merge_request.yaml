@@ -133,7 +133,7 @@ properties:
     source: merged_commit_id
     nullable: true
     mutable: false
-    description: "Synthetic Commit id the MR was merged at. The approach mirrors Rails' MergeRequest#merged_commit_sha fallback but stops at squash_commit_sha. Write-once: NULL until merged, set once at merge, never rewritten by user action -> immutable, so the stale-edge sweep skips it."
+    description: "Synthetic Commit id the MR was merged at. NULL until merged, then immutable."
 
   latest_build_started_at:
     type: timestamp
@@ -314,17 +314,12 @@ etl:
   # time because the upstream `merge_requests_mv` only re-fires on parent
   # inserts and routinely leaves those columns NULL on the destination.
   #
-  # MERGED_AT_COMMIT uses a synthetic FK because Siphon does not expose a commit
-  # table. The FK is sipHash64(target_project_id, decoded_sha), masked positive so
-  # it can share Commit.id's Int64 keyset cursor safely. Only merged MRs emit it.
-  # decoded_sha is COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha);
-  # merged_commit_sha is hex-of-ASCII bytea (pre-siphon!475: unhex; post-fix:
-  # clean ASCII pass-through). squash_commit_sha is raw-binary bytea, format-robust
-  # across siphon!475: `\x`-prefixed -> strip `\x`; raw binary -> lower(hex()).
-  # merge_commit_sha is clean varchar. See siphon#248.
+  # MERGED_AT_COMMIT: synthetic FK (sipHash64(target_project_id, decoded_sha),
+  # sign-bit-masked positive) because Siphon has no commit table. Only merged MRs
+  # emit it. Bytea decode details: see siphon#248.
   #
-  # Keep decoded_sha and the masked hash expression in sync with commit.yaml, or
-  # MERGED_AT_COMMIT points at a Commit node that was never emitted. See #924.
+  # DRIFT WARNING: keep decoded_sha and the masked hash in sync with commit.yaml,
+  # or MERGED_AT_COMMIT points at a Commit node that was never emitted. See #924.
   type: query
   source: merge_requests
   select: >-
