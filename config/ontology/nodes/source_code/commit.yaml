@@ -30,7 +30,7 @@ properties:
     source: sha
     nullable: false
     mutable: false
-    description: "Clean commit SHA (40-char SHA-1 or 64-char SHA-256). Currently sourced from the merge_requests bytea-decoded COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha); the first and third legs are unhex-decoded from Siphon's \\x-hex bytea form."
+    description: "Clean commit SHA (40-char SHA-1 or 64-char SHA-256). Currently sourced from the merge_requests bytea-decoded COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha); merged_commit_sha is hex-of-ASCII bytea (unhex-decoded), squash_commit_sha is raw-binary bytea (format-robust across siphon!475: \\x-strip legacy, lower(hex()) raw binary), merge_commit_sha is clean varchar."
 
   project_id:
     type: int64
@@ -51,7 +51,12 @@ properties:
 # has a target node. Duplicate (project_id, sha) rows collapse in gl_commit.
 #
 # decoded_sha is COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha);
-# the first and third columns are Postgres bytea replicated as `\x` + hex ASCII.
+# merged_commit_sha is hex-of-ASCII bytea (pre-siphon!475: `\x` + hex encoding of
+# the SHA string, decoded via unhex; post-fix: clean ASCII string, pass-through).
+# squash_commit_sha is raw-binary bytea, format-robust across siphon!475:
+# pre-fix `\x`-prefixed rows -> strip `\x` (payload is already hex text);
+# post-fix raw-binary rows -> lower(hex()) to produce the hex SHA. See siphon#248.
+# merge_commit_sha is clean varchar.
 # Rails' diff_head_sha fallback is intentionally omitted: it is not on
 # merge_requests and points at the pre-merge source-branch head. See #924.
 #
@@ -86,8 +91,8 @@ etl:
           nullIf(merge_commit_sha, ''),
           if(
             startsWith(squash_commit_sha, '\\x'),
-            unhex(substring(squash_commit_sha, 3)),
-            nullIf(squash_commit_sha, '')
+            substring(squash_commit_sha, 3),
+            lower(hex(nullIf(squash_commit_sha, '')))
           )
         ) AS decoded_sha
       FROM merge_requests

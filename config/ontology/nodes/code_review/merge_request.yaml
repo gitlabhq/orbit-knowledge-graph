@@ -330,7 +330,10 @@ etl:
   # table. The FK is sipHash64(target_project_id, decoded_sha), masked positive so
   # it can share Commit.id's Int64 keyset cursor safely. Only merged MRs emit it.
   # decoded_sha is COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha);
-  # the first and third columns are Postgres bytea replicated as `\x` + hex ASCII.
+  # merged_commit_sha is hex-of-ASCII bytea (pre-siphon!475: unhex; post-fix:
+  # clean ASCII pass-through). squash_commit_sha is raw-binary bytea, format-robust
+  # across siphon!475: `\x`-prefixed -> strip `\x`; raw binary -> lower(hex()).
+  # merge_commit_sha is clean varchar. See siphon#248.
   #
   # Keep decoded_sha and the masked hash expression in sync with commit.yaml, or
   # MERGED_AT_COMMIT points at a Commit node that was never emitted. See #924.
@@ -408,8 +411,8 @@ etl:
           nullIf(merge_commit_sha, ''),
           if(
             startsWith(squash_commit_sha, '\\x'),
-            unhex(substring(squash_commit_sha, 3)),
-            nullIf(squash_commit_sha, '')
+            substring(squash_commit_sha, 3),
+            lower(hex(nullIf(squash_commit_sha, '')))
           )
         ) AS decoded_sha
       FROM merge_requests
