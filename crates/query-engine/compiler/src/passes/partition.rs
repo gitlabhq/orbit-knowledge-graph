@@ -12,6 +12,15 @@
 //! column read). The bucket constant is computed in ClickHouse from the prefix
 //! via the same expression the DDL uses, so the two stay identical by
 //! construction.
+//!
+//! A namespaced scan with no pinning `startsWith` (a far node reached through a
+//! cross-namespace edge) still cannot hold rows outside the caller's authorized
+//! top-level namespaces, so it gets an `_partition_id IN (<authorized bucket
+//! set>)` predicate — over-scanning within the tenant instead of all buckets.
+//! This is skipped when the authorized set is unbounded (an org-only prefix
+//! pins no namespace) or covers as many buckets as the table has anyway.
+
+use std::collections::BTreeSet;
 
 use ontology::{Ontology, PartitionStrategy};
 use serde_json::Value;
@@ -19,26 +28,43 @@ use serde_json::Value;
 use crate::ast::{Expr, Node, Op, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::Result;
+use crate::passes::security::collect_aliased_tables;
+use crate::types::SecurityContext;
 
 /// ClickHouse virtual column holding a part's formatted partition value.
 const PARTITION_ID_COLUMN: &str = "_partition_id";
 
-pub fn apply_partition_pruning(node: &mut Node, ontology: &Ontology) -> Result<()> {
+pub fn apply_partition_pruning(
+    node: &mut Node,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> Result<()> {
     let Some(partition) = ontology.partition() else {
         return Ok(());
     };
+    let authorized = authorized_bucket_ids(&partition.strategy, security_ctx);
     if let Node::Query(q) = node {
-        prune_query(q, &partition.strategy);
+        prune_query(q, &partition.strategy, authorized.as_deref());
     }
     Ok(())
 }
 
-fn prune_query(q: &mut Query, strategy: &PartitionStrategy) {
+fn prune_query(q: &mut Query, strategy: &PartitionStrategy, authorized: Option<&[Expr]>) {
     if let Some(where_clause) = &q.where_clause {
-        let preds: Vec<Expr> = pinning_prefixes_by_alias(where_clause, strategy)
-            .into_iter()
-            .map(|(alias, prefixes)| partition_id_predicate(strategy, &alias, &prefixes))
+        let pinned = pinning_prefixes_by_alias(where_clause, strategy);
+        let mut preds: Vec<Expr> = pinned
+            .iter()
+            .map(|(alias, prefixes)| partition_id_predicate(strategy, alias, prefixes))
             .collect();
+        // Namespaced scans in this scope without a pinning prefix fall back to
+        // the authorized bucket set (the far-node case).
+        if let Some(buckets) = authorized {
+            for (alias, _) in collect_aliased_tables(&q.from) {
+                if !pinned.iter().any(|(a, _)| *a == alias) {
+                    preds.push(in_bucket_set(&alias, buckets));
+                }
+            }
+        }
         if !preds.is_empty() {
             q.where_clause = Expr::and_all(
                 preds
@@ -50,58 +76,121 @@ fn prune_query(q: &mut Query, strategy: &PartitionStrategy) {
     }
 
     for cte in &mut q.ctes {
-        prune_query(&mut cte.query, strategy);
+        prune_query(&mut cte.query, strategy, authorized);
     }
-    prune_query_from(&mut q.from, strategy);
+    prune_query_from(&mut q.from, strategy, authorized);
     // Cascade-anchor / narrowing subqueries embedded in the WHERE clause
     // (`… IN (SELECT … FROM gl_edge AS e0p WHERE startsWith(…))`) are their own
     // scans; prune each in its own scope so a confined cascade alias is not left
     // reading every bucket.
     if let Some(where_clause) = &mut q.where_clause {
-        prune_subqueries_in_expr(where_clause, strategy);
+        prune_subqueries_in_expr(where_clause, strategy, authorized);
     }
     for arm in &mut q.union_all {
-        prune_query(arm, strategy);
+        prune_query(arm, strategy, authorized);
     }
 }
 
-fn prune_subqueries_in_expr(expr: &mut Expr, strategy: &PartitionStrategy) {
+fn prune_subqueries_in_expr(
+    expr: &mut Expr,
+    strategy: &PartitionStrategy,
+    authorized: Option<&[Expr]>,
+) {
     match expr {
         Expr::InSelect { expr, query } => {
-            prune_subqueries_in_expr(expr, strategy);
-            prune_query(query, strategy);
+            prune_subqueries_in_expr(expr, strategy, authorized);
+            prune_query(query, strategy, authorized);
         }
         Expr::FuncCall { args, .. } => {
             for a in args {
-                prune_subqueries_in_expr(a, strategy);
+                prune_subqueries_in_expr(a, strategy, authorized);
             }
         }
         Expr::BinaryOp { left, right, .. } => {
-            prune_subqueries_in_expr(left, strategy);
-            prune_subqueries_in_expr(right, strategy);
+            prune_subqueries_in_expr(left, strategy, authorized);
+            prune_subqueries_in_expr(right, strategy, authorized);
         }
         Expr::UnaryOp { expr, .. } | Expr::InSubquery { expr, .. } => {
-            prune_subqueries_in_expr(expr, strategy);
+            prune_subqueries_in_expr(expr, strategy, authorized);
         }
-        Expr::Lambda { body, .. } => prune_subqueries_in_expr(body, strategy),
+        Expr::Lambda { body, .. } => prune_subqueries_in_expr(body, strategy, authorized),
         _ => {}
     }
 }
 
-fn prune_query_from(from: &mut TableRef, strategy: &PartitionStrategy) {
+fn prune_query_from(
+    from: &mut TableRef,
+    strategy: &PartitionStrategy,
+    authorized: Option<&[Expr]>,
+) {
     match from {
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            prune_query_from(left, strategy);
-            prune_query_from(right, strategy);
+            prune_query_from(left, strategy, authorized);
+            prune_query_from(right, strategy, authorized);
         }
-        TableRef::Subquery { query, .. } => prune_query(query, strategy),
+        TableRef::Subquery { query, .. } => prune_query(query, strategy, authorized),
         TableRef::Union { queries, .. } => {
             for q in queries {
-                prune_query(q, strategy);
+                prune_query(q, strategy, authorized);
             }
         }
     }
+}
+
+/// The bucket-id constant expressions for every top-level namespace the caller
+/// is authorized for. `None` when the set cannot prune: any authorized path is
+/// org-only (pins no namespace), or the distinct buckets cover the whole table.
+/// Derived from the full authorized set, so it is always a superset of any
+/// role-floored subset a given alias sees — a safe over-scan.
+fn authorized_bucket_ids(strategy: &PartitionStrategy, ctx: &SecurityContext) -> Option<Vec<Expr>> {
+    if ctx.admin {
+        return None;
+    }
+    let mut tlns: BTreeSet<String> = BTreeSet::new();
+    for tp in &ctx.traversal_paths {
+        let segments: Vec<&str> = tp.path.split('/').filter(|s| !s.is_empty()).collect();
+        // An org-only path (`1/`) pins no top-level namespace, so the authorized
+        // set spans every bucket; bail rather than emit a useless full set.
+        if segments.len() < 2 {
+            return None;
+        }
+        tlns.insert(segments[1].to_string());
+    }
+    // More distinct namespaces than buckets guarantees near-full coverage, so
+    // the IN-list buys nothing; bail. Bounding on the TLN count (not the hashed
+    // bucket count) keeps the hash entirely in ClickHouse — no Rust sipHash to
+    // drift from the DDL.
+    if tlns.is_empty() || tlns.len() >= bucket_count(strategy) {
+        return None;
+    }
+    Some(
+        tlns.iter()
+            .map(|tln| {
+                Expr::func(
+                    "toString",
+                    // Reuse the DDL strategy expression over the `<org>/<tln>/`
+                    // shape it hashes from; only segment 2 (the tln) is read.
+                    vec![partition_expr(strategy, Expr::string(format!("0/{tln}/")))],
+                )
+            })
+            .collect(),
+    )
+}
+
+fn bucket_count(strategy: &PartitionStrategy) -> usize {
+    match strategy {
+        PartitionStrategy::HashBucket { buckets, .. } => usize::from(*buckets),
+    }
+}
+
+/// `alias._partition_id IN tuple(<bucket exprs>)`.
+fn in_bucket_set(alias: &str, buckets: &[Expr]) -> Expr {
+    Expr::binary(
+        Op::In,
+        Expr::col(alias, PARTITION_ID_COLUMN),
+        Expr::func("tuple", buckets.to_vec()),
+    )
 }
 
 /// Per alias, the distinct set of pinning prefixes from its
@@ -231,6 +320,16 @@ mod tests {
     use super::*;
     use crate::ast::{JoinType, SelectExpr, TableRef};
 
+    /// Org-only scope: `authorized_bucket_ids` returns `None`, so the far-node
+    /// fallback is off and these tests isolate the pinning-prefix behavior.
+    fn org_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".into()]).unwrap()
+    }
+
+    fn prune(node: &mut Node, ctx: &SecurityContext) {
+        apply_partition_pruning(node, &Ontology::load_embedded().unwrap(), ctx).unwrap();
+    }
+
     fn where_with(filter: Expr) -> Option<Expr> {
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -242,7 +341,7 @@ mod tests {
             limit: Some(10),
             ..Default::default()
         }));
-        apply_partition_pruning(&mut node, &Ontology::load_embedded().unwrap()).unwrap();
+        prune(&mut node, &org_ctx());
         let Node::Query(q) = node else { unreachable!() };
         q.where_clause
     }
@@ -356,7 +455,7 @@ mod tests {
             limit: Some(10),
             ..Default::default()
         }));
-        apply_partition_pruning(&mut node, &Ontology::load_embedded().unwrap()).unwrap();
+        prune(&mut node, &org_ctx());
         let Node::Query(q) = node else { unreachable!() };
         assert!(has_partition_pred(q.where_clause.as_ref().unwrap(), "p"));
         let TableRef::Join { right, .. } = &q.from else {
@@ -399,7 +498,7 @@ mod tests {
             where_clause: Some(where_clause),
             ..Default::default()
         }));
-        apply_partition_pruning(&mut node, &Ontology::load_embedded().unwrap()).unwrap();
+        prune(&mut node, &org_ctx());
         let Node::Query(q) = node else { unreachable!() };
         let Some(Expr::BinaryOp { right, .. }) = q.where_clause.as_ref() else {
             unreachable!()
@@ -425,8 +524,49 @@ mod tests {
             ..Default::default()
         }));
         let ontology = Ontology::new();
-        apply_partition_pruning(&mut node, &ontology).unwrap();
+        apply_partition_pruning(&mut node, &ontology, &org_ctx()).unwrap();
         let Node::Query(q) = node else { unreachable!() };
         assert!(!has_partition_pred(q.where_clause.as_ref().unwrap(), "p"));
+    }
+
+    #[test]
+    fn unscoped_alias_falls_back_to_authorized_bucket_set() {
+        let ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/200/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_edge", "e"),
+            // No pinning startsWith: only the broad org filter.
+            where_clause: Some(starts_with("e", "1/")),
+            ..Default::default()
+        }));
+        prune(&mut node, &ctx);
+        let Node::Query(q) = node else { unreachable!() };
+        assert_eq!(
+            partition_id_pred(q.where_clause.as_ref().unwrap(), "e"),
+            Some((true, 2)),
+            "a far node with no pinning prefix prunes to the caller's authorized TLN buckets"
+        );
+    }
+
+    #[test]
+    fn org_only_scope_yields_no_authorized_fallback() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_edge", "e"),
+            where_clause: Some(starts_with("e", "1/")),
+            ..Default::default()
+        }));
+        prune(&mut node, &org_ctx());
+        let Node::Query(q) = node else { unreachable!() };
+        assert!(
+            !has_partition_pred(q.where_clause.as_ref().unwrap(), "e"),
+            "an org-only authorized path pins no namespace, so no bucket set"
+        );
     }
 }
