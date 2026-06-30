@@ -375,6 +375,17 @@ pub struct EdgeEntity {
 pub struct EdgeSourceEtlConfig {
     pub scope: crate::etl::EtlScope,
     pub source: String,
+    /// Optional raw `FROM` expression (a join or aliased subquery) scanned at
+    /// extract time instead of `source` directly. Lets an edge resolve an
+    /// endpoint id via a ClickHouse-side join — e.g. matching an SBOM
+    /// component `(name, type)` to a `Package` row — rather than reading a
+    /// literal FK column. The expression must project every column the extract
+    /// references: the `from`/`to` id columns, `order_by`, `traversal_path`
+    /// (when namespaced), and the watermark/deleted columns. `source` still
+    /// names the watermark/partitioning table and the plan; `reindex_on` should
+    /// list every table the join reads so the edge re-derives when either side
+    /// changes. When `None`, `source` is scanned as a plain table.
+    pub from_table: Option<String>,
     pub watermark: String,
     pub deleted: String,
     /// Columns for ORDER BY in extract queries and cursor-based pagination.

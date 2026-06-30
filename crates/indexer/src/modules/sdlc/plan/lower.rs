@@ -1099,6 +1099,64 @@ mod tests {
     }
 
     #[test]
+    fn edge_extract_with_raw_from_table_resolves_join_endpoints() {
+        // Mirrors a standalone edge whose ETL sets `from_table`: the endpoint
+        // ids are resolved by a ClickHouse-side join projected in the raw FROM
+        // (a subquery), so the outer extract reads them as plain columns.
+        let extract = ExtractPlan {
+            destination_table: "gl_sec_edge".to_string(),
+            columns: vec![
+                ExtractColumn::Bare("source_id".to_string()),
+                ExtractColumn::Bare("target_id".to_string()),
+                ExtractColumn::Bare("traversal_path".to_string()),
+            ],
+            source: ExtractSource::Raw(
+                "(SELECT pkg.id AS source_id, v.vulnerability_id AS target_id, \
+                  pkg.traversal_path, v._siphon_replicated_at, v._siphon_deleted \
+                  FROM gkg_sbom_vuln_components v \
+                  INNER JOIN siphon_packages_packages pkg \
+                  ON pkg.name = v.component_name AND pkg.package_type = v.package_type \
+                  AND pkg.version = v.component_version AND pkg.project_id = v.project_id) AS e"
+                    .to_string(),
+            ),
+            base_table: "siphon_sbom_occurrences_vulnerabilities".to_string(),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec![
+                "traversal_path".to_string(),
+                "source_id".to_string(),
+                "target_id".to_string(),
+            ],
+            namespaced: true,
+            traversal_path_filter: Some(
+                "startsWith(traversal_path, {traversal_path:String})".to_string(),
+            ),
+            additional_where: None,
+            enrichment: None,
+        };
+
+        let plan = lower_extract_plan(extract, 500);
+        let sql = render_namespaced_extract(&plan, "9/9/");
+
+        // The raw join (and its name+type+version match to packages) is scanned.
+        assert!(
+            sql.contains("INNER JOIN siphon_packages_packages pkg"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains("pkg.id AS source_id"), "sql: {sql}");
+        // The outer extract projects the resolved endpoint ids as plain columns.
+        assert!(sql.contains("SELECT source_id, target_id"), "sql: {sql}");
+        assert!(
+            sql.contains("startsWith(traversal_path, {traversal_path:String})"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("ORDER BY traversal_path, source_id, target_id"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
     fn cursor_filter_renders_dnf_in_extract_sql() {
         let extract = ExtractPlan {
             destination_table: "gl_user".to_string(),

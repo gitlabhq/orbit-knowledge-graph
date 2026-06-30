@@ -45,6 +45,10 @@ struct EdgeNodeRef {
 struct EdgeEtlYaml {
     scope: EtlScope,
     source: String,
+    /// Optional raw `FROM` expression (join or aliased subquery) scanned instead
+    /// of `source` directly. See [`EdgeSourceEtlConfig::from_table`].
+    #[serde(default)]
+    from_table: Option<String>,
     #[serde(default)]
     watermark: Option<String>,
     #[serde(default)]
@@ -128,6 +132,7 @@ impl EdgeYaml {
                 Ok(EdgeSourceEtlConfig {
                     scope: etl.scope,
                     source: etl.source,
+                    from_table: etl.from_table,
                     watermark,
                     deleted,
                     order_by: etl.order_by,
@@ -170,4 +175,74 @@ fn convert_endpoint(
         node_type,
         enrich: ep.enrich,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EdgeYaml;
+    use crate::loading::EtlSettings;
+
+    fn etl_settings() -> EtlSettings {
+        EtlSettings {
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn from_table_round_trips_into_etl_config() {
+        // An attribute-join edge: the Package id is resolved by joining the
+        // SBOM source to siphon_packages_packages on (name, type, version),
+        // projected via the raw `from_table` subquery rather than an FK column.
+        let yaml = r"
+etl:
+  - scope: namespaced
+    source: siphon_sbom_occurrences_vulnerabilities
+    from_table: >
+      (SELECT pkg.id AS source_id, v.vulnerability_id AS target_id,
+              pkg.traversal_path, v._siphon_replicated_at, v._siphon_deleted
+       FROM gkg_sbom_vuln_components v
+       INNER JOIN siphon_packages_packages pkg
+         ON pkg.name = v.component_name AND pkg.package_type = v.package_type) AS e
+    order_by: [traversal_path, source_id, target_id]
+    from: { id: source_id, type: Package }
+    to: { id: target_id, type: Vulnerability }
+";
+        let edge: EdgeYaml = serde_yaml::from_str(yaml).expect("parse edge yaml");
+        let configs = edge
+            .into_etl_configs("HAS_VULNERABILITY", &etl_settings())
+            .expect("into_etl_configs");
+
+        assert_eq!(configs.len(), 1);
+        let cfg = &configs[0];
+        let from_table = cfg
+            .from_table
+            .as_deref()
+            .expect("from_table should be Some");
+        assert!(from_table.contains("INNER JOIN siphon_packages_packages pkg"));
+        assert!(from_table.contains("pkg.id AS source_id"));
+        // `source` still names the concrete watermark/partitioning table.
+        assert_eq!(cfg.source, "siphon_sbom_occurrences_vulnerabilities");
+        assert_eq!(cfg.from.id_column, "source_id");
+        assert_eq!(cfg.to.id_column, "target_id");
+    }
+
+    #[test]
+    fn from_table_defaults_to_none_for_plain_fk_edge() {
+        let yaml = r"
+etl:
+  - scope: namespaced
+    source: siphon_packages_dependency_links
+    order_by: [traversal_path, id]
+    from: { id: package_id, type: Package }
+    to: { id: dependency_id, type: Dependency }
+";
+        let edge: EdgeYaml = serde_yaml::from_str(yaml).expect("parse edge yaml");
+        let configs = edge
+            .into_etl_configs("DECLARES_DEPENDENCY", &etl_settings())
+            .expect("into_etl_configs");
+
+        assert_eq!(configs[0].from_table, None);
+    }
 }

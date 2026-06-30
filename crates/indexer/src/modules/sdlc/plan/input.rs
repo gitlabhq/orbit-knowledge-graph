@@ -563,7 +563,14 @@ fn resolve_standalone_edge(
         })
     };
 
-    let source = ExtractSource::Table(config.source.clone());
+    // When `from_table` is set, scan a raw join/subquery so an endpoint id can
+    // be resolved via a ClickHouse-side join (the extract projects it under the
+    // configured id column). `base_table` stays the concrete `source` so
+    // partitioning and watermark/cursor logic still key off a real table.
+    let source = match &config.from_table {
+        Some(from_table) => ExtractSource::Raw(from_table.clone()),
+        None => ExtractSource::Table(config.source.clone()),
+    };
     let base_table = config.source.clone();
     let order_by = config.order_by.clone();
     let watermark = config.watermark.clone();
