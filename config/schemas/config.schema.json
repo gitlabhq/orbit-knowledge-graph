@@ -85,8 +85,8 @@
               "write_channel_capacity": 8,
               "write_max_concurrent": 4,
               "write_max_flush_age_secs": 120,
-              "write_min_flush_rows": 50000,
-              "write_slice_rows": 500000
+              "write_min_flush_rows": 10000,
+              "write_slice_rows": 1000000
             }
           },
           "entity-handler": {
@@ -534,17 +534,17 @@
           "minimum": 0
         },
         "write_min_flush_rows": {
-          "description": "Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached. Defaults to 50000.",
+          "description": "Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached. Defaults to 10000.",
           "type": "integer",
           "format": "uint",
-          "default": 50000,
+          "default": 10000,
           "minimum": 0
         },
         "write_slice_rows": {
-          "description": "Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.",
+          "description": "Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 1000000.",
           "type": "integer",
           "format": "uint",
-          "default": 500000,
+          "default": 1000000,
           "minimum": 0
         }
       },
@@ -575,8 +575,8 @@
             "write_channel_capacity": 8,
             "write_max_concurrent": 4,
             "write_max_flush_age_secs": 120,
-            "write_min_flush_rows": 50000,
-            "write_slice_rows": 500000
+            "write_min_flush_rows": 10000,
+            "write_slice_rows": 1000000
           }
         }
       },
@@ -680,8 +680,8 @@
                 "write_channel_capacity": 8,
                 "write_max_concurrent": 4,
                 "write_max_flush_age_secs": 120,
-                "write_min_flush_rows": 50000,
-                "write_slice_rows": 500000
+                "write_min_flush_rows": 10000,
+                "write_slice_rows": 1000000
               }
             },
             "entity-handler": {
@@ -935,8 +935,8 @@
               "write_channel_capacity": 8,
               "write_max_concurrent": 4,
               "write_max_flush_age_secs": 120,
-              "write_min_flush_rows": 50000,
-              "write_slice_rows": 500000
+              "write_min_flush_rows": 10000,
+              "write_slice_rows": 1000000
             }
           }
         },

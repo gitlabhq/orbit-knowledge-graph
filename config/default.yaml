@@ -108,9 +108,9 @@ engine:
         job_timeout_secs: 250
         fetch_concurrency: 10
         write_channel_capacity: 8
-        write_slice_rows: 500000
+        write_slice_rows: 1000000
         write_buffer_age_secs: 60
-        write_min_flush_rows: 50000
+        write_min_flush_rows: 10000
         write_max_flush_age_secs: 120
         write_max_concurrent: 4
         small_repo_max_files: 650

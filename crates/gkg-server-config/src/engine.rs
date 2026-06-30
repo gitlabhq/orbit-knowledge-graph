@@ -268,7 +268,7 @@ fn default_code_indexing_write_channel_capacity() -> usize {
 }
 
 fn default_code_indexing_write_slice_rows() -> usize {
-    500_000
+    1_000_000
 }
 
 fn default_code_indexing_write_buffer_age_secs() -> u64 {
@@ -276,7 +276,7 @@ fn default_code_indexing_write_buffer_age_secs() -> u64 {
 }
 
 fn default_code_indexing_write_min_flush_rows() -> usize {
-    50_000
+    10_000
 }
 
 fn default_code_indexing_write_max_flush_age_secs() -> u64 {
@@ -342,13 +342,13 @@ pub struct CodeIndexingPipelineConfig {
     /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.
     #[serde(default = "default_code_indexing_write_channel_capacity")]
     pub write_channel_capacity: usize,
-    /// Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.
+    /// Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 1000000.
     #[serde(default = "default_code_indexing_write_slice_rows")]
     pub write_slice_rows: usize,
     /// Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick. Defaults to 60.
     #[serde(default = "default_code_indexing_write_buffer_age_secs")]
     pub write_buffer_age_secs: u64,
-    /// Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached. Defaults to 50000.
+    /// Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached. Defaults to 10000.
     #[serde(default = "default_code_indexing_write_min_flush_rows")]
     pub write_min_flush_rows: usize,
     /// Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`. Defaults to 120.
