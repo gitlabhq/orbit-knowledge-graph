@@ -932,7 +932,6 @@
         },
         "description": {
           "type": "string",
-          "maxLength": 200,
           "description": "Overall description of the ontology."
         },
         "settings": {
