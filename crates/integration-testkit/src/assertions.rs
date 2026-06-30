@@ -9,7 +9,6 @@ use crate::t;
 static ONTOLOGY: LazyLock<ontology::Ontology> =
     LazyLock::new(|| ontology::Ontology::load_embedded().expect("embedded ontology should load"));
 
-/// Returns the prefixed edge table name for the given relationship kind.
 pub(crate) fn edge_table(relationship_kind: &str) -> String {
     t(ONTOLOGY.edge_table_for_relationship(relationship_kind))
 }
@@ -109,9 +108,7 @@ pub async fn assert_edges_have_traversal_path(
     }
 }
 
-/// Assert that every edge matching the given relationship/source/target kinds
-/// contains the expected set of tags in the specified tag column
-/// (`source_tags` or `target_tags`).
+/// `tag_column` must be `source_tags` or `target_tags`.
 pub async fn assert_edge_tags(
     ctx: &TestContext,
     relationship_kind: &str,
@@ -146,8 +143,7 @@ pub async fn assert_edge_tags(
     }
 }
 
-/// Assert that edges matching the given criteria have the expected tags per
-/// source_id. `expected` maps source_id → expected tag set.
+/// `expected` maps source_id → expected tag set.
 pub async fn assert_edge_tags_by_source(
     ctx: &TestContext,
     relationship_kind: &str,
@@ -189,8 +185,7 @@ pub async fn assert_edge_tags_by_source(
     }
 }
 
-/// Assert that edges matching the given criteria have the expected tags per
-/// target_id. `expected` maps target_id → expected tag set.
+/// `expected` maps target_id → expected tag set.
 pub async fn assert_edge_tags_by_target(
     ctx: &TestContext,
     relationship_kind: &str,

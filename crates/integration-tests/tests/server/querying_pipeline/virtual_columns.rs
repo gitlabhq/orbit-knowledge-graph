@@ -1,8 +1,3 @@
-//! Tests for virtual column resolution dispatch logic.
-//!
-//! Exercises `resolve_virtual_columns` with `MockColumnResolver` -- no
-//! ClickHouse or Gitaly needed.
-
 use std::sync::Arc;
 
 use gkg_utils::arrow::ColumnValue;
@@ -122,7 +117,7 @@ async fn errors_when_batch_size_exceeded() {
         lookup: "blob_content".into(),
     }];
     let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
-    let mut map = file_property_map(); // 2 File entries, limit is 1
+    let mut map = file_property_map();
 
     let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map)
         .await

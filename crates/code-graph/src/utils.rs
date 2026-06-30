@@ -1,5 +1,3 @@
-//! Common utilities and types for the parser core
-
 /// Minimum stack space (128 KiB) that must remain before recursing into
 /// tree-sitter visitors. Guards against stack overflow on deeply nested ASTs.
 pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024;
@@ -9,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-/// Represents a position in source code (line, column)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Position {
     pub line: usize,
@@ -22,7 +19,6 @@ impl Position {
     }
 }
 
-/// Represents a range in source code (start and end positions)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Range {
     pub start: Position,
@@ -47,7 +43,6 @@ impl Range {
         }
     }
 
-    /// Check if a position is within this range
     pub fn contains(&self, pos: &Position) -> bool {
         use std::cmp::Ordering;
 
@@ -66,19 +61,15 @@ impl Range {
         starts_before_or_eq && ends_after_or_eq
     }
 
-    /// Get the size of the range in lines
     pub const fn line_span(&self) -> usize {
         self.end.line.saturating_sub(self.start.line) + 1
     }
 
-    /// Get the byte length of the range
     pub const fn byte_length(&self) -> usize {
         self.byte_offset.1.saturating_sub(self.byte_offset.0)
     }
 
-    /// Check if this range is completely contained within another range
     pub fn is_contained_within(&self, other: Range) -> bool {
-        // Check byte offset containment for accuracy
         self.byte_offset.0 >= other.byte_offset.0 && self.byte_offset.1 <= other.byte_offset.1
     }
 }
@@ -99,7 +90,6 @@ pub fn compare_positions(p1: &Position, p2: &Position) -> std::cmp::Ordering {
         .then_with(|| p1.column.cmp(&p2.column))
 }
 
-/// Convert a tree-sitter node to a Range
 pub fn node_to_range(node: &Node<StrDoc<SupportLang>>) -> Range {
     let start_pos = node.start_pos();
     let end_pos = node.end_pos();
@@ -112,7 +102,6 @@ pub fn node_to_range(node: &Node<StrDoc<SupportLang>>) -> Range {
     )
 }
 
-/// Trait for entities that occupy a byte `Range` in a document
 pub trait HasRange {
     fn range(&self) -> Range;
 }
@@ -137,17 +126,12 @@ impl<T: HasRange + Clone + Eq + Send + Sync> IntervalTree<T> {
         }
     }
 
-    // Find the nearest symbol that contains the given range
     pub fn find_containing(&self, start: u64, end: u64) -> Option<&T> {
         self.lapper
             .find(start, end)
             .map(|interval| &interval.val)
             .find(|item| {
                 let item_range = item.range();
-                // The item contains the given range if:
-                // 1. It's not the same range (to avoid self-containment)
-                // 2. The item starts before or at the given start
-                // 3. The item ends after or at the given end
                 !(item_range.byte_offset.0 == start as usize
                     && item_range.byte_offset.1 == end as usize)
                     && item_range.byte_offset.0 <= start as usize
@@ -155,7 +139,6 @@ impl<T: HasRange + Clone + Eq + Send + Sync> IntervalTree<T> {
             })
     }
 
-    // Find all symbols contained within a given range
     pub fn find_contained(&self, start: u64, end: u64) -> Vec<&T> {
         self.lapper
             .find(start, end)
@@ -168,7 +151,6 @@ impl<T: HasRange + Clone + Eq + Send + Sync> IntervalTree<T> {
             .collect()
     }
 
-    // Find all symbols that contain the given range
     pub fn find_all_containing(&self, start: u64, end: u64) -> Vec<&T> {
         self.lapper
             .find(start, end)
@@ -178,17 +160,11 @@ impl<T: HasRange + Clone + Eq + Send + Sync> IntervalTree<T> {
                 let item_start = item_range.byte_offset.0 as u64;
                 let item_end = item_range.byte_offset.1 as u64;
 
-                // The item contains the given range if:
-                // 1. It's not the exact same range (to avoid self-containment)
-                // 2. The item starts before or at the given start
-                // 3. The item ends after or at the given end
-                // 4. The item is strictly larger (not equal in both start and end)
                 !(item_start == start && item_end == end) && item_start <= start && item_end >= end
             })
             .collect()
     }
 
-    // Find the most immediate parent (smallest containing symbol)
     pub fn find_immediate_parent(&self, start: u64, end: u64) -> Option<&T> {
         self.find_all_containing(start, end)
             .into_iter()
@@ -207,7 +183,6 @@ impl<T: HasRange + Clone + Eq + Send + Sync> IntervalTree<T> {
                 let item_start = item_range.byte_offset.0 as u64;
                 let item_end = item_range.byte_offset.1 as u64;
 
-                // Item must be contained within the given range (not equal)
                 item_start >= start && item_end <= end && !(item_start == start && item_end == end)
             })
             .collect()
@@ -260,19 +235,17 @@ mod tests {
     fn test_range_contains_edge_cases() {
         let range = Range::new(Position::new(2, 5), Position::new(2, 15), (10, 20));
 
-        // Test same line range
-        assert!(range.contains(&Position::new(2, 5))); // start boundary
-        assert!(range.contains(&Position::new(2, 10))); // middle
-        assert!(range.contains(&Position::new(2, 15))); // end boundary
-        assert!(!range.contains(&Position::new(2, 4))); // before start
-        assert!(!range.contains(&Position::new(2, 16))); // after end
-        assert!(!range.contains(&Position::new(1, 10))); // line before
-        assert!(!range.contains(&Position::new(3, 10))); // line after
+        assert!(range.contains(&Position::new(2, 5)));
+        assert!(range.contains(&Position::new(2, 10)));
+        assert!(range.contains(&Position::new(2, 15)));
+        assert!(!range.contains(&Position::new(2, 4)));
+        assert!(!range.contains(&Position::new(2, 16)));
+        assert!(!range.contains(&Position::new(1, 10)));
+        assert!(!range.contains(&Position::new(3, 10)));
     }
 
     #[test]
     fn test_const_functions() {
-        // Test that const functions work at compile time
         const POS: Position = Position::new(1, 2);
         const RANGE: Range = Range::new(POS, Position::new(3, 4), (0, 10));
 
@@ -335,7 +308,6 @@ mod tests {
             ),
         ]);
 
-        // Find children within the parent range
         let children = index.find_immediate_children(0, 100);
         assert_eq!(children.len(), 3);
         let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
@@ -343,12 +315,10 @@ mod tests {
         assert!(names.contains(&"child2"));
         assert!(names.contains(&"child3"));
 
-        // Find children within a smaller range
         let children = index.find_immediate_children(5, 35);
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].name, "child1");
 
-        // No children when range is too small
         let children = index.find_immediate_children(15, 25);
         assert_eq!(children.len(), 0);
     }

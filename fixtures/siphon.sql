@@ -534,7 +534,7 @@ SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild'
 
 -- Knowledge graph enabled namespaces.
 -- `traversal_path` mirrors the production column added in
-CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces
+CREATE TABLE IF NOT EXISTS siphon_knowledge_graph_enabled_namespaces
 (
     `id` Int64 CODEC(DoubleDelta, ZSTD(1)),
     `root_namespace_id` Int64,
@@ -1547,3 +1547,36 @@ CREATE TABLE IF NOT EXISTS siphon_container_repositories
 ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
+
+-- Traversal-path dictionaries (mirrors config/graph.sql) used by the namespace
+-- dispatch change query. The $DICTIONARY_* placeholders are substituted by the
+-- test harness and, in production, at deploy time.
+CREATE DICTIONARY namespace_traversal_paths_dict
+(
+    `id` UInt64,
+    `traversal_path` String
+)
+PRIMARY KEY id
+SOURCE(CLICKHOUSE(USER '$DICTIONARY_USER' PASSWORD '$DICTIONARY_PASSWORD' SECURE '$DICTIONARY_SECURE' QUERY '\n        SELECT id, traversal_path FROM (\n          SELECT id, traversal_path\n          FROM (\n            SELECT\n              id,\n              argMax(traversal_path, version) AS traversal_path,\n              argMax(deleted, version) AS deleted\n              FROM $DICTIONARY_DATABASE.namespace_traversal_paths\n            GROUP BY id\n          )\n          WHERE deleted = false\n        )\n      '))
+LIFETIME(MIN 60 MAX 300)
+LAYOUT(CACHE(SIZE_IN_CELLS 3000000));
+
+CREATE DICTIONARY organization_traversal_paths_dict
+(
+    `id` UInt64,
+    `traversal_path` String
+)
+PRIMARY KEY id
+SOURCE(CLICKHOUSE(USER '$DICTIONARY_USER' PASSWORD '$DICTIONARY_PASSWORD' SECURE '$DICTIONARY_SECURE' QUERY '\n        SELECT id, traversal_path FROM (\n          SELECT id, traversal_path\n          FROM (\n            SELECT\n              id,\n              concat(toString(id), \'/\') AS traversal_path,\n              argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted\n              FROM siphon_organizations\n            GROUP BY id\n          )\n          WHERE _siphon_deleted = false\n        )\n      '))
+LIFETIME(MIN 60 MAX 300)
+LAYOUT(CACHE(SIZE_IN_CELLS 100000));
+
+CREATE DICTIONARY project_traversal_paths_dict
+(
+    `id` UInt64,
+    `traversal_path` String
+)
+PRIMARY KEY id
+SOURCE(CLICKHOUSE(USER '$DICTIONARY_USER' PASSWORD '$DICTIONARY_PASSWORD' SECURE '$DICTIONARY_SECURE' QUERY '\n        SELECT id, traversal_path FROM (\n          SELECT id, traversal_path\n          FROM (\n            SELECT\n              id,\n              argMax(traversal_path, version) AS traversal_path,\n              argMax(deleted, version) AS deleted\n              FROM $DICTIONARY_DATABASE.project_namespace_traversal_paths\n            GROUP BY id\n          )\n          WHERE deleted = false\n        )\n      '))
+LIFETIME(MIN 60 MAX 300)
+LAYOUT(CACHE(SIZE_IN_CELLS 5000000));

@@ -12,6 +12,13 @@ ClickHouse from your GDK installation.
 1. **[mise](https://mise.jdx.dev/)** for tool version management
 
 1. **[ClickHouse](https://clickhouse.com/docs/install)** installed locally.
+
+   GDK does **not** download the ClickHouse binary for you. When
+   `clickhouse.enabled: true`, GDK templates the config and registers the
+   service, but expects a binary to already exist at `clickhouse.bin` (default
+   `/usr/bin/clickhouse`). If none is present, GDK silently skips the service —
+   so install ClickHouse yourself first.
+
    On macOS, follow the
    [terminal process instructions](https://clickhouse.com/docs/install/macOS#terminal-process).
    After downloading, remove the binary from quarantine before running it:
@@ -19,6 +26,17 @@ ClickHouse from your GDK installation.
    ```shell
    xattr -d com.apple.quarantine clickhouse
    ```
+
+   On Linux, download the binary with the one-liner:
+
+   ```shell
+   curl -sSL "https://clickhouse.com/" | sh
+   ```
+
+   This downloads a `./clickhouse` binary into the current directory. Either
+   point `clickhouse.bin` in `gdk.yml` at it, or move it onto your `PATH` (for
+   example to `/usr/bin/clickhouse`); `sudo ./clickhouse install` is not
+   required.
 
    > **Note:** GDK's ClickHouse listens on port **9001**, not the default 9000.
    > Always pass `--port 9001` when using `clickhouse client` to connect to the
@@ -89,104 +107,57 @@ ClickHouse from your GDK installation.
 
 1. **Configure Siphon tables:**
 
-   Run `gdk reconfigure` to generate the initial Siphon configs, then replace
-   them with the correct format. The current Siphon binary expects a
-   `producers:`/`consumers:` array structure, but GDK generates an older flat
-   format.
+   The set of replicated tables is driven by per-table YAML files in
+   `$GDK_ROOT/gitlab/db/siphon/tables/`. GDK reads them on `gdk reconfigure` and
+   generates the entire Siphon config (`$GDK_ROOT/siphon/config.yml`) — both the
+   producer and consumer sides — from that single source. In general you do
+   **not** hand-write `config.yml`; add or remove table files and let GDK
+   regenerate it. (One exception, the hardcoded Prometheus port, is covered under
+   [Siphon Prometheus port conflict](#siphon-prometheus-port-conflict).)
 
-   Create `$GDK_ROOT/siphon/config_main.yml`:
-
-   ```yaml
-   producers:
-     - application_identifier: "gdkproducer_main"
-       max_column_size_in_bytes: 1048576
-       partitions_monitoring_interval_in_seconds: 30
-       database:
-         host: "localhost"
-         port: 5432
-         database: "gitlabhq_development"
-         advisory_lock_id: 1
-         advisory_lock_timeout_ms: 100
-         advisory_lock_timeout_fuzziness_ms: 50
-         lock_timeout_ms: 500
-         lock_timeout_fuzziness_ms: 300
-         application_name: "siphon_main"
-       replication:
-         publication_name: "siphon_publication_main_db"
-         slot_name: "siphon_slot_main_db"
-         initial_data_snapshot_threads_per_table: 3
-         memory_buffer_size_in_bytes: 8388608
-       queueing:
-         driver: "nats"
-         url: "localhost:4222"
-         stream_name: "siphon_stream_main_db"
-         temp_stream_name: "siphon_temp_stream_main"
-         snapshot_stream_name: "siphon_snapshot_stream_main"
-       table_mapping:
-         - table: namespaces
-           schema: public
-           subject: namespaces
-         - table: projects
-           schema: public
-           subject: projects
-         # Add more tables as needed (issues, merge_requests, users, etc.)
-   prometheus:
-     port: 8081
-   ```
-
-   Create `$GDK_ROOT/siphon/consumer.yml`:
-
-   ```yaml
-   consumers:
-     - type: "clickhouse"
-       application_identifier: "gdkconsumer"
-       queueing:
-         driver: "nats"
-         url: "localhost:4222"
-         stream_name: "siphon_stream_main_db"
-       streams:
-         - identifier: namespaces
-           subject: namespaces
-           target: siphon_namespaces
-         - identifier: projects
-           subject: projects
-           target: siphon_projects
-         # Add matching entries for each table in the producer
-       clickhouse:
-         host: localhost
-         port: 9001
-         user: default
-         database: gitlab_clickhouse_development
-   prometheus:
-     port: 8084
-   ```
-
-   The consumer also needs a wrapper script since GDK expects a separate binary.
-   Create `$GDK_ROOT/siphon/bin/clickhouse_consumer`:
+   The GitLab repo already ships the tables the live indexing path needs,
+   including the system-notes / commit-edge path: `notes`,
+   `system_note_metadata`, `merge_requests`, `issues`, `users`, and `routes`
+   (the transform reads these to resolve note bodies, the `action`
+   discriminator, noteable and cross-reference targets, authors, and
+   `path` → traversal-path lookups), alongside `namespaces` and `projects`.
+   Confirm the ones you need exist:
 
    ```shell
-   #!/bin/sh
-   exec "$(dirname "$0")/siphon" consumer "$@"
+   ls $GDK_ROOT/gitlab/db/siphon/tables/
    ```
 
-   ```shell
-   chmod +x $GDK_ROOT/siphon/bin/clickhouse_consumer
-   ```
-
-   Protect these files from being overwritten by `gdk reconfigure` by adding
-   to `$GDK_ROOT/gdk.yml`:
+   Each file maps one PostgreSQL table to a ClickHouse `siphon_*` target, for
+   example `$GDK_ROOT/gitlab/db/siphon/tables/notes.yml`:
 
    ```yaml
-   gdk:
-     protected_config_files:
-       - siphon/config_main.yml
-       - siphon/consumer.yml
+   table: notes
+   database: main
+   replication_targets:
+     - name: clickhouse_main
+       target: siphon_notes
    ```
 
-   Then restart siphon: `gdk restart siphon`
+   To replicate a table that isn't shipped yet, add a file in the same shape,
+   generate its ClickHouse migration, and run it:
 
-   See the [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/bases/environments/orbit-stg.yaml.gotmpl)
-   for the full list of tables used in production.
+   ```shell
+   cd $GDK_ROOT/gitlab
+   bundle exec rails generate gitlab:click_house:siphon <table_name>
+   bundle exec rake gitlab:clickhouse:migrate
+   ```
+
+   Then regenerate the Siphon config and restart the service:
+
+   ```shell
+   gdk reconfigure
+   gdk restart siphon
+   ```
+
+   For full details (multi-database support, re-syncing a single table) see the
+   GDK [Siphon how-to](https://gitlab.com/gitlab-org/gitlab-development-kit/-/blob/main/doc/howto/siphon.md).
+   The [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/bases/environments/orbit-stg.yaml.gotmpl)
+   lists the tables used in production.
 
 1. **Enable Knowledge Graph and JWT auth:**
 
@@ -324,17 +295,21 @@ trust the certificate. If you used `mkcert` to generate GDK certificates, run
 
 ### Siphon Prometheus port conflict
 
-Siphon's default Prometheus port (8081) often conflicts with Elasticsearch. If
-Siphon crash-loops with `listen tcp :8081: bind: address already in use`, change
-the port in `$GDK_ROOT/siphon/config.yml`:
+Siphon's Prometheus port (8081) often conflicts with Elasticsearch. GDK
+hardcodes this port when it generates `$GDK_ROOT/siphon/config.yml` and exposes
+no `gdk.yml` knob for it, so changing it is the one case where you override the
+generated file. If Siphon crash-loops with
+`listen tcp :8081: bind: address already in use`, change the port:
 
 ```yaml
 prometheus:
   port: 8082
 ```
 
-Protect the file from being overwritten by adding `siphon/config.yml` to
-`gdk.protected_config_files` in `gdk.yml`, then `gdk restart siphon`.
+Then protect the file from being regenerated by adding `siphon/config.yml` to
+`gdk.protected_config_files` in `gdk.yml`, and `gdk restart siphon`. Note that
+while this file is protected, GDK will not pick up new table files until you
+remove the protection and reconfigure.
 
 ## Troubleshooting
 
@@ -362,16 +337,31 @@ health checks and REST-style queries.
 
 **MEMORY_LIMIT_EXCEEDED errors from ClickHouse:**
 
-- Increase `max_server_memory_usage` (bytes) in `$GDK_ROOT/clickhouse/config.d/gdk.xml` e.g. `4294967296` for 4 GB:
+ClickHouse's `max_server_memory_usage` is a **whole-host RSS** limit, not a
+per-query budget. GDK sets it from `clickhouse.max_server_memory_usage` in
+`gdk.yml` (default 3 GB), and on a busy GDK the baseline RSS can already exceed
+that cap — so even a trivial `SELECT` fails with
+`(total) memory limit exceeded ... (MEMORY_LIMIT_EXCEEDED)`.
 
-```xml
-<clickhouse>
-  <!-- other existing settings ... -->
-  <max_server_memory_usage>4294967296</max_server_memory_usage>
-</clickhouse>
+GDK generates `$GDK_ROOT/clickhouse/config.d/gdk.xml` from `gdk.yml`, so editing
+that file directly is overwritten on the next `gdk reconfigure`. Raise the limit
+through `gdk.yml` instead:
+
+```yaml
+clickhouse:
+  max_server_memory_usage: 8000000000
 ```
 
-- Restart ClickHouse: `gdk restart clickhouse`
+Then apply it and restart:
+
+```shell
+gdk reconfigure
+gdk restart clickhouse
+```
+
+A value of `0` disables the absolute cap and falls back to a fraction of host
+RAM (`max_server_memory_usage_to_ram_ratio`), which is a good choice when total
+RAM, not a fixed number, is the right ceiling.
 
 **403 Forbidden on the /dashboard/orbit page but JWT auth works:**
 

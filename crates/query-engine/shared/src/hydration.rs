@@ -1,7 +1,5 @@
 //! Shared hydration helpers used by both the server and local pipelines.
-//!
-//! These functions handle ID collection, input construction, batch parsing,
-//! and property merging. The compile + execute step is left to the caller.
+//! The compile + execute step is left to the caller.
 
 use std::collections::HashMap;
 
@@ -21,8 +19,6 @@ use types::QueryResult;
 
 pub use crate::content::PropertyMap;
 
-/// Collect entity primary keys from authorized rows for static hydration.
-///
 /// Tries the PK column first (`_gkg_{alias}_pk`), falling back to the
 /// redaction ID column (`_gkg_{alias}_id`).
 pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
@@ -40,10 +36,7 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
     ids
 }
 
-/// Collect distinct traversal paths from authorized rows for a static node.
-///
 /// Reads the `_gkg_{alias}_tp` column emitted by the enforce pass.
-/// Returns deduplicated paths sorted for stable output.
 pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<String> {
     let tp_col = traversal_path_column(alias);
     let mut paths: Vec<String> = result
@@ -56,13 +49,10 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<String>
     paths
 }
 
-/// Collect the union of all distinct traversal paths across every template
-/// alias that has a `_gkg_{alias}_tp` column in the result.
-///
-/// Used as a fallback for nodes whose own TP column is absent (FK-elided
-/// pinned nodes where the alias was absorbed into a literal). The TPs from
-/// sibling nodes in the same result rows are valid narrowing candidates
-/// because all entities share the same namespace hierarchy.
+/// Fallback for nodes whose own TP column is absent (FK-elided pinned nodes
+/// where the alias was absorbed into a literal). The TPs from sibling nodes in
+/// the same result rows are valid narrowing candidates because all entities
+/// share the same namespace hierarchy.
 fn collect_all_traversal_paths(
     result: &QueryResult,
     templates: &[HydrationTemplate],
@@ -86,8 +76,6 @@ fn collect_all_traversal_paths(
     all
 }
 
-/// Extract (entity_type, id) pairs from dynamic nodes (path finding, neighbors).
-///
 /// When `static_nodes` is provided (e.g. the center node in a neighbors query),
 /// their IDs are also collected so properties can be hydrated for them.
 pub fn extract_dynamic_refs(
@@ -116,7 +104,6 @@ pub fn extract_dynamic_refs(
     refs
 }
 
-/// Build `InputNode`s for static hydration from templates and collected IDs.
 pub fn build_static_nodes(
     templates: &[HydrationTemplate],
     result: &QueryResult,
@@ -154,7 +141,6 @@ pub fn build_static_nodes(
     (nodes, total_ids)
 }
 
-/// Build `InputNode`s for dynamic hydration from entity specs and discovered refs.
 pub fn build_dynamic_nodes(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
@@ -183,7 +169,6 @@ pub fn build_dynamic_nodes(
     (nodes, total_ids)
 }
 
-/// Build the hydration `Input` from collected nodes.
 /// Caps limit at `u32::MAX` to prevent truncation.
 ///
 /// Callers set `Input.hydration_dynamic` from the originating query's type
@@ -201,8 +186,6 @@ pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
     }
 }
 
-/// Parse hydration result batches into a `PropertyMap`.
-///
 /// Expects columns: `{alias}_id`, `{alias}_entity_type`, `{alias}_props`
 /// where props is a JSON-encoded object.
 pub fn parse_hydration_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
@@ -255,7 +238,6 @@ pub fn parse_hydration_batches(batches: &[RecordBatch]) -> Result<PropertyMap, P
     Ok(result)
 }
 
-/// Merge hydrated properties into static (traversal) query result rows.
 pub fn merge_static_properties(
     result: &mut QueryResult,
     property_map: &PropertyMap,
@@ -280,7 +262,6 @@ pub fn merge_static_properties(
     }
 }
 
-/// Merge hydrated properties into dynamic (path finding, neighbors) node refs.
 pub fn merge_dynamic_properties(result: &mut QueryResult, property_map: &PropertyMap) {
     for row in result.authorized_rows_mut() {
         for node_ref in row.dynamic_nodes_mut() {
@@ -291,9 +272,7 @@ pub fn merge_dynamic_properties(result: &mut QueryResult, property_map: &Propert
     }
 }
 
-/// Merge hydrated properties for static nodes (e.g. the center node in
-/// neighbors queries) into row columns so formatters can extract them
-/// via `{alias}_{column}`.
+/// Writes row columns named `{alias}_{column}` so formatters can extract them.
 pub fn merge_static_node_properties(
     result: &mut QueryResult,
     property_map: &PropertyMap,
@@ -377,12 +356,8 @@ pub fn hydrate_static(
     Ok((nodes, total_ids))
 }
 
-/// Collect distinct traversal paths from static nodes in a dynamic query
-/// result (e.g. the center node in a Neighbors query).
-///
-/// Returns deduplicated, sorted paths. For PathFinding queries where no
-/// static nodes have TP columns, returns an empty vec — the caller can
-/// fall back to security context TPs.
+/// For PathFinding queries where no static nodes have TP columns, returns an
+/// empty vec — the caller can fall back to security context TPs.
 pub fn collect_dynamic_traversal_paths(
     result: &QueryResult,
     static_nodes: &[compiler::RedactionNode],
@@ -403,9 +378,8 @@ pub fn collect_dynamic_traversal_paths(
     paths
 }
 
-/// Dynamic hydration: builds an `Input` with one node per
-/// discovered entity type using pre-resolved column specs from the
-/// compilation plan. No ontology lookups at runtime.
+/// Uses pre-resolved column specs from the compilation plan; no ontology
+/// lookups at runtime.
 ///
 /// `traversal_paths` narrows hydration scans for entities that have
 /// `traversal_path` in their table. Pass TPs collected from static nodes
@@ -459,11 +433,6 @@ pub fn hydrate_dynamic(
     Ok((nodes, total_ids))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Post-hydration virtual column filtering
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Evaluate a single [`InputFilter`] against a [`ColumnValue`].
 fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> bool {
     let op = filter.op.unwrap_or(FilterOp::Eq);
     match op {
@@ -485,8 +454,6 @@ fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> boo
     }
 }
 
-/// Apply virtual-column filters to static hydration results.
-/// Rows that fail any virtual filter predicate are removed.
 pub fn apply_virtual_filters_static(result: &mut QueryResult, templates: &[HydrationTemplate]) {
     let filters: Vec<_> = templates
         .iter()

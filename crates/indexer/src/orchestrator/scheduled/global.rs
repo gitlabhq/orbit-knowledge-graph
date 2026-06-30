@@ -66,6 +66,7 @@ impl GlobalDispatcher {
             watermark: Utc::now(),
             dispatch_id: Uuid::new_v4(),
             campaign_id: self.campaign.current(),
+            targets: Vec::new(),
         })
         .map_err(|error| {
             self.metrics.record_error(self.name(), "publish");

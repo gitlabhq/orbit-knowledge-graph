@@ -16,7 +16,7 @@
 //! let registry = Arc::new(HandlerRegistry::default());
 //! registry.register_handler(Box::new(my_handler));
 //!
-//! let engine = EngineBuilder::new(broker, registry, Arc::new(my_destination))
+//! let engine = EngineBuilder::new(broker, registry)
 //!     .nats_services(nats_services)
 //!     .build();
 //!
@@ -27,10 +27,10 @@
 //! ```
 
 pub mod dead_letter;
-pub mod destination;
 pub mod durability;
 pub mod handler;
 pub mod metrics;
+pub mod retry;
 pub mod types;
 pub mod worker_pool;
 
@@ -46,25 +46,21 @@ use tracing::{Instrument, error, info, warn};
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
-use destination::Destination;
+
 use gkg_server_config::EngineConfiguration;
 use handler::{Handler, HandlerContext, HandlerError, HandlerRegistry, PermanentAction};
 use metrics::EngineMetrics;
 use types::{Envelope, Subscription};
 use worker_pool::WorkerPool;
 
-/// Errors that can occur during engine operation.
 #[derive(Debug, Error)]
 pub enum EngineError {
-    /// An error from the NATS broker.
     #[error("NATS error: {0}")]
     Nats(#[from] NatsError),
 
-    /// An error from a message handler.
     #[error("handler error: {0}")]
     Handler(#[from] HandlerError),
 
-    /// Invalid engine configuration.
     #[error("invalid config: {0}")]
     InvalidConfig(String),
 }
@@ -80,12 +76,11 @@ pub enum EngineError {
 /// use etl_engine::engine::EngineBuilder;
 /// use std::sync::Arc;
 ///
-/// let engine = EngineBuilder::new(broker, registry, destination).build();
+/// let engine = EngineBuilder::new(broker, registry).build();
 /// ```
 pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
-    destination: Arc<dyn Destination>,
     indexing_status: Arc<IndexingStatusStore>,
     metrics: Option<Arc<EngineMetrics>>,
     nats_services: Option<Arc<dyn NatsServices>>,
@@ -95,13 +90,11 @@ impl EngineBuilder {
     pub fn new(
         broker: Arc<NatsBroker>,
         registry: Arc<HandlerRegistry>,
-        destination: Arc<dyn Destination>,
         indexing_status: Arc<IndexingStatusStore>,
     ) -> Self {
         Self {
             broker,
             registry,
-            destination,
             indexing_status,
             metrics: None,
             nats_services: None,
@@ -133,7 +126,6 @@ impl EngineBuilder {
         Engine {
             broker: self.broker,
             registry: self.registry,
-            destination: self.destination,
             metrics,
             nats_services,
             lock_service,
@@ -154,7 +146,7 @@ impl EngineBuilder {
 /// Use [`EngineBuilder`]:
 ///
 /// ```ignore
-/// let engine = EngineBuilder::new(broker, registry, destination).build();
+/// let engine = EngineBuilder::new(broker, registry).build();
 /// ```
 ///
 /// # Lifecycle
@@ -165,7 +157,6 @@ impl EngineBuilder {
 pub struct Engine {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
-    destination: Arc<dyn Destination>,
     metrics: Arc<EngineMetrics>,
     nats_services: Arc<dyn NatsServices>,
     lock_service: Arc<dyn LockService>,
@@ -174,8 +165,6 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Starts the engine and processes messages until stopped.
-    ///
     /// Returns when stopped via [`Engine::stop`] or when all subscriptions end.
     pub async fn run(&self, configuration: &EngineConfiguration) -> Result<(), EngineError> {
         let subscriptions = self.registry.subscriptions();
@@ -236,7 +225,7 @@ impl Engine {
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
-                        HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress, self.indexing_status.clone()),
+                        HandlerContext::new(self.nats_services.clone(), self.lock_service.clone(), progress, self.indexing_status.clone()),
                         self.broker.clone(),
                         runtime.clone(),
                         subscription.clone(),
@@ -285,8 +274,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Signals the engine to stop processing.
-    ///
     /// In-flight messages will complete before shutdown.
     pub fn stop(&self) {
         self.cancel.cancel();
@@ -305,7 +292,7 @@ enum HandlerTaskOutcome {
 enum HandlersOutcome {
     Success,
     Failed { retry_delay: Option<Duration> },
-    Exhausted { error: String },
+    Exhausted { error: String, dead_letter: bool },
     Dropped { error: String },
 }
 
@@ -369,8 +356,8 @@ async fn process_message(
             }
             "term"
         }
-        HandlersOutcome::Exhausted { error } => {
-            if subscription.dead_letter_on_exhaustion {
+        HandlersOutcome::Exhausted { error, dead_letter } => {
+            if dead_letter {
                 match message.to_dlq(&broker, &subscription, &error).await {
                     DlqResult::Published => "dead_letter",
                     DlqResult::Nacked => "nack",
@@ -401,8 +388,6 @@ async fn process_message(
     );
 }
 
-/// Runs all handlers concurrently and aggregates their outcomes.
-///
 /// Precedence: Exhausted > Dropped > RetryRequested > TransientError > Success.
 /// Retry policy (max_attempts, retry_interval) is read from the subscription,
 /// not from individual handlers.
@@ -510,7 +495,10 @@ async fn run_handlers(
     }
 
     if let Some(error) = exhausted_error {
-        return HandlersOutcome::Exhausted { error };
+        return HandlersOutcome::Exhausted {
+            error,
+            dead_letter: subscription.dead_letter_on_exhaustion,
+        };
     }
     if let Some(error) = dropped_error {
         return HandlersOutcome::Dropped { error };
@@ -519,14 +507,18 @@ async fn run_handlers(
         return HandlersOutcome::Failed { retry_delay: None };
     }
     if let Some(error) = transient_error {
-        return match subscription.max_attempts {
+        return match subscription.retry_policy() {
             None => HandlersOutcome::Success,
-            Some(max_attempts) if envelope.attempt >= max_attempts => {
+            Some(policy) if !policy.should_redeliver(envelope.attempt) => {
                 warn!(
                     attempt = envelope.attempt,
-                    max_attempts, "retry attempts exhausted"
+                    max_attempts = policy.max_attempts,
+                    "retry attempts exhausted"
                 );
-                HandlersOutcome::Exhausted { error }
+                HandlersOutcome::Exhausted {
+                    error,
+                    dead_letter: policy.dead_letter,
+                }
             }
             Some(_) => HandlersOutcome::Failed {
                 retry_delay: subscription.retry_interval(),
@@ -541,7 +533,7 @@ mod tests {
     use super::*;
     use crate::nats::ProgressNotifier;
     use crate::testkit::mocks::{
-        MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
+        MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
     use gkg_server_config::SubscriptionConfig;
     use handler::{HandlerError, PermanentAction};
@@ -550,7 +542,6 @@ mod tests {
     fn test_context() -> HandlerContext {
         let mock = Arc::new(MockNatsServices::new());
         HandlerContext::new(
-            Arc::new(MockDestination::new()),
             mock.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
@@ -619,8 +610,50 @@ mod tests {
         .await;
 
         assert!(
-            matches!(outcome, HandlersOutcome::Exhausted { .. }),
-            "expected Exhausted, got {outcome:?}"
+            matches!(
+                outcome,
+                HandlersOutcome::Exhausted {
+                    dead_letter: false,
+                    ..
+                }
+            ),
+            "expected Exhausted without dead-letter, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exhausted_carries_dead_letter_from_the_policy() {
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                dead_letter_on_exhaustion: true,
+                ..Default::default()
+            });
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(
+                outcome,
+                HandlersOutcome::Exhausted {
+                    dead_letter: true,
+                    ..
+                }
+            ),
+            "exhausted transient must carry dead_letter from the policy, got {outcome:?}"
         );
     }
 
@@ -971,7 +1004,6 @@ mod tests {
             ..Default::default()
         });
 
-        // Exhaust the single worker pool permit.
         let _blocker = runtime
             .worker_pool
             .acquire_handler_slot(None)
@@ -983,7 +1015,6 @@ mod tests {
         let subscription = Subscription::new("stream", "subject");
         let envelope = TestEnvelopeFactory::simple("payload");
 
-        // Must complete despite the pool being fully consumed.
         let outcome = tokio::time::timeout(
             Duration::from_secs(2),
             run_handlers(

@@ -1,5 +1,3 @@
-//! Core AST node types for tree-sitter traversal.
-
 use crate::Language;
 use crate::source::SgNode;
 use crate::source::{Content, Doc};
@@ -7,8 +5,7 @@ use std::borrow::Cow;
 
 pub type KindId = u16;
 
-/// Represents a position in the source code.
-/// The line and column are zero-based, character offsets.
+/// Line and column are zero-based, character offsets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     line: usize,
@@ -41,7 +38,7 @@ impl Position {
     }
 }
 
-/// Represents a parsed tree and owns the source string.
+/// Owns the source string.
 #[derive(Clone)]
 pub struct Root<D: Doc> {
     pub(crate) doc: D,
@@ -56,7 +53,6 @@ impl<D: Doc> Root<D> {
         self.doc.get_lang()
     }
 
-    /// The root node represents the entire source
     pub fn root(&self) -> Node<'_, D> {
         Node {
             inner: self.doc.root_node(),
@@ -64,7 +60,6 @@ impl<D: Doc> Root<D> {
         }
     }
 
-    /// Adopt the tree_sitter as the descendant of the root and return the wrapped sg Node.
     pub fn adopt<'r>(&'r self, inner: D::Node<'r>) -> Node<'r, D> {
         debug_assert!(self.check_lineage(&inner));
         Node { inner, root: self }
@@ -79,15 +74,13 @@ impl<D: Doc> Root<D> {
     }
 }
 
-/// A node in the AST tree.
-/// 'r represents root lifetime
+/// `'r` represents root lifetime.
 #[derive(Clone)]
 pub struct Node<'r, D: Doc> {
     pub(crate) inner: D::Node<'r>,
     pub(crate) root: &'r Root<D>,
 }
 
-/// APIs for Node inspection
 impl<'r, D: Doc> Node<'r, D> {
     pub fn get_doc(&self) -> &'r D {
         &self.root.doc
@@ -130,12 +123,10 @@ impl<'r, D: Doc> Node<'r, D> {
         self.inner.range()
     }
 
-    /// Nodes' start position in terms of zero-based rows and columns.
     pub fn start_pos(&self) -> Position {
         self.inner.start_pos()
     }
 
-    /// Nodes' end position in terms of rows and columns.
     pub fn end_pos(&self) -> Position {
         self.inner.end_pos()
     }
@@ -148,7 +139,6 @@ impl<'r, D: Doc> Node<'r, D> {
         self.root.lang()
     }
 
-    /// the underlying tree-sitter Node
     pub fn get_inner_node(&self) -> D::Node<'r> {
         self.inner.clone()
     }
@@ -158,7 +148,6 @@ impl<'r, D: Doc> Node<'r, D> {
     }
 }
 
-/// Tree traversal API
 impl<'r, D: Doc> Node<'r, D> {
     #[must_use]
     pub fn parent(&self) -> Option<Self> {
@@ -209,7 +198,6 @@ impl<'r, D: Doc> Node<'r, D> {
         })
     }
 
-    /// Returns all ancestors nodes of `self`.
     pub fn ancestors(&self) -> impl Iterator<Item = Node<'r, D>> + '_ {
         let root = self.root.doc.root_node();
         self.inner.ancestors(root).map(|inner| Node {
@@ -227,7 +215,6 @@ impl<'r, D: Doc> Node<'r, D> {
         })
     }
 
-    /// Returns all sibling nodes next to `self`.
     pub fn next_all(&self) -> impl Iterator<Item = Node<'r, D>> + '_ {
         self.inner.next_all().map(|inner| Node {
             inner,
@@ -271,8 +258,7 @@ impl<'r, D: Doc> Node<'r, D> {
         Some(current)
     }
 
-    /// Find the first descendant (DFS, left-to-right) matching a predicate.
-    /// Does not test `self`, only its descendants.
+    /// DFS, left-to-right. Does not test `self`, only its descendants.
     #[must_use]
     pub fn find_descendant(&self, predicate: impl Fn(&Self) -> bool) -> Option<Self> {
         self.find_descendant_inner(&predicate)
@@ -312,12 +298,10 @@ impl<'r, D: Doc> Node<'r, D> {
         }
     }
 
-    /// Check if any node along `axis` satisfies `criterion`.
     pub fn has(&self, axis: Axis<'_>, criterion: Match<'_>) -> bool {
         self.find(axis, criterion).is_some()
     }
 
-    /// All direct children whose kind satisfies `criterion`.
     pub fn children_matching<'a>(
         &'a self,
         criterion: Match<'a>,
@@ -325,23 +309,18 @@ impl<'r, D: Doc> Node<'r, D> {
         self.children().filter(move |c| criterion.test(c))
     }
 
-    /// Find the first direct child whose kind equals `kind`.
     #[must_use]
     pub fn child_of_kind(&self, kind: &str) -> Option<Self> {
         self.find(Axis::Child, Match::Kind(kind))
     }
 
-    /// Check whether any direct child has the given kind.
     pub fn has_child_of_kind(&self, kind: &str) -> bool {
         self.has(Axis::Child, Match::Kind(kind))
     }
 
-    /// Return the `n`-th node along `axis` matching `criterion`.
     /// Positive `n`: 0-based from the start. Negative: -1 = last, -2 = second-to-last, etc.
     #[must_use]
     pub fn nth(&self, axis: Axis<'_>, criterion: Match<'_>, n: isize) -> Option<Self> {
-        // For axes that produce iterators, collect matches and index.
-        // Forward-only axes (Parent) just check n==0.
         match axis {
             Axis::Child => self.nth_iter(self.children(), criterion, n),
             Axis::PrevSibling => self.nth_iter(self.prev_all(), criterion, n),
@@ -380,7 +359,6 @@ impl<'r, D: Doc> Node<'r, D> {
         }
     }
 
-    /// Lazy iterator from the immediate parent up to the root.
     pub fn parent_chain(&self) -> impl Iterator<Item = Node<'r, D>> {
         let mut current = self.parent();
         std::iter::from_fn(move || {
@@ -391,28 +369,20 @@ impl<'r, D: Doc> Node<'r, D> {
     }
 }
 
-// ── Composable traversal primitives ─────────────────────────────
-
 /// Which direction to traverse from a node.
 #[derive(Clone, Copy)]
 pub enum Axis<'a> {
-    /// Direct children only.
     Child,
-    /// Immediate parent.
     Parent,
     /// Walk up from parent to root.
     Ancestor,
     /// DFS through all descendants.
     Descendant,
-    /// Named field on the node.
     Field(&'a str),
-    /// Previous siblings (same parent, before this node).
     PrevSibling,
-    /// Next siblings (same parent, after this node).
     NextSibling,
 }
 
-/// What to match on a node during traversal.
 #[derive(Clone, Copy)]
 pub enum Match<'a> {
     Kind(&'a str),

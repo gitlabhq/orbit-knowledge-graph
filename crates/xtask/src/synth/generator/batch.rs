@@ -1,5 +1,3 @@
-//! Dynamic RecordBatch builder from ontology definitions.
-
 use super::fake_data::{FakeDataPools, FakeValue, FakeValueGenerator, FieldKind};
 use arrow::array::*;
 use arrow::datatypes::Schema;
@@ -9,15 +7,10 @@ use ontology::{DataType, Field, NodeEntity};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// Builds Arrow RecordBatches dynamically from ontology node definitions.
-///
 /// Accumulates rows and flushes to batches when `batch_size` is reached.
 pub struct BatchBuilder {
-    /// Primary key field names (from ontology).
     primary_keys: HashSet<String>,
-    /// Maximum rows per batch before flushing.
     batch_size: usize,
-    /// Schema for building batches.
     schema: Arc<Schema>,
     fake_gen: FakeValueGenerator,
     traversal_paths: Vec<String>,
@@ -25,17 +18,14 @@ pub struct BatchBuilder {
     batches: Vec<RecordBatch>,
 }
 
-/// Holds data for a single column during batch building.
 struct ColumnData {
     field: Field,
-    /// Pre-computed field kind for fast generation.
     kind: FieldKind,
-    /// Cached enum values for enum fields (uses i64 keys as per ontology).
+    /// Enum keys are i64 per ontology.
     enum_values: Option<std::collections::BTreeMap<i64, String>>,
     values: ColumnValues,
 }
 
-/// Enum to hold different column value types.
 enum ColumnValues {
     Int64(Vec<Option<i64>>),
     Float64(Vec<Option<f64>>),
@@ -61,8 +51,8 @@ impl BatchBuilder {
         seed: Option<u64>,
         pools: &'static FakeDataPools,
     ) -> Self {
-        // Skip traversal_path - it's a system column handled separately
-        // Pre-compute FieldKind once per field to avoid runtime string matching
+        // traversal_path is a system column handled separately.
+        // Pre-compute FieldKind once per field to avoid runtime string matching per row.
         let columns: Vec<ColumnData> = node
             .fields
             .iter()
@@ -100,7 +90,6 @@ impl BatchBuilder {
             if self.primary_keys.contains(&col_data.field.name) {
                 col_data.values.push_int64(Some(id));
             } else {
-                // Use pre-computed FieldKind for fast generation
                 let value = self.fake_gen.generate_with_kind(
                     col_data.kind,
                     col_data.field.nullable,
@@ -261,7 +250,6 @@ mod tests {
         let schema = Arc::new(node.to_arrow_schema());
         let mut builder = BatchBuilder::new(&node, schema, 100, pools);
 
-        // Add some rows (less than batch_size)
         for i in 0..10 {
             builder.add_row(format!("1/{}/", i), i + 1);
         }
@@ -271,9 +259,8 @@ mod tests {
 
         let batch = &batches[0];
         assert_eq!(batch.num_rows(), 10);
-        assert_eq!(batch.num_columns(), 4); // traversal_path + 3 fields
+        assert_eq!(batch.num_columns(), 4);
 
-        // Check traversal_path column
         let traversal_paths = batch
             .column(0)
             .as_any()
@@ -281,7 +268,6 @@ mod tests {
             .unwrap();
         assert!(traversal_paths.iter().all(|v| v.is_some()));
 
-        // Check id column
         let ids = batch
             .column(1)
             .as_any()
@@ -299,9 +285,8 @@ mod tests {
         let pools = FakeDataPools::intern(FakeDataConfig::load(fake_data_path()).unwrap());
         let node = test_node();
         let schema = Arc::new(node.to_arrow_schema());
-        let mut builder = BatchBuilder::new(&node, schema, 5, pools); // Small batch size
+        let mut builder = BatchBuilder::new(&node, schema, 5, pools);
 
-        // Add 12 rows - should create 3 batches (5, 5, 2)
         for i in 0..12 {
             builder.add_row(format!("1/{}/", i), i + 1);
         }

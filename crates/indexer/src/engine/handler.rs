@@ -27,10 +27,7 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 use thiserror::Error;
 
-use super::{
-    destination::Destination,
-    types::{Envelope, Subscription},
-};
+use super::types::{Envelope, Subscription};
 use crate::{
     indexing_status::IndexingStatusStore,
     locking::LockService,
@@ -43,10 +40,9 @@ pub enum PermanentAction {
     Drop,
 }
 
-/// Errors that can occur during message handling.
 #[derive(Debug, Error)]
 pub enum HandlerError {
-    /// A general processing error with a descriptive message.
+    /// Transient failure; retried via the subscription's retry policy, then dead-lettered.
     #[error("processing failed: {0}")]
     Processing(String),
 
@@ -57,9 +53,14 @@ pub enum HandlerError {
         action: PermanentAction,
     },
 
-    /// Failed to deserialize the message payload.
     #[error("deserialization failed: {0}")]
     Deserialization(#[from] serde_json::Error),
+}
+
+impl From<crate::engine::retry::RetryExhausted> for HandlerError {
+    fn from(e: crate::engine::retry::RetryExhausted) -> Self {
+        HandlerError::Processing(e.to_string())
+    }
 }
 
 impl HandlerError {
@@ -74,53 +75,52 @@ impl HandlerError {
     pub fn is_permanent(&self) -> bool {
         matches!(self, Self::Permanent { .. } | Self::Deserialization(_))
     }
+
+    /// A deterministic failure that will never succeed on retry; dead-letter it for inspection.
+    pub fn dead_letter(message: impl Into<String>) -> Self {
+        HandlerError::Permanent {
+            message: message.into(),
+            action: PermanentAction::DeadLetter,
+        }
+    }
+
+    /// A deterministic failure that should be discarded without retry or dead-lettering.
+    pub fn drop(message: impl Into<String>) -> Self {
+        HandlerError::Permanent {
+            message: message.into(),
+            action: PermanentAction::Drop,
+        }
+    }
 }
 
-/// Errors that can occur during handler initialization.
 #[derive(Debug, Error)]
 #[error("{0}")]
 pub struct HandlerInitError(#[from] Box<dyn std::error::Error + Send + Sync>);
 
 impl HandlerInitError {
-    /// Creates a new handler initialization error from any error type.
     pub fn new<E: std::error::Error + Send + Sync + 'static>(error: E) -> Self {
         Self(Box::new(error))
     }
 }
 
-/// Context provided to handlers during message processing.
-///
-/// Contains shared resources that handlers need to process messages
-/// and write results.
 #[derive(Clone)]
 pub struct HandlerContext {
-    /// The destination where processed data should be written.
-    pub destination: Arc<dyn Destination>,
-
-    /// NATS services for publishing messages and other NATS operations.
     pub nats: Arc<dyn NatsServices>,
-
-    /// Distributed lock service for coordinating concurrent processing.
     pub lock_service: Arc<dyn LockService>,
-
     /// Signals in-progress processing to prevent NATS message redelivery.
     pub progress: ProgressNotifier,
-
     /// Records indexing run progress to NATS KV for `GetGraphStatus`.
     pub indexing_status: Arc<IndexingStatusStore>,
 }
 
 impl HandlerContext {
-    /// Creates a new handler context with the given resources.
     pub fn new(
-        destination: Arc<dyn Destination>,
         nats: Arc<dyn NatsServices>,
         lock_service: Arc<dyn LockService>,
         progress: ProgressNotifier,
         indexing_status: Arc<IndexingStatusStore>,
     ) -> Self {
         HandlerContext {
-            destination,
             nats,
             lock_service,
             progress,
@@ -129,31 +129,16 @@ impl HandlerContext {
     }
 }
 
-/// A message handler that processes events from a specific topic.
-///
-/// Each handler subscribes to one topic and processes incoming messages.
 /// Engine behavior (retries, concurrency, DLQ) is configured on the
 /// [`Subscription`] returned by [`subscription()`](Handler::subscription),
 /// not on the handler itself.
 #[async_trait]
 pub trait Handler: Send + Sync {
-    /// Returns the unique name of this handler.
-    ///
-    /// Used for metrics labeling, config lookup, and debugging. Should be a stable identifier.
+    /// Should be a stable identifier; used for metrics labeling and config lookup.
     fn name(&self) -> &str;
 
-    /// Returns the subscription this handler listens on.
-    ///
-    /// The subscription carries message-level processing policy (retry,
-    /// concurrency group, DLQ) applied at registration time.
     fn subscription(&self) -> Subscription;
 
-    /// Processes a message from the subscribed topic.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`HandlerError`] if processing fails. The engine will
-    /// retry or ack based on the subscription's config.
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError>;
 
     /// Whether the engine should acquire a worker pool permit before calling
@@ -167,17 +152,12 @@ pub trait Handler: Send + Sync {
     }
 }
 
-/// A registry for managing handlers and their topic subscriptions.
-///
-/// The registry collects handlers and provides lookup functionality
-/// for the engine to dispatch messages.
 #[derive(Default)]
 pub struct HandlerRegistry {
     handlers_by_subscription: RwLock<HashMap<Subscription, Vec<Arc<dyn Handler>>>>,
 }
 
 impl HandlerRegistry {
-    /// Registers a handler, adding it to the registry under its subscription.
     pub fn register_handler(&self, handler: Box<dyn Handler>) {
         let mut handlers_by_subscription = self.handlers_by_subscription.write();
         let subscription = handler.subscription();
@@ -187,7 +167,6 @@ impl HandlerRegistry {
             .push(Arc::from(handler));
     }
 
-    /// Returns all handlers registered for a given subscription.
     pub fn handlers_for(&self, subscription: &Subscription) -> Vec<Arc<dyn Handler>> {
         self.handlers_by_subscription
             .read()
@@ -196,7 +175,6 @@ impl HandlerRegistry {
             .unwrap_or_default()
     }
 
-    /// Returns all unique subscriptions that have registered handlers.
     pub fn subscriptions(&self) -> Vec<Subscription> {
         let mut subscriptions: Vec<_> = self
             .handlers_by_subscription
@@ -208,7 +186,6 @@ impl HandlerRegistry {
         subscriptions
     }
 
-    /// Finds a handler by name across all subscriptions.
     pub fn find_by_name(&self, name: &str) -> Option<Arc<dyn Handler>> {
         self.handlers_by_subscription
             .read()

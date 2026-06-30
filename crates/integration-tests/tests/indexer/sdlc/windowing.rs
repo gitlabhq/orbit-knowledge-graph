@@ -1,16 +1,7 @@
-//! Incremental-extract windowing: watermark filtering and keyset-cursor resume.
-//!
-//! These exercise the shared `pull_window` + cursor-DNF path
-//! (`crates/indexer/src/modules/sdlc/handler/entity.rs`), which is
-//! entity-agnostic, so one representative entity per cursor arity covers it:
-//! `User` for the single-column key, `Group` for the composite
-//! `[traversal_path, id]` key.
-//!
-//! Each subtest is shaped as seed -> run -> assert so it maps onto a future
-//! YAML scenario. These three need no format additions to port: the scenario
-//! format already seeds the `checkpoint` table and asserts the surviving id-set
-//! via `expect.nodes.rows`. They stay in Rust only to share a container with the
-//! partitioning mechanics that are not yet portable.
+//! The shared `pull_window` + cursor-DNF path
+//! (`crates/indexer/src/modules/sdlc/handler/entity.rs`) is entity-agnostic, so
+//! one representative entity per cursor arity covers it: `User` for the
+//! single-column key, `Group` for the composite `[traversal_path, id]` key.
 
 use arrow::array::Int64Array;
 use gkg_utils::arrow::ArrowUtils;
@@ -54,7 +45,7 @@ pub async fn incremental_watermark_filters_old_rows(ctx: &TestContext) {
 
     global_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("handler should succeed");
 
@@ -86,7 +77,7 @@ pub async fn resume_honors_cursor_floor_and_watermark_boundary(ctx: &TestContext
 
     global_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(), global_envelope())
         .await
         .expect("handler should succeed");
 
@@ -118,7 +109,7 @@ pub async fn composite_keyset_resume_skips_processed_groups(ctx: &TestContext) {
 
     namespace_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(), namespace_envelope(1, 100))
         .await
         .expect("handler should succeed");
 

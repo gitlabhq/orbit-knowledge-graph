@@ -1,6 +1,3 @@
-//! Generates `orbit-dashboards/gkg-metrics.json` from the static
-//! `gkg_observability::catalog()`.
-//!
 //! With `--check`, compares the regenerated output against the committed file
 //! and fails with a diff if they differ. This is the CI gate that keeps
 //! dashboards and emitted metrics from drifting apart.
@@ -12,14 +9,11 @@ use anyhow::{Context, Result, anyhow};
 use gkg_observability::{MetricSpec, catalog};
 use serde::Serialize;
 
-/// Default output path relative to the workspace root.
 const DEFAULT_OUTPUT: &str = "crates/gkg-observability/orbit-dashboards/gkg-metrics.json";
 
-/// Hand-authored note prepended to the generated file via a `$generated_by` key.
 const GENERATED_BY: &str = "cargo xtask metrics-catalog - do not edit";
 
-/// Minimum number of metrics that must appear in the catalog. Acts as a
-/// sanity floor so an accidental truncation (e.g. a missing `v.extend(...)`
+/// Sanity floor so an accidental truncation (e.g. a missing `v.extend(...)`
 /// line in `gkg_observability::catalog`) fails the `--check` pass rather than
 /// quietly shipping an incomplete dashboard inventory.
 const MIN_CATALOG_SIZE: usize = 55;

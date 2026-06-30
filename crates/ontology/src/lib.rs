@@ -18,6 +18,7 @@
 
 pub mod constants;
 mod entities;
+pub mod errors;
 pub mod etl;
 pub mod introspection;
 mod json_schema;
@@ -34,13 +35,16 @@ pub use entities::{
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
-    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig,
-    StatisticsExclude, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
-    TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    NodeEntity, NodeStorage, NodeStyle, PartitionConfig, RedactionConfig, RequiredRole,
+    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
+    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
-pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+pub use etl::{
+    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
+    ReindexSource,
+};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
@@ -50,32 +54,23 @@ use loading::EtlSettings;
 /// over compiler-specific types so the taint walk lives in the ontology crate.
 #[derive(Debug)]
 pub struct ScopeEdge<'a> {
-    /// DSL alias of the source node (e.g. `"mr"`).
     pub from: &'a str,
-    /// DSL alias of the target node (e.g. `"diff"`).
     pub to: &'a str,
-    /// Relationship kind(s) on this edge (e.g. `["HAS_DIFF"]`).
     pub types: &'a [String],
-    /// Entity type of the source (e.g. `"MergeRequest"`).
     pub source_kind: &'a str,
-    /// Entity type of the target (e.g. `"MergeRequestDiff"`).
     pub target_kind: &'a str,
 }
 
-/// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]
 pub enum OntologyError {
-    /// Failed to read a file.
     Io {
         path: String,
         source: std::io::Error,
     },
-    /// Failed to parse YAML.
     Yaml {
         path: String,
         source: serde_yaml::Error,
     },
-    /// Ontology validation failed.
     Validation(String),
 }
 
@@ -103,26 +98,20 @@ impl fmt::Display for OntologyError {
     }
 }
 
-/// Configuration for a single edge table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeTableConfig {
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumn>,
-    /// ClickHouse-specific storage metadata for DDL generation.
     pub storage: EdgeTableStorage,
 }
 
-/// A loaded ontology containing all node and edge entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
     schema_version: String,
-    /// Prefix for all ClickHouse graph table names (e.g., `"gl_"`).
     pub(crate) table_prefix: String,
-    /// Default edge table name (e.g., `"gl_edge"`).
     pub(crate) default_edge_table: String,
     /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
     pub(crate) default_entity_sort_key: Vec<String>,
-    /// Edge table configurations keyed by table name.
     pub(crate) edge_table_configs: BTreeMap<String, EdgeTableConfig>,
     pub(crate) domains: BTreeMap<String, DomainInfo>,
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
@@ -135,11 +124,8 @@ pub struct Ontology {
     /// Local entity configs keyed by entity name. Each entry lists
     /// properties to exclude from the local DuckDB table.
     pub(crate) local_entities: BTreeMap<String, Vec<String>>,
-    /// Local edge table name, if declared.
     pub(crate) local_edge_table_name: Option<String>,
-    /// Local edge table columns, if declared.
     pub(crate) local_edge_columns: Vec<EdgeColumn>,
-    /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
     pub(crate) auxiliary_tables: Vec<AuxiliaryTable>,
     pub(crate) auxiliary_dictionaries: Vec<AuxiliaryDictionary>,
     /// Node properties denormalized onto edge tables for query optimization.
@@ -147,9 +133,9 @@ pub struct Ontology {
     /// Edge-producing entities derived by a Rust transform (keyed by name).
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
-    /// Materialized views defined in the ontology settings.
     pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
     pub(crate) statistics: Option<StatisticsConfig>,
+    pub(crate) partition: Option<PartitionConfig>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
     /// Regex patterns for `v<N>_*` objects that the GC sweep must never drop.
     /// Matched against the base name (after stripping the `v<N>_` prefix).
@@ -163,8 +149,9 @@ impl Default for Ontology {
     }
 }
 
+use errors::describe_valid_fields;
+
 impl Ontology {
-    /// Create an empty ontology.
     #[must_use]
     pub fn new() -> Self {
         let default_sort_key: Vec<String> = EDGE_RESERVED_COLUMNS
@@ -208,12 +195,12 @@ impl Ontology {
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
             statistics: None,
+            partition: None,
             traversal_path_lookups: Vec::new(),
             gc_preserve_patterns: Vec::new(),
         }
     }
 
-    /// Add nodes by name.
     #[must_use]
     pub fn with_nodes(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
         for name in names {
@@ -254,7 +241,6 @@ impl Ontology {
         self
     }
 
-    /// Add edge types by name.
     #[must_use]
     pub fn with_edges(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
         for name in names {
@@ -263,7 +249,6 @@ impl Ontology {
         self
     }
 
-    /// Builder: set edge columns (for testing).
     #[must_use]
     pub fn with_edge_columns(
         mut self,
@@ -282,7 +267,6 @@ impl Ontology {
         self
     }
 
-    /// Builder: declare an additional edge table (for testing multi-table routing).
     #[must_use]
     pub fn with_edge_table(mut self, name: impl Into<String>) -> Self {
         let name = name.into();
@@ -309,11 +293,8 @@ impl Ontology {
         self
     }
 
-    /// Builder: assign specific edge types to a named edge table.
-    ///
     /// The edge must already be added via `with_edges()` and the table
-    /// via `with_edge_table()`. This sets `destination_table` on all
-    /// variants of the named edge.
+    /// via `with_edge_table()`. Sets `destination_table` on all variants.
     #[must_use]
     pub fn with_edge_for_table(
         mut self,
@@ -340,7 +321,6 @@ impl Ontology {
         self
     }
 
-    /// Columns of the default edge table, in schema order.
     #[must_use]
     pub fn edge_columns(&self) -> &[EdgeColumn] {
         self.edge_table_configs
@@ -349,13 +329,11 @@ impl Ontology {
             .unwrap_or(&[])
     }
 
-    /// Get the configuration for a specific edge table.
     #[must_use]
     pub fn edge_table_config(&self, table: &str) -> Option<&EdgeTableConfig> {
         self.edge_table_configs.get(table)
     }
 
-    /// Look up the `DataType` of an edge table column by name.
     #[must_use]
     pub fn get_edge_column_type(&self, name: &str) -> Option<DataType> {
         // Search across all edge tables, not just the default, so
@@ -369,7 +347,6 @@ impl Ontology {
         None
     }
 
-    /// Check if a specific edge table has a given column and return its type.
     pub fn get_edge_table_column_type(&self, table: &str, name: &str) -> Option<DataType> {
         self.edge_table_configs
             .get(table)
@@ -490,7 +467,6 @@ impl Ontology {
             })
     }
 
-    /// Builder: set redaction config for a node (for testing).
     #[must_use]
     pub fn with_redaction(
         mut self,
@@ -616,13 +592,11 @@ impl Ontology {
         self
     }
 
-    /// Get a node by name.
     #[must_use]
     pub fn get_node(&self, name: &str) -> Option<&NodeEntity> {
         self.nodes.get(name)
     }
 
-    /// Get all variants of an edge by relationship name.
     #[must_use]
     pub fn get_edge(&self, name: &str) -> Option<&[EdgeEntity]> {
         self.edges.get(name).map(|v| v.as_slice())
@@ -657,9 +631,7 @@ impl Ontology {
             .collect()
     }
 
-    /// Get all source node types for an edge relationship.
-    ///
-    /// Returns unique node types that can be the source of this relationship.
+    /// Returns unique (deduplicated) source node types for this relationship.
     pub fn get_edge_source_types(&self, relationship_kind: &str) -> Vec<String> {
         let Some(variants) = self.get_edge(relationship_kind) else {
             return Vec::new();
@@ -673,9 +645,7 @@ impl Ontology {
             .collect()
     }
 
-    /// Get all target node types for an edge relationship.
-    ///
-    /// Returns unique node types that can be the target of this relationship.
+    /// Returns unique (deduplicated) target node types for this relationship.
     pub fn get_edge_all_target_types(&self, relationship_kind: &str) -> Vec<String> {
         let Some(variants) = self.get_edge(relationship_kind) else {
             return Vec::new();
@@ -714,25 +684,21 @@ impl Ontology {
             .collect()
     }
 
-    /// Check if a node exists.
     #[must_use]
     pub fn has_node(&self, name: &str) -> bool {
         self.nodes.contains_key(name)
     }
 
-    /// Check if an edge exists.
     #[must_use]
     pub fn has_edge(&self, name: &str) -> bool {
         self.edges.contains_key(name)
     }
 
-    /// Get the redaction config for an entity, if it requires redaction.
     #[must_use]
     pub fn get_redaction_config(&self, entity_name: &str) -> Option<&RedactionConfig> {
         self.get_node(entity_name)?.redaction.as_ref()
     }
 
-    /// Check if an entity requires redaction validation.
     #[must_use]
     pub fn requires_redaction(&self, entity_name: &str) -> bool {
         self.get_redaction_config(entity_name).is_some()
@@ -778,38 +744,49 @@ impl Ontology {
             .is_some_and(|f| f.admin_only)
     }
 
-    /// Iterator over all nodes.
     pub fn nodes(&self) -> impl Iterator<Item = &NodeEntity> {
         self.nodes.values()
     }
 
-    /// Iterator over all node names.
     pub fn node_names(&self) -> impl Iterator<Item = &str> {
         self.nodes.keys().map(|s| s.as_str())
     }
 
-    /// Iterator over all edge-producing derived entities (Rust-transformed).
     pub fn derived_entities(&self) -> impl Iterator<Item = &DerivedEntity> {
         self.derived_entities.values()
     }
 
-    /// Iterator over all edges (flattened).
+    pub fn reindex_sources(&self) -> BTreeSet<ReindexSource> {
+        let node_sources = self
+            .nodes()
+            .filter_map(|node| node.etl.as_ref())
+            .flat_map(|etl| etl.reindex_on().iter().cloned());
+        let derived_sources = self
+            .derived_entities()
+            .flat_map(|derived| derived.etl.reindex_on().iter().cloned());
+        let edge_sources = self
+            .edge_etl_configs()
+            .flat_map(|(_, config)| config.reindex_on.iter().cloned());
+
+        node_sources
+            .chain(derived_sources)
+            .chain(edge_sources)
+            .collect()
+    }
+
     pub fn edges(&self) -> impl Iterator<Item = &EdgeEntity> {
         self.edges.values().flatten()
     }
 
-    /// Iterator over all edge names.
     pub fn edge_names(&self) -> impl Iterator<Item = &str> {
         self.edges.keys().map(|s| s.as_str())
     }
 
-    /// Number of nodes.
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Number of edge types.
     #[must_use]
     pub fn edge_count(&self) -> usize {
         self.edges.len()
@@ -820,25 +797,21 @@ impl Ontology {
         &self.schema_version
     }
 
-    /// Table name prefix for all ClickHouse graph tables.
     #[must_use]
     pub fn table_prefix(&self) -> &str {
         &self.table_prefix
     }
 
-    /// Default ClickHouse table name for graph edges.
     #[must_use]
     pub fn edge_table(&self) -> &str {
         &self.default_edge_table
     }
 
-    /// All edge table names defined in settings.
     #[must_use]
     pub fn edge_tables(&self) -> Vec<&str> {
         self.edge_table_configs.keys().map(|s| s.as_str()).collect()
     }
 
-    /// Check if a table name is an edge table.
     #[must_use]
     pub fn is_edge_table(&self, table: &str) -> bool {
         self.edge_table_configs.contains_key(table)
@@ -889,10 +862,8 @@ impl Ontology {
         })
     }
 
-    /// True when `entity` declares a `traversal_path_lookup`, i.e. its
-    /// `traversal_path` can be resolved from an `id`/`full_path` filter so a
-    /// query anchored on it can be scope-pruned. `Project`, `Group`, and
-    /// `MergeRequest` today.
+    /// True when `entity` declares a `traversal_path_lookup`, so a query anchored
+    /// on it can be scope-pruned from an `id`/`full_path` filter.
     #[must_use]
     pub fn is_anchor(&self, entity: &str) -> bool {
         self.traversal_path_lookups
@@ -1074,7 +1045,6 @@ impl Ontology {
         result
     }
 
-    /// Prefix for internal columns injected by the compiler.
     #[must_use]
     pub fn internal_column_prefix(&self) -> &str {
         &self.internal_column_prefix
@@ -1107,7 +1077,6 @@ impl Ontology {
             .collect()
     }
 
-    /// Entity names that participate in the local DuckDB graph.
     #[must_use]
     pub fn local_entity_names(&self) -> Vec<&str> {
         self.local_entities.keys().map(|s| s.as_str()).collect()
@@ -1141,25 +1110,21 @@ impl Ontology {
         )
     }
 
-    /// Name of the local edge table, if declared.
     #[must_use]
     pub fn local_edge_table_name(&self) -> Option<&str> {
         self.local_edge_table_name.as_deref()
     }
 
-    /// Column definitions for the local edge table, if declared.
     #[must_use]
     pub fn local_edge_columns(&self) -> &[EdgeColumn] {
         &self.local_edge_columns
     }
 
-    /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
     #[must_use]
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.auxiliary_tables
     }
 
-    /// Materialized view definitions from the ontology settings.
     #[must_use]
     pub fn materialized_views(&self) -> &[MaterializedViewDefinition] {
         &self.materialized_views
@@ -1168,6 +1133,16 @@ impl Ontology {
     #[must_use]
     pub fn statistics(&self) -> Option<&StatisticsConfig> {
         self.statistics.as_ref()
+    }
+
+    #[must_use]
+    pub fn partition(&self) -> Option<&PartitionConfig> {
+        self.partition.as_ref()
+    }
+
+    #[must_use]
+    pub fn partition_by(&self) -> Option<&str> {
+        self.partition.as_ref().map(|p| p.partition_by.as_str())
     }
 
     /// Returns the partition key column for a given entity's statistics MV,
@@ -1262,7 +1237,6 @@ impl Ontology {
             .find(|l| l.entity == entity && l.kind == kind)
     }
 
-    /// Returns all denormalized property declarations.
     #[must_use]
     pub fn denormalized_properties(&self) -> &[DenormalizedProperty] {
         &self.denormalized_properties
@@ -1311,13 +1285,11 @@ impl Ontology {
         columns
     }
 
-    /// Default ORDER BY / dedup key columns for node tables.
     #[must_use]
     pub fn default_entity_sort_key(&self) -> &[String] {
         &self.default_entity_sort_key
     }
 
-    /// ORDER BY / dedup key columns for the default edge table.
     #[must_use]
     pub fn edge_sort_key(&self) -> &[String] {
         self.edge_table_configs
@@ -1359,7 +1331,6 @@ impl Ontology {
             .map(|v| v.as_slice())
     }
 
-    /// Check if an edge has ETL config (i.e., is sourced from a join table).
     pub fn has_edge_etl(&self, relationship_kind: &str) -> bool {
         self.edge_etl_configs.contains_key(relationship_kind)
     }
@@ -1422,22 +1393,15 @@ impl Ontology {
             .is_some_and(|n| n.fields.iter().any(|f| f.column_name() == Some(column)))
     }
 
-    /// Iterator over all edge ETL configs, flattened to (relationship_kind, config) pairs.
     pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &EdgeSourceEtlConfig)> {
         self.edge_etl_configs
             .iter()
             .flat_map(|(k, configs)| configs.iter().map(move |c| (k.as_str(), c)))
     }
 
-    // --- Query validation helpers ---
-
-    /// Check if a field exists on a node, including reserved columns.
-    ///
-    /// Returns `true` if:
-    /// - The node exists AND the field is a reserved column (`id`)
-    /// - The node exists AND the field exists in the node's field definitions
-    ///
-    /// Returns `false` if the node doesn't exist.
+    /// Returns `true` when the node exists and `field_name` is either a
+    /// reserved column (`id`) or a declared field; `false` if the node is
+    /// unknown.
     #[must_use]
     pub fn has_field(&self, node_name: &str, field_name: &str) -> bool {
         let Some(node) = self.nodes.get(node_name) else {
@@ -1479,7 +1443,8 @@ impl Ontology {
         }
 
         Err(OntologyError::Validation(format!(
-            "field \"{field_name}\" does not exist on node type \"{node_name}\""
+            "field \"{field_name}\" does not exist on node type \"{node_name}\". {}",
+            describe_valid_fields(node)
         )))
     }
 
@@ -1645,9 +1610,7 @@ mod tests {
     fn code_graph_edges_are_registered() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
 
-        // Code-graph emits CALLS, EXTENDS, DEFINES, IMPORTS via the linker
-        // resolver. All four must be registered for queries to compile, and
-        // they must all route to the same edge table so traversals can JOIN
+        // They must all route to the same edge table so traversals can JOIN
         // them with edges from other code-graph relationships.
         for kind in ["CALLS", "EXTENDS", "DEFINES", "IMPORTS"] {
             let entries = ontology
@@ -1786,8 +1749,6 @@ mod tests {
         assert_eq!(edge_names1, edge_names2);
     }
 
-    // --- Builder method tests ---
-
     #[test]
     fn test_builder_methods() {
         let ontology = Ontology::new()
@@ -1824,8 +1785,6 @@ mod tests {
         let _ = Ontology::new().with_fields("NonExistent", [("field", DataType::String)]);
     }
 
-    // --- Validation method tests ---
-
     #[test]
     fn test_has_field() {
         let ontology = Ontology::new()
@@ -1854,10 +1813,32 @@ mod tests {
         assert!(err.to_string().contains("unknown node type"));
 
         let err = ontology.validate_field("User", "nonexistent").unwrap_err();
-        assert!(err.to_string().contains("does not exist"));
+        let msg = err.to_string();
+        assert!(msg.contains("does not exist"), "got: {msg}");
+        assert!(msg.contains("Valid fields: id, username"), "got: {msg}");
 
         let err = Ontology::new().validate_field("", "field").unwrap_err();
         assert!(err.to_string().contains("without an entity type"));
+    }
+
+    #[test]
+    fn validate_field_truncates_long_field_lists() {
+        let fields: Vec<(String, DataType)> = (0..20)
+            .map(|i| (format!("field_{i}"), DataType::Int))
+            .collect();
+        let ontology = Ontology::new()
+            .with_nodes(["Wide"])
+            .with_fields("Wide", fields);
+
+        let msg = ontology
+            .validate_field("Wide", "missing")
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("Valid fields include:"), "got: {msg}");
+        assert!(msg.contains("more"), "got: {msg}");
+        assert!(msg.contains("get_graph_schema"), "got: {msg}");
+        // Reserved "id" must not be duplicated even when a field is also named differently.
+        assert_eq!(msg.matches("field_0").count(), 1, "got: {msg}");
     }
 
     #[test]
@@ -1892,10 +1873,8 @@ mod tests {
             strip_schema_version_prefix("v42_gl_vulnerability"),
             "gl_vulnerability"
         );
-        // No digits after `v` — leave untouched.
         assert_eq!(strip_schema_version_prefix("v_gl_user"), "v_gl_user");
         assert_eq!(strip_schema_version_prefix("version_gl_x"), "version_gl_x");
-        // Missing underscore after digits — leave untouched.
         assert_eq!(strip_schema_version_prefix("v1gl_user"), "v1gl_user");
     }
 
@@ -1936,8 +1915,6 @@ mod tests {
             Some(25)
         );
 
-        // Prefixed ontology, prefixed or unprefixed query — both ends
-        // normalize.
         let prefixed = ontology_with_role("Vulnerability", RequiredRole::SecurityManager)
             .with_schema_version_prefix("v1_");
         assert_eq!(
@@ -1953,15 +1930,10 @@ mod tests {
     #[test]
     fn min_access_level_for_table_is_none_for_unknown_or_unredacted() {
         let ontology = Ontology::new().with_nodes(["Project"]);
-        // Edge tables and CTEs aren't known nodes.
         assert!(ontology.min_access_level_for_table("gl_edge").is_none());
         assert!(ontology.min_access_level_for_table("some_cte").is_none());
-        // Node without a `redaction` block yields None — caller picks the
-        // default role.
         assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
-
-    // --- JSON Schema tests ---
 
     #[test]
     fn test_data_type_to_json_schema_type() {
@@ -2198,8 +2170,6 @@ mod tests {
         );
     }
 
-    // --- sort_key tests ---
-
     #[test]
     fn sort_key_settings_are_non_empty() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
@@ -2285,8 +2255,6 @@ mod tests {
 
         assert_eq!(ontology.sort_key_for_table("nonexistent_table"), None);
     }
-
-    // ── edge_tables tests ────────────────────────────────────────────
 
     #[test]
     fn edge_tables_includes_default_table() {
@@ -2535,8 +2503,6 @@ style:
         }
     }
 
-    // --- default_columns tests ---
-
     #[test]
     fn default_columns_loaded_from_ontology() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
@@ -2681,8 +2647,6 @@ properties:
         assert_eq!(entity.sort_key, default_sort_key);
     }
 
-    // ── check_field_flag / modify_field ────────────────────────────
-
     fn field_flags_ontology() -> Ontology {
         Ontology::new()
             .with_nodes(["User"])
@@ -2738,8 +2702,6 @@ properties:
             .modify_field("Bogus", "field", |_| {});
         assert!(result.is_err());
     }
-
-    // ── admin_only_properties / is_admin_only ──────────────────────
 
     fn admin_only_ontology() -> Ontology {
         Ontology::new()
@@ -2864,15 +2826,12 @@ properties:
             .expect("Directory is a local entity");
         let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
 
-        // Included: regular fields and envelope fields (not excluded in YAML)
         assert!(names.contains(&"id"));
         assert!(names.contains(&"project_id"));
         assert!(names.contains(&"branch"));
         assert!(names.contains(&"path"));
         assert!(names.contains(&"name"));
-        // traversal_path is now included for hydration TP narrowing
         assert!(names.contains(&"traversal_path"));
-        // commit_sha is now included in local schema
         assert!(names.contains(&"commit_sha"));
     }
 
@@ -2916,8 +2875,6 @@ properties:
 
     #[test]
     fn local_exclude_properties_validated_against_fields() {
-        // Verify the real ontology passes validation (all exclude_properties
-        // reference actual fields). If someone adds a typo, this catches it.
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         for entity_name in ontology.local_entity_names() {
             let fields = ontology
@@ -3077,15 +3034,20 @@ properties:
         assert!(edge_names.contains(&"MENTIONS"));
     }
 
-    // --- Scope annotation tests ---
-
     #[test]
     fn is_anchor_tracks_traversal_path_lookups() {
         let o = Ontology::load_embedded().unwrap();
-        for entity in ["Project", "Group", "MergeRequest"] {
+        for entity in [
+            "Project",
+            "Group",
+            "MergeRequest",
+            "Definition",
+            "File",
+            "Directory",
+        ] {
             assert!(o.is_anchor(entity), "{entity} declares a lookup");
         }
-        for entity in ["WorkItem", "User", "Definition", "Nonexistent"] {
+        for entity in ["WorkItem", "User", "Nonexistent"] {
             assert!(!o.is_anchor(entity), "{entity} declares no lookup");
         }
         assert!(

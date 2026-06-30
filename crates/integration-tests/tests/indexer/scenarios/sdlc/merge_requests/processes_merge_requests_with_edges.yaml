@@ -25,8 +25,11 @@ expect:
   nodes:
     gl_merge_request:
       rows:
-        - { id: 1, title: Add feature X, state: opened, project_id: 1000, merged_commit_sha: "", squash_commit_sha: "", commits_count: 3, added_lines: 120 }
-        - { id: 2, title: Fix bug Y, state: merged, project_id: 1000, merged_commit_sha: abc123def456, squash_commit_sha: squash789, commits_count: 2, added_lines: 15 }
+        - { id: 1, title: Add feature X, state: opened, project_id: 1000, commits_count: 3, added_lines: 120 }
+        - { id: 2, title: Fix bug Y, state: merged, project_id: 1000, commits_count: 2, added_lines: 15 }
+    gl_commit:
+      rows:
+        - { sha: abc123def456, project_id: 1000, traversal_path: "1/100/" }
   edges:
     - { kind: IN_PROJECT, from: MergeRequest, to: Project, traversal_path: "1/100/", count: 2 }
     # source_project_id is 1001 for MR 1 (fork) and 1000 for MR 2 (same project).
@@ -41,3 +44,5 @@ expect:
     - { kind: IN_MILESTONE, from: MergeRequest, to: Milestone, traversal_path: "1/100/", count: 1 }
     - { kind: REVIEWER, from: User, to: MergeRequest, traversal_path: "1/100/", count: 3 }
     - { kind: APPROVED, from: User, to: MergeRequest, traversal_path: "1/100/", count: 3 }
+    # Only MR 2 is merged (has a decoded SHA via COALESCE); MR 1 is unmerged, so no edge.
+    - { kind: MERGED_AT_COMMIT, from: MergeRequest, to: Commit, traversal_path: "1/100/", count: 1, rows: [{ source_id: 2 }] }

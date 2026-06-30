@@ -51,9 +51,6 @@ pub(crate) struct QuotaCache {
 
 impl QuotaCache {
     pub(crate) fn new(client: Arc<QuotaClient>, max_entries: u64) -> Self {
-        // Per-entry TTL: moka calls the expire_after closure on each access, and
-        // we use the stored `expires_at` rather than a uniform cache-wide TTL so
-        // each key can carry the TTL CDot returned for it.
         let inner: Cache<CacheKey, CachedDecision> = Cache::builder()
             .max_capacity(max_entries)
             .expire_after(ExpireByInstant)
@@ -90,7 +87,6 @@ impl QuotaCache {
             return (gate_from_decision(cached.decision), CacheOutcome::Hit);
         }
 
-        // Cache miss: fetch from CDot with moka coalescing for concurrent callers.
         let client = self.client.clone();
         let entry = self
             .inner
@@ -276,15 +272,13 @@ mod tests {
             );
         }
 
-        // First call hits the server; the next two are cache hits.
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn caches_deny_decisions() {
         // A Deny outcome carries a TTL just like Allow and must be cached so
-        // we don't re-hit CDot for every denied request. Three sequential
-        // denies for the same key must produce exactly one upstream call.
+        // we don't re-hit CDot for every denied request.
         let (url, counter) = counting_status_server(AxumStatus::PAYMENT_REQUIRED).await;
         let client = Arc::new(
             QuotaClient::new(
@@ -334,7 +328,7 @@ mod tests {
             assert_eq!(h.await.unwrap().0, QuotaGateDecision::Allow);
         }
 
-        // 20 concurrent callers, single upstream request due to get_with coalescing.
+        // Single upstream request despite 20 concurrent callers, due to get_with coalescing.
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

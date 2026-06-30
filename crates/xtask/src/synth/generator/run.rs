@@ -1,9 +1,3 @@
-//! Synthetic SDLC data generator.
-//!
-//! Generates entities in topological order based on relationship definitions,
-//! creating edges inline during generation. This ensures referential integrity
-//! and proper traversal ID inheritance.
-
 use super::batch::BatchBuilder;
 use super::dependency::{DependencyGraph, ParentEdge};
 use super::fake_data::FakeDataPools;
@@ -21,10 +15,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
-/// Pick the more specific traversal_path between source and target.
-///
 /// In production, edges are scoped to the namespace where the resource lives.
 /// For association edges between a global entity (e.g. User at `1/`) and a
 /// scoped entity (e.g. MergeRequest at `1/7/30/81/`), the scoped entity's
@@ -40,12 +30,9 @@ fn most_specific_path(registry: &EntityRegistry, source_id: i64, target_id: i64)
     if tgt.len() >= src.len() { tgt } else { src }.to_string()
 }
 
-// ── Public types ──────────────────────────────────────────────────────
-
 /// Interned string type for edge records to avoid millions of small allocations.
 pub type IStr = Arc<str>;
 
-/// Edge record for storage.
 #[derive(Debug, Clone)]
 pub struct EdgeRecord {
     pub traversal_path: IStr,
@@ -56,23 +43,16 @@ pub struct EdgeRecord {
     pub target_kind: IStr,
 }
 
-/// Generated data for an organization.
 #[derive(Debug, Default)]
 pub struct OrganizationData {
-    /// Node batches by node type name.
     pub nodes: HashMap<String, Vec<RecordBatch>>,
-    /// Edge records.
     pub edges: Vec<EdgeRecord>,
 }
 
-/// Generated node data only (edges streamed separately).
 #[derive(Debug, Default)]
 pub struct OrganizationNodes {
-    /// Node batches by node type name.
     pub nodes: HashMap<String, Vec<RecordBatch>>,
 }
-
-// ── Internals ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
 struct StringInterner {
@@ -89,8 +69,6 @@ impl StringInterner {
         interned
     }
 }
-
-// ── Generator ─────────────────────────────────────────────────────────
 
 pub struct Generator {
     ontology: Ontology,
@@ -662,8 +640,6 @@ impl Generator {
         edges
     }
 
-    // ── Streaming variants ────────────────────────────────────────────
-
     fn generate_root_entities_streaming(
         &self,
         node: &NodeEntity,
@@ -938,8 +914,6 @@ impl Generator {
     }
 }
 
-// ── CLI entry point ───────────────────────────────────────────────────
-
 pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
     println!("GitLab Knowledge Graph Generator");
     println!("=================================\n");
@@ -1032,8 +1006,6 @@ pub fn run(config_path: &Path, dry_run: bool, force: bool) -> Result<()> {
 
     Ok(())
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1294,8 +1266,6 @@ mod tests {
             overlap
         );
     }
-
-    // --- Validation tests ---
 
     #[test]
     fn test_validation_rejects_unknown_root_entity() {

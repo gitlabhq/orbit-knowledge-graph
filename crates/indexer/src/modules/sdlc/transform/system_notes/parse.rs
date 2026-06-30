@@ -139,8 +139,6 @@ impl Action {
 const PATH_SEGMENT: &str = r"[A-Za-z0-9_][A-Za-z0-9_\-\.]{0,254}";
 
 fn project_path_re() -> String {
-    // Up to 20 path segments separated by `/`. The first segment doesn't
-    // require a leading `/`; subsequent segments do.
     format!(r"(?:{PATH_SEGMENT})(?:/{PATH_SEGMENT}){{0,19}}")
 }
 
@@ -359,8 +357,6 @@ mod tests {
         }
     }
 
-    // --- Action::parse / Action::as_str --------------------------------------
-
     #[test]
     fn action_parse_known_actions_roundtrip() {
         for s in [
@@ -387,7 +383,6 @@ mod tests {
 
     #[test]
     fn reopened_is_not_a_system_note_action() {
-        // Reopen is a resource_state_events row (state = 5), not a note action.
         assert!(Action::parse("reopened").is_none());
     }
 
@@ -419,8 +414,6 @@ mod tests {
         assert!(!Action::CrossReference.is_lifecycle());
         assert!(!Action::Merge.is_lifecycle());
     }
-
-    // --- cross_reference -----------------------------------------------------
 
     #[test]
     fn cross_reference_same_project_issue() {
@@ -472,8 +465,6 @@ mod tests {
         );
     }
 
-    // --- relate / unrelate ---------------------------------------------------
-
     #[test]
     fn relate_single_reference() {
         let refs = extract(Action::Relate, "marked as related to gitlab-foss#9001");
@@ -498,10 +489,8 @@ mod tests {
 
     #[test]
     fn relate_mixed_mr_and_issue_refs_are_both_collected() {
-        // `all_refs_any` runs MR_REF first then ISSUE_REF; both kinds need
-        // to land in the output for a body that mixes them. Documents the
-        // emission order (MR refs before Issue refs) which downstream
-        // edge-emission stability relies on.
+        // Emission order (MR refs before Issue refs) is relied on by downstream
+        // edge-emission stability.
         let refs = extract(Action::Relate, "marked this issue as related to !42 and #9");
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0], mr_ref(None, 42));
@@ -513,8 +502,6 @@ mod tests {
         let refs = extract(Action::Unrelate, "removed the relation with !456");
         assert_eq!(refs, vec![mr_ref(None, 456)]);
     }
-
-    // --- hierarchy (relate_to_parent / child) --------------------------------
 
     #[test]
     fn relate_to_child_same_project() {
@@ -546,8 +533,6 @@ mod tests {
         assert_eq!(refs, vec![issue_ref(Some("group/proj"), 9)]);
     }
 
-    // --- moved / cloned ------------------------------------------------------
-
     #[test]
     fn moved_to() {
         let refs = extract(Action::Moved, "moved to other_namespace/project_new#11");
@@ -572,8 +557,6 @@ mod tests {
         );
     }
 
-    // --- duplicate -----------------------------------------------------------
-
     #[test]
     fn duplicate_marked_this_as_duplicate_of() {
         let refs = extract(
@@ -592,12 +575,8 @@ mod tests {
         assert_eq!(refs, vec![issue_ref(None, 1234)]);
     }
 
-    // --- commit --------------------------------------------------------------
-
     #[test]
     fn commit_action_extracts_short_shas_from_li_list() {
-        // Rails body format: `added N commits\n\n<ul><li>SHORTSHA - title</li>...</ul>`
-        // The HTML tags are present in the stored note body.
         let body = "added 3 commits\n\n\
                     * abc1234 - Fix the bug\n\
                     * def5678 - Add a test\n\
@@ -627,8 +606,6 @@ mod tests {
         assert_eq!(shas, vec!["deadbee"]);
     }
 
-    // --- merge ---------------------------------------------------------------
-
     #[test]
     fn merge_extracts_auto_merge_sha() {
         let refs = extract(
@@ -647,20 +624,15 @@ mod tests {
         assert_eq!(refs, vec![mr_ref(None, 123)]);
     }
 
-    // --- lifecycle (no parsing) ---------------------------------------------
-
     #[test]
     fn lifecycle_actions_extract_nothing() {
         for action in [Action::Closed, Action::Merged, Action::Opened] {
             assert!(extract(action, "closed").is_empty());
             assert!(extract(action, "merged").is_empty());
-            // Even a body that happens to look like a cross-reference is
-            // ignored for lifecycle actions — the action discriminator wins.
+            // The action discriminator wins even when the body looks like a ref.
             assert!(extract(action, "mentioned in !1").is_empty());
         }
     }
-
-    // --- negative / edge cases ----------------------------------------------
 
     #[test]
     fn empty_body_returns_no_refs() {
@@ -676,14 +648,12 @@ mod tests {
 
     #[test]
     fn body_with_project_path_only_yields_nothing() {
-        // No `#`, `!`, or `@` token — purely a project path mention.
         let refs = extract(Action::CrossReference, "mentioned in gitlab-org/gitlab");
         assert!(refs.is_empty());
     }
 
     #[test]
     fn body_with_too_short_sha_is_rejected() {
-        // 6 hex chars — below the 7-char minimum for a commit SHA.
         let refs = extract(Action::CrossReference, "mentioned in abc123");
         assert!(refs.is_empty(), "got refs: {refs:?}");
     }
@@ -696,18 +666,11 @@ mod tests {
 
     #[test]
     fn iid_extracts_at_most_20_digits() {
-        // The IID regex bounds at `\d{1,20}`. A 21-digit run produces a
-        // partial match (the first or last 20 digits) — this is
-        // intentional: a real-world Rails IID never exceeds
-        // `Gitlab::Database::MAX_INT_VALUE` (~19 digits), so the cap exists
-        // purely to prevent unbounded backtracking on adversarial input.
-        // The downstream resolver will fail to find an entity with that IID
-        // and the edge will be dropped.
+        // The `\d{1,20}` cap exists to prevent unbounded backtracking on
+        // adversarial input; a real Rails IID never exceeds
+        // `Gitlab::Database::MAX_INT_VALUE` (~19 digits).
         let body = "mentioned in #123456789012345678901";
         let refs = extract(Action::CrossReference, body);
-        // Whether the engine returns one match (20-digit prefix or suffix)
-        // or none, the contract is that the parser does not panic, does not
-        // hang, and produces at most one ref.
         assert!(refs.len() <= 1, "got {refs:?}");
     }
 }

@@ -1,5 +1,3 @@
-//! ClickHouse data writer with streaming batch inserts.
-
 use super::schema::SchemaGenerator;
 use crate::synth::config::ClickHouseConfig;
 use anyhow::{Context, Result};
@@ -12,7 +10,6 @@ use std::process::Command;
 
 use crate::synth::constants::CLICKHOUSE_NATIVE_PORT;
 
-/// Writes data to ClickHouse with batched inserts.
 pub struct ClickHouseWriter {
     pub client: ArrowClickHouseClient,
     url: String,
@@ -28,7 +25,6 @@ impl ClickHouseWriter {
         }
     }
 
-    /// Check that clickhouse CLI is available in PATH.
     pub fn check_cli_available() -> Result<()> {
         let output = Command::new("clickhouse").arg("--version").output();
 
@@ -46,8 +42,7 @@ impl ClickHouseWriter {
         }
     }
 
-    /// Load a Parquet file directly into a table using clickhouse client.
-    /// Much faster and more reliable than HTTP streaming for large files.
+    /// Faster and more reliable than HTTP streaming for large files.
     pub fn load_parquet_file(&self, table_name: &str, parquet_path: &Path) -> Result<()> {
         let path_str = parquet_path.to_str().context("Invalid path encoding")?;
 
@@ -78,7 +73,6 @@ impl ClickHouseWriter {
     }
 
     fn parse_host(&self) -> String {
-        // Extract host from URL like "http://localhost:8123"
         self.url
             .trim_start_matches("http://")
             .trim_start_matches("https://")

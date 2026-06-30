@@ -1,11 +1,8 @@
-//! Mock implementations for testing.
-
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::Utc;
@@ -13,7 +10,6 @@ use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::{LockError, LockService};
 use crate::nats::{
@@ -26,11 +22,20 @@ pub struct MockNatsServices {
     published: Arc<Mutex<Vec<(Subscription, Envelope)>>>,
     pending_messages: Arc<Mutex<Vec<Envelope>>>,
     kv: MockKvServices,
+    fail_publish: Arc<AtomicBool>,
 }
 
 impl MockNatsServices {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A mock whose `publish` always returns `NatsError::Publish`, for testing
+    /// callers' error handling.
+    pub fn failing() -> Self {
+        let mock = Self::default();
+        mock.fail_publish.store(true, Ordering::Relaxed);
+        mock
     }
 
     pub fn get_published(&self) -> Vec<(Subscription, Envelope)> {
@@ -57,6 +62,9 @@ impl NatsServices for MockNatsServices {
         subscription: &Subscription,
         envelope: &Envelope,
     ) -> Result<(), NatsError> {
+        if self.fail_publish.load(Ordering::Relaxed) {
+            return Err(NatsError::Publish("mock publish failure".to_string()));
+        }
         self.published
             .lock()
             .push((subscription.clone(), envelope.clone()));
@@ -124,51 +132,10 @@ impl nats_client::KvServices for MockNatsServices {
     }
 }
 
-/// Mock destination for testing.
-pub struct MockDestination {
-    batch_writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
+pub fn test_writer() -> Arc<crate::clickhouse::ClickHouseWriter> {
+    Arc::new(crate::clickhouse::ClickHouseWriter::noop())
 }
 
-impl MockDestination {
-    pub fn new() -> Self {
-        Self {
-            batch_writes: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-}
-
-impl Default for MockDestination {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl Destination for MockDestination {
-    async fn new_batch_writer(
-        &self,
-        _table: &str,
-        _options: crate::destination::BatchWriterOptions,
-    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        Ok(Box::new(MockBatchWriter {
-            writes: self.batch_writes.clone(),
-        }))
-    }
-}
-
-pub struct MockBatchWriter {
-    writes: Arc<Mutex<Vec<Vec<RecordBatch>>>>,
-}
-
-#[async_trait]
-impl BatchWriter for MockBatchWriter {
-    async fn write_batch(&self, batch: &[RecordBatch]) -> Result<(), DestinationError> {
-        self.writes.lock().push(batch.to_vec());
-        Ok(())
-    }
-}
-
-/// Mock handler for testing.
 pub struct MockHandler {
     name: String,
     subscription: Subscription,

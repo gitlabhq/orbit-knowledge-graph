@@ -776,7 +776,10 @@ impl JsAnalyzer {
         }
 
         let semantic_ret = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
+            // oxc 0.137 flipped the default to off; the analyzer relies on
+            // random access to `semantic.nodes()` (e.g. nodes.kind(decl_node_id)).
             SemanticBuilder::new()
+                .with_build_nodes(true)
                 .with_check_syntax_error(true)
                 .build(&parsed.program)
         });
@@ -784,10 +787,13 @@ impl JsAnalyzer {
         // scoping/symbols view; downstream SSA and class extraction
         // assume the view is valid. Skip these files rather than
         // emitting misleading definitions based on partial state.
-        if !semantic_ret.errors.is_empty() {
+        if !semantic_ret.diagnostics.is_empty() {
             return Err(AnalyzerError::fault(
                 FileFault::OxcSemantic,
-                format!("{file_path}: {} diagnostics", semantic_ret.errors.len()),
+                format!(
+                    "{file_path}: {} diagnostics",
+                    semantic_ret.diagnostics.len()
+                ),
             ));
         }
         let semantic = semantic_ret.semantic;
@@ -844,7 +850,6 @@ impl JsAnalyzer {
         );
         module_info.cjs_exports = cjs_exports;
 
-        // Ensure Vue SFC default export binding exists and points to the virtual class.
         // OXC's module_record may not include `export default { ... }` for anonymous
         // object expressions, so we synthesize the binding if a Vue virtual class exists.
         if is_vue_like_path(relative_path)
@@ -859,7 +864,6 @@ impl JsAnalyzer {
                         .with_definition_range(Some(vc.range))
                         .with_invocation_support(Some(JsInvocationSupport::class()))
                 });
-            // Also patch existing default binding if it has stale "default" fqn
             if let Some(binding) = module_info.exports.get_mut("default")
                 && binding.local_fqn == "default"
             {

@@ -49,101 +49,24 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 ## Where to find things
 
-| What | Where |
-|---|---|
-| **Domain glossary** | **`CONTEXT.md`** |
-| Indexer crate guide (handlers, reuse-infra checklist) | **`crates/indexer/AGENTS.md`** |
-| Architecture and data model | `docs/design-documents/data_model.md` |
-| Security / AuthZ design | `docs/design-documents/security.md` |
-| Query DSL spec | `docs/design-documents/querying/` |
-| SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
-| Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
-| Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
-| Schema migration strategy | `docs/design-documents/schema_management.md` |
-| Observability / SLOs | `docs/design-documents/observability.md` |
-| Duo / Orbit prompt routing (Rails-side) | `docs/design-documents/duo_orbit_prompt_routing.md` |
-| Ontology node definitions | `config/ontology/nodes/` |
-| Ontology edge definitions | `config/ontology/edges/` |
-| Ontology JSON schema | `config/schemas/ontology.schema.json` |
-| Graph query JSON schema | `config/schemas/graph_query.schema.json` |
-| Query DSL version | `config/QUERY_DSL_VERSION` |
-| Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
-| Query response JSON schema | `config/schemas/query_response.json` |
-| Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
-| Query test fixtures | `fixtures/queries/` |
-| Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
-| Graph DDL (ClickHouse) | `config/graph.sql` |
-| Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
-| RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |
-| Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
-| Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
-| gRPC service definition | `crates/gkg-server/proto/gkg.proto` |
-| Server config structure | `crates/gkg-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` |
-| Query settings (timeouts, cache) | `config/default.yaml` (`query:` section), `crates/gkg-server-config/src/query.rs` |
-| Configuration runbook | `docs/dev/runbooks/server_configuration.md` |
-| Local development guide | `docs/dev/local-development.md` |
-| Local development (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` |
-| Operational runbooks | `docs/dev/runbooks/` |
-| Architecture Decision Records | `docs/design-documents/decisions/` |
-| **All project links** (repos, epics, infra, people, Helm charts) | `README.md` (single source of truth) |
-| Code history / dead code investigation | `/code-history` skill |
-| AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
-| Related repos and local paths | `/related-repositories` skill |
-| Iglu schemas (committed; codegen'd at build) | `config/schemas/iglu/<name>/<version>.json` (update via `mise iglu:bump -- <name> <version>`) |
-| Iglu version pins | `config/schemas/iglu/*.version` (bump via `mise iglu:bump -- <name> <version>`, check via `mise iglu:check`) |
-| Analytics event definition | `config/events/gkg_query_executed.yml` |
-| Analytics contexts (Snowplow) | `crates/gkg-analytics/src/context.rs` (types), `crates/gkg-server/src/analytics/` (builders + observer) |
-| Billing config + observer | `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs` |
-| SOX billing authoring rules | `docs/dev/sox-billing-boundary.md` |
-| Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
+Full reference index: [`docs/dev/agents-reference-index.md`](docs/dev/agents-reference-index.md).
+Key locations: domain glossary in `CONTEXT.md`, indexer guide in `crates/indexer/AGENTS.md`, architecture in `docs/design-documents/`.
 
 ## Crate map
 
-Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, HealthCheck via `--mode`).
-
-| Crate | Role |
-|---|---|
-| `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`schema_watcher.rs`), MCP tool registry, and Orbit agent command registry (`CommandRegistry`) |
-| `gkg-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
-| `gkg-analytics` | Consumer-owned Snowplow context types (`OrbitCommonContext`, `OrbitQueryContext`) and tracker infrastructure (`AnalyticsTracker` trait, `SnowplowAnalyticsTracker`, `InMemoryAnalyticsTracker`). Context wrappers implement `labkit_events::SnowplowContext` over typify-codegen'd data types. `build.rs` runs `typify::TypeSpace` over `config/schemas/iglu/<name>/<version>.json` at build time and emits a module per schema (struct + `SCHEMA_URI` + `SCHEMA_JSON` consts) into `OUT_DIR/iglu_schemas.rs`; runtime never reads schema files. `load_schema_json()` returns the embedded JSON for test-time validator compilation. |
-| `gkg-billing` | Snowplow billing-event emission (`BillingObserver`, `BillingTracker`, `BillingInputs`) and CDot quota enforcement (`QuotaService`). Licensed as `LicenseRef-EE`. The billing adapter in `gkg-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point (SOX auditable surface). Billing event metrics: `gkg.billing.events.{emitted,dropped,rejected,delivered,delivery_failed}`. |
-| `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
-| `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
-| `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
-| `query-engine/types` | Type-safe result schema for redaction processing |
-| `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
-| `query-engine/shared` | Shared pipeline stages (compilation, extraction, output), virtual column resolution (`ColumnResolver` trait, `ColumnResolverRegistry`, `resolve_virtual_columns`) |
-| `query-engine/formatters` | Result formatters (graph, raw row, goon) |
-| `gkg-observability` | Central metric catalog: `MetricSpec` consts + typed `build_*` instrument factories, shared bucket sets, per-domain modules (indexer, query, server). `catalog()` feeds the xtask catalog generator; consumers call `meter()` and the typed builders instead of constructing instruments inline |
-| `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema_version.rs`), migration orchestrator (`schema_migration.rs`), migration completion detection and dead-version GC (`migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
-| `ontology` | Loads/validates YAML ontology, query validation helpers |
-| `code-graph` | Single crate split into `src/v2/` (current pipeline: `pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`) and `src/legacy/` (old `parser` + `linker` paths kept for the existing indexer path). Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
-| `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |
-| `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`), Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait |
-| `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
-| `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
-| `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
-| `health-check` | K8s readiness/liveness probes, plus a NATS code work queue depth endpoint for autoscaling code indexer pods |
-| `orbit-local` | Local `orbit index`, `orbit sql`, `orbit schema`, and `orbit mcp serve` (stateless stdio MCP server: `run_sql`, `get_graph_schema`, `index`; descriptions shared with the CLI via `descriptions.rs`) commands; writes the property graph to DuckDB and exposes it as raw SQL (no DSL); workspace management (`Workspace`, `GitInfo`, manifest in DuckDB). Release artifacts include glibc Linux builds plus fully static musl Linux builds for older enterprise, Alpine, scratch, and distroless environments. |
-| `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter |
-| `gitlab-client` | GitLab REST/JWT client for Rails API calls |
-| `integration-testkit` | Shared ClickHouse testcontainer helpers, `MockRedactionService`, `ResponseView` assertion framework, CLI test harness (`cli` module) for CLI integration tests |
-| `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting) + cli (concurrency, worktrees); depends on gkg-server, compiler, integration-testkit |
-| `integration-tests-codegraph` | Code-graph-specific integration tests (linker, lance-graph) |
-| `fuzz` | Fuzz testing harness (bolero) for the query compiler, code parsers, and indexer message handling |
-| `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |
+Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, HealthCheck via `--mode`). Full crate descriptions: [`docs/dev/agents-crate-map.md`](docs/dev/agents-crate-map.md).
 
 ## Code quality
 
-- **Do not write narration comments — including in tests.** A comment must explain *why* (a non-obvious constraint, a gotcha, an ADR/issue link), never restate *what* the next line does. The most common leak is a label on each test or setup block; those are narration, delete them. The test name and the `assert_eq!` already say what is being checked. Apply this while writing, not as a cleanup pass. Discriminator:
+- **Do not write narration comments — including in tests.** A comment must explain *why* (a non-obvious constraint, a gotcha, an ADR/issue link), never restate *what* the next line does. The most common leak is a label on each test or setup block; those are narration, delete them. The test name and the `assert_eq!` already say what is being checked. Write clean as you go. Clean-as-you-go alone has proven insufficient, so a final narration-comment pass over the comments your change added or modified is required before merge — run it before pushing or opening an MR. Discriminator:
   - ❌ `// Test cross_reference with WorkItem` above `assert_eq!(route("cross_reference", "WorkItem"), Some("MENTIONS"));` — restates the call.
   - ❌ `// merged with WorkItem should return None` above `assert_eq!(route("merged", "WorkItem"), None);` — restates the assertion.
   - ❌ `// Clear env vars` / `// Cleanup` / `// Setup` — block labels for self-evident code.
   - ✅ `// merged.yaml only declares User → MergeRequest, so a WorkItem noteable must drop.` — explains an invariant the code does not.
   - ✅ `// Insert the stale row second so argMax (not row order) must resolve it.` — explains intent a reader can't infer.
-  - If a comment would survive deleting it without losing *why* information, delete it. `/remove-llm-comments` is a fallback, not a license to narrate first.
+  - If a comment would survive deleting it without losing *why* information, delete it. The `/remove-llm-comments` skill drives that final pass; it is a backstop for what slipped through, not a license to narrate first.
 - **Reuse existing infrastructure before writing new code.** Before scaffolding a new handler, pipeline, or module, do an explicit "what does the codebase already give me?" pass (cursor/checkpoint, Arrow helpers, ontology-derived specs, SQL filtering, concurrency). Reinventing infra the codebase already provides is the most common class of preventable review feedback. For the indexer, see the checklist in **`crates/indexer/AGENTS.md`**. For code-graph, prefer reusing existing types and constructors in the language module (e.g. `CanonicalDefinition` in `src/v2/types/`, the DSL engine helpers in `src/v2/dsl/`) rather than duplicating construction logic per language.
-- **No `#[allow(dead_code)]` in shipped code.** Production (non-test) modules must not ship dead-code allows to silence scaffold warnings. If a symbol is test-only, gate it with `#[cfg(test)]`; if it is genuinely unused, delete it. Reserve exceptions for an explicit, justified case: use `#[allow(dead_code, reason = "…")]` (ideally linking an issue) or, preferably, `#[expect(dead_code, reason = "…")]`, which fails once the code is used and self-cleans. The `indexer` crate enforces this mechanically via `clippy::allow_attributes_without_reason = "deny"`.
+- **No `#[allow(dead_code)]` in shipped code.** Production (non-test) modules must not ship dead-code allows to silence scaffold warnings. If a symbol is test-only, gate it with `#[cfg(test)]`; if it is genuinely unused, delete it. Reserve exceptions for an explicit, justified case: use `#[allow(dead_code, reason = "…")]` (ideally linking an issue) or, preferably, `#[expect(dead_code, reason = "…")]`, which fails once the code is used and self-cleans. The `indexer` and `code-graph` crates enforce this mechanically via `clippy::allow_attributes_without_reason = "deny"`.
 - **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/gkg-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (asserts each schema's `self` block matches its path/version and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/iglu/check.sh`'s upstream-CDN half) stay in CI.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
 - Fence executable Orbit query JSON in docs and skills as `json orbit-query`; keep shell commands in separate shell fences so docs smoke tests run the query.
@@ -152,11 +75,13 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
 - Before touching billing-emission code, anything in `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs`, or wiring billing-relevant data (any field that populates `BillingInputs` in `crates/gkg-billing/src/inputs.rs`), read `docs/dev/sox-billing-boundary.md`. If a task you are given would require breaking any of those rules, stop and surface the conflict rather than working around it.
 - **Do not hardcode magic numbers or string literals that are environment-dependent or derivable.** Prefer deriving values from the ontology, a typed config field (`HandlersConfiguration`, `QuerySettings`), or a named constant. If a reviewer has to ask "what is this number?" or "should this be configurable?", the value needed a name or a config path. This applies across all crates, not just the indexer.
+- **A graph-shape fact belongs in the ontology, declared once — not mirrored in Rust.** Before adding a Rust flag, config field, ETL tag, or constant that encodes a node/edge property (global-ness, scope, table routing), check whether the ontology YAML already declares it or should. The ontology is the single source of truth; ETL, query validation, and redaction all read from it. If the same fact lands in two places, delete one.
+- **Keep introspected ontology descriptions short.** Node, edge, property, and domain descriptions can be surfaced through schema/introspection paths, so they must be scannable and token-efficient. State what the ontology item represents in one sentence; move rationale, caveats, and examples to YAML comments or design docs. CI enforces a 200-character cap for ontology descriptions below the top-level main schema (domains, nodes, edges, variants, derived entities, properties). The top-level `schema.yaml` `description` is human-facing and not capped because `get_graph_schema` does not introspect it.
 - **Keep MRs focused.** Each MR should address one concern. If you discover a second issue while working, open a follow-up issue or MR instead of bundling unrelated changes. Bundled MRs slow review and risk merging untested side-effects.
 
 ## Code-graph contributions
 
-Language-specific code belongs in `crates/code-graph/src/v2/langs/{generic,custom}/`, not in the shared linker, pipeline, or analyzer. The linker is performance-sensitive production code — introducing per-language branches there increases complexity for all languages. When adding a new language, include a `code-indexing-benchmark.yaml` entry and test fixture repos under `fixtures/code/` so the team can evaluate coverage.
+See [`crates/code-graph/AGENTS.md`](crates/code-graph/AGENTS.md).
 
 ## MR and issue descriptions and comments
 
@@ -181,6 +106,8 @@ Design docs live in `docs/design-documents/` and must describe the current repos
   - `docs/design-documents/indexing/` for indexing flow and runtime modes
   - `docs/design-documents/querying/` for query surface, DSL, and response shape
   - `AGENTS.md` / `CLAUDE.md` for agent-facing architecture summaries and doc-sync rules
+  - `docs/dev/agents-crate-map.md` for the crate inventory
+  - `docs/dev/agents-reference-index.md` for the file/schema/config reference index
 - **If your MR changes the architecture but no design doc changed, assume the documentation is incomplete and fix it before merging.**
 - **When you introduce a new domain concept** (new node type, relationship type, query feature, pipeline concept), check `CONTEXT.md` and add or update the term if it's missing. Only add terms that are domain-specific and would confuse a new team member — not implementation details.
 - **Before writing documentation, design docs, or MR descriptions, consult `CONTEXT.md` for canonical terminology.** Use the canonical terms, not the aliases listed under _Avoid_.

@@ -25,6 +25,6 @@ expect:
     - kind: MENTIONS
       count: 1
       rows:
-        - { target_id: 10 }
+        - { source_id: 10, target_id: 1000 }
   totals:
     gl_edge: 1

@@ -1,9 +1,6 @@
-//! Test builders for constructing test scenarios.
-
 use std::sync::Arc;
 
 use crate::IndexerConfig;
-use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
 use crate::handler::{Handler, HandlerRegistry};
 use crate::indexing_status::IndexingStatusStore;
@@ -12,9 +9,6 @@ use gkg_server_config::{
     ClickHouseConfiguration, EngineConfiguration, EntityHandlerConfig, HandlersConfiguration,
 };
 
-use super::mocks::MockDestination;
-
-/// Sets `datalake_batch_size` to 1 so tests process one row at a time.
 pub fn create_test_indexer_config(clickhouse_config: &ClickHouseConfiguration) -> IndexerConfig {
     IndexerConfig {
         graph: clickhouse_config.clone(),
@@ -33,13 +27,8 @@ pub fn create_test_indexer_config(clickhouse_config: &ClickHouseConfiguration) -
     }
 }
 
-/// Fluent builder for test engine setup.
-///
-/// The engine requires a real NATS broker. For integration tests,
-/// use testcontainers to start a NATS container.
 pub struct TestEngineBuilder {
     broker: Arc<NatsBroker>,
-    destination: Option<Arc<dyn Destination>>,
     nats_services: Option<Arc<dyn NatsServices>>,
     registry: Arc<HandlerRegistry>,
     configuration: EngineConfiguration,
@@ -49,7 +38,6 @@ impl TestEngineBuilder {
     pub fn new(broker: Arc<NatsBroker>) -> Self {
         Self {
             broker,
-            destination: None,
             nats_services: None,
             registry: Arc::new(HandlerRegistry::default()),
             configuration: EngineConfiguration::default(),
@@ -58,11 +46,6 @@ impl TestEngineBuilder {
 
     pub fn with_handler(self, handler: Box<dyn Handler>) -> Self {
         self.registry.register_handler(handler);
-        self
-    }
-
-    pub fn with_destination(mut self, destination: Arc<dyn Destination>) -> Self {
-        self.destination = Some(destination);
         self
     }
 
@@ -84,10 +67,6 @@ impl TestEngineBuilder {
     }
 
     pub fn build(self) -> (Arc<Engine>, EngineConfiguration) {
-        let destination = self
-            .destination
-            .unwrap_or_else(|| Arc::new(MockDestination::new()));
-
         let nats_services: Arc<dyn NatsServices> = self
             .nats_services
             .unwrap_or_else(|| Arc::new(NatsServicesImpl::new(self.broker.clone())));
@@ -96,11 +75,11 @@ impl TestEngineBuilder {
             nats_client::KvServicesImpl::new(self.broker.client().clone()),
         )));
 
-        let engine_builder =
-            EngineBuilder::new(self.broker, self.registry, destination, indexing_status)
-                .nats_services(nats_services);
-
-        let engine = Arc::new(engine_builder.build());
+        let engine = Arc::new(
+            EngineBuilder::new(self.broker, self.registry, indexing_status)
+                .nats_services(nats_services)
+                .build(),
+        );
         (engine, self.configuration)
     }
 }

@@ -1,14 +1,8 @@
-//! Declarative per-language resolution and walking rules.
-//!
-//! A single [`ResolutionRules`] struct carries both:
-//! - AST walking config: which tree-sitter node kinds create scopes,
-//!   branches, loops, bindings, and references
-//! - Resolution config: import strategy ordering, chain mode, receiver handling
-//!
-//! The `FileWalker` uses the walking rules to drive the SSA engine.
-//! The `RulesResolver` uses the resolution rules to chase imports.
-//!
-//!
+//! A single [`ResolutionRules`] struct carries both AST walking config (which
+//! node kinds create scopes/bindings/references) and resolution config (import
+//! strategy ordering, chain mode, receiver handling). The `FileWalker` uses the
+//! walking half to drive the SSA engine; the `RulesResolver` uses the resolution
+//! half to chase imports.
 use petgraph::graph::NodeIndex;
 
 use super::graph::CodeGraph;
@@ -45,8 +39,6 @@ impl<D: crate::v2::dsl::types::DslLanguage> HasRules for NoRules<D> {
     }
 }
 
-// ── Scope rules ─────────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct IsolatedScopeRule {
     pub node_kind: &'static str,
@@ -55,8 +47,6 @@ pub struct IsolatedScopeRule {
     pub is_type_scope: bool,
     pub name_field: &'static str,
 }
-
-// ── Import resolution ───────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportStrategy {
@@ -75,8 +65,6 @@ pub enum ImportStrategy {
     /// chain (direct + transitive). For C, C++, Objective-C.
     IncludeGraph,
 }
-
-// ── Chain / receiver ────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReceiverMode {
@@ -100,8 +88,6 @@ pub enum ResolveStage {
     /// Look up the name as a member of the enclosing type (implicit `this`/`self`).
     ImplicitMember,
 }
-
-// ── Resolver hooks ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AmbientImportFallback {
@@ -148,6 +134,9 @@ pub struct ImportedSymbolFallbackContext<'a> {
 pub type ImportedSymbolFallbackCandidatesHook =
     fn(&CodeGraph, &[NodeIndex], ImportedSymbolFallbackContext<'_>) -> Vec<NodeIndex>;
 
+/// Build the language's symbol re-export index from the linked graph.
+pub type ReexportIndexBuilder = fn(&CodeGraph, &str) -> super::graph::ReexportIndex;
+
 /// Language-specific resolver behavior. All fields default to `None`.
 #[derive(Default)]
 pub struct ResolverHooks {
@@ -175,9 +164,10 @@ pub struct ResolverHooks {
     /// `Model` is a constant with no SSA write. Ruby uses this to
     /// look up constants as class names in the graph.
     pub resolve_ident_type: Option<fn(&super::CodeGraph, &str) -> Option<String>>,
+    /// Build the language's re-export index; when set, callers bind through
+    /// re-exports to the concrete definition instead of an `ImportedSymbol`.
+    pub reexport_index_builder: Option<ReexportIndexBuilder>,
 }
-
-// ── Top-level config ────────────────────────────────────────────
 
 pub struct ResolutionRules {
     pub name: &'static str,
@@ -185,7 +175,6 @@ pub struct ResolutionRules {
     // AST walking (derived from language_spec for DSL languages)
     scopes: Vec<IsolatedScopeRule>,
 
-    // Resolution
     pub bare_stages: Vec<ResolveStage>,
     pub import_strategies: Vec<ImportStrategy>,
     pub receiver: ReceiverMode,
@@ -210,15 +199,16 @@ pub struct ResolutionRules {
     /// `Foo.Companion.bar()`.
     pub implicit_sub_scopes: &'static [&'static str],
 
-    /// Resolver hooks for language-specific resolution behavior.
     pub hooks: ResolverHooks,
 
-    /// Operational tuning: timeouts, thresholds, limits.
     pub settings: super::ResolveSettings,
 }
 
 impl ResolutionRules {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "builder-style constructor fully initialising a complex config struct; a params struct would add indirection without reducing call-site complexity"
+    )]
     pub fn new(
         name: &'static str,
         scopes: Vec<IsolatedScopeRule>,
@@ -259,7 +249,6 @@ impl ResolutionRules {
     /// Build a `ResolutionRules` without a DSL language spec, used by
     /// pipelines (e.g. the JS custom pipeline) that drive resolution
     /// entirely through hooks instead of scope/reference rules.
-    #[allow(clippy::too_many_arguments)]
     pub fn custom(
         name: &'static str,
         bare_stages: Vec<ResolveStage>,
@@ -285,13 +274,11 @@ impl ResolutionRules {
         }
     }
 
-    /// Override the default resolve settings.
     pub fn with_settings(mut self, settings: super::ResolveSettings) -> Self {
         self.settings = settings;
         self
     }
 
-    /// Access the scope rules.
     pub fn scopes(&self) -> &[IsolatedScopeRule] {
         &self.scopes
     }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,14 @@ impl SubscriptionConfig {
 
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Truncate sub-second precision from a [`DateTime`], snapping to the current
+/// whole second. Works around croner 3.0.1 preserving sub-second fractions in
+/// `find_next_occurrence`; becomes a harmless no-op if a future croner version
+/// fixes the upstream fraction handling. See #905.
+fn truncate_subsecond(dt: DateTime<Utc>) -> DateTime<Utc> {
+    dt.with_nanosecond(0).unwrap_or(dt)
+}
+
 /// Per-task schedule configuration.
 ///
 /// Each scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.
@@ -82,7 +90,13 @@ impl ScheduleConfiguration {
         let Ok(cron) = Cron::from_str(expr) else {
             return DEFAULT_INTERVAL;
         };
-        cron.find_next_occurrence(&now, false)
+        // croner 3.0.1 preserves the sub-second fraction of `now` in the
+        // returned occurrence, causing drift and periodic double-fires.
+        // Truncating to whole seconds for the lookup pins every fire to
+        // :00.000; the delta is still measured from the real `now` so the
+        // caller sleeps exactly until that clean boundary.
+        let truncated = truncate_subsecond(now);
+        cron.find_next_occurrence(&truncated, false)
             .ok()
             .map(|next| {
                 let delta = next - now;
@@ -100,7 +114,7 @@ impl ScheduleConfiguration {
         let Ok(cron) = Cron::from_str(expr) else {
             return DEFAULT_INTERVAL;
         };
-        let now = Utc::now();
+        let now = truncate_subsecond(Utc::now());
         let first = cron.find_next_occurrence(&now, false).ok();
         let second = first.and_then(|t| cron.find_next_occurrence(&t, false).ok());
         match (first, second) {
@@ -206,7 +220,7 @@ impl Default for EntityHandlerConfig {
 }
 
 fn default_fetch_concurrency() -> usize {
-    6
+    10
 }
 
 fn default_partition_min_rows() -> u64 {
@@ -222,7 +236,7 @@ fn default_code_indexing_max_files() -> usize {
 }
 
 fn default_code_indexing_max_total_bytes() -> u64 {
-    10_000_000_000
+    2_000_000_000
 }
 
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
@@ -249,6 +263,34 @@ fn default_code_indexing_job_timeout_secs() -> u64 {
     250
 }
 
+fn default_code_indexing_write_channel_capacity() -> usize {
+    8
+}
+
+fn default_code_indexing_write_slice_rows() -> usize {
+    500_000
+}
+
+fn default_code_indexing_write_buffer_age_secs() -> u64 {
+    60
+}
+
+fn default_code_indexing_write_max_concurrent() -> usize {
+    4
+}
+
+fn default_code_indexing_small_repo_max_files() -> usize {
+    650
+}
+
+fn default_code_indexing_small_indexing_slots() -> usize {
+    6
+}
+
+fn default_code_indexing_big_indexing_slots() -> usize {
+    2
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -256,9 +298,10 @@ pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     #[serde(default = "default_code_indexing_max_files")]
     pub max_files: usize,
-    /// Total discovered bytes above which a repository is skipped entirely
-    /// (indexed empty, then checkpointed). Bounds pathologically large repos.
-    /// 0 = no limit. Defaults to 10 GB.
+    /// Post-filter retained bytes above which a repository is skipped entirely
+    /// (indexed empty, then checkpointed). Bounds per-repo disk so fetch/index
+    /// concurrency can rise without exhausting the pod volume. 0 = no limit.
+    /// Defaults to 2 GB.
     #[serde(default = "default_code_indexing_max_total_bytes")]
     pub max_total_bytes: u64,
     #[serde(default)]
@@ -285,9 +328,30 @@ pub struct CodeIndexingPipelineConfig {
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
     /// many repositories can be downloaded simultaneously in the pipelined
-    /// code indexer. 0 = no limit. Defaults to 6.
+    /// code indexer. 0 = no limit. Defaults to 10.
     #[serde(default = "default_fetch_concurrency")]
     pub fetch_concurrency: usize,
+    /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.
+    #[serde(default = "default_code_indexing_write_channel_capacity")]
+    pub write_channel_capacity: usize,
+    /// Maximum rows per ClickHouse insert; larger batches are sliced before sending. Defaults to 500000.
+    #[serde(default = "default_code_indexing_write_slice_rows")]
+    pub write_slice_rows: usize,
+    /// Flush the write coalescer after this many seconds even below `write_slice_rows`, bounding latency. Keep below `nats.ack_wait_secs`. Defaults to 60.
+    #[serde(default = "default_code_indexing_write_buffer_age_secs")]
+    pub write_buffer_age_secs: u64,
+    /// Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput. Defaults to 4.
+    #[serde(default = "default_code_indexing_write_max_concurrent")]
+    pub write_max_concurrent: usize,
+    /// Post-filter file count at or below which a repository runs on the small lane. Defaults to 650.
+    #[serde(default = "default_code_indexing_small_repo_max_files")]
+    pub small_repo_max_files: usize,
+    /// Concurrent indexing slots for small repositories. Defaults to 6.
+    #[serde(default = "default_code_indexing_small_indexing_slots")]
+    pub small_indexing_slots: usize,
+    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.
+    #[serde(default = "default_code_indexing_big_indexing_slots")]
+    pub big_indexing_slots: usize,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -305,6 +369,13 @@ impl Default for CodeIndexingPipelineConfig {
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
             job_timeout_secs: default_code_indexing_job_timeout_secs(),
             fetch_concurrency: default_fetch_concurrency(),
+            write_channel_capacity: default_code_indexing_write_channel_capacity(),
+            write_slice_rows: default_code_indexing_write_slice_rows(),
+            write_buffer_age_secs: default_code_indexing_write_buffer_age_secs(),
+            write_max_concurrent: default_code_indexing_write_max_concurrent(),
+            small_repo_max_files: default_code_indexing_small_repo_max_files(),
+            small_indexing_slots: default_code_indexing_small_indexing_slots(),
+            big_indexing_slots: default_code_indexing_big_indexing_slots(),
         }
     }
 }
@@ -313,6 +384,10 @@ impl CodeIndexingPipelineConfig {
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
+    }
+
+    pub fn write_buffer_age(&self) -> Duration {
+        Duration::from_secs(self.write_buffer_age_secs.max(1))
     }
 }
 
@@ -344,10 +419,27 @@ pub struct GlobalDispatcherConfig {
     pub schedule: ScheduleConfiguration,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+    #[serde(default = "default_namespace_sweep_interval_secs")]
+    pub sweep_interval_secs: u64,
+}
+
+impl Default for NamespaceDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("*/30 * * * * *".into()),
+            },
+            sweep_interval_secs: default_namespace_sweep_interval_secs(),
+        }
+    }
+}
+
+fn default_namespace_sweep_interval_secs() -> u64 {
+    3600
 }
 
 fn default_events_stream_name() -> String {
@@ -711,5 +803,48 @@ modules: [sdlc, namespace_deletion]
             cfg.validate(),
             Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
+    }
+
+    #[test]
+    fn interval_hint_returns_exact_period() {
+        let sched = ScheduleConfiguration {
+            cron: Some("0 */1 * * * *".into()),
+        };
+
+        let hint = sched.interval_hint();
+
+        // interval_hint computes (second_occurrence - first_occurrence).
+        // Even without truncation the chained find_next_occurrence calls
+        // carry the same sub-second fraction, so the difference cancels to
+        // a clean 60s. The truncation is defensive; this test pins the
+        // contract regardless.
+        assert_eq!(hint, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn next_delay_snaps_to_whole_second_boundary() {
+        use chrono::NaiveDate;
+
+        let sched = ScheduleConfiguration {
+            cron: Some("0 */1 * * * *".into()),
+        };
+
+        // 2026-01-15 10:05:00.700 UTC — 700ms into a matching second.
+        // Without truncation croner returns :06:00.700, yielding ~60.0s delay.
+        // With truncation the next occurrence is :06:00.000, yielding exactly 59.3s.
+        let now = NaiveDate::from_ymd_opt(2026, 1, 15)
+            .unwrap()
+            .and_hms_milli_opt(10, 5, 0, 700)
+            .unwrap()
+            .and_utc();
+
+        let delay = sched.next_delay(now);
+        let secs = delay.as_secs_f64();
+
+        // Must be < 60s (snapped to :06:00.000 → 59.3s), not ~60.0s or ~60.7s.
+        assert!(
+            (59.0..60.0).contains(&secs),
+            "expected delay ~59.3s, got {secs:.3}s"
+        );
     }
 }

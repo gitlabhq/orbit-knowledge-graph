@@ -15,6 +15,7 @@ use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
+
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{
     GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest, NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
@@ -30,6 +31,7 @@ pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
@@ -100,6 +102,7 @@ pub async fn register_handlers(
             plan,
             EtlScope::Global,
             Arc::clone(&pipeline),
+            Arc::clone(&writer),
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
             metrics.clone(),
@@ -119,6 +122,7 @@ pub async fn register_handlers(
             plan,
             EtlScope::Namespaced,
             Arc::clone(&pipeline),
+            Arc::clone(&writer),
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
             metrics.clone(),
@@ -214,5 +218,27 @@ mod tests {
         );
         assert!(template.contains("ORDER BY traversal_path, id"));
         assert_eq!(system_note.watermark_column, "sn._siphon_watermark");
+    }
+
+    #[test]
+    fn every_reindex_target_maps_to_a_dispatch_plan() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+
+        let dispatch_targets: std::collections::BTreeSet<&str> =
+            plans.namespaced.iter().map(|p| p.target.as_str()).collect();
+
+        let orphans: Vec<String> = ontology
+            .reindex_sources()
+            .into_iter()
+            .map(|source| source.target)
+            .filter(|target| !dispatch_targets.contains(target.as_str()))
+            .collect();
+
+        assert!(
+            orphans.is_empty(),
+            "reindex_on targets without a namespaced dispatch plan would be silently \
+             skipped by incremental dispatch: {orphans:?}"
+        );
     }
 }

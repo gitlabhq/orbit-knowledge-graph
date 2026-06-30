@@ -1,6 +1,4 @@
-//! Integration tests for the ClickHouse destination.
-//!
-//! These tests require a Docker-compatible runtime (Docker, Colima, etc).
+//! Require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::sync::Arc;
 
@@ -9,8 +7,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use gkg_server_config::ClickHouseConfiguration;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
-use indexer::destination::{BatchWriterOptions, Destination};
+use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseWriter};
 use indexer::durability::WriteDurability;
 use indexer::metrics::EngineMetrics;
 use testcontainers::GenericImage;
@@ -29,7 +26,7 @@ const CONNECTION_RETRY_DELAY_MS: u64 = 500;
 
 struct TestContext {
     _container: testcontainers::ContainerAsync<GenericImage>,
-    destination: ClickHouseDestination,
+    writer: ClickHouseWriter,
     host: String,
     port: u16,
 }
@@ -39,12 +36,12 @@ impl TestContext {
         let (container, host, port) = start_clickhouse_container().await;
         setup_database(&host, port).await;
         let config = create_config(&host, port);
-        let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
-            .expect("failed to create destination");
+        let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
+            .expect("failed to create writer");
 
         Self {
             _container: container,
-            destination,
+            writer,
             host,
             port,
         }
@@ -180,19 +177,13 @@ async fn write_batch_to_clickhouse(context: &TestContext) {
         .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
         .await;
 
-    let writer = context
-        .destination
-        .new_batch_writer(
+    context
+        .writer
+        .write(
             TEST_TABLE,
-            BatchWriterOptions {
-                durability: Some(WriteDurability::Durable),
-            },
+            vec![create_test_batch()],
+            Some(WriteDurability::Durable),
         )
-        .await
-        .expect("failed to create batch writer");
-
-    writer
-        .write_batch(&[create_test_batch()])
         .await
         .expect("failed to write batch");
 
@@ -209,22 +200,16 @@ async fn write_multiple_batches(context: &TestContext) {
         .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
         .await;
 
-    let writer = context
-        .destination
-        .new_batch_writer(
-            TEST_TABLE,
-            BatchWriterOptions {
-                durability: Some(WriteDurability::Durable),
-            },
-        )
-        .await
-        .expect("failed to create batch writer");
-
     let batch1 = create_test_batch();
     let batch2 = create_test_batch_with_data(vec![4, 5], vec!["dave", "eve"]);
 
-    writer
-        .write_batch(&[batch1, batch2])
+    context
+        .writer
+        .write(
+            TEST_TABLE,
+            vec![batch1, batch2],
+            Some(WriteDurability::Durable),
+        )
         .await
         .expect("failed to write batches");
 
@@ -242,19 +227,9 @@ async fn write_empty_batch_succeeds(context: &TestContext) {
         .execute(&format!("TRUNCATE TABLE {TEST_TABLE}"))
         .await;
 
-    let writer = context
-        .destination
-        .new_batch_writer(
-            TEST_TABLE,
-            BatchWriterOptions {
-                durability: Some(WriteDurability::Durable),
-            },
-        )
-        .await
-        .expect("failed to create batch writer");
-
-    writer
-        .write_batch(&[])
+    context
+        .writer
+        .write(TEST_TABLE, vec![], Some(WriteDurability::Durable))
         .await
         .expect("empty write should succeed");
 }
@@ -347,20 +322,15 @@ async fn connection_failure_returns_error() {
         profiling: Default::default(),
     };
 
-    let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
-        .expect("failed to create destination");
+    let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
+        .expect("failed to create writer");
 
-    let writer = destination
-        .new_batch_writer(
+    let result = writer
+        .write(
             TEST_TABLE,
-            BatchWriterOptions {
-                durability: Some(WriteDurability::Durable),
-            },
+            vec![create_test_batch()],
+            Some(WriteDurability::Durable),
         )
-        .await
-        .expect("writer creation should succeed");
-
-    let batch = create_test_batch();
-    let result = writer.write_batch(&[batch]).await;
+        .await;
     assert!(result.is_err(), "should fail to write to invalid address");
 }

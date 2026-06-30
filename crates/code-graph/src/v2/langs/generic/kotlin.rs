@@ -18,15 +18,12 @@ use crate::v2::linker::rules::{
     ResolverHooks,
 };
 
-// ── DSL parser spec ─────────────────────────────────────────────
-
 #[derive(Default)]
 pub struct KotlinDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 fn extract_user_type(node: &N<'_>) -> Option<String> {
-    // Look for user_type in direct children first, then in constructor_invocation
     if let Some(ut) = node.children().find(|c| c.kind() == "user_type") {
         return Some(ut.text().to_string());
     }
@@ -112,8 +109,6 @@ impl DslLanguage for KotlinDsl {
             scope("object_declaration", "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
-            // Companion objects: named (companion object Foo {}) uses type_identifier,
-            // anonymous (companion object {}) defaults to "Companion".
             scope("companion_object", "Object")
                 .def_kind(DefKind::Class)
                 .name_from_or(child_of_kind("type_identifier"), "Companion"),
@@ -127,7 +122,6 @@ impl DslLanguage for KotlinDsl {
             scope("secondary_constructor", "Constructor")
                 .def_kind(DefKind::Constructor)
                 .name_from(no_extract()),
-            // Unconditional fallback first for property_declaration.
             scope("property_declaration", "Property")
                 .def_kind(DefKind::Property)
                 .no_scope(),
@@ -161,12 +155,9 @@ impl DslLanguage for KotlinDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Simple call: create() — name from direct simple_identifier child
             reference("call_expression")
                 .name_from(child_of_kind("simple_identifier"))
                 .when(!has_child(&["navigation_expression"])),
-            // Chain call: Foo.create() — name from navigation_suffix's identifier.
-            // Receiver: navigation_expression → first named child (the object).
             reference("call_expression")
                 .name_from(
                     child_of_kind("navigation_expression")
@@ -174,7 +165,6 @@ impl DslLanguage for KotlinDsl {
                 )
                 .when(has_child(&["navigation_expression"]))
                 .receiver_via(child_of_kind("navigation_expression").first_named()),
-            // Bare type references: declarations, type casts, is checks
             reference("type_identifier").name_from(text()),
             // Operator desugaring: binary operators map to named methods.
             // The left operand is the receiver, the method name is derived from the operator.
@@ -256,7 +246,6 @@ impl DslLanguage for KotlinDsl {
                     child_of_kind("variable_declaration")
                         .then(child_of_kind("user_type"))
                         .then(text()),
-                    // direct user_type child (for parameters)
                     field("user_type").inner("type_arguments", "type_identifier"),
                     field("type"),
                 ],
@@ -264,9 +253,6 @@ impl DslLanguage for KotlinDsl {
             )
         };
         vec![
-            // val/var foo = Foo()
-            // Name is in variable_declaration > simple_identifier
-            // Value is the call_expression / navigation_expression / simple_identifier child
             kotlin_type(
                 binding("property_declaration", BindingKind::Assignment)
                     .name_from_extract(
@@ -330,8 +316,6 @@ impl DslLanguage for KotlinDsl {
         }
     }
 }
-
-// ── Resolution rules ────────────────────────────────────────────
 
 pub struct KotlinRules;
 

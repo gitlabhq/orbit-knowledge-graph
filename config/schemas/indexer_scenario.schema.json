@@ -11,6 +11,8 @@
     "seed": { "$ref": "#/definitions/seed" },
     "seed_settings": { "$ref": "#/definitions/seedSettings" },
     "run": { "$ref": "#/definitions/run" },
+    "dispatch": { "$ref": "#/definitions/dispatch" },
+    "cdc": { "$ref": "#/definitions/cdc" },
     "expect": { "$ref": "#/definitions/expect" },
     "steps": {
       "type": "array",
@@ -78,6 +80,43 @@
       "type": "string",
       "enum": ["namespace", "global", "system_notes"]
     },
+    "dispatch": {
+      "description": "Dispatcher(s) to run; drains the requests they publish for expect.dispatched.",
+      "oneOf": [
+        { "$ref": "#/definitions/dispatchKind" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/dispatchKind" }
+        }
+      ]
+    },
+    "dispatchKind": {
+      "type": "string",
+      "enum": ["namespace", "global", "enabled_namespaces"]
+    },
+    "cdc": {
+      "type": "array",
+      "description": "Siphon logical-replication events fed to a CDC route at run time.",
+      "items": { "$ref": "#/definitions/cdcEvent" }
+    },
+    "cdcEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "operation", "rows"],
+      "properties": {
+        "table": { "type": "string" },
+        "operation": { "type": "string", "enum": ["insert", "update", "delete"] },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "integer"] }
+          }
+        }
+      }
+    },
     "step": {
       "type": "object",
       "additionalProperties": false,
@@ -85,6 +124,8 @@
         "seed": { "$ref": "#/definitions/seed" },
         "seed_settings": { "$ref": "#/definitions/seedSettings" },
         "run": { "$ref": "#/definitions/run" },
+        "dispatch": { "$ref": "#/definitions/dispatch" },
+        "cdc": { "$ref": "#/definitions/cdc" },
         "expect": { "$ref": "#/definitions/expect" }
       }
     },
@@ -105,6 +146,28 @@
           "type": "object",
           "description": "Exact total row count per table ('and nothing else' assertions).",
           "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "dispatched": {
+          "type": "array",
+          "description": "Assertions on the indexing requests a dispatch handler published to NATS.",
+          "items": { "$ref": "#/definitions/dispatchExpect" }
+        }
+      }
+    },
+    "dispatchExpect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Logical request type a dispatch handler tags its drained messages with, e.g. namespace."
+        },
+        "count": { "type": "integer", "minimum": 0 },
+        "rows": {
+          "type": "array",
+          "description": "Each matcher must match exactly one published request payload; 'contains' matches array membership or a string substring.",
+          "items": { "$ref": "#/definitions/rowMatcher" }
         }
       }
     },

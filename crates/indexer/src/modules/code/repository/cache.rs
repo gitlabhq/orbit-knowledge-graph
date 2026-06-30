@@ -10,6 +10,7 @@ use gkg_utils::fs_stream::StreamError;
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
+use tracing::warn;
 
 use super::service::ByteStream;
 use crate::modules::code::metrics::CodeMetrics;
@@ -143,17 +144,29 @@ impl RepositoryCache for LocalRepositoryCache {
             self.max_total_bytes,
             detect_language_from_path,
         );
-        let (file_inventory, filter) = tokio::task::spawn_blocking(move || {
+        let extracted = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
             extract_tar_gz(bridge, &repo_dir_owned, &mut filter).map(|inv| (inv, filter))
         })
         .await
-        .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
-        .map_err(|e| match e {
-            StreamError::Empty => RepositoryCacheError::EmptyArchive,
-            StreamError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
-            StreamError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
-        })?;
+        .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?;
+
+        // Extraction streams files to disk as it goes, so a mid-stream failure (cap exceeded,
+        // truncated body) leaves partial output. Remove it before returning so a too-large repo
+        // does not orphan up to max_total_bytes on disk every time it is re-attempted.
+        let (file_inventory, filter) = match extracted {
+            Ok(ok) => ok,
+            Err(e) => {
+                if let Err(cleanup) = tokio::fs::remove_dir_all(&repo_dir).await {
+                    warn!(?repo_dir, error = %cleanup, "failed to clean partial extraction after error");
+                }
+                return Err(match e {
+                    StreamError::Empty => RepositoryCacheError::EmptyArchive,
+                    StreamError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
+                    StreamError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
+                });
+            }
+        };
 
         for (reason, tally) in filter.skips() {
             self.metrics
@@ -197,6 +210,17 @@ mod tests {
             temp_dir.path().to_path_buf(),
             max_file_size,
             0,
+            CodeMetrics::default(),
+        );
+        (temp_dir, cache)
+    }
+
+    fn create_cache_with_total_cap(max_total_bytes: u64) -> (TempDir, LocalRepositoryCache) {
+        let temp_dir = TempDir::new().unwrap();
+        let cache = LocalRepositoryCache::new(
+            temp_dir.path().to_path_buf(),
+            u64::MAX,
+            max_total_bytes,
             CodeMetrics::default(),
         );
         (temp_dir, cache)
@@ -312,6 +336,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cap_exceeded_leaves_no_partial_extraction_on_disk() {
+        let (dir, cache) = create_cache_with_total_cap(8);
+        // Two 6-byte files: the first fits, the second trips the 8-byte total cap mid-stream.
+        let archive = build_tar_gz(&[
+            ("repo-abc/first.rs", b"aaaaaa"),
+            ("repo-abc/second.rs", b"bbbbbb"),
+        ]);
+
+        let result = cache
+            .extract_archive(42, "main", archive_stream(archive))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(RepositoryCacheError::RepositoryTooLarge)
+        ));
+        let repo_dir = dir
+            .path()
+            .join("42")
+            .join(hashed_branch_name("main"))
+            .join(REPOSITORY_DIR);
+        assert!(
+            !repo_dir.exists(),
+            "a too-large repo must not orphan partial files on disk"
+        );
+    }
+
+    #[tokio::test]
     async fn invalidate_removes_directory() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[("file.rs", b"content")]);
@@ -354,14 +406,12 @@ mod tests {
         assert!(!path_main.exists());
         assert!(path_dev.exists());
 
-        // Project directory still exists because "develop" branch is present
         let project_dir = dir.path().join("42");
         assert!(project_dir.exists());
 
         cache.invalidate(42, "develop").await.unwrap();
         assert!(!path_dev.exists());
 
-        // Project directory removed after all branches invalidated
         assert!(
             !project_dir.exists(),
             "project directory should be removed when all branches are invalidated"
@@ -444,9 +494,7 @@ mod tests {
     async fn extract_archive_drops_excluded_extensions_and_keeps_resolver_inputs() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[
-            // Source.
             ("project-abc/src/main.rs", b"fn main() {}"),
-            // Excluded extensions: dropped at extraction.
             ("project-abc/assets/logo.png", b"\x89PNG\r\n\x1a\nfake"),
             ("project-abc/static/banner.gif", b"GIF89a"),
             ("project-abc/fonts/Inter.woff2", b""),
@@ -484,14 +532,11 @@ mod tests {
             "retained non-parsable files should be present in archive inventory"
         );
 
-        // Source kept.
         assert!(path.join("src/main.rs").exists());
-        // Excluded extensions dropped.
         assert!(!path.join("assets/logo.png").exists());
         assert!(!path.join("static/banner.gif").exists());
         assert!(!path.join("fonts/Inter.woff2").exists());
         assert!(!path.join("dist/build.zip").exists());
-        // Resolver inputs preserved.
         assert!(path.join("Cargo.toml").exists());
         assert!(path.join("Cargo.lock").exists());
         assert!(path.join("package.json").exists());

@@ -1,15 +1,3 @@
-//! Deduplication correctness tests for `ReplacingMergeTree` node and edge tables.
-//!
-//! Validates that the query pipeline:
-//! - Returns only the latest `_version` when duplicate rows exist
-//! - Excludes soft-deleted rows (`_deleted = true`) from all query types
-//! - Evaluates mutable filters (`state`, `status`) against the latest
-//!   version, not stale ones
-//! - Applies `_deleted = false` filtering to edge table scans
-//!
-//! Each test runs in a forked database (`run_subtests!`) so INSERT
-//! operations are isolated. There are no cross-test data dependencies.
-//!
 //! Both versions are inserted in a single INSERT so they land in the same
 //! data part -- ReplacingMergeTree never deduplicates within a part, only
 //! across parts during background merges. This makes the tests deterministic.
@@ -33,7 +21,6 @@ fn dedup_svc() -> MockRedactionService {
     svc
 }
 
-/// Two versions of the same user in one INSERT. Search returns only the latest.
 pub(super) async fn search_returns_latest_version(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
@@ -64,7 +51,6 @@ pub(super) async fn search_returns_latest_version(ctx: &TestContext) {
     node.assert_str("state", "active");
 }
 
-/// Latest version has `_deleted = true`. Search should return nothing.
 pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
@@ -87,13 +73,11 @@ pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
     )
     .await;
 
-    // Deleted entity — no results. Skip the node_ids requirement since
-    // the correct behavior is 0 rows (the ID exists but is soft-deleted).
+    // The ID exists but is soft-deleted, so 0 rows is correct -- skip the NodeIds requirement.
     resp.skip_requirement(Requirement::NodeIds);
     resp.assert_node_count(0);
 }
 
-/// Duplicate MR rows (same id) in one INSERT. Aggregation counts it once.
 pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) {
     ctx.execute(&format!(
          "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
@@ -129,12 +113,10 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
 
     resp.assert_group_node_count("p", 1);
     resp.assert_group_node_ids("p", "Project", &[1000]);
-    // MR is the aggregation target (counted), not a returned node — skip filter check.
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
-    // Duplicate MR 9100 should be counted once. Seed MRs 2004 and 2005 are
-    // also merged in project 1000, so the total is 3.
+    // Seed MRs 2004 and 2005 are also merged in project 1000, so the count is 3.
     resp.assert_group_node_row("p", "Project", 1000, |row, project| {
         assert_eq!(
             project
@@ -196,7 +178,6 @@ pub(super) async fn aggregation_multi_hop_self_join_dedups_edge_versions(ctx: &T
     resp.assert_row_value_i64(0, "n", 1);
 }
 
-/// Search with filter: latest version matches the filter. Should return the row.
 pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
@@ -219,20 +200,16 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
     )
     .await;
 
-    // Search uses LIMIT 1 BY to pick the latest version per user. Our test
-    // user 9010 has latest version state='active', so it should appear.
-    // Other seed users with state='active' also appear -- we just verify
-    // 9010 is among them.
+    // Other seed users with state='active' also appear, so skip NodeCount and just verify 9010 is among them.
     resp.skip_requirement(Requirement::NodeCount);
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
     let node = resp.find_node("User", 9010).unwrap();
     node.assert_str("state", "active");
 }
 
-/// Search with filter: latest version does NOT match, but a stale version does.
 /// LIMIT 1 BY picks the latest version per user, then the outer WHERE
-/// checks mutable filters against the deduplicated row. The row should be
-/// excluded because the latest version's state is 'blocked', not 'active'.
+/// checks mutable filters against the deduplicated row, so a stale version
+/// that matches must not surface.
 pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
@@ -255,8 +232,6 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
     )
     .await;
 
-    // LIMIT 1 BY picks the latest version (state='blocked'), then the outer
-    // WHERE state='active' rejects it. User 9011 should NOT appear in results.
     resp.skip_requirement(Requirement::NodeCount);
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
@@ -267,12 +242,7 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
     );
 }
 
-/// Aggregation with mutable filter: v1 state='merged', v2 state='opened'.
-/// The filter `state = 'merged'` should NOT match because the latest version
-/// has state='opened'. Mutable filters must apply after deduplication.
 pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestContext) {
-    // MR 9200: v1 merged, v2 opened -- latest is 'opened', should NOT match state='merged'
-    // MR 9201: single version, state='merged' -- should match
     ctx.execute(&format!(
          "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
           (9200, 200, 'Flipped MR', 'merged', '1/100/1002/', 1002, '2024-01-01 00:00:00', false),
@@ -312,13 +282,10 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
-    // Only MR 9201 should be counted (state='merged').
-    // MR 9200 must NOT be counted: its latest version has state='opened'.
     resp.assert_group_node_property_str("p", "Project", 1002, "name", "Internal Project");
     resp.assert_group_row_value_i64("p", "Project", 1002, "mr_count", 1);
 }
 
-/// Duplicate user rows. Traversal should produce one edge, not two.
 pub(super) async fn traversal_dedup_returns_single_edge(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
@@ -362,11 +329,7 @@ pub(super) async fn traversal_dedup_returns_single_edge(ctx: &TestContext) {
     resp.assert_edge_count("AUTHORED", 1);
 }
 
-/// Traversal with mutable filter: v1 state='merged', v2 state='opened'.
-/// The filter should NOT match because the latest version has state='opened'.
 pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
-    // MR 9400: v1 merged, v2 opened -- latest is 'opened'
-    // MR 9401: single version, state='merged' -- should match
     ctx.execute(&format!(
          "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
           (9400, 400, 'Stale Traversal MR', 'merged', '1/100/1003/', 1003, '2024-01-01 00:00:00', false),
@@ -401,8 +364,6 @@ pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
     )
     .await;
 
-    // Only MR 9401 should appear (state='merged').
-    // MR 9400 must NOT appear: latest version has state='opened'.
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
@@ -420,8 +381,6 @@ pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
 /// a synthetic setup (deleted node + non-deleted edge) to document the
 /// query-layer limitation.
 pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
-    // MR 9500: v1 alive, v2 deleted
-    // MR 9501: single version, alive
     ctx.execute(&format!(
          "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
           (9500, 500, 'Deleted MR', 'merged', '1/100/1004/', 1004, '2024-01-01 00:00:00', false),
@@ -454,9 +413,7 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     )
     .await;
 
-    // The dedup scan picks the latest version for each MR id.
-    // MR 9500's latest is _deleted=true, so it's filtered out.
-    // MR 9501 (alive) + seed MR 2003 (also in project 1004) both appear.
+    // 9500's latest is _deleted; 9501 plus seed MR 2003 (project 1004) remain.
     resp.assert_node_count(3);
     resp.assert_node_ids("Project", &[1004]);
     resp.assert_node_ids("MergeRequest", &[2003, 9501]);
@@ -465,9 +422,7 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     resp.assert_edge_count("IN_PROJECT", 2);
 }
 
-/// Neighbors dedup: duplicate user rows should not produce duplicate edges.
 pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
-    // User 9300 has two versions, MR 9300 is the center node.
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
          (9300, 'nbr_old', 'Neighbor Old', 'active', 'human', '2024-01-01 00:00:00', false),
@@ -510,8 +465,6 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
 /// don't join non-center node tables. In production the indexer soft-deletes
 /// FK edge rows alongside their parent node, so this scenario is synthetic.
 pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
-    // User 9301: v1 alive, v2 deleted. Still visible via edge (known limitation).
-    // MR 9311 is the center node.
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
          (9301, 'del_nbr', 'Deleted Neighbor', 'active', 'human', '2024-01-01 00:00:00', false),
@@ -544,19 +497,11 @@ pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
     )
     .await;
 
-    // User 9301 is soft-deleted, but the edge row itself is not deleted.
-    // Neighbors queries are edge-only -- they don't join node tables for
-    // non-center nodes, so the deleted user's edge still appears. This
-    // documents a known limitation: edge-only queries cannot filter out
-    // deleted nodes.
     resp.skip_requirement(Requirement::NodeCount);
     resp.assert_node_ids("MergeRequest", &[9311]);
     resp.assert_edge_exists("User", 9301, "MergeRequest", 9311, "AUTHORED");
 }
 
-/// Hydration returns properties from the latest version, not a stale one.
-/// User 9600 has v1 username='hydrate_old', v2 username='hydrate_new'.
-/// The hydrated properties should show 'hydrate_new'.
 pub(super) async fn hydration_returns_latest_properties(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
@@ -590,18 +535,13 @@ pub(super) async fn hydration_returns_latest_properties(ctx: &TestContext) {
 
     resp.skip_requirement(Requirement::NodeCount);
     resp.assert_node_ids("User", &[9600]);
-    // Hydration should return v2 properties, not v1.
     let node = resp.find_node("User", 9600).unwrap();
     node.assert_str("username", "hydrate_new");
     node.assert_str("name", "New Hydrated");
     resp.assert_edge_exists("User", 9600, "Group", 100, "MEMBER_OF");
 }
 
-/// Soft-deleted edge row excluded from traversal results.
-/// The edge itself has _deleted=true (as the indexer would set it).
 pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
-    // MR 9700: alive, with a deleted edge to project 1000
-    // MR 9701: alive, with a non-deleted edge to project 1000
     ctx.execute(&format!(
          "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
           (9700, 700, 'Alive MR deleted edge', 'merged', '1/100/1000/', 0, '2024-06-01 00:00:00', false),
@@ -633,7 +573,6 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
     )
     .await;
 
-    // Only MR 9701's edge should appear. MR 9700's edge is soft-deleted.
     resp.skip_requirement(Requirement::NodeCount);
     resp.assert_node_ids("Project", &[1000]);
     resp.assert_edge_exists("MergeRequest", 9701, "Project", 1000, "IN_PROJECT");
@@ -644,8 +583,6 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
     );
 }
 
-/// Three versions of the same entity: dedup picks the latest (v3), not v2.
-/// Confirms ORDER BY _version DESC picks the true latest across multiple versions.
 pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
@@ -673,18 +610,14 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
 
     resp.assert_node_count(2);
     resp.assert_node_ids("MergeRequest", &[9800, 9801]);
-    // MR 9800 should show v3 (state='closed'), not v2 (state='merged').
     let node = resp.find_node("MergeRequest", 9800).unwrap();
     node.assert_str("state", "closed");
     node.assert_str("title", "MR v3");
-    // Control: MR 9801 has a single version.
     let control = resp.find_node("MergeRequest", 9801).unwrap();
     control.assert_str("state", "merged");
 }
 
-/// Aggregation excludes deleted entities from count via _nf_* CTE dedup.
-/// MR 9900 has latest version _deleted=true. It should not be counted.
-/// MR 9901 is alive and serves as the control (should be counted).
+/// Aggregation excludes deleted entities from the count via the `_nf_*` CTE dedup.
 pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
     ctx.execute(&format!(
          "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
@@ -725,7 +658,6 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
-    // MR 9900 is deleted, only MR 9901 should be counted.
     resp.assert_group_node_property_str("p", "Project", 1002, "name", "Internal Project");
     resp.assert_group_row_value_i64("p", "Project", 1002, "mr_count", 1);
 }

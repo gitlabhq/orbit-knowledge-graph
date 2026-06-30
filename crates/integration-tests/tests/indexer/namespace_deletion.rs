@@ -132,10 +132,7 @@ async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontolo
         dispatch_id: uuid::Uuid::new_v4(),
     };
     let envelope = Envelope::new(&request).unwrap();
-    handler
-        .handle(handler_context(context), envelope)
-        .await
-        .unwrap();
+    handler.handle(handler_context(), envelope).await.unwrap();
 }
 
 async fn assert_graph_data_deleted(context: &TestContext) {

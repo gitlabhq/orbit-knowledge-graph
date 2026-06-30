@@ -10,7 +10,7 @@ title: REST API
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -76,33 +76,39 @@ curl --request POST \
 
 パイプラインの失敗が最も多いプロジェクトを検索するリクエストの例:
 
+リクエストボディを`request.json`に記述します。
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
+      {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "pl", "to": "p"}
+    ],
+    "group_by": [{"kind": "node", "node": "p"}],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "pl",
+        "alias": "failed_pipelines"
+      }
+    ],
+    "aggregation_sort": {"column": "failed_pipelines", "direction": "DESC"},
+    "limit": 10
+  },
+  "format": "raw"
+}
+```
+
 ```shell
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{
-    "query": {
-      "query_type": "aggregation",
-      "nodes": [
-        {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
-        {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-      ],
-      "relationships": [
-        {"type": "IN_PROJECT", "from": "pl", "to": "p"}
-      ],
-      "group_by": [{"kind": "node", "node": "p"}],
-      "aggregations": [
-        {
-          "function": "count",
-          "target": "pl",
-          "alias": "failed_pipelines"
-        }
-      ],
-      "aggregation_sort": {"column": "failed_pipelines", "direction": "DESC"},
-      "limit": 10
-    },
-    "format": "raw"
-  }' \
+  --data @request.json \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 

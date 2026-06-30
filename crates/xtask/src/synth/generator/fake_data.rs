@@ -1,5 +1,3 @@
-//! Fast data generators for ontology data types.
-
 use crate::synth::config::{FakeDataConfig, StringKind};
 use chrono::Utc;
 use ontology::{DataType, Field};
@@ -8,10 +6,8 @@ use rand::{RngExt, SeedableRng};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-/// Hex digits for fast formatting (avoids format! parsing overhead).
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
-/// Fast hex formatting into a String buffer.
 #[inline]
 #[allow(unsafe_code)]
 fn push_hex_u64(buf: &mut String, mut val: u64) {
@@ -19,17 +15,14 @@ fn push_hex_u64(buf: &mut String, mut val: u64) {
         buf.push('0');
         return;
     }
-    // Find the highest non-zero nibble
     let leading_zeros = val.leading_zeros() as usize;
     let nibbles = 16 - (leading_zeros / 4);
 
-    // Reserve space
     buf.reserve(nibbles);
 
-    // Build hex string from high to low nibbles
     let start = buf.len();
     for _ in 0..nibbles {
-        buf.push('0'); // placeholder
+        buf.push('0');
     }
     // SAFETY: we only write ASCII hex digits (0-9, a-f) into positions
     // that already contain ASCII '0', so the buffer remains valid UTF-8.
@@ -45,20 +38,15 @@ fn push_hex_u16(buf: &mut String, val: u16) {
     push_hex_u64(buf, val as u64);
 }
 
-/// Pre-computed field generation strategy.
-///
-/// String variants carry the `StringKind` from YAML classification rules.
 /// Bool and Int carry pre-resolved parameters so generation is a single
 /// comparison / modulo with no HashMap lookup on the hot path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
-    /// String field classified by YAML rules.
     String(StringKind),
-    /// String field that matched no classification rule.
     GenericString,
-    /// Bool field with pre-computed byte threshold (random_byte < threshold → true).
+    /// Pre-computed byte threshold (random_byte < threshold → true).
     Bool(u8),
-    /// Int field with pre-computed (min, range_size) for `min + (random % range_size)`.
+    /// Pre-computed (min, range_size) for `min + (random % range_size)`.
     Int(u32, u32),
     Float,
     Date,
@@ -68,7 +56,6 @@ pub enum FieldKind {
 }
 
 impl FieldKind {
-    /// Classify a field once at startup using data-driven rules from pools.
     pub fn classify(field: &Field, pools: &FakeDataPools) -> Self {
         if field.enum_values.is_some() {
             return FieldKind::Enum;
@@ -87,20 +74,15 @@ impl FieldKind {
     }
 }
 
-/// A leaked string classification rule for runtime use.
 pub struct StaticStringRule {
     pub patterns: &'static [&'static str],
     pub kind: StringKind,
 }
 
-/// Interned runtime pools for fake data generation.
-///
 /// String pools are `Box::leak`ed to get `&'static str` slices — the data lives
 /// for the entire program lifetime (trivial size, few hundred bytes) and avoids
-/// per-row allocation overhead. This gives identical perf to the old hardcoded
-/// `const` arrays while allowing the values to come from YAML.
+/// per-row allocation overhead, allowing `Cow::Borrowed` returns.
 pub struct FakeDataPools {
-    // String pools — leaked to &'static str for Cow::Borrowed returns
     pub name_prefixes: &'static [&'static str],
     pub email_domains: &'static [&'static str],
     pub description_words: &'static [&'static str],
@@ -108,19 +90,16 @@ pub struct FakeDataPools {
     pub states: &'static [&'static str],
     pub branch_prefixes: &'static [&'static str],
 
-    // String classification rules (order matters — first match wins)
+    // order matters — first match wins
     pub string_rules: &'static [StaticStringRule],
 
-    // Bool thresholds — field_name → u8 byte threshold
     pub bool_thresholds: HashMap<&'static str, u8>,
     pub default_bool_threshold: u8,
 
-    // Int ranges — field_name → (min, range_size)
     pub int_ranges: HashMap<&'static str, (u32, u32)>,
     pub default_int_range: (u32, u32),
 }
 
-/// Leak a Vec<String> into a &'static [&'static str].
 fn leak_string_pool(strings: Vec<String>) -> &'static [&'static str] {
     let leaked: Vec<&'static str> = strings
         .into_iter()
@@ -142,7 +121,6 @@ fn range_to_params(range: [u32; 2]) -> (u32, u32) {
 }
 
 impl FakeDataPools {
-    /// Intern a `FakeDataConfig` into leaked static pools.
     pub fn intern(config: FakeDataConfig) -> &'static Self {
         let string_rules: Vec<StaticStringRule> = config
             .strings
@@ -193,7 +171,6 @@ impl FakeDataPools {
         Box::leak(Box::new(pools))
     }
 
-    /// Classify a string field using YAML rules (first match wins).
     fn classify_string(&self, name: &str) -> FieldKind {
         let lower = name.to_lowercase();
         for rule in self.string_rules {
@@ -204,7 +181,6 @@ impl FakeDataPools {
         FieldKind::GenericString
     }
 
-    /// Classify a bool field — look up threshold by name, fall back to default.
     fn classify_bool(&self, name: &str) -> FieldKind {
         let lower = name.to_lowercase();
         let threshold = self
@@ -215,7 +191,6 @@ impl FakeDataPools {
         FieldKind::Bool(threshold)
     }
 
-    /// Classify an int field — look up range by name, fall back to default.
     fn classify_int(&self, name: &str) -> FieldKind {
         let lower = name.to_lowercase();
         let (min, range) = self
@@ -227,13 +202,10 @@ impl FakeDataPools {
     }
 }
 
-/// Generates values for ontology fields using minimal randomness.
 pub struct FakeValueGenerator {
     rng: Xoshiro256PlusPlus,
     counter: u64,
-    /// Cached current timestamp to avoid repeated syscalls.
     now_millis: i64,
-    /// Reusable string buffer to avoid allocations.
     buf: String,
     pools: &'static FakeDataPools,
 }
@@ -267,7 +239,6 @@ impl FakeValueGenerator {
         Self::with_seed(seed, pools)
     }
 
-    /// Clone the buffer contents and return as Cow::Owned. Buffer is reused next call.
     #[inline]
     fn emit_buf(&self) -> Cow<'static, str> {
         Cow::Owned(self.buf.clone())
@@ -384,7 +355,6 @@ impl FakeValueGenerator {
         FakeValue::String(self.emit_buf())
     }
 
-    /// Generate a single u64 and use the counter for mixing.
     #[inline]
     fn next_random(&mut self) -> u64 {
         self.counter = self.counter.wrapping_add(1);
@@ -392,14 +362,11 @@ impl FakeValueGenerator {
         r ^ self.counter.wrapping_mul(0x9e3779b97f4a7c15)
     }
 
-    /// Generate a value for a field. Use FieldKind::classify() once per field,
-    /// then call generate_with_kind() for each row.
     pub fn generate(&mut self, field: &Field) -> FakeValue {
         let kind = FieldKind::classify(field, self.pools);
         self.generate_with_kind(kind, field.nullable, field.enum_values.as_ref())
     }
 
-    /// Fast path: generate using pre-computed FieldKind.
     #[inline]
     pub fn generate_with_kind(
         &mut self,
@@ -456,11 +423,9 @@ impl FakeValueGenerator {
     }
 }
 
-/// A generated fake value.
 #[derive(Debug, Clone)]
 pub enum FakeValue {
     Null,
-    /// String value - uses Cow to avoid allocation for static strings.
     String(Cow<'static, str>),
     Int(i64),
     Float(f64),
@@ -474,13 +439,11 @@ impl FakeValue {
         matches!(self, FakeValue::Null)
     }
 
-    /// Create a string value from an owned String.
     #[inline]
     pub fn owned_string(s: String) -> Self {
         FakeValue::String(Cow::Owned(s))
     }
 
-    /// Create a string value from a static str (zero allocation).
     #[inline]
     pub fn static_string(s: &'static str) -> Self {
         FakeValue::String(Cow::Borrowed(s))

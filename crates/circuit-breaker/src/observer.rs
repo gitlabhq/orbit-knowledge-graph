@@ -1,6 +1,6 @@
 use crate::state::{StateLabel, Transition};
 
-/// Metrics/logging hook. All methods default to no-ops.
+/// All methods default to no-ops.
 pub trait CircuitBreakerObserver: Send + Sync {
     fn on_state_change(&self, service: &str, transition: Transition) {
         let _ = (service, transition);

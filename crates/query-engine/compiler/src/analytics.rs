@@ -1,5 +1,3 @@
-//! Pipeline execution metrics for analytics and billing.
-
 use std::time::Duration;
 
 use serde::Serialize;
@@ -7,11 +5,8 @@ use serde::Serialize;
 use crate::input::Input;
 use crate::passes::hydrate::HydrationPlan;
 
-/// Accumulated pipeline execution metrics. Embedded by observer impls.
-///
-/// Fields are `pub` -- observers write directly, no setters needed.
-/// `query_executed` is the one exception: it accumulates across multiple
-/// ClickHouse round-trips.
+/// `query_executed` accumulates across multiple ClickHouse round-trips; all
+/// other fields are written directly by observers.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExecMetrics {
     #[serde(skip)]

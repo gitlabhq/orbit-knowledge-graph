@@ -122,8 +122,7 @@ impl TestContext {
     }
 
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
-    /// every inserted row. Queries `system.tables` for the current database
-    /// and runs `OPTIMIZE TABLE … FINAL` on each table concurrently.
+    /// every inserted row.
     pub async fn optimize_all(&self) {
         let t = std::time::Instant::now();
         let batches = self
@@ -155,7 +154,7 @@ impl TestContext {
     pub async fn truncate_all_tables(&self) {
         let batches = self
             .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{}' AND engine != 'View'",
+                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'Dictionary')",
                 self.config.database
             ))
             .await;
@@ -190,11 +189,10 @@ impl TestContext {
         let schema_refs: Vec<&str> = self.schema_sqls.iter().map(|s| s.as_str()).collect();
         Self::run_schema_in(&self.url, name, &schema_refs).await;
 
-        // Copy data from parent into fork for tables that exist in both.
         let src = &self.config.database;
         let batches = self
             .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{name}' AND engine != 'View'"
+                "SELECT name FROM system.tables WHERE database = '{name}' AND engine NOT IN ('View', 'Dictionary')"
             ))
             .await;
         for batch in &batches {
@@ -355,6 +353,11 @@ impl TestContext {
         );
 
         for schema_sql in schema_sqls {
+            let schema_sql = schema_sql
+                .replace("$DICTIONARY_USER", TEST_USERNAME)
+                .replace("$DICTIONARY_PASSWORD", TEST_PASSWORD)
+                .replace("$DICTIONARY_SECURE", "0")
+                .replace("$DICTIONARY_DATABASE", database);
             for statement in schema_sql.split(';') {
                 let statement = statement.trim();
                 if statement.is_empty() {

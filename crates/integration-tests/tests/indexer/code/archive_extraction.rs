@@ -1,9 +1,3 @@
-//! End-to-end archive path: serve a tar over a mock GitLab archive endpoint,
-//! stream it through `gkg_utils::archive::extract_tar_gz` + the production
-//! `CodeFilter`, and run `Pipeline::run`. Verifies resolver inputs survive the
-//! round trip and resolution works, and that excluded entries are recorded but
-//! not materialized or parsed.
-
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -11,9 +5,7 @@ use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
 use code_graph::v2::linker::CodeGraph;
 use code_graph::v2::linker::graph::GraphNode;
 use code_graph::v2::types::EdgeKind;
-use code_graph::v2::{
-    BatchSink, FileInventoryEntry, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
-};
+use code_graph::v2::{FileInventoryEntry, GraphConverter, Pipeline, PipelineConfig, SinkError};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use gkg_utils::archive::extract_tar_gz;
@@ -64,8 +56,6 @@ impl GraphConverter for CapturingConverter {
     }
 }
 
-/// Fetch the archive over HTTP and stream it through the production extraction
-/// path. Mirrors `LocalRepositoryCache::extract_archive` end to end.
 async fn extract_via_archive_endpoint(
     entries: &[Entry<'_>],
     target: &Path,
@@ -131,14 +121,15 @@ async fn run_pipeline(
     let capturer_for_pipeline = capturer.clone();
     let root = root.to_path_buf();
     let result = tokio::task::spawn_blocking(move || {
-        let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
+        let on_batch: Arc<code_graph::v2::OnBatch> =
+            Arc::new(|_: &str, _: arrow::record_batch::RecordBatch| Ok(()));
         Pipeline::run(
             &root,
             Arc::from(file_inventory),
             PipelineConfig::default(),
             &stream_reasons,
             capturer_for_pipeline as Arc<dyn GraphConverter>,
-            sink,
+            on_batch,
         )
     })
     .await
@@ -269,7 +260,6 @@ async fn excluded_archive_entries_are_not_materialized_or_parsed() {
         file_language(&run.graphs, "assets/logo.png"),
         Some("unknown")
     );
-    // The stream's per-file skip reason reaches the File node's gl_file.reason.
     assert_eq!(
         file_reason(&run.graphs, "assets/logo.png").as_deref(),
         Some("skip_excluded_extension")

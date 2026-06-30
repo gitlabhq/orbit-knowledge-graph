@@ -7,13 +7,9 @@ use tempfile::TempDir;
 
 use super::*;
 
-/// Embedded Rust toolchain version.
-///
-/// The sysroot is pinned intentionally so that indexing results stay
-/// reproducible across machines and releases. Standard-library APIs
-/// introduced after this version will not resolve via rust-analyzer
-/// until this constant (and the checked-in assets under
-/// `assets/rust-sysroot-<version>/`) are bumped in lockstep.
+/// Pinned for reproducible indexing across machines/releases. Std APIs newer
+/// than this version won't resolve until this constant and the checked-in
+/// assets under `assets/rust-sysroot-<version>/` are bumped in lockstep.
 pub(super) const EMBEDDED_RUST_SYSROOT_VERSION: &str = "1.95.0";
 
 const EMBEDDED_RUST_PROJECT_JSON: &str = "rust-project.json";

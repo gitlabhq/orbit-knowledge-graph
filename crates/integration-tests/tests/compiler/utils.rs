@@ -1,10 +1,3 @@
-//! SQL assertion utilities backed by sqlparser's Visitor.
-//!
-//! Parses compiled SQL with the appropriate dialect, then walks the
-//! entire AST (CTEs, subqueries, unions) to collect function names,
-//! column references, table names, aliases, and operators. Tests
-//! assert against these collected sets instead of raw string matching.
-
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
@@ -16,10 +9,6 @@ use sqlparser::ast::{
 };
 use sqlparser::dialect::ClickHouseDialect;
 use sqlparser::parser::Parser;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Collector — walks the full AST via Visitor
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Default)]
 struct Collector {
@@ -104,10 +93,6 @@ impl Visitor for Collector {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ParsedSql — the public API
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub struct ParsedSql {
     pub statements: Vec<Statement>,
     pub raw: String,
@@ -115,8 +100,6 @@ pub struct ParsedSql {
 }
 
 impl ParsedSql {
-    /// Parse a `ParameterizedQuery` by rendering (inlining params) first.
-    /// Uses the query's dialect to select the sqlparser dialect.
     pub fn from_query(query: &ParameterizedQuery) -> Self {
         Self::parse_with_dialect(&query.render(), query.dialect)
     }
@@ -126,7 +109,6 @@ impl ParsedSql {
         Self::parse_with_dialect(sql, SqlDialect::ClickHouse)
     }
 
-    /// Parse raw SQL using the specified dialect.
     pub fn parse_with_dialect(sql: &str, dialect: SqlDialect) -> Self {
         let statements = match dialect {
             SqlDialect::ClickHouse => Parser::parse_sql(&ClickHouseDialect {}, sql)
@@ -151,8 +133,6 @@ impl ParsedSql {
         }
     }
 
-    // ── Structural queries ───────────────────────────────────────────────
-
     pub fn query(&self) -> &Query {
         assert!(!self.statements.is_empty(), "parsed SQL has no statements");
         // Skip SET statements (e.g. CH query cache settings) to find the SELECT.
@@ -174,51 +154,38 @@ impl ParsedSql {
         extract_select(self.query())
     }
 
-    // ── Visitor-based lookups ────────────────────────────────────────────
-
-    /// True if any function call in the AST matches (case-insensitive).
     pub fn has_function(&self, name: &str) -> bool {
         self.collected.functions.contains(&name.to_uppercase())
     }
 
-    /// True if any column reference contains the substring.
     pub fn has_column_ref(&self, needle: &str) -> bool {
         self.collected.columns.iter().any(|c| c.contains(needle))
     }
 
-    /// True if no column reference contains the substring.
     pub fn lacks_column_ref(&self, needle: &str) -> bool {
         !self.has_column_ref(needle)
     }
 
-    /// True if any table name matches.
     pub fn has_table(&self, name: &str) -> bool {
         self.collected.tables.iter().any(|t| t.contains(name))
     }
 
-    /// True if any alias matches.
     pub fn has_alias(&self, name: &str) -> bool {
         self.collected.aliases.contains(name)
     }
 
-    /// True if a CTE with this name exists.
     pub fn has_cte(&self, name: &str) -> bool {
         self.collected.cte_names.contains(name)
     }
 
-    /// True if any binary/unary operator matches.
     pub fn has_operator(&self, op: &str) -> bool {
         self.collected.operators.contains(op)
     }
 
-    /// True if a UNION ALL appears anywhere in the query tree.
     pub fn has_union_all(&self) -> bool {
         self.collected.has_union_all
     }
 
-    // ── SELECT-level helpers ─────────────────────────────────────────────
-
-    /// True if any SELECT item (alias or expression) contains the substring.
     pub fn has_select_column(&self, needle: &str) -> bool {
         self.select()
             .projection
@@ -282,17 +249,11 @@ impl ParsedSql {
         }
     }
 
-    /// Fallback for anything the visitor doesn't cover.
     pub fn raw_contains(&self, s: &str) -> bool {
         self.raw.contains(s)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Param helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// True if any param value matches the given JSON value.
 pub fn has_param_value(params: &HashMap<String, ParamValue>, val: &serde_json::Value) -> bool {
     params.values().any(|p| &p.value == val)
 }

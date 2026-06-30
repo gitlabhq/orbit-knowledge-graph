@@ -1,0 +1,30 @@
+description: A route change resolves to its own namespace even when its source id also exists under another namespace
+
+seed:
+  checkpoint:
+    - { key: dispatch.sdlc.namespace.changes, watermark: "2024-01-19 00:00:00.000000", cursor_values: "null" }
+    - { key: dispatch.sdlc.namespace.sweep, watermark: { sql: "now64(6)" }, cursor_values: "null" }
+  siphon_knowledge_graph_enabled_namespaces:
+    - { id: 1, root_namespace_id: 300, traversal_path: "3/300/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+    - { id: 2, root_namespace_id: 400, traversal_path: "4/400/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+    - { id: 3, root_namespace_id: 800, traversal_path: "8/800/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+    - { id: 4, root_namespace_id: 900, traversal_path: "9/900/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  namespace_traversal_paths:
+    - { id: 300, traversal_path: "3/300/" }
+    - { id: 4000, traversal_path: "9/900/4000/" }
+  project_namespace_traversal_paths:
+    - { id: 300, traversal_path: "8/800/300/" }
+    - { id: 4000, traversal_path: "4/400/4000/" }
+  siphon_routes:
+    - { id: 3000, source_id: 300, source_type: Namespace, namespace_id: 300, traversal_path: "3/300/" }
+    - { id: 4000, source_id: 4000, source_type: Project, namespace_id: 400, traversal_path: "4/400/4000/" }
+
+dispatch: namespace
+
+expect:
+  dispatched:
+    - kind: namespace
+      count: 2
+      rows:
+        - { namespace: 300, traversal_path: "3/300/" }
+        - { namespace: 400, traversal_path: "4/400/" }

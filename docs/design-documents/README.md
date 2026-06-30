@@ -26,7 +26,7 @@ We will then build a secure query layer on top of the Data Insights Platform to 
 - **Knowledge Graph service** as a unified binary with four runtime modes:
   - **`Webserver`** (`gkg-server --mode Webserver`): Serves HTTP, gRPC, and MCP traffic; validates graph queries against the JSON schema and ontology; compiles them to ClickHouse SQL; and applies authorization and formatting before returning results.
   - **`Indexer`** (`gkg-server --mode Indexer`): Runs the shared indexing engine, consumes SDLC and code indexing requests from NATS JetStream, and writes graph data into ClickHouse.
-  - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, enumerates enabled namespaces from the datalake and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. Also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle.
+  - **`DispatchIndexing`** (`gkg-server --mode DispatchIndexing`): On a schedule, detects enabled root namespaces with recent Siphon changes and publishes deduplicated per-namespace indexing requests to the internal `GKG_INDEXER` stream. Also runs scheduled dispatchers for code indexing tasks, namespace deletion, stale-edge reconciliation, and schema-migration lifecycle.
   - **`HealthCheck`** (`gkg-server --mode HealthCheck`): Aggregates cluster health by probing Kubernetes deployments and ClickHouse instances, and exposes the result on a single `/health` endpoint.
 - **UI and product experiences** are downstream consumers of this service. The current repository contains the graph/querying service and indexing platform rather than an embedded desktop UI.
 

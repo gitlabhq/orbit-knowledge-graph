@@ -1,12 +1,13 @@
-//! NATS JetStream message broker.
-//!
-//! Wraps [`nats_client::NatsClient`] and adds indexer-specific functionality:
-//! subscriptions, publishing, dead-letter queues, and message conversion.
-
 use std::sync::Arc;
 use std::time::Duration;
 
-const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
+/// Flat 100ms hot-poll for the unbounded fetch supervisor loop.
+const FETCH_RETRY: crate::engine::retry::RetryPolicy = crate::engine::retry::RetryPolicy {
+    mode: crate::engine::retry::RetryMode::Local,
+    backoff: crate::engine::retry::Backoff::Fixed(&[Duration::from_millis(100)]),
+    max_attempts: u32::MAX, // unused by drive_forever; the loop is unbounded by design
+    dead_letter: false,
+};
 const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
 
 use async_nats::jetstream::consumer::PullConsumer;
@@ -24,6 +25,7 @@ use tracing::{debug, info, warn};
 use crate::dead_letter::{
     DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
 };
+use crate::engine::retry::{Loop, drive_forever};
 use crate::metrics::EngineMetrics;
 use crate::nats::versioning::NATS_VERSIONER;
 use crate::types::{Envelope, MessageId, Subscription};
@@ -315,53 +317,62 @@ impl NatsBroker {
         let cancel_token = self.cancellation_token.clone();
 
         let handle = tokio::spawn(async move {
-            loop {
-                if cancel_token.is_cancelled() {
-                    break;
-                }
-
-                let fetch_start = std::time::Instant::now();
-                let batch = match consumer
-                    .batch()
-                    .max_messages(batch_size)
-                    .expires(fetch_expires)
-                    .messages()
-                    .await
-                {
-                    Ok(batch) => batch,
-                    Err(e) => {
-                        warn!(error = %e, "fetch batch error");
-                        metrics.record_nats_fetch_duration(
-                            fetch_start.elapsed().as_secs_f64(),
-                            "error",
-                        );
-                        let _ = sender.send(Err(map_subscribe_error(e))).await;
-                        tokio::time::sleep(FETCH_RETRY_DELAY).await;
-                        continue;
-                    }
-                };
-                metrics.record_nats_fetch_duration(fetch_start.elapsed().as_secs_f64(), "success");
-
-                tokio::pin!(batch);
-
-                let mut batch_count: usize = 0;
-                while let Some(result) = batch.next().await {
+            // Forward each fetch error downstream, back off, and run until cancel/consumer-close.
+            drive_forever(&FETCH_RETRY, |_failures| {
+                let consumer = &consumer;
+                let sender = &sender;
+                let metrics = &metrics;
+                let cancel_token = &cancel_token;
+                async move {
                     if cancel_token.is_cancelled() {
-                        break;
+                        return Loop::Stop;
                     }
 
-                    batch_count += 1;
-                    let converted = match result {
-                        Ok(msg) => Self::convert_message(msg),
-                        Err(e) => Err(map_subscribe_error(e)),
+                    let fetch_start = std::time::Instant::now();
+                    let batch = match consumer
+                        .batch()
+                        .max_messages(batch_size)
+                        .expires(fetch_expires)
+                        .messages()
+                        .await
+                    {
+                        Ok(batch) => batch,
+                        Err(e) => {
+                            warn!(error = %e, "fetch batch error");
+                            metrics.record_nats_fetch_duration(
+                                fetch_start.elapsed().as_secs_f64(),
+                                "error",
+                            );
+                            let _ = sender.send(Err(map_subscribe_error(e))).await;
+                            return Loop::Backoff;
+                        }
                     };
+                    metrics
+                        .record_nats_fetch_duration(fetch_start.elapsed().as_secs_f64(), "success");
 
-                    if sender.send(converted).await.is_err() {
-                        return;
+                    tokio::pin!(batch);
+
+                    let mut batch_count: usize = 0;
+                    while let Some(result) = batch.next().await {
+                        if cancel_token.is_cancelled() {
+                            break;
+                        }
+
+                        batch_count += 1;
+                        let converted = match result {
+                            Ok(msg) => Self::convert_message(msg),
+                            Err(e) => Err(map_subscribe_error(e)),
+                        };
+
+                        if sender.send(converted).await.is_err() {
+                            return Loop::Stop;
+                        }
                     }
+                    debug!(count = batch_count, "batch fetched");
+                    Loop::Continue
                 }
-                debug!(count = batch_count, "batch fetched");
-            }
+            })
+            .await;
         });
 
         {
@@ -453,7 +464,6 @@ impl NatsBroker {
             ack_wait: self.config.ack_wait(),
             max_deliver,
             durable_name: durable_name.clone(),
-            // ConsumerConfig::max_ack_pending uses 0 to mean "NATS server default" (currently 1000).
             max_ack_pending: max_ack_pending_to_i64(max_ack_pending),
             ..Default::default()
         };

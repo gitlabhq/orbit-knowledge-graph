@@ -5,7 +5,6 @@ use gkg_utils::arrow::ColumnValue;
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
-/// Mock resolver that echoes the lookup name back as the resolved value.
 pub struct MockColumnResolver;
 
 #[async_trait]

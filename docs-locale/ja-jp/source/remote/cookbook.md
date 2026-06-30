@@ -10,14 +10,14 @@ title: Cookbook
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
 {{< history >}}
 
-- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)付きで[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。
+- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ版](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。
 
 {{< /history >}}
 
@@ -30,13 +30,13 @@ title: Cookbook
 
 ## ブラスト半径分析 {#blast-radius-analysis}
 
-「これを変更すると何が壊れるか？」という問いに答えます。
+答える質問: 「これを変更すると何が壊れますか？」
 
 ### 特定のモジュールをインポートしているすべてのファイルを検索する {#find-all-files-that-import-a-specific-module}
 
 `payments-service`をトレースしたいモジュールまたはライブラリに置き換えてください。
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -51,9 +51,9 @@ title: Cookbook
 }
 ```
 
-### 共有ライブラリに依存しているプロジェクトを検索する {#find-projects-that-depend-on-a-shared-library}
+### 共有ライブラリに依存するプロジェクトを検索する {#find-projects-that-depend-on-a-shared-library}
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -75,11 +75,11 @@ title: Cookbook
 
 ## オンボーディングとコードベースの探索 {#onboarding-and-codebase-exploration}
 
-「このコードベースを理解するのを助けてほしい」という問いに答えます。
+答える質問: 「このコードベースを理解するのを手伝ってください。」
 
-### プロジェクトで最もアクティブなコントリビューターを検索する {#find-the-most-active-contributors-to-a-project}
+### プロジェクトへの最もアクティブなコントリビューターを検索する {#find-the-most-active-contributors-to-a-project}
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -110,11 +110,11 @@ title: Cookbook
 
 ## 依存関係マッピング {#dependency-mapping}
 
-「サービス間はどのように接続されているか？」という問いに答えます。
+答える質問: 「サービスはどのように接続されていますか？」
 
 ### インポートされた定義をマップする {#map-imported-definitions}
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -142,11 +142,11 @@ title: Cookbook
 
 ## パイプラインの健全性 {#pipeline-health}
 
-「CI/CDの問題はどこにあるか？」という問いに答えます。
+答える質問: 「CI/CDの問題はどこにありますか？」
 
 ### 失敗したパイプラインが最も多いプロジェクトを検索する {#find-projects-with-the-most-failed-pipelines}
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -167,7 +167,7 @@ title: Cookbook
 
 ### 失敗したジョブとその失敗理由を検索する {#find-failed-jobs-and-their-failure-reasons}
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -182,11 +182,11 @@ title: Cookbook
 
 ## 脆弱性トレーシング {#vulnerability-tracing}
 
-「セキュリティリスクはどこにあり、どのように発生したか？」という問いに答えます。
+答える質問: 「セキュリティリスクはどこにあり、どのように発生しましたか？」
 
-### グループ内のすべてのクリティカルおよび高重大度の脆弱性を検索する {#find-all-critical-and-high-vulnerabilities-in-a-group}
+### グループ内のすべての重大度が「クリティカル」および「高」の脆弱性を検索する {#find-all-critical-and-high-vulnerabilities-in-a-group}
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -211,7 +211,7 @@ title: Cookbook
 
 ### プロジェクト別に脆弱性を集計する {#count-vulnerabilities-by-project}
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -236,7 +236,7 @@ title: Cookbook
 
 ### 重大度別に脆弱性を集計する {#count-vulnerabilities-by-severity}
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [

@@ -16,6 +16,8 @@ use crate::input::{
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
 
+use super::errors::format_schema_error;
+
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
@@ -35,7 +37,7 @@ fn collect_schema_errors(
 ) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
-        .map(|e| sanitize_schema_error(&format!("{} at {}", e, e.instance_path())))
+        .map(|e| format_schema_error(&e))
         .collect();
 
     if errors.is_empty() {
@@ -43,16 +45,6 @@ fn collect_schema_errors(
     } else {
         Err(QueryError::Validation(errors.join("; ")))
     }
-}
-
-/// Strip enumerated valid values from jsonschema enum-rejection messages.
-/// Matches `is not one of ["quoted","values",...]` — requires at least one
-/// quoted element to avoid false positives on non-enum bracket content.
-fn sanitize_schema_error(msg: &str) -> String {
-    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r#"is not one of \["[^"]*".*?\]"#).expect("valid regex")
-    });
-    RE.replace_all(msg, "is not an allowed value").to_string()
 }
 
 /// Check whether a JSON value is compatible with an ontology `DataType`.
@@ -65,8 +57,7 @@ fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<Str
                 return Some(format!("is {}, not a string", json_type_name(value)));
             }
         }
-        // Enums accept strings (string-based) or integers (int-based, coerced
-        // to string labels by normalization before lowering).
+        // Int-based enums are coerced to string labels by normalization before lowering.
         DataType::Enum => {
             if !value.is_string() && !value.is_i64() && !value.is_u64() {
                 return Some(format!(
@@ -146,10 +137,6 @@ fn node_has_selectivity(node: &InputNode) -> bool {
     }
     false
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Validator
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub struct Validator<'a> {
     ontology: &'a Ontology,
@@ -242,8 +229,7 @@ impl<'a> Validator<'a> {
                 input.relationships.len()
             )));
         }
-        // Traversal with 1 node + 0 rels is a search (single table scan).
-        // Multi-node traversal requires exactly n-1 relationships.
+        // Multi-node traversal requires exactly n-1 relationships (1 node + 0 rels is a search).
         if input.query_type == QueryType::Traversal
             && !input.nodes.is_empty()
             && !(input.nodes.len() == 1 && input.relationships.is_empty())
@@ -268,10 +254,8 @@ impl<'a> Validator<'a> {
             )));
         }
         for rel in &input.relationships {
-            // direction: "both" generates OR join conditions that defeat
-            // ClickHouse index and projection usage. The JSON schema also
-            // rejects this for aggregation, but this guard covers code paths
-            // that bypass schema validation (CLI, internal tests, gRPC).
+            // "both" generates OR joins that defeat CH index usage; schema also rejects it,
+            // but this guard covers code paths that bypass schema validation.
             if rel.direction == crate::input::Direction::Both
                 && input.query_type == QueryType::Aggregation
             {
@@ -420,9 +404,6 @@ impl<'a> Validator<'a> {
         }
 
         for (i, rel) in input.relationships.iter().enumerate() {
-            // Resolve the physical edge table for this relationship so we
-            // can validate filters against that table's actual columns,
-            // not the union across all edge tables.
             let edge_table = rel
                 .types
                 .first()
@@ -483,7 +464,6 @@ impl<'a> Validator<'a> {
         }
     }
 
-    /// Minimum number of characters required in a LIKE filter value.
     const MIN_LIKE_PATTERN_LEN: usize = 3;
 
     fn check_traversal_path_filter(label: &str, filter: &InputFilter) -> Result<()> {
@@ -534,7 +514,6 @@ impl<'a> Validator<'a> {
     ) -> Result<()> {
         let op = filter.op.unwrap_or(FilterOp::Eq);
 
-        // Ops without a value — nothing to type-check.
         if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
             return Ok(());
         }
@@ -549,7 +528,6 @@ impl<'a> Validator<'a> {
             FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens
         );
 
-        // Reject LIKE operators on fields marked like_allowed: false.
         if is_like_op
             && !self
                 .ontology
@@ -561,7 +539,6 @@ impl<'a> Validator<'a> {
             )));
         }
 
-        // Token operators require a text index on the column.
         if is_token_op && self.ontology.text_index_tokenizer(entity, prop).is_none() {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
@@ -573,9 +550,7 @@ impl<'a> Validator<'a> {
             return Ok(());
         };
 
-        // Free-text LIKE and token filters need a minimum length.
-        // traversal_path is a hierarchical scope where short paths like "1/"
-        // are valid and no broader than SecurityPass's required predicate.
+        // traversal_path is exempt: short paths like "1/" are valid hierarchical scopes.
         if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
@@ -637,7 +612,6 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // Neighbors without selectivity on the center node scans all edges.
             QueryType::Neighbors => {
                 if let Some(ref nb) = input.neighbors {
                     let node = input.nodes.iter().find(|n| n.id == nb.node);
@@ -650,8 +624,6 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-
-            // Traversal/aggregation without selectivity scans entire edge tables.
             QueryType::Traversal | QueryType::Aggregation
                 if !input.nodes.iter().any(node_has_selectivity) =>
             {
@@ -1064,10 +1036,6 @@ impl<'a> Validator<'a> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1130,9 +1098,6 @@ mod tests {
 
     #[test]
     fn cross_reference_validation() {
-        // ── Happy paths ─────────────────────────────────────────────
-
-        // Valid traversal with relationship
         assert_ok(
             r#"{
                 "query_type": "traversal",
@@ -1144,7 +1109,6 @@ mod tests {
             }"#,
         );
 
-        // Valid aggregation with target and group_by
         assert_ok(
             r#"{
                 "query_type": "aggregation",
@@ -1162,7 +1126,6 @@ mod tests {
             }"#,
         );
 
-        // Valid order_by referencing declared node
         assert_ok(
             r#"{
                 "query_type": "traversal",
@@ -1171,7 +1134,6 @@ mod tests {
             }"#,
         );
 
-        // Valid path_finding
         assert_ok(
             r#"{
                 "query_type": "path_finding",
@@ -1184,7 +1146,6 @@ mod tests {
             }"#,
         );
 
-        // Valid neighbors
         assert_ok(
             r#"{
                 "query_type": "neighbors",
@@ -1192,8 +1153,6 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "both"}
             }"#,
         );
-
-        // ── Relationship from/to ────────────────────────────────────
 
         assert_rejects(
             r#"{
@@ -1212,8 +1171,6 @@ mod tests {
             }"#,
             "undefined node \"ghost\"",
         );
-
-        // ── Aggregation references ──────────────────────────────────
 
         assert_rejects(
             r#"{
@@ -1242,7 +1199,6 @@ mod tests {
             "undefined node \"missing\"",
         );
 
-        // Aggregation property that doesn't exist on the target entity
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
@@ -1322,8 +1278,6 @@ mod tests {
             "conflicts with another output column",
         );
 
-        // ── Order by references ─────────────────────────────────────
-
         assert_rejects(
             r#"{
                 "query_type": "traversal",
@@ -1341,8 +1295,6 @@ mod tests {
             }"#,
             "does not exist",
         );
-
-        // ── Path from/to ────────────────────────────────────────────
 
         assert_rejects(
             r#"{
@@ -1369,8 +1321,6 @@ mod tests {
             }"#,
             "undefined node \"ghost\"",
         );
-
-        // ── Neighbors node ──────────────────────────────────────────
 
         assert_rejects(
             r#"{
@@ -1505,7 +1455,6 @@ mod tests {
             );
             assert_rejects(&json, "requires a 'property' field");
         }
-        // count without property is fine
         assert_ok(
             r#"{
                 "query_type": "aggregation",
@@ -1613,8 +1562,6 @@ mod tests {
             }"#,
         );
     }
-
-    // ── Filter type validation ──────────────────────────────────────
 
     #[test]
     fn accepts_string_filter_on_string_column() {
@@ -1825,7 +1772,6 @@ mod tests {
         let ontology = test_ontology();
         let validator = Validator::new(&ontology);
 
-        // Scalar op: wrong type must produce Err, not silently pass.
         let input = parse_input(
             r#"{
                 "query_type": "traversal",
@@ -1838,7 +1784,6 @@ mod tests {
             "scalar type mismatch must reject the query"
         );
 
-        // IN op: one bad element among valid ones must produce Err.
         let input = parse_input(
             r#"{
                 "query_type": "traversal",
@@ -1854,8 +1799,6 @@ mod tests {
             "IN filter with a mismatched element must reject the query"
         );
     }
-
-    // ── Relationship filter type validation ─────────────────────────
 
     #[test]
     fn accepts_int_filter_on_edge_source_id() {
@@ -2048,7 +1991,6 @@ mod tests {
 
     #[test]
     fn edge_filter_passes_with_correct_ontology_types() {
-        // Same setup but with correct types — integer filter on source_id passes.
         let ontology = ontology::Ontology::new()
             .with_nodes(["User", "Note"])
             .with_edges(["AUTHORED"])
@@ -2089,24 +2031,18 @@ mod tests {
             .expect("Identifier pattern missing from schema");
         let re = regex::Regex::new(pattern).unwrap();
 
-        // Valid ASCII identifiers
         assert!(re.is_match("user"));
         assert!(re.is_match("_foo"));
         assert!(re.is_match("User123"));
 
-        // Homoglyph / non-ASCII must be rejected
         assert!(!re.is_match("usеr")); // Cyrillic е (U+0435)
         assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
         assert!(!re.is_match("üser")); // Latin u with diaeresis
         assert!(!re.is_match("用户")); // CJK
     }
 
-    // ── Selectivity guards ────────────────────────────────────────────
-
     #[test]
     fn selectivity_guards() {
-        // ── Path finding ────────────────────────────────────────────
-        // Both endpoints pinned: OK
         assert_ok(
             r#"{
                 "query_type": "path_finding",
@@ -2118,7 +2054,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // Filters on endpoint: OK (lowerer resolves via capped CTE)
         assert_ok(
             r#"{
                 "query_type": "path_finding",
@@ -2130,7 +2065,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // Narrow id_range on endpoint: OK
         assert_ok(
             r#"{
                 "query_type": "path_finding",
@@ -2142,7 +2076,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // Wide id_range on endpoint exceeds MAX_PATH_ANCHOR_RANGE (500)
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2155,7 +2088,6 @@ mod tests {
             }"#,
             "endpoint \"a\"",
         );
-        // No selectivity on start endpoint
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2168,7 +2100,6 @@ mod tests {
             }"#,
             "endpoint \"a\"",
         );
-        // No selectivity on end endpoint
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2181,7 +2112,6 @@ mod tests {
             }"#,
             "endpoint \"b\"",
         );
-        // Missing rel_types with filtered endpoint: rejected
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2193,7 +2123,6 @@ mod tests {
             }"#,
             "requires rel_types",
         );
-        // Missing rel_types with both endpoints pinned: rejected (fan-out)
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2206,8 +2135,6 @@ mod tests {
             "requires rel_types",
         );
 
-        // ── Neighbors ───────────────────────────────────────────────
-        // Center node pinned: OK
         assert_ok(
             r#"{
                 "query_type": "neighbors",
@@ -2215,7 +2142,6 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "both"}
             }"#,
         );
-        // Center node with filter: OK
         assert_ok(
             r#"{
                 "query_type": "neighbors",
@@ -2223,7 +2149,6 @@ mod tests {
                 "neighbors": {"node": "u", "direction": "both"}
             }"#,
         );
-        // Center node without selectivity
         assert_rejects(
             r#"{
                 "query_type": "neighbors",
@@ -2233,22 +2158,18 @@ mod tests {
             "center node",
         );
 
-        // ── Search ──────────────────────────────────────────────────
-        // Search with filter: OK
         assert_ok(
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"username": "root"}}
             }"#,
         );
-        // Search with node_ids: OK
         assert_ok(
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]}
             }"#,
         );
-        // Single-node traversal without selectivity
         assert_rejects(
             r#"{
                 "query_type": "traversal",
@@ -2257,8 +2178,6 @@ mod tests {
             "full edge table scans",
         );
 
-        // ── Traversal ───────────────────────────────────────────────
-        // Single-hop with pinned node: OK
         assert_ok(
             r#"{
                 "query_type": "traversal",
@@ -2269,7 +2188,6 @@ mod tests {
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
         );
-        // Single-hop with filter on second node: OK
         assert_ok(
             r#"{
                 "query_type": "traversal",
@@ -2280,7 +2198,6 @@ mod tests {
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
         );
-        // Single-hop without any selectivity
         assert_rejects(
             r#"{
                 "query_type": "traversal",
@@ -2292,7 +2209,6 @@ mod tests {
             }"#,
             "full edge table scans",
         );
-        // Multi-hop with pinned node: OK
         assert_ok(
             r#"{
                 "query_type": "traversal",
@@ -2303,7 +2219,6 @@ mod tests {
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
             }"#,
         );
-        // Multi-hop without any selectivity
         assert_rejects(
             r#"{
                 "query_type": "traversal",
@@ -2316,8 +2231,6 @@ mod tests {
             "full edge table scans",
         );
 
-        // ── Aggregation ─────────────────────────────────────────────
-        // Aggregation with filter: OK
         assert_ok(
             r#"{
                 "query_type": "aggregation",
@@ -2330,7 +2243,6 @@ mod tests {
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
-        // Aggregation without any selectivity
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
@@ -2345,15 +2257,12 @@ mod tests {
             "full edge table scans",
         );
 
-        // ── id_range selectivity ────────────────────────────────────
-        // Narrow id_range counts as selective
         assert_ok(
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}
             }"#,
         );
-        // Wide id_range does NOT count as selective
         assert_rejects(
             r#"{
                 "query_type": "traversal",
@@ -2361,7 +2270,6 @@ mod tests {
             }"#,
             "full edge table scans",
         );
-        // Traversal with id_range: OK (lowerer generates CTE with range condition)
         assert_ok(
             r#"{
                 "query_type": "traversal",
@@ -2372,7 +2280,6 @@ mod tests {
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
             }"#,
         );
-        // Aggregation with id_range: OK
         assert_ok(
             r#"{
                 "query_type": "aggregation",
@@ -2385,7 +2292,6 @@ mod tests {
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
-        // path_finding with narrow id_range: OK (within MAX_PATH_ANCHOR_RANGE)
         assert_ok(
             r#"{
                 "query_type": "path_finding",
@@ -2397,7 +2303,6 @@ mod tests {
                          "rel_types": ["CONTAINS"]}
             }"#,
         );
-        // path_finding with wide id_range: rejected (exceeds MAX_PATH_ANCHOR_RANGE)
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -2411,8 +2316,6 @@ mod tests {
             "endpoint \"a\"",
         );
     }
-
-    // ── LIKE security controls ──────────────────────────────────────
 
     fn ontology_with_sensitive_field() -> Ontology {
         Ontology::new()

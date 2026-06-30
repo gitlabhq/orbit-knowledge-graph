@@ -45,7 +45,6 @@ impl CircuitBreakerRegistry {
         Self::new(configs, Arc::new(NoopObserver))
     }
 
-    /// Returns a [`CircuitBreaker`] handle for the given service.
     /// All handles for the same service share state.
     pub fn circuit_breaker<S: ServiceName>(&self, service: S) -> CircuitBreaker {
         let name = service.as_str();
@@ -66,7 +65,6 @@ impl CircuitBreakerRegistry {
             .is_none_or(|circuit| circuit.is_available())
     }
 
-    /// Names of all services with non-closed circuits.
     pub fn unavailable_services(&self) -> Vec<&'static str> {
         let circuits = self.circuits.read();
         circuits

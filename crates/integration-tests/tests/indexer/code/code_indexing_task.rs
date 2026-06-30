@@ -2,16 +2,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
-use arrow::record_batch::RecordBatch;
-use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::destination::{BatchWriter, Destination, DestinationError};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
-use indexer::modules::code::config::CodeTableNames;
-use indexer::modules::code::{ClickHouseStaleDataCleaner, StaleDataCleaner};
+use indexer::modules::code::{
+    ClickHouseStaleDataCleaner, StaleDataCleaner, config::CodeTableNames,
+};
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
@@ -46,12 +44,13 @@ async fn indexes_repository() {
 
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
-    let context = handler_context(&clickhouse);
+    let context = handler_context();
     let traversal_path = "1/1/";
     let envelope = code_indexing_task_envelope(project_id, commit_sha, 1, traversal_path);
 
     let result = handler.handle(context, envelope).await;
     assert!(result.is_ok(), "handler failed: {:?}", result);
+    handler.flush().await.expect("flush");
 
     assert_code_indexed(&clickhouse, project_id).await;
     assert_branch_indexed(&clickhouse, project_id, "main", traversal_path).await;
@@ -134,6 +133,12 @@ async fn indexes_file_nodes_for_all_archive_files() {
     );
     assert_eq!(language_for(&files, "assets/logo.png"), Some("unknown"));
     assert_eq!(language_for(&files, "src/main.py"), Some("python"));
+
+    assert_eq!(
+        file_size_bytes(&clickhouse, project_id, "src/main.py").await,
+        Some(26),
+        "size_bytes must record the file's uncompressed byte length"
+    );
 
     assert_directory_is_active(&clickhouse, project_id, "config").await;
     assert_directory_is_active(&clickhouse, project_id, "docs/only").await;
@@ -219,9 +224,6 @@ async fn skips_oversized_go_parser_input_and_indexes_repository() {
     assert_active_definitions(&clickhouse, project_id, "main.go", &["main"]).await;
 }
 
-/// End-to-end test for CALLS and EXTENDS edges:
-/// indexes Java code with class inheritance and a method call, then
-/// queries `gl_code_edge` to verify both relationship kinds were written.
 #[tokio::test]
 async fn indexes_calls_and_extends_edges() {
     let project_id: i64 = 99;
@@ -387,7 +389,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 }
 
 #[tokio::test]
-async fn skips_stale_data_cleanup_on_first_index() {
+async fn cleans_stale_data_on_first_index() {
     let project_id: i64 = 13;
     let traversal_path = "1/13/";
     let branch = "main";
@@ -408,6 +410,7 @@ async fn skips_stale_data_cleanup_on_first_index() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
+    // The canary stands in for rows a killed prior run left with no checkpoint; the first successful index must sweep them.
     insert_stale_canary_file(&clickhouse, project_id, traversal_path, branch).await;
     assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
 
@@ -417,23 +420,6 @@ async fn skips_stale_data_cleanup_on_first_index() {
         project_id,
         "commit1",
         1,
-        traversal_path,
-    )
-    .await;
-
-    assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
-    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
-
-    mock.replace_archive(
-        project_id,
-        &[("src/Main.java", "public class Main { public void v2() {} }")],
-    );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit2",
-        2,
         traversal_path,
     )
     .await;
@@ -637,38 +623,23 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
             "public class Other { public void run() {} }",
         )],
     );
-    let (context, indexing_status) = handler_context_with_destination(Arc::new(FailingDestination));
+    let failing_handler = deps.code_indexing_task_handler_with_writer(failing_writer());
+    let (context, _indexing_status) = handler_context_with_status();
     let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
-    let error = handler
+    // Writes are buffered, so the handler acks; the deferred flush fails, the project's commit is
+    // marked failed (never checkpointed), and the backfill sweep re-indexes it.
+    failing_handler
         .handle(context, envelope)
         .await
-        .expect_err("writer failure should fail the task");
+        .expect("buffered handler acks even when the deferred write will fail");
+    let _ = failing_handler.flush().await;
 
-    assert!(
-        error
-            .to_string()
-            .contains("fatal code indexing pipeline error"),
-        "unexpected error: {error}"
-    );
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_file_not_active(&clickhouse, project_id, "src/Other.java").await;
     assert_eq!(
         latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
         Some(1),
         "failed reindex must not advance the checkpoint"
-    );
-
-    let progress = indexing_status
-        .get(traversal_path)
-        .await
-        .expect("progress lookup should succeed")
-        .expect("failed run should record indexing progress");
-    assert!(
-        progress
-            .last_error
-            .as_deref()
-            .is_some_and(|error| error.contains("fatal code indexing pipeline error")),
-        "failed run should record the fatal pipeline error in indexing progress, got {progress:?}"
     );
 }
 
@@ -688,7 +659,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
-    let context = handler_context(&clickhouse);
+    let context = handler_context();
     let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
 
     let result = handler.handle(context, envelope).await;
@@ -698,7 +669,6 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
         result
     );
 
-    // Checkpoint is set with no commit, marking the project as indexed-empty.
     let checkpoint_rows = clickhouse
         .query(&format!(
             "SELECT last_task_id, last_commit FROM {} FINAL \
@@ -722,7 +692,6 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
         last_commits.value(0)
     );
 
-    // No graph rows should have been written for this project.
     let files = clickhouse
         .query(&format!(
             "SELECT path FROM {} WHERE project_id = {project_id}",
@@ -767,7 +736,6 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
 /// `source_id IN (subquery)` that pins to `project_id` and `branch`.
 #[tokio::test]
 async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
-    // Two projects in the same namespace (traversal_path prefix "1/").
     let project_a: i64 = 20;
     let project_b: i64 = 21;
     let traversal_path_a = "1/20/";
@@ -781,7 +749,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
 
     let mock = MockGitlabServer::start().await;
 
-    // Project A: one Java file with two definitions.
     mock.add_project(
         project_a,
         "main",
@@ -793,7 +760,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
         )],
     );
 
-    // Project B: one Java file with two definitions.
     mock.add_project(
         project_b,
         "main",
@@ -808,7 +774,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    // Index both projects.
     index_code(
         &handler,
         &clickhouse,
@@ -828,7 +793,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     )
     .await;
 
-    // Verify both projects have active edges before reindexing.
     let edges_a_before = count_active_edges(&clickhouse, project_a, "DEFINES").await;
     let edges_b_before = count_active_edges(&clickhouse, project_b, "DEFINES").await;
     assert!(
@@ -840,7 +804,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
         "project B should have DEFINES edges before reindex, got {edges_b_before}"
     );
 
-    // Reindex project A with different content (triggers stale data cleanup for A).
     mock.replace_archive(
         project_a,
         &[(
@@ -860,7 +823,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     )
     .await;
 
-    // Project A's old edges should be gone, new ones present.
     assert_no_active_definitions(&clickhouse, project_a, "src/Alpha.java").await;
     assert_active_definitions(
         &clickhouse,
@@ -870,7 +832,6 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
     )
     .await;
 
-    // Project B's edges must be completely untouched by project A's stale cleanup.
     let edges_b_after = count_active_edges(&clickhouse, project_b, "DEFINES").await;
     assert_eq!(
         edges_b_after, edges_b_before,
@@ -888,19 +849,20 @@ async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
 
 async fn index_code(
     handler: &indexer::modules::code::CodeIndexingTaskHandler,
-    clickhouse: &integration_testkit::TestContext,
+    _clickhouse: &integration_testkit::TestContext,
     project_id: i64,
     commit_sha: &str,
     task_id: i64,
     traversal_path: &str,
 ) {
-    let context = handler_context(clickhouse);
+    let context = handler_context();
     let envelope = code_indexing_task_envelope(project_id, commit_sha, task_id, traversal_path);
 
     handler
         .handle(context, envelope)
         .await
         .unwrap_or_else(|e| panic!("indexing commit {commit_sha} (task {task_id}) failed: {e}"));
+    handler.flush().await.expect("flush");
 }
 
 async fn insert_file_row_with_version(
@@ -940,44 +902,29 @@ async fn insert_stale_canary_file(
     clickhouse.execute(&sql).await;
 }
 
-struct FailingDestination;
-
-#[async_trait]
-impl Destination for FailingDestination {
-    async fn new_batch_writer(
-        &self,
-        _table: &str,
-        _options: indexer::destination::BatchWriterOptions,
-    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        Ok(Box::new(FailingBatchWriter))
-    }
-}
-
-struct FailingBatchWriter;
-
-#[async_trait]
-impl BatchWriter for FailingBatchWriter {
-    async fn write_batch(&self, _batch: &[RecordBatch]) -> Result<(), DestinationError> {
-        Err(DestinationError::Write(
-            "forced write failure".to_string(),
-            None,
-        ))
-    }
-}
-
-fn handler_context_with_destination(
-    destination: Arc<dyn Destination>,
-) -> (HandlerContext, Arc<IndexingStatusStore>) {
+fn handler_context_with_status() -> (HandlerContext, Arc<IndexingStatusStore>) {
     let mock_nats = Arc::new(MockNatsServices::new());
     let indexing_status = Arc::new(IndexingStatusStore::new(mock_nats.clone()));
     let context = HandlerContext::new(
-        destination,
         mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
         indexing_status.clone(),
     );
     (context, indexing_status)
+}
+
+fn failing_writer() -> Arc<indexer::clickhouse::ClickHouseWriter> {
+    Arc::new(
+        indexer::clickhouse::ClickHouseWriter::new(
+            gkg_server_config::ClickHouseConfiguration {
+                url: "http://127.0.0.1:1".into(),
+                ..Default::default()
+            },
+            Arc::new(indexer::metrics::EngineMetrics::new()),
+        )
+        .expect("config is valid"),
+    )
 }
 
 async fn latest_checkpoint_task_id(
@@ -1093,6 +1040,24 @@ fn language_for<'a>(rows: &'a [(String, String, String)], path: &str) -> Option<
     rows.iter()
         .find(|row| row.0 == path)
         .map(|row| row.2.as_str())
+}
+
+async fn file_size_bytes(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    path: &str,
+) -> Option<i64> {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT size_bytes FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_file")
+        ))
+        .await;
+    let batch = result.into_iter().find(|b| b.num_rows() > 0)?;
+    let col = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(&batch, "size_bytes")
+        .expect("size_bytes column");
+    Some(col.value(0))
 }
 
 async fn assert_directory_is_active(
@@ -1312,10 +1277,30 @@ async fn timed_out_job_writes_no_data() {
         },
     );
     let handler = deps.code_indexing_task_handler();
-    let envelope = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
 
-    let result = handler.handle(handler_context(&clickhouse), envelope).await;
-    assert!(result.is_err(), "slow fetch should trip the job timeout");
+    // First timeout: transient, so NATS redelivers for one retry.
+    let mut first = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
+    first.attempt = 1;
+    let result = handler.handle(handler_context(), first).await;
+    assert!(
+        matches!(result, Err(indexer::handler::HandlerError::Processing(_))),
+        "first timeout must retry (transient), not dead-letter; got {result:?}"
+    );
+
+    // Second timeout: structurally stuck, so it dead-letters.
+    let mut second = code_indexing_task_envelope(project_id, "abc123", 1, "99/99/");
+    second.attempt = 2;
+    let result = handler.handle(handler_context(), second).await;
+    assert!(
+        matches!(
+            result,
+            Err(indexer::handler::HandlerError::Permanent {
+                action: indexer::handler::PermanentAction::DeadLetter,
+                ..
+            })
+        ),
+        "a job that times out twice must dead-letter; got {result:?}"
+    );
 
     for table in ["gl_file", "gl_definition"] {
         let rows = clickhouse

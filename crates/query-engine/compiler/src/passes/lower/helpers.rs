@@ -1,5 +1,3 @@
-//! Shared emit helpers: latest-row scans, columns, predicates, node hydration, edge predicates.
-
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -15,10 +13,6 @@ use crate::passes::shared::{
     deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate,
     rel_kind_filter, rel_kind_filter_values,
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared primitives: latest-row scans, columns, predicates
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Predicates applied after `FINAL` has resolved each node's latest row.
 pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
@@ -54,10 +48,8 @@ pub(super) fn candidate_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr>
     predicates
 }
 
-/// WHERE predicates for a node: filters + _deleted=false.
-/// Node columns for the outer SELECT, aliased as `{alias}_{col}` for the
-/// graph formatter. Only for non-aggregation queries (aggregation builds
-/// its own SELECT).
+/// Columns aliased as `{alias}_{col}` for the graph formatter. Only for
+/// non-aggregation queries (aggregation builds its own SELECT).
 pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
     if !np.emit_select {
         return vec![];
@@ -67,10 +59,6 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
         .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
         .collect()
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit helpers: node hydration
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Narrowing source for a node's latest-row scan: a `_narrow_*` CTE referenced
 /// by the node scan's WHERE clause.
@@ -98,7 +86,6 @@ pub(super) fn emit_node_join_with_narrowing(
     )
 }
 
-/// JOIN a node's latest-row scan into the FROM tree (FINAL when broad, LIMIT BY when narrowed).
 fn emit_node_join_inner(
     from: TableRef,
     np: &NodePlan,
@@ -192,12 +179,12 @@ fn node_join_condition(
     on
 }
 
+// Authoritative filter: dedup with FINAL before filtering so a stale matching version can't resurrect a row.
 pub(super) fn emit_filter_subquery(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
     ctes: &mut Vec<Cte>,
-    sort_key: &[String],
 ) -> Result<Vec<Expr>> {
     let table = np
         .table
@@ -208,7 +195,12 @@ pub(super) fn emit_filter_subquery(
 
     ctes.push(Cte::new(
         &cte_name,
-        node_ids_dedup_scan(alias, table, np, sort_key)?,
+        Query {
+            select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+            from: TableRef::scan_final(table, alias),
+            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+            ..Default::default()
+        },
     ));
 
     Ok(vec![Expr::InSubquery {
@@ -282,10 +274,6 @@ pub(super) fn fk_values_from_candidate_scan(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit helpers: edge predicates
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) fn push_edge_predicates(
     where_parts: &mut Vec<Expr>,
     alias: &str,
@@ -299,7 +287,6 @@ pub(super) fn push_edge_predicates(
     if let Some(f) = rel_kind_filter(alias, &hop.rel_types) {
         where_parts.push(f);
     }
-    // Entity kind filters.
     for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
         if let Some(np) = nodes.get(node_alias)
             && let Some(ref entity) = np.entity
@@ -343,70 +330,23 @@ pub(super) fn push_edge_predicates(
     }
 }
 
+// FINAL streams the latest edge version in bounded memory; argMax GROUP BY held every key resident and OOM'd on fat rels.
 pub(super) fn dedup_edge_scan(
     edge_table: &str,
     alias: &str,
-    table_columns: &HashMap<String, HashSet<String>>,
     inner_predicates: Vec<Expr>,
 ) -> TableRef {
-    let Some(cols) = table_columns.get(edge_table) else {
-        return TableRef::scan_final(edge_table, alias);
-    };
-
-    let identity: Vec<&str> = EDGE_RESERVED_COLUMNS
-        .iter()
-        .copied()
-        .filter(|c| cols.contains(*c))
-        .collect();
-
-    let mut projected: Vec<&str> = cols
-        .iter()
-        .map(String::as_str)
-        .filter(|c| !identity.contains(c) && *c != VERSION_COLUMN && *c != DELETED_COLUMN)
-        .collect();
-    projected.sort_unstable();
-
-    let mut select = Vec::with_capacity(identity.len() + projected.len());
-    for col in &identity {
-        select.push(SelectExpr::col(alias, *col));
-    }
-    for col in projected {
-        select.push(SelectExpr::new(
-            Expr::func(
-                "argMax",
-                vec![Expr::col(alias, col), Expr::col(alias, VERSION_COLUMN)],
-            ),
-            col,
-        ));
-    }
-
-    let group_by = identity
-        .iter()
-        .map(|c| Expr::col(alias, *c))
-        .collect::<Vec<_>>();
-
-    let having = Expr::eq(
-        Expr::func(
-            "argMax",
-            vec![
-                Expr::col(alias, DELETED_COLUMN),
-                Expr::col(alias, VERSION_COLUMN),
-            ],
-        ),
-        Expr::lit(false),
-    );
-
-    let where_clause = Expr::conjoin(inner_predicates);
-
-    let query = Query {
-        select,
-        from: TableRef::scan(edge_table, alias),
-        where_clause,
-        group_by,
-        having: Some(having),
-        ..Default::default()
-    };
-    TableRef::subquery(query, alias)
+    let mut where_parts = inner_predicates;
+    where_parts.push(deleted_false(alias));
+    TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan_final(edge_table, alias),
+            where_clause: Expr::conjoin(where_parts),
+            ..Default::default()
+        },
+        alias,
+    )
 }
 
 /// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery
@@ -596,10 +536,6 @@ pub(super) fn emit_filter_narrowing(
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Variable-length: UNION ALL of edge chains
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub(super) fn build_multi_hop_union(
     hop: &Hop,
     alias: &str,
@@ -673,7 +609,6 @@ pub(super) fn build_depth_arm(
     };
 
     let mut from = TableRef::scan(edge_table, "e1");
-    // First edge: relationship kind + _deleted filter.
     let mut where_parts = Vec::new();
     if let Some(types) = type_filter
         && let Some(f) = Expr::col_in(
@@ -697,7 +632,6 @@ pub(super) fn build_depth_arm(
         let curr = format!("e{i}");
         let right = TableRef::scan(edge_table, &curr);
         let mut join_on = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
-        // _deleted = false on every chained edge.
         join_on = Expr::and(join_on, deleted_false(&curr));
         if let Some(types) = type_filter
             && let Some(tc) = Expr::col_in(

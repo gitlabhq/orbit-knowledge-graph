@@ -22,9 +22,6 @@ use crate::node::{Axis, Match, Node};
 use crate::source::Doc;
 use smallvec::SmallVec;
 
-// ── Core types ──────────────────────────────────────────────────
-
-/// A single navigation step: `(Axis, Match)`, required or optional.
 #[derive(Clone)]
 pub enum Step {
     /// Must succeed or pipeline returns None.
@@ -37,18 +34,13 @@ pub enum Step {
     Nth(Axis<'static>, Match<'static>, isize),
 }
 
-/// How to produce a string from the final node.
 #[derive(Clone)]
 pub enum Emit {
-    /// The node's full text.
     Text,
-    /// Nothing — used for navigation-only extracts (via `navigate()`).
     None,
     /// Try `field("name")`, then first child matching these kinds.
     Name(&'static [&'static str]),
-    /// Collect text of all children matching this criterion.
     Children(Match<'static>),
-    /// A fixed constant string, ignoring the node.
     Const(&'static str),
 }
 
@@ -62,14 +54,11 @@ pub const IDENT_KINDS: &[&str] = &[
     "property_identifier",
 ];
 
-/// A pipeline: navigation steps + terminal extraction.
 #[derive(Clone)]
 pub struct Extract {
     steps: SmallVec<[Step; 4]>,
     emit: Emit,
 }
-
-// ── Constructors ────────────────────────────────────────────────
 
 pub fn field(name: &'static str) -> Extract {
     Extract::from_step(Step::Nav(Axis::Field(name), Match::Any))
@@ -99,7 +88,6 @@ pub fn text() -> Extract {
     Extract::terminal(Emit::Text)
 }
 
-/// Always returns a fixed string, regardless of the node.
 pub fn constant(s: &'static str) -> Extract {
     Extract::terminal(Emit::Const(s))
 }
@@ -116,8 +104,6 @@ pub fn name_or_ident(ident_kinds: &'static [&'static str]) -> Extract {
     Extract::terminal(Emit::Name(ident_kinds))
 }
 
-// ── Chaining ────────────────────────────────────────────────────
-
 impl Extract {
     fn from_step(step: Step) -> Self {
         Self {
@@ -126,7 +112,6 @@ impl Extract {
         }
     }
 
-    /// Start a pipeline with a single required navigation step.
     pub fn one(axis: Axis<'static>, m: Match<'static>) -> Self {
         Self::from_step(Step::Nav(axis, m))
     }
@@ -143,7 +128,6 @@ impl Extract {
         self
     }
 
-    // Required steps
     pub fn field(self, name: &'static str) -> Self {
         self.push(Step::Nav(Axis::Field(name), Match::Any))
     }
@@ -176,7 +160,6 @@ impl Extract {
         self.push(Step::Nth(axis, m, n))
     }
 
-    // Optional steps (stay at current node on failure)
     pub fn try_field(self, name: &'static str) -> Self {
         self.push(Step::Try(Axis::Field(name), Match::Any))
     }
@@ -190,12 +173,10 @@ impl Extract {
         self.push(Step::Try(axis, m))
     }
 
-    // Filter (validate current node without navigating)
     pub fn where_(self, m: Match<'static>) -> Self {
         self.push(Step::Where(m))
     }
 
-    // Emit control
     pub fn or_default_name(mut self) -> Self {
         self.emit = Emit::Name(IDENT_KINDS);
         self
@@ -209,14 +190,12 @@ impl Extract {
         self
     }
 
-    /// Collect text of all children matching this criterion.
     /// Use with `apply_all()` instead of `apply()`.
     pub fn collect(mut self, m: Match<'static>) -> Self {
         self.emit = Emit::Children(m);
         self
     }
 
-    // Composition
     pub fn inner(self, container: &'static str, target: &'static str) -> Self {
         self.try_child(container).try_descendant(target)
     }
@@ -227,17 +206,14 @@ impl Extract {
     }
 }
 
-// ── Execution ───────────────────────────────────────────────────
-
 impl Extract {
     pub fn apply<D: Doc>(&self, node: &Node<'_, D>) -> Option<String> {
         let target = self.navigate(node)?;
         emit(&self.emit, &target)
     }
 
-    /// Navigate + extract, then transform the result with access to the
-    /// origin node. The origin node gives full tree context — walk
-    /// ancestors for scope, siblings for decorators, anything.
+    /// The transform receives the *origin* node (not the navigated target),
+    /// so it can walk ancestors for scope or siblings for decorators.
     pub fn apply_with<D: Doc>(
         &self,
         node: &Node<'_, D>,
@@ -248,8 +224,7 @@ impl Extract {
         Some(transform(raw, node))
     }
 
-    /// Navigate, then collect all children matching the `Emit::Children`
-    /// criterion. Returns empty vec on navigation failure or non-Children emit.
+    /// Returns empty vec on navigation failure or non-Children emit.
     pub fn apply_all<D: Doc>(&self, node: &Node<'_, D>) -> Vec<String> {
         let Some(target) = self.navigate(node) else {
             return vec![];
@@ -257,7 +232,6 @@ impl Extract {
         emit_all(&self.emit, &target)
     }
 
-    /// Like `apply_all`, but transform each collected string with tree context.
     pub fn apply_all_with<D: Doc>(
         &self,
         node: &Node<'_, D>,
@@ -312,10 +286,7 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
             }
             None
         }
-        Emit::Children(_) => {
-            // Single-value fallback: return first match
-            emit_all(mode, node).into_iter().next()
-        }
+        Emit::Children(_) => emit_all(mode, node).into_iter().next(),
         Emit::Const(s) => Some(s.to_string()),
     }
 }
@@ -327,7 +298,6 @@ fn emit_all<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Vec<String> {
             .filter(|c| m.test(c))
             .map(|c| c.text().to_string())
             .collect(),
-        // For non-Children emit, produce 0 or 1 element
         other => emit(other, node).into_iter().collect(),
     }
 }
@@ -417,7 +387,6 @@ mod tests {
             .find(Axis::Descendant, Match::Kind("function_definition"))
             .unwrap();
 
-        // Extract the method name, then compute FQN from ancestors
         let fqn = field("name").apply_with(&method, |name, origin| {
             let mut scope = Vec::new();
             for ancestor in origin.parent_chain() {
@@ -441,7 +410,6 @@ mod tests {
         let root = SupportLang::Python.ast_grep(code);
         let cls = root.root().children().next().unwrap();
 
-        // Collect all function_definition names from the class body
         let methods = field("body")
             .collect(Match::Kind("function_definition"))
             .apply_all(&cls);
@@ -461,7 +429,6 @@ mod tests {
             .collect(Match::Kind("function_definition"))
             .apply_all_with(&cls, |method_text, origin| {
                 let cls_name = origin.field("name").unwrap().text().to_string();
-                // Just extract function name from the full text
                 let fn_name = method_text
                     .split('(')
                     .next()

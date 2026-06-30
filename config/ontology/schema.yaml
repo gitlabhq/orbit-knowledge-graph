@@ -264,6 +264,9 @@ settings:
     # Use exclude to skip noisy or irrelevant columns.
     exclude:
       - {node: Note, columns: [st_diff]}
+  partition:
+    partition_by: "sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50"
+    required_columns: [traversal_path]
   internal_column_prefix: "_gkg_"
   local_db:
     entities:
@@ -374,6 +377,7 @@ domains:
     description: "Entities related to source code structure, definitions, and imports."
     nodes:
       Branch: nodes/source_code/branch.yaml
+      Commit: nodes/source_code/commit.yaml
       Directory: nodes/source_code/directory.yaml
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
@@ -446,4 +450,5 @@ edges:
   BUILT_BY: edges/built_by.yaml
   MENTIONS: edges/mentions.yaml
   REOPENED: edges/reopened.yaml
+  MERGED_AT_COMMIT: edges/merged_at_commit.yaml
   DECLARES_DEPENDENCY: edges/declares_dependency.yaml

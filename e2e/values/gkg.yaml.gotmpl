@@ -145,16 +145,24 @@ schedule:
       cron: "*/5 * * * * *"
     namespace:
       cron: "*/5 * * * * *"
-    code-indexing-task:
-      cron: "*/5 * * * * *"
+      # Full re-dispatch safety net. A namespace whose enable CDC event lost the race
+      # with traversal_path materialization is skipped and only recovered by this sweep
+      # (no later data change re-triggers it). The default is hourly, far longer than the
+      # Robot suite budgets (180s), so a race-lost namespace never recovers in time.
+      # Keep it well under the budget but well above the cron so the incremental
+      # change-detection path still dominates (a too-short interval makes every tick a
+      # full sweep, starving incremental pickup of fresh data and thrashing the indexer).
+      sweep_interval_secs: 60
+    siphon:
       events_stream_name: "e2e_siphon_event_stream"
-    namespace-code-backfill:
+    code-backfill:
       cron: "*/5 * * * * *"
-      events_stream_name: "e2e_siphon_event_stream"
     table-cleanup:
       cron: "0 0 3 * * *"
     namespace-deletion:
       cron: "0 0 3 * * *"
+    stale-edge-reconciliation:
+      cron: "*/10 * * * * *"
     migration-completion:
       cron: "*/10 * * * * *"
 

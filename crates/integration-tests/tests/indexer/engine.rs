@@ -1,7 +1,4 @@
-//! Integration tests for the ETL engine.
-//!
-//! These tests verify the full message flow: NATS -> Handler -> ClickHouse.
-//! They require a Docker-compatible runtime (Docker, Colima, etc).
+//! Require a Docker-compatible runtime (Docker, Colima, etc).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,9 +12,8 @@ use gkg_server_config::{
     ClickHouseConfiguration, EngineConfiguration, NatsConfiguration, SubscriptionConfig,
 };
 use gkg_utils::arrow::ArrowUtils;
-use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
+use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseWriter};
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
-use indexer::destination::BatchWriterOptions;
 use indexer::durability::WriteDurability;
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
@@ -57,7 +53,9 @@ impl Event for TestEvent {
     }
 }
 
-struct TestHandler;
+struct TestHandler {
+    writer: Arc<ClickHouseWriter>,
+}
 
 #[async_trait]
 impl Handler for TestHandler {
@@ -69,20 +67,13 @@ impl Handler for TestHandler {
         test_subscription()
     }
 
-    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+    async fn handle(
+        &self,
+        _context: HandlerContext,
+        message: Envelope,
+    ) -> Result<(), HandlerError> {
         let event: TestEvent = message
             .to_event()
-            .map_err(|error| HandlerError::Processing(error.to_string()))?;
-
-        let writer = context
-            .destination
-            .new_batch_writer(
-                TABLE,
-                BatchWriterOptions {
-                    durability: Some(WriteDurability::Durable),
-                },
-            )
-            .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
         let schema = Arc::new(Schema::new(vec![
@@ -99,8 +90,8 @@ impl Handler for TestHandler {
         )
         .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
-        writer
-            .write_batch(&[batch])
+        self.writer
+            .write(TABLE, vec![batch], Some(WriteDurability::Durable))
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
@@ -243,9 +234,9 @@ impl TestContext {
         )
     }
 
-    async fn create_destination(&self) -> Arc<ClickHouseDestination> {
+    fn create_writer(&self) -> Arc<ClickHouseWriter> {
         Arc::new(
-            ClickHouseDestination::new(
+            ClickHouseWriter::new(
                 ClickHouseConfiguration {
                     database: DATABASE.to_string(),
                     url: self.clickhouse_endpoint.clone(),
@@ -257,7 +248,7 @@ impl TestContext {
                 },
                 Arc::new(EngineMetrics::default()),
             )
-            .expect("failed to create destination"),
+            .expect("failed to create writer"),
         )
     }
 
@@ -308,25 +299,21 @@ async fn run_engine_for(engine: Arc<Engine>, duration: Duration) {
     task.await.expect("engine task panicked");
 }
 
-fn create_engine(
-    broker: Arc<NatsBroker>,
-    destination: Arc<ClickHouseDestination>,
-    handler: Box<dyn Handler>,
-) -> Arc<Engine> {
+fn create_engine(broker: Arc<NatsBroker>, handler: Box<dyn Handler>) -> Arc<Engine> {
     let registry = Arc::new(HandlerRegistry::default());
     registry.register_handler(handler);
     let indexing_status = Arc::new(indexer::indexing_status::IndexingStatusStore::new(
         Arc::new(nats_client::KvServicesImpl::new(broker.client().clone())),
     ));
-    Arc::new(EngineBuilder::new(broker, registry, destination, indexing_status).build())
+    Arc::new(EngineBuilder::new(broker, registry, indexing_status).build())
 }
 
 #[tokio::test]
 async fn single_message_flows_through_engine() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;
-    let destination = context.create_destination().await;
-    let engine = create_engine(broker.clone(), destination, Box::new(TestHandler));
+    let writer = context.create_writer();
+    let engine = create_engine(broker.clone(), Box::new(TestHandler { writer }));
 
     context.publish_event(&broker, 1, "alice").await;
     run_engine_for(engine, Duration::from_secs(2)).await;
@@ -338,8 +325,8 @@ async fn single_message_flows_through_engine() {
 async fn multiple_messages_processed() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;
-    let destination = context.create_destination().await;
-    let engine = create_engine(broker.clone(), destination, Box::new(TestHandler));
+    let writer = context.create_writer();
+    let engine = create_engine(broker.clone(), Box::new(TestHandler { writer }));
 
     for i in 1..=5 {
         context
@@ -356,18 +343,18 @@ async fn multiple_messages_processed() {
 async fn multiple_handlers_receive_same_message() {
     let context = TestContext::new().await;
     let broker = context.create_broker().await;
-    let destination = context.create_destination().await;
+    let writer = context.create_writer();
 
     let registry = Arc::new(HandlerRegistry::default());
-    registry.register_handler(Box::new(TestHandler));
-    registry.register_handler(Box::new(TestHandler));
+    registry.register_handler(Box::new(TestHandler {
+        writer: writer.clone(),
+    }));
+    registry.register_handler(Box::new(TestHandler { writer }));
 
     let indexing_status = Arc::new(indexer::indexing_status::IndexingStatusStore::new(
         Arc::new(nats_client::KvServicesImpl::new(broker.client().clone())),
     ));
-    let engine = Arc::new(
-        EngineBuilder::new(broker.clone(), registry, destination, indexing_status).build(),
-    );
+    let engine = Arc::new(EngineBuilder::new(broker.clone(), registry, indexing_status).build());
 
     context.publish_event(&broker, 100, "shared").await;
     run_engine_for(engine, Duration::from_secs(2)).await;
@@ -384,6 +371,7 @@ fn panic_subscription() -> Subscription {
 
 struct PanickingHandler {
     should_panic: Arc<AtomicBool>,
+    writer: Arc<ClickHouseWriter>,
 }
 
 #[async_trait]
@@ -396,24 +384,17 @@ impl Handler for PanickingHandler {
         panic_subscription()
     }
 
-    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+    async fn handle(
+        &self,
+        _context: HandlerContext,
+        message: Envelope,
+    ) -> Result<(), HandlerError> {
         if self.should_panic.load(Ordering::SeqCst) {
             panic!("intentional panic in handler");
         }
 
         let event: TestEvent = message
             .to_event()
-            .map_err(|error| HandlerError::Processing(error.to_string()))?;
-
-        let writer = context
-            .destination
-            .new_batch_writer(
-                TABLE,
-                BatchWriterOptions {
-                    durability: Some(WriteDurability::Durable),
-                },
-            )
-            .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
         let schema = Arc::new(Schema::new(vec![
@@ -430,8 +411,8 @@ impl Handler for PanickingHandler {
         )
         .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
-        writer
-            .write_batch(&[batch])
+        self.writer
+            .write(TABLE, vec![batch], Some(WriteDurability::Durable))
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
@@ -451,10 +432,8 @@ async fn subject_is_unblocked_after_handler_panic() {
     };
 
     let should_panic = Arc::new(AtomicBool::new(true));
-    let destination = context.create_destination().await;
+    let writer = context.create_writer();
 
-    // Phase 1: publish a message that will cause the handler to panic.
-    // The engine should catch the panic and term-ack the message, freeing the subject slot.
     {
         let broker = context.create_broker_with_config(nats_config.clone()).await;
 
@@ -475,8 +454,9 @@ async fn subject_is_unblocked_after_handler_panic() {
 
         let handler = PanickingHandler {
             should_panic: should_panic.clone(),
+            writer: writer.clone(),
         };
-        let engine = create_engine(broker.clone(), destination.clone(), Box::new(handler));
+        let engine = create_engine(broker.clone(), Box::new(handler));
 
         run_engine_for(engine, Duration::from_secs(2)).await;
 
@@ -492,8 +472,6 @@ async fn subject_is_unblocked_after_handler_panic() {
         "panicked message should not be written"
     );
 
-    // Phase 2: the subject slot is now free. Publish a new message and verify it
-    // is processed by a non-panicking handler.
     should_panic.store(false, Ordering::SeqCst);
 
     let broker = context.create_broker_with_config(nats_config).await;
@@ -510,8 +488,9 @@ async fn subject_is_unblocked_after_handler_panic() {
 
     let handler = PanickingHandler {
         should_panic: should_panic.clone(),
+        writer,
     };
-    let engine = create_engine(broker.clone(), destination, Box::new(handler));
+    let engine = create_engine(broker.clone(), Box::new(handler));
 
     run_engine_for(engine, Duration::from_secs(2)).await;
 
@@ -521,8 +500,6 @@ async fn subject_is_unblocked_after_handler_panic() {
         "second message should be processed"
     );
 }
-
-// -- Permanent error test helpers --
 
 use indexer::handler::PermanentAction;
 
@@ -636,8 +613,6 @@ async fn permanent_dlq_error_sends_to_dlq_on_first_attempt() {
             ..Default::default()
         })
         .await;
-    let destination = context.create_destination().await;
-
     broker
         .ensure_streams(std::slice::from_ref(&subscription))
         .await
@@ -651,7 +626,7 @@ async fn permanent_dlq_error_sends_to_dlq_on_first_attempt() {
         PermanentAction::DeadLetter,
         "fatal code indexing pipeline error during parse for main.rs: unsupported",
     );
-    let engine = create_engine(broker.clone(), destination, Box::new(handler));
+    let engine = create_engine(broker.clone(), Box::new(handler));
     run_engine_for(engine, Duration::from_secs(3)).await;
 
     assert_eq!(
@@ -689,8 +664,6 @@ async fn permanent_drop_error_drops_without_dlq() {
             ..Default::default()
         })
         .await;
-    let destination = context.create_destination().await;
-
     broker
         .ensure_streams(std::slice::from_ref(&subscription))
         .await
@@ -704,7 +677,7 @@ async fn permanent_drop_error_drops_without_dlq() {
         PermanentAction::Drop,
         "known unrecoverable state",
     );
-    let engine = create_engine(broker.clone(), destination, Box::new(handler));
+    let engine = create_engine(broker.clone(), Box::new(handler));
     run_engine_for(engine, Duration::from_secs(3)).await;
 
     assert_eq!(

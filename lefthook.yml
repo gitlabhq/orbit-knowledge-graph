@@ -3,6 +3,7 @@ glob_matcher: doublestar
 output:
   - summary
   - failure
+  - execution_out
 
 commit-msg:
   jobs:
@@ -21,6 +22,14 @@ pre-commit:
   jobs:
     - name: fmt
       run: mise run lint:fmt
+      glob: "**/*.rs"
+    # Advisory/non-blocking: narration lint prints warnings but must not block
+    # the commit. The script exits non-zero on findings; `|| true` absorbs that
+    # exit at the config level so lefthook treats the job as passed. (Lefthook
+    # has no per-job allow_failure primitive — this is the standard workaround.)
+    # To promote to a blocking gate, remove `|| true`.
+    - name: narration
+      run: ./scripts/comment-guard/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md

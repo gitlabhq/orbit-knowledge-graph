@@ -3,13 +3,19 @@ use std::collections::HashMap;
 use arrow::record_batch::RecordBatch;
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 
-use super::format::{EdgeExpect, Expect, Matcher, NodeExpect, RowMatcher};
+use super::DispatchedMessage;
+use super::format::{DispatchExpect, EdgeExpect, Expect, Matcher, NodeExpect, RowMatcher};
 use super::seed::prefix_graph_table;
 use crate::assertions::{assert_edge_tags_by_source, assert_edge_tags_by_target, edge_table};
 use crate::context::TestContext;
 use crate::t;
 
-pub async fn check_expect(ctx: &TestContext, expect: &Expect, location: &str) {
+pub async fn check_expect(
+    ctx: &TestContext,
+    expect: &Expect,
+    dispatched: &[DispatchedMessage],
+    location: &str,
+) {
     for (table, node_expect) in &expect.nodes {
         check_nodes(ctx, table, node_expect, location).await;
     }
@@ -18,6 +24,9 @@ pub async fn check_expect(ctx: &TestContext, expect: &Expect, location: &str) {
     }
     for (table, expected_total) in &expect.totals {
         check_total(ctx, table, *expected_total, location).await;
+    }
+    for dispatch_expect in &expect.dispatched {
+        check_dispatched(dispatched, dispatch_expect, location);
     }
 }
 
@@ -179,6 +188,76 @@ fn value_matches(expected: &Matcher, actual: &ColumnValue) -> bool {
         Matcher::Value(value) => {
             let json = serde_json::to_value(value).expect("YAML value converts to JSON");
             ColumnValue::from(json) == *actual
+        }
+    }
+}
+
+fn check_dispatched(dispatched: &[DispatchedMessage], expect: &DispatchExpect, location: &str) {
+    let payloads: Vec<&serde_json::Value> = dispatched
+        .iter()
+        .filter(|message| message.kind == expect.kind)
+        .map(|message| &message.payload)
+        .collect();
+    let kind_location = format!("{location}: {} requests", expect.kind);
+
+    if let Some(expected) = expect.count {
+        assert_eq!(
+            payloads.len(),
+            expected,
+            "{kind_location}: expected {expected}, got {}",
+            payloads.len()
+        );
+    }
+
+    for matcher in &expect.rows {
+        assert_exactly_one_request_match(&payloads, matcher, &kind_location);
+    }
+}
+
+fn assert_exactly_one_request_match(
+    payloads: &[&serde_json::Value],
+    matcher: &RowMatcher,
+    location: &str,
+) {
+    let matching = payloads
+        .iter()
+        .filter(|payload| request_matches(payload, matcher))
+        .count();
+    if matching == 1 {
+        return;
+    }
+    panic!(
+        "{location}: matcher {matcher:?} matched {matching} requests (expected exactly 1); \
+         actual payloads:\n  {}",
+        payloads
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+}
+
+fn request_matches(payload: &serde_json::Value, matcher: &RowMatcher) -> bool {
+    matcher.iter().all(|(field, expected)| {
+        payload
+            .get(field)
+            .is_some_and(|actual| request_value_matches(expected, actual))
+    })
+}
+
+fn request_value_matches(expected: &Matcher, actual: &serde_json::Value) -> bool {
+    match expected {
+        // `contains` is element membership for arrays, substring for strings.
+        Matcher::Contains(c) => match actual {
+            serde_json::Value::Array(items) => items
+                .iter()
+                .any(|item| item.as_str() == Some(c.contains.as_str())),
+            serde_json::Value::String(s) => s.contains(&c.contains),
+            _ => false,
+        },
+        Matcher::Value(value) => {
+            let json = serde_json::to_value(value).expect("YAML value converts to JSON");
+            json == *actual
         }
     }
 }

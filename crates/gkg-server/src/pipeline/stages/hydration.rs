@@ -28,7 +28,6 @@ impl HydrationStage {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
     }
 
-    /// Build a [`ResolverContext`] and call the shared resolution loop.
     async fn resolve(
         ctx: &QueryPipelineContext,
         entity_virtual_columns: &[EntityVirtualColumns<'_>],
@@ -58,9 +57,6 @@ impl HydrationStage {
         .await
     }
 
-    /// Compile a `QueryType::Hydration` input and execute the single UNION ALL
-    /// query against ClickHouse. Shared by both static and dynamic hydration.
-    ///
     /// The `traversal_path` filter shape (`arrayExists` vs OR-of-`startsWith`)
     /// is selected by the compiler from the originating query type, read off
     /// the pipeline ctx (`ctx.compiled.input.query_type`) here and stamped on

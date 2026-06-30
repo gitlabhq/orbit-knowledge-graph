@@ -1,9 +1,6 @@
-//! Neighbors emit: single-hop edge scan for adjacent entities.
-//!
-//! For Direction::Both, produces outgoing UNION ALL incoming.
-//! The enforce pass handles _gkg_* column injection (Neighbors emits
-//! its own redaction columns directly since the center edge column
-//! differs per direction arm).
+//! Neighbors emits its own redaction columns directly (rather than relying on
+//! the enforce pass's _gkg_* injection) since the center edge column differs
+//! per direction arm.
 
 use ontology::constants::*;
 
@@ -17,8 +14,6 @@ use crate::passes::shared::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
-
-// ─── Emit ────────────────────────────────────────────────────────────────────
 
 pub fn emit_neighbors(
     plan: &Plan,

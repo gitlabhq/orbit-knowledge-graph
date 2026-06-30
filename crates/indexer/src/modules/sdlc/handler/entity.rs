@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
@@ -17,10 +18,10 @@ use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
 use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats, WindowBounds};
 use crate::modules::sdlc::plan::{
-    Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
+    DeletedFilter, Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
 };
 use crate::modules::sdlc::transform::system_notes;
-use crate::observer::{self, IndexingObserver, PipelineType};
+use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
@@ -34,6 +35,7 @@ pub struct EntityHandler {
     plan: Plan,
     scope: EtlScope,
     pipeline: Arc<Pipeline>,
+    writer: Arc<crate::clickhouse::ClickHouseWriter>,
     datalake: Arc<dyn DatalakeQuery>,
     checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
@@ -49,6 +51,13 @@ struct IndexingRequest {
     namespace_id: Option<i64>,
     dispatch_id: Uuid,
     campaign_id: Option<String>,
+    targets: Vec<String>,
+}
+
+impl IndexingRequest {
+    fn indexing_requested(&self, target: &str) -> bool {
+        self.targets.is_empty() || self.targets.iter().any(|requested| requested == target)
+    }
 }
 
 impl EntityHandler {
@@ -60,6 +69,7 @@ impl EntityHandler {
         plan: Plan,
         scope: EtlScope,
         pipeline: Arc<Pipeline>,
+        writer: Arc<crate::clickhouse::ClickHouseWriter>,
         datalake: Arc<dyn DatalakeQuery>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
@@ -73,6 +83,7 @@ impl EntityHandler {
             plan,
             scope,
             pipeline,
+            writer,
             datalake,
             checkpoint_store,
             metrics,
@@ -107,6 +118,7 @@ impl EntityHandler {
                     namespace_id: None,
                     dispatch_id: payload.dispatch_id,
                     campaign_id: payload.campaign_id,
+                    targets: payload.targets,
                 })
             }
             EtlScope::Namespaced => {
@@ -119,6 +131,7 @@ impl EntityHandler {
                     namespace_id: Some(payload.namespace),
                     dispatch_id: payload.dispatch_id,
                     campaign_id: payload.campaign_id,
+                    targets: payload.targets,
                 })
             }
         }
@@ -153,7 +166,7 @@ impl EntityHandler {
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
         let pipeline_context = PipelineContext {
-            destination: Arc::clone(&context.destination),
+            writer: Arc::clone(&self.writer),
             progress: context.progress.clone(),
             observer: Arc::clone(&observer),
         };
@@ -171,7 +184,10 @@ impl EntityHandler {
                     .traversal_path
                     .as_deref()
                     .map(|path| TraversalPathFilter { path }),
-            );
+            )
+            .with((mode == IndexingMode::Full).then_some(DeletedFilter {
+                column: &self.plan.deleted_column,
+            }));
 
         let should_partition = self.partition_strategy.is_some() && parent_checkpoint.is_none();
         let ranges = if should_partition {
@@ -304,7 +320,7 @@ impl EntityHandler {
             let plan = self.plan.clone();
             let pipeline = Arc::clone(&self.pipeline);
             let partition_context = PipelineContext {
-                destination: Arc::clone(&context.destination),
+                writer: Arc::clone(&self.writer),
                 progress: context.progress.clone(),
                 observer: Arc::clone(&parent_pipeline_context.observer),
             };
@@ -406,6 +422,16 @@ impl Handler for EntityHandler {
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let request = self.deserialize(message)?;
 
+        if !request.indexing_requested(&self.plan.target) {
+            debug!(
+                entity = %self.plan.name,
+                target = %self.plan.target,
+                targets = ?request.targets,
+                "skipping request: target not selected"
+            );
+            return Ok(());
+        }
+
         if !self.enabled_for_namespace(request.namespace_id) {
             debug!(
                 entity = %self.plan.name,
@@ -481,15 +507,13 @@ mod tests {
     use crate::modules::sdlc::plan::build_plans;
     use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
-    use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
+    use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
     use ontology::Ontology;
 
     fn handler_context() -> HandlerContext {
-        let destination = Arc::new(MockDestination::new());
         let mock_nats = Arc::new(MockNatsServices::new());
         HandlerContext::new(
-            destination,
             mock_nats.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
@@ -522,10 +546,12 @@ mod tests {
             EtlScope::Namespaced => NamespaceIndexingRequest::subscription(),
         };
 
+        let writer = crate::testkit::test_writer();
         EntityHandler::new(
             plan,
             scope,
             pipeline,
+            writer,
             datalake,
             checkpoint_store,
             test_metrics(),
@@ -564,6 +590,25 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn indexing_requested_matches_empty_or_matching_target() {
+        assert!(indexing_request_with_targets([]).indexing_requested("MergeRequest"));
+        assert!(indexing_request_with_targets(["MergeRequest"]).indexing_requested("MergeRequest"));
+        assert!(!indexing_request_with_targets(["Job"]).indexing_requested("MergeRequest"));
+    }
+
+    fn indexing_request_with_targets<const N: usize>(targets: [&str; N]) -> IndexingRequest {
+        IndexingRequest {
+            watermark: ts("2024-01-21T00:00:00Z"),
+            scope_key: "global".to_string(),
+            traversal_path: None,
+            namespace_id: None,
+            dispatch_id: Uuid::nil(),
+            campaign_id: None,
+            targets: targets.iter().map(|target| target.to_string()).collect(),
+        }
     }
 
     fn ts(s: &str) -> DateTime<Utc> {

@@ -348,7 +348,6 @@ pub(super) async fn search_wildcard_columns_returns_all_ontology_fields(ctx: &Te
     alice.assert_str("state", "active");
     alice.assert_str("user_type", "human");
 
-    // Wildcard must not leak internal columns (traversal_path, _version, _deleted).
     assert!(
         alice.prop("traversal_path").is_none(),
         "traversal_path is internal and should not be exposed"
@@ -611,10 +610,6 @@ pub(super) async fn search_filter_is_not_null_on_datetime_returns_merged_rows(ct
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Multi-filter range queries (array of PropertyFilter on a single property)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Date window via multi-filter: merged_at >= 2024-04-01 AND < 2024-07-01.
 /// Only MR 2004 (merged_at 2024-06-10) falls within [April, July).
 pub(super) async fn search_multi_filter_date_window(ctx: &TestContext) {
@@ -745,11 +740,6 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Virtual column filters (post-hydration, uses MockColumnResolver)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Filter on virtual column `diff` with `contains` matching the mock value.
 /// MockColumnResolver returns "mock:mr_raw_patch" for every MR, so
 /// `contains: "mock"` should return all merged MRs that pass the state filter.
 pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
@@ -779,8 +769,6 @@ pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
     });
 }
 
-/// Filter on virtual column `diff` with `eq` that does not match the mock
-/// value. Should return 0 rows.
 pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -827,7 +815,6 @@ pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
     resp.assert_filter("MergeRequest", "diff", |n| n.prop_str("diff").is_some());
 }
 
-/// Combined physical + virtual filter: state=merged AND diff contains "mock".
 pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestContext) {
     let resp = run_query(
         ctx,

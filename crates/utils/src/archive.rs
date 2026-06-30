@@ -186,7 +186,6 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
-    /// Parses every file — the archive's mechanism with no filtering (defaults).
     struct ParseAll;
     impl FileStreamHooks for ParseAll {}
 

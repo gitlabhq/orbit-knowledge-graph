@@ -1,11 +1,7 @@
-//! Tree traversal algorithms for tree-sitter nodes.
-//!
-//! This module provides efficient pre-order traversal using tree-sitter's cursor API
-//! without extra heap allocation.
+//! Pre-order traversal over tree-sitter's cursor API without extra heap allocation.
 
 use tree_sitter as ts;
 
-/// Represents a pre-order traversal of tree-sitter nodes.
 pub struct TsPre<'tree> {
     cursor: ts::TreeCursor<'tree>,
     start_id: Option<usize>,
@@ -44,7 +40,6 @@ impl<'tree> TsPre<'tree> {
         self.start_id = None;
     }
 
-    /// Get the current depth of traversal
     pub fn current_depth(&self) -> usize {
         self.current_depth
     }

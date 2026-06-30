@@ -11,13 +11,12 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::types::BindingKind;
 
+use crate::v2::dsl::types::LanguageHooks;
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
     ResolverHooks,
 };
-
-// ── DSL parser spec ─────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct PythonDsl;
@@ -95,14 +94,14 @@ impl DslLanguage for PythonDsl {
         Language::Python
     }
 
-    fn hooks() -> crate::v2::dsl::types::LanguageHooks {
-        crate::v2::dsl::types::LanguageHooks {
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
             module_scope: Some(python_module_from_path),
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["decorator"],
-            resolve_import_path: Some(resolve_python_relative_import),
+            import_rewriter: Some(build_python_import_rewriter),
             import_scope_name: Some(python_import_scope_name),
-            ..crate::v2::dsl::types::LanguageHooks::default()
+            ..LanguageHooks::default()
         }
     }
 
@@ -138,7 +137,6 @@ impl DslLanguage for PythonDsl {
                 .metadata(metadata().type_annotation(field("type"))),
         ];
 
-        // Inside a class: functions become methods
         rules.extend(within(
             grandparent_is("class_definition"),
             vec![
@@ -158,12 +156,10 @@ impl DslLanguage for PythonDsl {
                 .name_from(field_chain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
             reference("call").name_from(field("function")),
-            // Instance field access: obj.email
             reference("attribute")
                 .name_from(field("attribute"))
                 .receiver_chain(&["object"])
                 .when(!parent_is("call")),
-            // Bare type references in annotations: x: MyClass, def foo() -> MyClass
             reference("type").name_from(text()),
         ]
     }
@@ -298,8 +294,6 @@ impl DslLanguage for PythonDsl {
     }
 }
 
-// ── Resolution rules ────────────────────────────────────────────
-
 pub struct PythonRules;
 
 impl HasRules for PythonRules {
@@ -330,6 +324,7 @@ impl HasRules for PythonRules {
         )
         .with_hooks(ResolverHooks {
             call_method: Some("__call__"),
+            reexport_index_builder: Some(build_python_reexport_index),
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
             excluded_ambient_imported_symbol_names: &[
                 "abs",
@@ -369,12 +364,146 @@ impl HasRules for PythonRules {
     }
 }
 
+struct PythonImportRewriter {
+    importable_paths: rustc_hash::FxHashSet<String>,
+}
+
+impl PythonImportRewriter {
+    fn from_paths<'a>(paths: impl IntoIterator<Item = &'a str>, sep: &str) -> Self {
+        let mut importable_paths = rustc_hash::FxHashSet::default();
+        for module in paths
+            .into_iter()
+            .filter_map(|path| python_module_from_path(path, sep))
+        {
+            insert_importable_path_prefixes(&module, sep, &mut importable_paths);
+        }
+
+        Self { importable_paths }
+    }
+
+    fn resolve_source_root(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
+        // Over-deep or bare-dot relative imports (e.g. `from ...x import Y` above
+        // the package root) reach here because resolve_python_relative_import
+        // returned None for them. They are still relative, so never source-root them.
+        if raw_path.is_empty() || raw_path.starts_with('.') {
+            return None;
+        }
+
+        let mut candidate = String::with_capacity(module_scope.len() + sep.len() + raw_path.len());
+        let mut resolved = None;
+        for (source_root_end, _) in module_scope.match_indices(sep) {
+            candidate.clear();
+            candidate.push_str(&module_scope[..source_root_end]);
+            candidate.push_str(sep);
+            candidate.push_str(raw_path);
+            if self.importable_paths.contains(candidate.as_str()) {
+                if resolved.is_some() {
+                    return None;
+                }
+                resolved = Some(candidate.clone());
+            }
+        }
+        resolved
+    }
+
+    fn rewrite(
+        &self,
+        import: &mut CanonicalImport,
+        module_scope: Option<&str>,
+        sep: &str,
+    ) -> Option<String> {
+        let module_scope = module_scope?;
+
+        if let Some(path) = resolve_python_relative_import(&import.path, module_scope, sep) {
+            import.path = path;
+            return None;
+        }
+
+        if let Some(path) = self.resolve_source_root(&import.path, module_scope, sep) {
+            // The local binding keeps the originally-written first segment, so
+            // capture it before the path gains the source-root prefix.
+            let scope_name =
+                if import.import_type == "Import" || import.import_type == "AliasedImport" {
+                    import
+                        .path
+                        .split(sep)
+                        .next()
+                        .filter(|segment| !segment.is_empty())
+                        .map(ToString::to_string)
+                } else {
+                    None
+                };
+            import.path = path;
+            return scope_name;
+        }
+
+        None
+    }
+}
+
+fn build_python_import_rewriter(paths: &[&str], sep: &str) -> Box<ImportRewriter> {
+    let rewriter = PythonImportRewriter::from_paths(paths.iter().copied(), sep);
+    Box::new(move |import, module_scope, sep| rewriter.rewrite(import, module_scope, sep))
+}
+
+/// Index every `from M import ...` (named or `import *`) keyed by the declaring
+/// module, so callers of a re-exported name bind to the concrete definition.
+fn build_python_reexport_index(
+    graph: &crate::v2::linker::CodeGraph,
+    sep: &str,
+) -> crate::v2::linker::graph::ReexportIndex {
+    let mut index = crate::v2::linker::graph::ReexportIndex::default();
+    for (_node, file_path, imp) in graph.imports_iter() {
+        if imp.import_type == "FutureImport" {
+            continue;
+        }
+        let Some(module) = python_module_from_path(file_path.as_ref(), sep) else {
+            continue;
+        };
+        let target_module = graph.str(imp.path);
+        if target_module.is_empty() {
+            continue;
+        }
+        if imp.wildcard {
+            index.add_wildcard(module, target_module.to_string());
+        } else if let Some(name_id) = imp.name {
+            let target_name = graph.str(name_id);
+            if target_name.is_empty() {
+                continue;
+            }
+            let bound = imp.alias.map(|a| graph.str(a)).unwrap_or(target_name);
+            index.add_named(
+                module,
+                bound.to_string(),
+                target_module.to_string(),
+                target_name.to_string(),
+            );
+        }
+    }
+    index
+}
+
+fn insert_importable_path_prefixes(
+    module: &str,
+    sep: &str,
+    importable_paths: &mut rustc_hash::FxHashSet<String>,
+) {
+    let mut prefix = String::with_capacity(module.len());
+    for part in module.split(sep).filter(|part| !part.is_empty()) {
+        if !prefix.is_empty() {
+            prefix.push_str(sep);
+        }
+        prefix.push_str(part);
+        importable_paths.insert(prefix.clone());
+    }
+}
+
 /// Resolve Python relative import paths against the current module scope.
 /// `from .models import User` in module `pkg.sub.mod` → `pkg.sub.models`
 /// `from ..services import Auth` in `pkg.sub.mod` → `pkg.services`
 fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
     if !raw_path.starts_with('.') {
-        return None; // absolute import, no resolution needed
+        return None;
     }
     let dots = raw_path.chars().take_while(|&c| c == '.').count();
     let suffix = &raw_path[dots..];
@@ -383,7 +512,7 @@ fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str)
     // 1 dot = same package (drop last component), 2 dots = parent, etc.
     let parts: Vec<&str> = module_scope.split(sep).collect();
     if dots > parts.len() {
-        return None; // too many dots, can't resolve
+        return None;
     }
     let base = &parts[..parts.len() - dots];
     if suffix.is_empty() {
@@ -455,6 +584,30 @@ fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> 
 mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
+    use crate::v2::types::{ImportBindingKind, ImportMode, Range};
+
+    fn transform_import(
+        rewriter: &PythonImportRewriter,
+        import_type: &'static str,
+        path: &str,
+        name: Option<&str>,
+        module_scope: &str,
+    ) -> (String, Option<String>) {
+        let mut import = CanonicalImport {
+            import_type,
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
+            path: path.to_string(),
+            name: name.map(ToString::to_string),
+            alias: None,
+            scope_fqn: None,
+            range: Range::empty(),
+            is_type_only: false,
+            wildcard: false,
+        };
+        let scope_name = rewriter.rewrite(&mut import, Some(module_scope), ".");
+        (import.path, scope_name)
+    }
 
     fn parse(
         code: &str,
@@ -588,6 +741,108 @@ mod tests {
                 .imports
                 .iter()
                 .any(|i| i.name.as_deref() == Some("Path"))
+        );
+    }
+
+    #[test]
+    fn import_transformer_uses_actual_module_files() {
+        let transformer = PythonImportRewriter::from_paths(
+            [
+                "lib/myapp/service.py",
+                "lib/myapp/worker.py",
+                "src/pipeline.py",
+                "src/scoring.py",
+            ],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "myapp.worker",
+                Some("Worker"),
+                "lib.myapp.service"
+            ),
+            ("lib.myapp.worker".to_string(), None)
+        );
+        assert_eq!(
+            transform_import(&transformer, "Import", "scoring", None, "src.pipeline"),
+            ("src.scoring".to_string(), Some("scoring".to_string()))
+        );
+        assert_eq!(
+            transform_import(&transformer, "Import", "requests", None, "src.pipeline"),
+            ("requests".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_aliased_import_without_alias_keeps_first_segment() {
+        // `import a.b, c.d as e` labels the unaliased `a.b` name AliasedImport with
+        // alias=None, so the scope-name override must still bind `a`, not `src`.
+        let transformer = PythonImportRewriter::from_paths(["src/a/b.py", "src/main.py"], ".");
+
+        assert_eq!(
+            transform_import(&transformer, "AliasedImport", "a.b", None, "src.main"),
+            ("src.a.b".to_string(), Some("a".to_string()))
+        );
+    }
+
+    #[test]
+    fn import_transformer_uses_module_parent_packages() {
+        let transformer = PythonImportRewriter::from_paths(
+            ["src/package/module.py", "src/test_package_import.py"],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "package",
+                Some("module"),
+                "src.test_package_import"
+            ),
+            ("src.package".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_rejects_ambiguous_ancestor_matches() {
+        let transformer = PythonImportRewriter::from_paths(
+            [
+                "src/alpha/common/scoring.py",
+                "src/alpha/other/common/scoring.py",
+                "src/alpha/other/reporting.py",
+            ],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "common.scoring",
+                Some("score_review"),
+                "src.alpha.other.reporting"
+            ),
+            ("common.scoring".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_handles_relative_imports() {
+        let transformer = PythonImportRewriter::from_paths(std::iter::empty(), ".");
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                ".models",
+                Some("User"),
+                "src.package.views"
+            ),
+            ("src.package.models".to_string(), None)
         );
     }
 }

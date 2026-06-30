@@ -91,7 +91,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     ontology.default_edge_table = schema.settings.default_edge_table;
     ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
 
-    // Load edge table configs.
     ontology.edge_table_configs = schema
         .settings
         .edge_tables
@@ -148,8 +147,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     ontology.etl_settings = etl_settings.clone();
     ontology.internal_column_prefix = schema.settings.internal_column_prefix;
 
-    // Validate edge table names: must start with table_prefix and contain
-    // only lowercase ASCII letters and underscores (safe for SQL identifiers).
+    // Edge table names become SQL identifiers, so restrict to lowercase ASCII and underscores.
     for table_name in ontology.edge_table_configs.keys() {
         if !table_name.starts_with(&ontology.table_prefix) {
             return Err(OntologyError::Validation(format!(
@@ -177,7 +175,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         )));
     }
 
-    // Validate default edge table columns match EDGE_RESERVED_COLUMNS.
     let actual_names: Vec<&str> = ontology
         .edge_columns()
         .iter()
@@ -301,7 +298,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
-    // Auto-derive denormalized properties from central denormalization list.
     let has_denorm = !denormalization_entries.is_empty();
 
     for entry in &denormalization_entries {
@@ -376,7 +372,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
-    // Auto-populate denormalized Array columns and text indexes on all edge tables.
     let auto_columns: Vec<crate::entities::StorageColumn> = if has_denorm {
         vec![
             crate::entities::StorageColumn {
@@ -420,7 +415,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         config.storage.denormalized_indexes = auto_indexes.clone();
     }
 
-    // Validate and store local_db entity settings.
     if let Some(local_db) = schema.settings.local_db {
         for entry in local_db.entities {
             let node = ontology.nodes.get(&entry.name).ok_or_else(|| {
@@ -430,7 +424,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 ))
             })?;
 
-            // Validate exclude_properties reference actual fields.
             let field_names: std::collections::HashSet<&str> =
                 node.fields.iter().map(|f| f.name.as_str()).collect();
             for prop in &entry.exclude_properties {
@@ -449,7 +442,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
 
         if let Some(edge_table) = local_db.edge_table {
-            // Validate no duplicate column names.
             let mut seen = std::collections::HashSet::new();
             for col in &edge_table.columns {
                 if !seen.insert(&col.name) {
@@ -472,7 +464,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
-    // Load auxiliary tables.
     ontology.auxiliary_tables = schema
         .settings
         .auxiliary_tables
@@ -504,7 +495,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
-    // Load and validate materialized views.
     let all_table_names: std::collections::HashSet<String> = ontology
         .auxiliary_tables
         .iter()
@@ -629,6 +619,27 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .transpose()?;
 
+    ontology.partition = schema
+        .settings
+        .partition
+        .map(|p| -> Result<_, OntologyError> {
+            if p.partition_by.trim().is_empty() {
+                return Err(OntologyError::Validation(
+                    "partition.partition_by must be a non-empty ClickHouse expression".to_string(),
+                ));
+            }
+            if p.required_columns.is_empty() {
+                return Err(OntologyError::Validation(
+                    "partition.required_columns must list at least one column".to_string(),
+                ));
+            }
+            Ok(crate::entities::PartitionConfig {
+                partition_by: p.partition_by,
+                required_columns: p.required_columns,
+            })
+        })
+        .transpose()?;
+
     ontology.traversal_path_lookups = ontology
         .nodes
         .values()
@@ -649,7 +660,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     ontology.gc_preserve_patterns = schema.settings.gc_preserve_patterns;
 
-    // Validate storage columns match declared properties.
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
@@ -742,9 +752,7 @@ fn validate_auxiliary_dictionaries(ontology: &crate::Ontology) -> Result<(), Ont
     Ok(())
 }
 
-/// Checks that every node's storage columns correspond 1:1 with its
-/// non-virtual properties. Catches drift between the logical schema
-/// (properties) and physical schema (storage).
+/// Every node's storage columns must correspond 1:1 with its non-virtual properties.
 fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyError> {
     for node in ontology.nodes() {
         if node.storage.columns.is_empty() {
@@ -879,6 +887,7 @@ mod tests {
                 watermark: "w".to_string(),
                 deleted: "d".to_string(),
                 order_by: vec![],
+                reindex_on: Vec::new(),
                 edges: BTreeMap::new(),
             },
         }

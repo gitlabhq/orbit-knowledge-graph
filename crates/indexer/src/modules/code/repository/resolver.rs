@@ -7,8 +7,6 @@ use super::service::{RepositoryService, RepositoryServiceError};
 use crate::handler::HandlerError;
 use gitlab_client::GitlabClientError;
 
-/// Errors produced when resolving a repository snapshot for indexing.
-///
 /// `EmptyRepository` is a recognized terminal outcome: the project record
 /// exists but has no Gitaly content (no refs, or no repository storage at
 /// all). These should be checkpointed as "indexed empty" instead of retried.

@@ -31,8 +31,6 @@ struct ReconciliationSpec {
     other_id_column: &'static str,
 }
 
-/// Periodic, dispatcher-side sweep that tombstones stale FK-derived edges.
-///
 /// The watermark cursor advances only on full success; re-tombstoning is a
 /// no-op, so a failed run just widens the next window.
 pub struct StaleEdgeReconciliation {
@@ -186,7 +184,7 @@ fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
     for node in ontology.nodes() {
         let Some(etl) = &node.etl else { continue };
         // Global owners lack a traversal_path, so the dual-IN PK prune can't apply;
-        // measured staleness is all on namespaced entities (MR, WorkItem, Pipeline).
+        // staleness only affects namespaced entities (MR, WorkItem, Pipeline).
         if etl.scope() != EtlScope::Namespaced {
             continue;
         }
@@ -258,8 +256,6 @@ fn reconciliation_spec(
     })
 }
 
-/// Builds the single tombstone statement for one spec.
-///
 /// `source_kind`/`target_kind` are pinned to concrete node types so a kind
 /// emitted from several FK columns into the same table (e.g. `TRIGGERED` from
 /// both `merge_request_id` and `user_id`) reconciles each variant in isolation.
@@ -380,7 +376,14 @@ mod tests {
     #[test]
     fn immutable_fk_kinds_are_not_marked_mutable() {
         let specs = specs();
-        for immutable in ["IN_PROJECT", "AUTHORED", "HAS_JOB", "IN_PIPELINE", "CLOSED"] {
+        for immutable in [
+            "IN_PROJECT",
+            "AUTHORED",
+            "HAS_JOB",
+            "IN_PIPELINE",
+            "CLOSED",
+            "MERGED_AT_COMMIT",
+        ] {
             assert!(
                 !specs.iter().any(|s| s.relationship_kind == immutable),
                 "{immutable} is not marked mutable in the ontology and must not be swept",

@@ -244,8 +244,6 @@ pub(super) async fn path_finding_redaction_blocks_intermediate_node(ctx: &TestCo
 }
 
 pub(super) async fn path_finding_rel_types_restricts_traversal(ctx: &TestContext) {
-    // Only allow MEMBER_OF edges. The path User→Group→Project requires
-    // a CONTAINS edge for the second hop, so no path should be found.
     let resp = run_query(
         ctx,
         r#"{
@@ -349,10 +347,6 @@ pub(super) async fn path_finding_target_entity_constrains_results(ctx: &TestCont
 }
 
 pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestContext) {
-    // Find all paths from User(1) to any MergeRequest in the seed range.
-    // Uses id_range instead of node_ids to exercise the filtered-endpoint
-    // path. The frontier should only include edges where the target_kind
-    // matches MergeRequest.
     let resp = run_query(
         ctx,
         r#"{
@@ -384,7 +378,6 @@ pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestCo
         );
     }
 
-    // Verify no Note or WorkItem appears as a path endpoint
     for edge in resp.edges() {
         if edge.path_id.is_some() {
             assert_ne!(edge.to, "Note", "path should not include Note endpoints");

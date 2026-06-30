@@ -1,7 +1,5 @@
-//! Pipeline registry — maps Language variants and Tag strings to pipeline impls.
-//!
-//! All pipeline registration lives here. Adding a new language or custom
-//! pipeline: add one line to the `register_v2_pipelines!` invocation below.
+//! Adding a new language or custom pipeline: add one line to the
+//! `register_v2_pipelines!` invocation below.
 
 use crate::v2::config::{Language, LanguageFamily};
 
@@ -20,6 +18,7 @@ use crate::v2::langs::generic::lua::{LuaDsl, LuaRules};
 use crate::v2::langs::generic::php::{PhpDsl, PhpRules};
 use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
+use crate::v2::langs::generic::scala::{ScalaDsl, ScalaRules};
 use crate::v2::langs::generic::swift::{SwiftDsl, SwiftRules};
 use std::sync::Arc;
 
@@ -28,13 +27,8 @@ use crate::v2::pipeline::{
     BatchTx, GenericPipeline, LanguageContext, LanguagePipeline, PipelineContext, PipelineError,
 };
 
-// ── Macro ───────────────────────────────────────────────────────
-
-/// Pipeline registration macro. Generates `dispatch_language` and `dispatch_by_tag`.
-///
 /// Pipeline types wrapped in `[]` to avoid comma ambiguity in generics.
 macro_rules! register_v2_pipelines {
-    // Done.
     (@munch [$($langs:tt)*] [$($tags:tt)*]) => {
         register_v2_pipelines!(@emit_lang $($langs)*);
         register_v2_pipelines!(@emit_tag $($tags)*);
@@ -43,11 +37,9 @@ macro_rules! register_v2_pipelines {
     (@munch [$($langs:tt)*] [$($tags:tt)*] Tag($tag:literal) => $p:tt , $($rest:tt)*) => {
         register_v2_pipelines!(@munch [$($langs)*] [$($tags)* [$tag => $p]] $($rest)*);
     };
-    // Language entry.
     (@munch [$($langs:tt)*] [$($tags:tt)*] $v:ident => $p:tt , $($rest:tt)*) => {
         register_v2_pipelines!(@munch [$($langs)* [$v => $p]] [$($tags)*] $($rest)*);
     };
-    // Emit dispatch_language, lang_ctx_for, dispatch_by_tag.
     (@emit_lang $( [$variant:ident => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_language(
             language: Language,
@@ -55,29 +47,27 @@ macro_rules! register_v2_pipelines {
             ctx: &Arc<PipelineContext>,
             btx: &BatchTx<'_>,
         ) -> Option<Result<(), Vec<PipelineError>>> {
-            #[allow(unreachable_patterns)]
+            #[allow(unreachable_patterns, reason = "macro-generated: wildcard is reachable when not all Language variants have a registered pipeline")]
             Some(match language {
                 $(Language::$variant => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
             })
         }
 
-        /// Build a [`LanguageContext`] for the given language at runtime.
-        /// Auto-generated from the pipeline registration table.
         /// Returns `None` for custom pipelines (JS, Rust) that don't
         /// implement `lang_ctx`.
         pub fn lang_ctx_for(
             language: Language,
             ctx: &Arc<PipelineContext>,
         ) -> Option<Arc<LanguageContext>> {
-            #[allow(unreachable_patterns)]
+            #[allow(unreachable_patterns, reason = "macro-generated: wildcard is reachable when not all Language variants have a registered pipeline")]
             match language {
                 $(Language::$variant => <$($pipeline)*>::lang_ctx(ctx),)*
                 _ => None,
             }
         }
     };
-    // Emit dispatch_by_tag (called by YAML test harness).
+    // dispatch_by_tag is called by the YAML test harness.
     (@emit_tag $( [$tag:literal => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_by_tag(
             tag: &str,
@@ -96,8 +86,6 @@ macro_rules! register_v2_pipelines {
     };
 }
 
-// ── Registration ────────────────────────────────────────────────
-
 register_v2_pipelines! {
     Bash    => [GenericPipeline<BashDsl, BashRules>],
     C       => [GenericPipeline<CDsl, CRules>],
@@ -107,6 +95,7 @@ register_v2_pipelines! {
     Python  => [GenericPipeline<PythonDsl, PythonRules>],
     Java    => [GenericPipeline<JavaDsl, JavaRules>],
     Kotlin  => [GenericPipeline<KotlinDsl, KotlinRules>],
+    Scala   => [GenericPipeline<ScalaDsl, ScalaRules>],
     CSharp  => [GenericPipeline<CSharpDsl, CSharpRules>],
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Elixir  => [GenericPipeline<ElixirDsl, ElixirRules>],
@@ -119,10 +108,6 @@ register_v2_pipelines! {
     Tag("js") => [JsPipeline],
 }
 
-// ── Family dispatch ─────────────────────────────────────────────
-
-/// Dispatch a language family to the appropriate pipeline(s).
-///
 /// For single-language families and families where all members use
 /// custom pipelines, groups files by language and delegates to
 /// [`dispatch_language`]. For multi-language generic-pipeline
@@ -134,23 +119,18 @@ pub fn dispatch_family(
     ctx: &Arc<PipelineContext>,
     btx: &BatchTx<'_>,
 ) -> Option<Result<(), Vec<PipelineError>>> {
-    // Collect the distinct languages present in this batch.
     let mut languages: rustc_hash::FxHashSet<Language> = rustc_hash::FxHashSet::default();
     for f in files {
         languages.insert(f.language);
     }
 
-    // If there's only one language, delegate to the per-language pipeline
-    // directly -- avoids building the family machinery for the common case.
+    // Avoids building the family machinery for the common single-language case.
     if languages.len() == 1 {
         let lang = *languages.iter().next().unwrap();
         let paths: Vec<FileInput> = files.iter().map(|f| f.path.clone()).collect();
         return dispatch_language(lang, &paths, ctx, btx);
     }
 
-    // Multiple languages: try to build LanguageContexts for each.
-    // If any member doesn't support it (custom pipeline), fall back
-    // to running each language's pipeline separately.
     let mut member_ctxs: rustc_hash::FxHashMap<Language, Arc<LanguageContext>> =
         rustc_hash::FxHashMap::default();
     let mut has_custom = false;
@@ -166,7 +146,6 @@ pub fn dispatch_family(
     }
 
     if has_custom {
-        // Fall back: run each language's pipeline over its files separately.
         let mut by_lang: rustc_hash::FxHashMap<Language, Vec<FileInput>> =
             rustc_hash::FxHashMap::default();
         for f in files {
@@ -195,8 +174,6 @@ pub fn dispatch_family(
         };
     }
 
-    // All members are generic-pipeline languages: run FamilyPipeline
-    // with a shared CodeGraph.
     Some(crate::v2::pipeline::FamilyPipeline::run(
         files,
         &member_ctxs,
@@ -234,11 +211,16 @@ mod tests {
         })
     }
 
+    fn noop_on_batch()
+    -> impl Fn(&str, arrow::record_batch::RecordBatch) -> Result<(), crate::v2::SinkError> {
+        |_: &str, _: arrow::record_batch::RecordBatch| Ok(())
+    }
+
     #[test]
     fn javascript_pipeline_is_registered() {
         let ctx = test_ctx();
         let conv = NoopConverter;
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let on_batch = noop_on_batch();
         let (dirs, files, d, i, e) = (
             AtomicUsize::new(0),
             AtomicUsize::new(0),
@@ -248,7 +230,7 @@ mod tests {
         );
         let errors = std::sync::Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            &on_batch,
             &conv,
             &errors,
             GraphStatsCounters::new(&dirs, &files, &d, &i, &e),
@@ -260,7 +242,7 @@ mod tests {
     fn typescript_pipeline_is_registered() {
         let ctx = test_ctx();
         let conv = NoopConverter;
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let on_batch = noop_on_batch();
         let (dirs, files, d, i, e) = (
             AtomicUsize::new(0),
             AtomicUsize::new(0),
@@ -270,7 +252,7 @@ mod tests {
         );
         let errors = std::sync::Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            &on_batch,
             &conv,
             &errors,
             GraphStatsCounters::new(&dirs, &files, &d, &i, &e),
@@ -282,7 +264,7 @@ mod tests {
     fn js_pipeline_tag_is_registered() {
         let ctx = test_ctx();
         let conv = NoopConverter;
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let on_batch = noop_on_batch();
         let (dirs, files, d, i, e) = (
             AtomicUsize::new(0),
             AtomicUsize::new(0),
@@ -292,7 +274,7 @@ mod tests {
         );
         let errors = std::sync::Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            &on_batch,
             &conv,
             &errors,
             GraphStatsCounters::new(&dirs, &files, &d, &i, &e),

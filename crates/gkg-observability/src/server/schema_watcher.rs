@@ -1,5 +1,3 @@
-//! Webserver schema-watcher readiness state.
-
 use crate::MetricSpec;
 
 pub mod labels {

@@ -1,5 +1,3 @@
-//! Query compiler metric, backed by the central `gkg-observability` catalog.
-//!
 //! Every [`QueryError`] increments [`spec::COMPILER_REJECTED`] with a
 //! closed-enum `failure_reason` label.
 
@@ -41,7 +39,7 @@ impl Default for QueryEngineMetrics {
     }
 }
 
-/// Maps a [`QueryError`] variant to a low-cardinality `failure_reason` label.
+/// Maps to a low-cardinality `failure_reason` label.
 pub(crate) fn failure_reason(err: &QueryError) -> &'static str {
     match err {
         QueryError::Parse(_) => "parse",
@@ -62,9 +60,6 @@ pub(crate) fn failure_reason(err: &QueryError) -> &'static str {
     }
 }
 
-/// Extension trait that converts any compatible error into [`QueryError`],
-/// increments [`spec::COMPILER_REJECTED`] with the matching `failure_reason`,
-/// and returns `Result<T>`.
 pub(crate) trait CountErr<T, E> {
     fn count_err(self) -> crate::error::Result<T>;
 }

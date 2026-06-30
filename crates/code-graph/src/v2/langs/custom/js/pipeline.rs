@@ -166,7 +166,7 @@ mod tests {
 
     fn run_js(ctx: &Arc<PipelineContext>, files: &[FileInput]) {
         let conv = NoopConverter;
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let on_batch = |_: &str, _: RecordBatch| Ok(());
         let dirs = AtomicUsize::new(0);
         let files_count = AtomicUsize::new(0);
         let d = AtomicUsize::new(0);
@@ -174,14 +174,11 @@ mod tests {
         let e = AtomicUsize::new(0);
         let errs = Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            &on_batch,
             &conv,
             &errs,
             GraphStatsCounters::new(&dirs, &files_count, &d, &i, &e),
         );
-        // We expect this not to return Err — at least one file must be
-        // analyzable so the pipeline produces a graph and reaches the
-        // skip recording path.
         let _ = JsPipeline::process_files(files, ctx, &btx);
     }
 

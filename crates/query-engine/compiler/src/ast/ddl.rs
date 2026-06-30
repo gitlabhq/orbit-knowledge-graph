@@ -1,11 +1,7 @@
-//! DDL Abstract Syntax Tree for `CREATE TABLE` and `CREATE MATERIALIZED VIEW`
-//! statements.
-//!
-//! Database-agnostic where possible. Storage-engine details (codecs,
-//! projections, engine type, settings) are represented as data, not
-//! hardcoded SQL. The codegen layer handles dialect-specific emission.
+//! Storage-engine details (codecs, projections, engine type, settings) are
+//! represented as data, not hardcoded SQL. The codegen layer handles
+//! dialect-specific emission.
 
-/// A complete `CREATE TABLE IF NOT EXISTS` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTable {
     pub name: String,
@@ -13,6 +9,7 @@ pub struct CreateTable {
     pub indexes: Vec<IndexDef>,
     pub projections: Vec<ProjectionDef>,
     pub engine: Engine,
+    pub partition_by: Vec<String>,
     pub order_by: Vec<String>,
     /// When absent, PRIMARY KEY defaults to ORDER BY.
     pub primary_key: Option<Vec<String>>,
@@ -36,19 +33,15 @@ pub struct DictLayout {
     pub size_in_cells: Option<u64>,
 }
 
-/// A column definition: `name type [DEFAULT expr] [codec]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnDef {
     pub name: String,
     pub data_type: ColumnType,
     pub default: Option<String>,
-    /// Storage-level compression hints. Dialect-specific (e.g. ClickHouse CODECs).
     /// Backends that don't support codecs ignore this field.
     pub codec: Option<Vec<Codec>>,
 }
 
-/// Column data types. Uses names that map naturally to both ClickHouse and
-/// DuckDB. The codegen layer emits the dialect-appropriate spelling.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ColumnType {
     Int64,
@@ -57,26 +50,19 @@ pub enum ColumnType {
     Bool,
     String,
     Date32,
-    /// Plain `DateTime` (second precision, no timezone).
+    /// Second precision, no timezone.
     DateTime,
-    /// Timestamp with sub-second precision and optional timezone.
     /// Precision must be 0–9 for ClickHouse (`DateTime64`).
     Timestamp {
         precision: u8,
         timezone: Option<String>,
     },
-    /// ClickHouse `Enum8('label' = N, ...)`.
     Enum8(Vec<(std::string::String, i8)>),
-    /// Wraps an inner type as nullable.
     Nullable(Box<ColumnType>),
-    /// Dictionary-encoded / low-cardinality wrapper.
     LowCardinality(Box<ColumnType>),
-    /// ClickHouse `Array(T)`.
     Array(Box<ColumnType>),
 }
 
-/// Compression codec applied to a column's on-disk representation.
-/// Dialect-specific; backends that don't support codecs skip emission.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Codec {
     ZSTD(u8),
@@ -88,7 +74,6 @@ pub enum Codec {
     LZ4,
 }
 
-/// A secondary index definition on a column or expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexDef {
     pub name: String,
@@ -97,7 +82,6 @@ pub struct IndexDef {
     pub granularity: u32,
 }
 
-/// Index algorithm types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum IndexType {
     MinMax,
@@ -114,7 +98,6 @@ pub enum IndexType {
     TokenBF(String),
 }
 
-/// A materialized projection over table data.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectionDef {
     /// Re-sorted copy of the data for alternative access patterns.
@@ -187,26 +170,17 @@ impl CreateMaterializedView {
     }
 }
 
-/// Table engine with arguments.
-///
-/// Generic enough for any engine that takes positional args:
-/// `ReplacingMergeTree(_version, _deleted)`, `MergeTree()`, etc.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Engine {
     pub name: String,
     pub args: Vec<String>,
 }
 
-/// A key-value setting applied at the table level.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableSetting {
     pub key: String,
     pub value: String,
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Builder helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
 impl ColumnDef {
     pub fn new(name: impl Into<String>, data_type: ColumnType) -> Self {
@@ -237,6 +211,7 @@ impl CreateTable {
             indexes: vec![],
             projections: vec![],
             engine,
+            partition_by: vec![],
             order_by: vec![],
             primary_key: None,
             settings: vec![],

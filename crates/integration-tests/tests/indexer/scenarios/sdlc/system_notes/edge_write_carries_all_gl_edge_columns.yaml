@@ -23,6 +23,6 @@ expect:
     - kind: MENTIONS
       count: 1
       rows:
-        - { source_id: 1000, source_kind: MergeRequest, target_id: 10, target_kind: MergeRequest }
+        - { source_id: 10, source_kind: MergeRequest, target_id: 1000, target_kind: MergeRequest }
   totals:
     gl_edge: 1

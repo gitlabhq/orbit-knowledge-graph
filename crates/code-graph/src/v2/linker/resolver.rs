@@ -1,5 +1,3 @@
-//! Cross-file reference resolution.
-//!
 //! `FileResolver` resolves one reference at a time via `resolve()`.
 //! No intermediate collections — the caller drives iteration.
 
@@ -22,7 +20,6 @@ use super::rules::{
 };
 use super::state::ScratchBuf;
 
-/// Borrowed reference data for resolution. No allocations.
 pub struct RefData<'a> {
     pub name: &'a str,
     pub chain: Option<&'a [ExpressionStep]>,
@@ -99,6 +96,7 @@ impl<'a> FileResolver<'a> {
             inferred_returns: FxHashMap::default(),
             include_index: None,
             include_reachable: None,
+            reexport_index: None,
         };
         Self {
             ctx,
@@ -108,25 +106,26 @@ impl<'a> FileResolver<'a> {
         }
     }
 
-    /// Pre-set the include index from a shared precomputed value.
     pub fn set_include_index(&mut self, idx: std::sync::Arc<super::graph::IncludeIndex>) {
         self.ctx.include_index = Some(idx);
     }
 
-    /// Drain accumulated Definition → ImportedSymbol edges.
+    pub fn set_reexport_index(&mut self, idx: std::sync::Arc<super::graph::ReexportIndex>) {
+        self.ctx.reexport_index = Some(idx);
+    }
+
     pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
         self.import_edge_keys.clear();
         std::mem::take(&mut self.import_edges)
     }
 
-    /// Dump resolver trace events to stderr. Call after all refs are resolved.
+    /// Dumps the collected resolver trace events. Call after all refs are resolved.
     pub fn dump_trace(&self, header: &str) {
         self.ctx.tracer.dump_grouped(header);
     }
 
-    /// Register inferred return types from the current file's Phase 2 pass.
-    /// Maps def index → return type name. The resolver checks these when
-    /// the graph's metadata has no explicit return type.
+    /// Registers inferred return types (def index -> return type name) for this file.
+    /// Checked only when the graph's metadata has no explicit return type.
     pub fn set_inferred_returns(&mut self, returns: &[(u32, String)]) {
         for (def_idx, rt) in returns {
             if let Some(&node) = self.ctx.def_nodes.get(*def_idx as usize) {
@@ -135,7 +134,6 @@ impl<'a> FileResolver<'a> {
         }
     }
 
-    /// Resolve a single reference, returning (source, target, edge) triples.
     /// Returns `Err(Killed)` if the sentinel has timed out this file.
     pub fn resolve(
         &mut self,
@@ -205,7 +203,6 @@ impl<'a> FileResolver<'a> {
         Ok(())
     }
 
-    /// Emit source → ImportedSymbol edges for external (unresolved) refs.
     fn emit_imported_symbol_edges(&mut self, r: &RefData<'_>) {
         let graph = self.ctx.graph;
         let src = r
@@ -316,8 +313,6 @@ impl<'a> FileResolver<'a> {
     }
 }
 
-// ── internals ───────────────────────────────────────────────────
-
 struct ResolveCtx<'a> {
     graph: &'a CodeGraph,
     file_node: NodeIndex,
@@ -337,6 +332,9 @@ struct ResolveCtx<'a> {
     /// Cached BFS result: paths of files reachable via transitive includes
     /// from this file. Computed once on first IncludeGraph resolve call.
     include_reachable: Option<rustc_hash::FxHashSet<String>>,
+    /// Precomputed symbol re-export index. Shared across resolvers, set before
+    /// Phase 2 when the language provides a builder hook.
+    reexport_index: Option<std::sync::Arc<super::graph::ReexportIndex>>,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -368,11 +366,10 @@ impl<'a> ResolveCtx<'a> {
             inferred_returns: FxHashMap::default(),
             include_index: None,
             include_reachable: None,
+            reexport_index: None,
         }
     }
 
-    /// Check if the sentinel has killed this file. Returns `Err(Killed)`
-    /// if so, allowing `?` propagation to unwind cleanly.
     #[inline]
     fn check_killed(&self) -> Result<(), Killed> {
         if self.kill_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -382,7 +379,6 @@ impl<'a> ResolveCtx<'a> {
         }
     }
 
-    /// Build a temporary `ImportResolver` from this context's state.
     fn import_resolver(&mut self) -> ImportResolver<'_> {
         let needs_include_index = self
             .rules
@@ -401,6 +397,7 @@ impl<'a> ResolveCtx<'a> {
             settings: self.settings,
             include_index: self.include_index.as_deref(),
             include_reachable: &mut self.include_reachable,
+            reexport_index: self.reexport_index.as_deref(),
         }
     }
 
@@ -590,8 +587,6 @@ impl<'a> ResolveCtx<'a> {
         self.nested_cache.insert(key, result);
         found
     }
-
-    // ── Resolution methods (formerly free functions) ────────────
 
     fn resolve_single(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
         trace!(
@@ -1358,7 +1353,6 @@ impl<'a> ResolveCtx<'a> {
             let fqn = self.graph.str(gdef.fqn);
             let mut scope = fqn;
             loop {
-                // Look for the member in this scope's nested definitions.
                 self.graph.indexes.nested.lookup_into(
                     scope,
                     name,
@@ -1412,8 +1406,6 @@ impl<'a> ResolveCtx<'a> {
         result
     }
 }
-
-// ── Utility functions ───────────────────────────────────────────
 
 fn format_reaching(reaching: &[ParseValue]) -> Vec<String> {
     reaching

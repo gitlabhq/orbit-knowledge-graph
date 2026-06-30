@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use integration_testkit::TestContext;
-use integration_testkit::scenario::{ScenarioHandlers, Scope};
+use integration_testkit::scenario::{CdcEvent, DispatchedMessage, ScenarioHandlers, Scope};
 
 use super::handlers::{
     global_envelope, global_handler, handler_context, namespace_envelope, namespace_handler,
@@ -11,14 +11,20 @@ pub struct SdlcScenarioHandlers;
 
 #[async_trait]
 impl ScenarioHandlers for SdlcScenarioHandlers {
-    async fn run(&self, ctx: &TestContext, handler: &str, scope: Option<Scope>) {
+    async fn run(
+        &self,
+        ctx: &TestContext,
+        handler: &str,
+        scope: Option<Scope>,
+        _cdc: &[CdcEvent],
+    ) -> Vec<DispatchedMessage> {
         match handler {
             "namespace" => {
                 let scope = require_scope(handler, scope);
                 namespace_handler(ctx)
                     .await
                     .handle(
-                        handler_context(ctx),
+                        handler_context(),
                         namespace_envelope(scope.organization, scope.namespace),
                     )
                     .await
@@ -27,7 +33,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
             "global" => {
                 global_handler(ctx)
                     .await
-                    .handle(handler_context(ctx), global_envelope())
+                    .handle(handler_context(), global_envelope())
                     .await
                     .unwrap();
             }
@@ -36,7 +42,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
                 system_notes_handler(ctx)
                     .await
                     .handle(
-                        handler_context(ctx),
+                        handler_context(),
                         namespace_envelope(scope.organization, scope.namespace),
                     )
                     .await
@@ -44,6 +50,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
             }
             other => panic!("unknown scenario handler '{other}'"),
         }
+        Vec::new()
     }
 }
 

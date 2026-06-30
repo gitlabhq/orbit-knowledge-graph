@@ -1,8 +1,6 @@
-//! Filesystem security utilities.
-//!
-//! Functions for safe directory creation, symlink validation, and path
-//! traversal prevention. These are security-critical and should be
-//! reviewed carefully before modification.
+//! Filesystem security utilities (safe directory creation, symlink
+//! validation, path-traversal prevention). Security-critical: review
+//! carefully before modification.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -112,7 +110,6 @@ pub fn longest_existing_ancestor(path: &Path) -> &Path {
 /// malicious archive from planting multiple escaping symlinks where only
 /// the first gets cleaned up.
 pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
-    // Accumulates the first error without stopping the scan.
     let mut first_err: Option<io::Error> = None;
     let mut removed_symlinks = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -296,18 +293,13 @@ mod tests {
 
     #[test]
     fn safe_create_dir_all_rejects_chained_symlink_redirect() {
-        // Symlink "a" points outside root, then create_dir_all for
-        // "a/b/file" would follow "a" and create dirs outside root
-        // if not guarded.
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
 
         #[cfg(unix)]
         {
-            // Iteration 1: create symlink pointing outside
             std::os::unix::fs::symlink(outside.path(), root.join("a")).unwrap();
-            // Iteration 2: create_dir_all through the symlink
             let target = root.join("a/b/link");
             let err = safe_create_dir_all(&target, &root).unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);

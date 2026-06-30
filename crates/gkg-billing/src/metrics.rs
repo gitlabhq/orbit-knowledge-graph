@@ -40,8 +40,7 @@ impl BillingMetrics {
 
 /// Register every series at 0 at startup so `rate(...) == 0` alerts compare
 /// against zero rather than an absent series — OTel only exposes a series
-/// once it has been observed at least once. The labelled `dropped` counter
-/// is touched per known `reason` value so each labelled series appears.
+/// once it has been observed at least once.
 pub fn register() {
     METRICS.emitted.add(0, &[]);
     METRICS.rejected.add(0, &[]);

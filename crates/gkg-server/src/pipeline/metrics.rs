@@ -62,7 +62,6 @@ pub(crate) fn failure_reason(err: &PipelineError) -> Option<&'static str> {
     }
 }
 
-/// OpenTelemetry-backed pipeline observer for the server.
 pub struct OTelPipelineObserver {
     query_type: &'static str,
     start: Instant,

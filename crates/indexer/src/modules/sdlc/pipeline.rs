@@ -6,13 +6,12 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use futures::future::BoxFuture;
+use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::destination::{BatchWriterOptions, Destination};
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_with};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -22,12 +21,22 @@ use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
-use crate::durability::{RunDurability, WriteDurability};
+use crate::durability::RunDurability;
 use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
 
-type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
+/// Retry a datalake page read, shrinking the block size each time so an oversized page self-corrects.
+const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
+    mode: RetryMode::Local,
+    backoff: Backoff::Fixed(&[
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+        Duration::from_millis(400),
+    ]),
+    max_attempts: MAX_RETRIES + 1,
+    dead_letter: false,
+};
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
@@ -88,7 +97,7 @@ impl Page {
 }
 
 pub(in crate::modules::sdlc) struct PipelineContext {
-    pub destination: Arc<dyn Destination>,
+    pub writer: Arc<crate::clickhouse::ClickHouseWriter>,
     pub progress: ProgressNotifier,
     pub observer: Arc<std::sync::Mutex<dyn IndexingObserver>>,
 }
@@ -183,36 +192,48 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let (write_futures, per_table) = self
-                .build_writes(
-                    context.destination.as_ref(),
-                    &outputs,
-                    grouped,
-                    durability.data_writes,
-                )
-                .await?;
+            let mut write_futures = FuturesUnordered::new();
+            for (index, batches) in grouped.into_iter().enumerate() {
+                if batches.is_empty() {
+                    continue;
+                }
+                let table = outputs[index].clone();
+                let w = Arc::clone(&context.writer);
+                let d = durability.data_writes;
+                write_futures.push(async move {
+                    w.write(&table, batches, d)
+                        .await
+                        .map_err(|e| HandlerError::Processing(e.to_string()))
+                });
+            }
 
             {
                 let mut observer = context.observer.lock().unwrap();
                 observer.extracted(rows_in_page, bytes_in_page);
-                for (index, rows, bytes) in &per_table {
-                    observer.record_graph_write(&outputs[*index], *rows, *bytes);
-                    stats.written_rows += rows;
-                    stats.written_bytes += bytes;
-                }
             }
 
-            // Overlap the next page's read with this page's writes, exactly as
-            // the pre-streaming pipeline did: peak memory is roughly two pages.
+            let write_start = Instant::now();
+            let drain_writes = async {
+                while let Some(report) = write_futures.next().await {
+                    let report = report?;
+                    let mut observer = context.observer.lock().unwrap();
+                    observer.record_graph_write(&report.table, report.rows, report.bytes);
+                    stats.written_rows += report.rows;
+                    stats.written_bytes += report.bytes;
+                }
+                Ok::<_, HandlerError>(write_start.elapsed())
+            };
+
+            // Overlap the next page's read with this page's writes; peak memory is roughly two pages.
             let (write_elapsed, next_page) = if has_more {
                 let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor);
                 let (write_result, extract_result) = tokio::join!(
-                    self.drain_writes(write_futures),
+                    drain_writes,
                     self.extract_batch(transform.name(), &next_sql, params.clone()),
                 );
                 (write_result?, Some(extract_result?))
             } else {
-                (self.drain_writes(write_futures).await?, None)
+                (drain_writes.await?, None)
             };
             stats.write_ms += write_elapsed.as_millis() as u64;
 
@@ -298,69 +319,69 @@ impl Pipeline {
         sql: &str,
         params: Value,
     ) -> Result<Page, HandlerError> {
-        let mut last_error = None;
-        let mut max_block_size: Option<u64> = None;
-
-        for attempt in 0..=MAX_RETRIES {
-            if attempt > 0 {
-                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
-                tokio::time::sleep(backoff).await;
-            }
-
-            let query_start = Instant::now();
-            match self
-                .datalake
-                .query_batches_with_summary(sql, params.clone(), max_block_size)
-                .await
-            {
-                Ok((batches, scan_stats)) => {
-                    let extract_elapsed = query_start.elapsed();
-                    let bytes: u64 = batches
-                        .iter()
-                        .map(|b| b.get_array_memory_size() as u64)
-                        .sum();
-                    self.metrics.record_datalake_query(
-                        transform_name,
-                        extract_elapsed.as_secs_f64(),
-                        bytes,
-                    );
-                    return Ok(Page {
-                        batches,
-                        scan_stats,
-                        extract_elapsed,
-                    });
-                }
-                Err(err) => {
-                    warn!(
-                        attempt,
-                        max_retries = MAX_RETRIES,
-                        max_block_size = ?max_block_size,
-                        %err,
-                        "datalake query failed, retrying with smaller block size"
-                    );
-                    let overflow = is_arrow_string_overflow(&err);
-                    last_error = Some(HandlerError::Processing(format!(
-                        "datalake query failed: {err}"
-                    )));
-                    // An overflow only clears once blocks are small, and each halving
-                    // step re-scans the page, so jump straight to the floor.
-                    max_block_size = Some(if overflow {
-                        self.retry_config.halving_min_block_size
-                    } else {
-                        match max_block_size {
-                            Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
-                            None => self.retry_config.halving_initial_block_size,
+        drive_with(
+            &DATALAKE_EXTRACT_RETRY,
+            None::<u64>,
+            |block_size, attempt| {
+                let query_start = Instant::now();
+                let fut = self
+                    .datalake
+                    .query_batches_with_summary(sql, params.clone(), block_size);
+                let metrics = &self.metrics;
+                let retry_config = &self.retry_config;
+                async move {
+                    match fut.await {
+                        Ok((batches, scan_stats)) => {
+                            let extract_elapsed = query_start.elapsed();
+                            let bytes: u64 = batches
+                                .iter()
+                                .map(|b| b.get_array_memory_size() as u64)
+                                .sum();
+                            metrics.record_datalake_query(
+                                transform_name,
+                                extract_elapsed.as_secs_f64(),
+                                bytes,
+                            );
+                            Step::Done(Page {
+                                batches,
+                                scan_stats,
+                                extract_elapsed,
+                            })
                         }
-                    });
+                        Err(err) => {
+                            warn!(
+                                attempt,
+                                max_retries = MAX_RETRIES,
+                                max_block_size = ?block_size,
+                                %err,
+                                "datalake query failed, retrying with smaller block size"
+                            );
+                            // An overflow only clears once blocks are small, and each halving step
+                            // re-scans the page, so jump straight to the floor.
+                            let next = if is_arrow_string_overflow(&err) {
+                                retry_config.halving_min_block_size
+                            } else {
+                                match block_size {
+                                    Some(size) => {
+                                        (size / 2).max(retry_config.halving_min_block_size)
+                                    }
+                                    None => retry_config.halving_initial_block_size,
+                                }
+                            };
+                            DATALAKE_EXTRACT_RETRY.retry_or_give_up(
+                                attempt,
+                                Some(next),
+                                HandlerError::Processing(format!("datalake query failed: {err}")),
+                            )
+                        }
+                    }
                 }
-            }
-        }
-
-        Err(last_error.expect("loop runs once and only exits here after a failure"))
+            },
+        )
+        .await
     }
 
-    /// Drives the transform over every block of the page, grouping output rows
-    /// by destination table so each table is written as one bulk insert.
+    /// Groups output rows by destination table so each table is written as one bulk insert.
     async fn transform_page(
         &self,
         transform: &dyn BlockTransform,
@@ -373,57 +394,6 @@ impl Pipeline {
             }
         }
         Ok(grouped)
-    }
-
-    /// One bulk insert per non-empty destination table, returned as futures so
-    /// the writes overlap the next page's extract.
-    async fn build_writes(
-        &self,
-        destination: &dyn Destination,
-        outputs: &[String],
-        grouped: Vec<Vec<RecordBatch>>,
-        durability: Option<WriteDurability>,
-    ) -> Result<(WriteFutures, Vec<(usize, u64, u64)>), HandlerError> {
-        let write_futures = WriteFutures::new();
-        let mut per_table = Vec::new();
-
-        for (index, batches) in grouped.into_iter().enumerate() {
-            if batches.is_empty() {
-                continue;
-            }
-            let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-            let bytes: u64 = batches
-                .iter()
-                .map(|b| b.get_array_memory_size() as u64)
-                .sum();
-            per_table.push((index, rows, bytes));
-
-            let table = outputs[index].clone();
-            let writer = destination
-                .new_batch_writer(&table, BatchWriterOptions { durability })
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
-                })?;
-            write_futures.push(
-                async move {
-                    writer.write_batch(&batches).await.map_err(|err| {
-                        HandlerError::Processing(format!("failed to write to {table}: {err}"))
-                    })
-                }
-                .boxed(),
-            );
-        }
-
-        Ok((write_futures, per_table))
-    }
-
-    async fn drain_writes(&self, mut futures: WriteFutures) -> Result<Duration, HandlerError> {
-        let start = Instant::now();
-        while let Some(result) = futures.next().await {
-            result?;
-        }
-        Ok(start.elapsed())
     }
 
     async fn save_batch_progress(
@@ -495,10 +465,11 @@ mod tests {
     use super::super::plan::{TransformSpec, Transformation};
     use super::*;
     use crate::checkpoint::CheckpointError;
+    use crate::durability::WriteDurability;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::observer::NoOpObserver;
-    use crate::testkit::MockDestination;
+    use crate::testkit::test_writer;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
@@ -512,6 +483,7 @@ mod tests {
     fn simple_plan_with_batch_size(name: &str, batch_size: u64) -> Plan {
         Plan {
             name: name.to_string(),
+            target: name.to_string(),
             extract_template: "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
@@ -519,6 +491,7 @@ mod tests {
                  ORDER BY id LIMIT {{batch_size}}"
                 .to_string(),
             watermark_column: "_siphon_watermark".to_string(),
+            deleted_column: "_siphon_deleted".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
             transform: TransformSpec::DataFusion(vec![Transformation {
@@ -560,7 +533,6 @@ mod tests {
         test_batch_range(1, rows)
     }
 
-    /// A batch of `count` rows with `id` running `start_id..start_id+count`.
     fn test_batch_range(start_id: i64, count: usize) -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("id", ArrowDataType::Int64, false),
@@ -592,7 +564,7 @@ mod tests {
 
     fn noop_context() -> PipelineContext {
         PipelineContext {
-            destination: Arc::new(MockDestination::new()),
+            writer: test_writer(),
             progress: ProgressNotifier::noop(),
             observer: Arc::new(Mutex::new(NoOpObserver)),
         }
@@ -802,10 +774,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Records every `max_block_size` it sees and replays a configurable
-    /// success/failure pattern. Lets us assert that the per-plan override
-    /// flows through and that the adaptive halving on retry halves on each
-    /// attempt.
     struct RecordingDatalake {
         calls: Mutex<Vec<Option<u64>>>,
         responses: Mutex<Vec<Result<Vec<RecordBatch>, &'static str>>>,
@@ -887,10 +855,6 @@ mod tests {
 
     #[tokio::test]
     async fn extract_halves_max_block_size_on_each_retry() {
-        // Three failures then a success on the fourth attempt. The first
-        // attempt uses the datalake default (None). Subsequent attempts seed
-        // at retry_config.halving_initial_block_size (8000 here) and halve
-        // from there: 8000 → 4000 → 2000.
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
             Err("simulated transient failure"),
             Err("simulated transient failure"),
@@ -930,8 +894,6 @@ mod tests {
 
     #[tokio::test]
     async fn extract_halving_respects_min_block_size_floor() {
-        // Halving stops at halving_min_block_size and stays there for
-        // subsequent retries.
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
             Err("simulated transient failure"),
             Err("simulated transient failure"),
@@ -1084,8 +1046,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Returns one page of `rows` plus a fixed `ScanStats` from its summary,
-    /// then nothing.
     struct StatsDatalake {
         rows: usize,
         scan_stats: ScanStats,

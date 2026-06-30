@@ -10,7 +10,7 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -79,8 +79,9 @@ glab orbit remote tools
 
 `your-group`を実際のグループパスに置き換えてください。このクエリはそのグループの最初の5つのプロジェクトを返します。
 
-```shell
-glab orbit remote query - <<'EOF'
+リクエストボディを`query.json`に記述します。
+
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -94,7 +95,10 @@ glab orbit remote query - <<'EOF'
     "limit": 5
   }
 }
-EOF
+```
+
+```shell
+glab orbit remote query query.json
 ```
 
 `--format`フラグはリクエストボディの`response_format`にマップされます。

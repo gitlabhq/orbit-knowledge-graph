@@ -22,4 +22,4 @@ pub use pipeline::{
     PhaseCpuObserver, PhaseTimings, Pipeline, PipelineConfig, PipelineContext, PipelineResult,
 };
 pub use registry::{dispatch_by_tag, dispatch_family, dispatch_language};
-pub use sink::{BatchSink, CollectSink, GraphConverter, NullSink, SinkError};
+pub use sink::{GraphConverter, OnBatch, SinkError};

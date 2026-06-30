@@ -1,7 +1,3 @@
-//! PathFinding emit: bidirectional frontier expansion SQL generation.
-//!
-//! Reads Plan + PathFindingBody, produces SQL AST.
-//!
 //! Generates forward + backward frontier CTEs (UNION ALL of depth arms),
 //! then combines via direct (depth-1) + intersection (forward meets backward).
 //! Dedup is baked into anchor CTEs.
@@ -21,10 +17,6 @@ use crate::passes::shared::{
     dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
     let start_np = &plan.nodes[&pf.start];
@@ -109,7 +101,6 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         )
     };
 
-    // Direct depth-1 paths.
     let direct_query = Query {
         select: vec![
             SelectExpr::col(FORWARD_ALIAS, DEPTH_COLUMN),
@@ -144,7 +135,6 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         ..Default::default()
     };
 
-    // Intersection paths: forward meets backward.
     let intersection_query = Query {
         select: vec![
             SelectExpr::new(
@@ -261,10 +251,6 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
     })))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Clone)]
 struct Anchor {
     edge_filter: Option<Expr>,
@@ -277,7 +263,6 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
     let table = np.table.as_deref().unwrap_or("");
     let has_tp = np.has_traversal_path;
 
-    // Literal IN for concrete node_ids (no CTE needed).
     if !force_cte && !np.node_ids.is_empty() {
         return Anchor {
             edge_filter: Expr::col_in(
@@ -403,10 +388,6 @@ fn scope_filter(alias: &str, cte_name: &str) -> Expr {
         column: TRAVERSAL_PATH_COLUMN.to_string(),
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Frontier building
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 enum FDir {

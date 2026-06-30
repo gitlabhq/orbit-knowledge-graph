@@ -68,7 +68,27 @@ pub(super) mod params {
         json!({
             "type": "array",
             "items": { "type": "string" },
-            "description": "Node types to expand with properties and relationships."
+            "description": "Entity types to expand with their properties and relationships. Pass the names you intend to query (e.g. [\"MergeRequest\", \"User\"]) to get their filterable fields and types."
+        })
+    }
+
+    pub fn entity_types() -> Value {
+        json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Alias for expand_nodes. Entity types to expand with their properties and relationships."
+        })
+    }
+
+    pub fn get_graph_schema_parameters() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "expand_nodes": expand_nodes(),
+                "entity_types": entity_types(),
+                "format": format()
+            },
+            "additionalProperties": false
         })
     }
 
@@ -101,20 +121,16 @@ impl ToolRegistry {
     }
 
     pub(super) fn query_graph() -> ToolDefinition {
-        // Keep the inline TOON for now so existing MCP clients that already
-        // depend on it keep working. The new `get_query_dsl` tool exposes
-        // the same grammar through a dedicated call; a follow-up MR will
-        // strip the inline schema once the new tool has been adopted.
-        let base_description = "Execute graph queries to find nodes, traverse relationships, \
-                                explore neighborhoods, find paths, or aggregate data. \
-                                Use get_query_dsl for the query grammar. \
-                                Use get_graph_schema to discover available entity types and relationships.";
+        // Inline TOON kept for back-compat (one release cycle); a follow-up
+        // strips it once `get_query_dsl` adoption is verified.
+        let base_description = "Execute graph queries. \
+                                The DSL below is STRUCTURE ONLY — you MUST call \
+                                get_graph_schema (with expand_nodes) to discover valid \
+                                node/property/edge names. Use get_query_dsl for the \
+                                full grammar reference.";
 
         let description = match condensed_query_schema() {
-            Ok(schema) => format!(
-                "{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
-                base_description, schema
-            ),
+            Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
             Err(_) => base_description.to_string(),
         };
 
@@ -137,17 +153,11 @@ impl ToolRegistry {
         ToolDefinition {
             name: "get_graph_schema".into(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
-                          and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types."
+                          and edges with their source/target types. Pass expand_nodes (or its \
+                          alias entity_types) with specific type names to get their filterable \
+                          properties and types before composing a query_graph call."
                 .into(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "expand_nodes": params::expand_nodes(),
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
+            parameters: params::get_graph_schema_parameters(),
         }
     }
 
@@ -458,6 +468,15 @@ mod tests {
         assert!(!props.contains_key("include"));
         assert!(props.contains_key("expand_nodes"));
         assert!(props.contains_key("format"));
+    }
+
+    #[test]
+    fn get_graph_schema_advertises_entity_types_alias() {
+        let tool = find_command("get_graph_schema");
+        assert!(
+            tool.parameters["properties"]["entity_types"].is_object(),
+            "entity_types alias should be advertised so agents that reach for it self-correct"
+        );
     }
 
     #[test]

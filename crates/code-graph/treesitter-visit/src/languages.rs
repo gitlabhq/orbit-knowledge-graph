@@ -1,11 +1,8 @@
-//! Supported programming languages.
-
 use crate::Language;
 use crate::tree_sitter::{LanguageExt, TSLanguage};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Represents all supported languages.
 /// Variants are always available, but tree-sitter parsing requires the corresponding feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SupportLang {
@@ -23,6 +20,7 @@ pub enum SupportLang {
     CSharp,
     Kotlin,
     Rust,
+    Scala,
     Php,
     Hcl,
     Swift,
@@ -37,8 +35,7 @@ impl fmt::Display for SupportLang {
 
 impl Language for SupportLang {
     fn kind_to_id(&self, kind: &str) -> u16 {
-        self.get_ts_language()
-            .id_for_node_kind(kind, /*named*/ true)
+        self.get_ts_language().id_for_node_kind(kind, true)
     }
 
     fn field_to_id(&self, field: &str) -> Option<u16> {
@@ -115,6 +112,11 @@ impl LanguageExt for SupportLang {
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-rust"))]
             Self::Rust => panic!("tree-sitter-rust feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-scala")]
+            Self::Scala => tree_sitter_scala::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-scala"))]
+            Self::Scala => panic!("tree-sitter-scala feature not enabled"),
 
             #[cfg(feature = "tree-sitter-php")]
             Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),

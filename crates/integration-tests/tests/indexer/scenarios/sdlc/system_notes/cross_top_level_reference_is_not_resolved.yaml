@@ -27,4 +27,4 @@ expect:
     - kind: MENTIONS
       count: 1
       rows:
-        - { target_id: 40 }
+        - { source_id: 40, target_id: 1000 }

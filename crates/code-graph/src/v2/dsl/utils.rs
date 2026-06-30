@@ -2,9 +2,6 @@ use crate::v2::types::ImportBindingKind;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
-/// Resolve a bare or dotted type name to its FQN using import_map,
-/// separator-based splitting, and module_prefix fallback.
-///
 /// Resolution order:
 /// 1. Direct import_map lookup for the full name
 /// 2. Split on separator, resolve first segment via imports, append rest
@@ -53,9 +50,6 @@ pub fn canonical_range(r: &crate::utils::Range) -> crate::v2::types::Range {
     )
 }
 
-/// Find the first identifier node in an expression tree (DFS).
-/// Uses the language's `ident_kinds` from chain config to detect identifiers
-/// generically across languages.
 pub fn find_first_ident(node: &Node<StrDoc<SupportLang>>, ident_kinds: &[&str]) -> Option<String> {
     node.find_descendant(|n| n.is_named() && ident_kinds.contains(&n.kind().as_ref()))
         .map(|n| n.text().to_string())

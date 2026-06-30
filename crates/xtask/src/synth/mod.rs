@@ -12,8 +12,6 @@ pub mod generator;
 #[allow(dead_code)]
 pub mod load;
 
-/// Resolve a path relative to the xtask crate root (where fixture YAMLs live).
-/// Uses CARGO_MANIFEST_DIR for reliable paths in tests.
 #[cfg(test)]
 pub(crate) fn fixture_path(relative: &str) -> String {
     format!("{}/{}", env!("CARGO_MANIFEST_DIR"), relative)

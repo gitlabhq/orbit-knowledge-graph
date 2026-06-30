@@ -1,5 +1,3 @@
-//! Shared types used across GKG crates.
-
 pub mod archive;
 pub mod arrow;
 pub mod clickhouse;

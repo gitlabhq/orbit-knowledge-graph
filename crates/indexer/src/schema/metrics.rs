@@ -1,6 +1,3 @@
-//! OTel instrument holders for schema migration, backed by the central
-//! `gkg-observability` catalog.
-//!
 //! Names, descriptions, units, labels, and histogram buckets live in
 //! `crates/gkg-observability/src/indexer/migration.rs`. This module only
 //! builds instruments against the running `MeterProvider`.
@@ -10,8 +7,6 @@ use opentelemetry::metrics::{Counter, Gauge};
 
 use gkg_observability::indexer::migration;
 
-/// Schema-migration counter with labels `phase` and `result`.
-///
 /// Prometheus exposes this as `gkg_schema_migration_phase_total` after the
 /// rename from the former `gkg_schema_migration_total_total` double suffix.
 #[derive(Clone)]
@@ -44,8 +39,6 @@ impl Default for MigrationMetrics {
     }
 }
 
-/// Migration completion metrics: successful finishes and per-version cleanup.
-///
 /// The `version_band` label buckets the historical version integer into
 /// `current`, `previous`, or `ancient` to cap cardinality as schema history
 /// grows. Prometheus exposes these as `gkg_schema_migration_completed_total`
@@ -87,8 +80,7 @@ impl CompletionMetrics {
         );
     }
 
-    /// Records both gauges for a single (scope, version) at once. `version`
-    /// is the migrating version we just measured against, used to derive the
+    /// `version` is the migrating version measured against, used to derive the
     /// `version_band` label so dashboards don't have to know version numbers.
     pub(crate) fn record_units(
         &self,

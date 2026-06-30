@@ -1,5 +1,3 @@
-//! ClickHouse schema generation from ontology and config.
-
 use crate::synth::arrow_schema::{ToArrowSchema, arrow_to_clickhouse_type, edge_schema};
 use crate::synth::config::SchemaConfig;
 use crate::synth::constants::{TABLE_PATTERN_ALL_NODES, TABLE_PATTERN_EDGES};
@@ -7,7 +5,6 @@ use arrow::datatypes::Schema;
 use ontology::Ontology;
 use ontology::constants::EDGE_TABLE;
 
-/// Generates ClickHouse DDL statements from ontology and config.
 pub struct SchemaGenerator<'a> {
     ontology: &'a Ontology,
     config: &'a SchemaConfig,
@@ -18,23 +15,19 @@ impl<'a> SchemaGenerator<'a> {
         Self { ontology, config }
     }
 
-    /// Generate CREATE TABLE statements for all tables.
     pub fn generate_create_tables(&self) -> Vec<(String, String)> {
         let mut statements = Vec::new();
 
-        // Node tables
         for node in self.ontology.nodes() {
             let tbl_name = self.ontology.table_name(&node.name).unwrap();
             let schema = node.to_arrow_schema();
 
             let (primary_key, order_by): (Vec<&str>, Vec<&str>) =
                 if self.config.use_ontology_sort_keys && !node.sort_key.is_empty() {
-                    // Use the per-node sort_key from ontology YAML as both ORDER BY and PK.
-                    // This matches graph.sql where each table has its own ORDER BY/PK.
+                    // Matches graph.sql where each table has its own ORDER BY/PK.
                     let sort_key: Vec<&str> = node.sort_key.iter().map(|s| s.as_str()).collect();
                     (sort_key.clone(), sort_key)
                 } else {
-                    // Fall back to global config when sort_key is empty or flag is off.
                     let pk = self
                         .config
                         .node_primary_key
@@ -53,7 +46,6 @@ impl<'a> SchemaGenerator<'a> {
             statements.push((tbl_name.to_owned(), ddl));
         }
 
-        // Edge table
         let edge_schema = edge_schema(self.ontology);
         let primary_key: Vec<&str> = self
             .config
@@ -73,7 +65,6 @@ impl<'a> SchemaGenerator<'a> {
         statements
     }
 
-    /// Generate DROP TABLE statements.
     pub fn generate_drop_tables(&self) -> Vec<String> {
         let mut drops = Vec::new();
 
@@ -86,7 +77,6 @@ impl<'a> SchemaGenerator<'a> {
         drops
     }
 
-    /// Generate ALTER TABLE statements for indexes.
     pub fn generate_add_indexes(&self) -> Vec<String> {
         let mut statements = Vec::new();
 
@@ -104,7 +94,6 @@ impl<'a> SchemaGenerator<'a> {
         statements
     }
 
-    /// Generate MATERIALIZE INDEX statements.
     pub fn generate_materialize_indexes(&self) -> Vec<String> {
         let mut statements = Vec::new();
 
@@ -122,7 +111,6 @@ impl<'a> SchemaGenerator<'a> {
         statements
     }
 
-    /// Generate ALTER TABLE statements for projections.
     pub fn generate_add_projections(&self) -> Vec<String> {
         let mut statements = Vec::new();
 
@@ -143,7 +131,6 @@ impl<'a> SchemaGenerator<'a> {
         statements
     }
 
-    /// Generate MATERIALIZE PROJECTION statements.
     pub fn generate_materialize_projections(&self) -> Vec<String> {
         let mut statements = Vec::new();
 
@@ -174,7 +161,6 @@ impl<'a> SchemaGenerator<'a> {
         }
     }
 
-    /// Convert Arrow schema to ClickHouse CREATE TABLE DDL.
     fn schema_to_ddl(
         &self,
         table_name: &str,
@@ -193,7 +179,6 @@ impl<'a> SchemaGenerator<'a> {
 
         let order_by_clause = order_by.join(", ");
 
-        // PRIMARY KEY clause (only if different from ORDER BY)
         let primary_key_clause = if primary_key.is_empty() {
             String::new()
         } else {
@@ -247,7 +232,7 @@ mod tests {
         let generator = SchemaGenerator::new(&ontology, &config);
         let statements = generator.generate_create_tables();
 
-        assert_eq!(statements.len(), 3); // User, Project, edges
+        assert_eq!(statements.len(), 3);
 
         let (_, user_ddl) = &statements[1];
         assert!(user_ddl.contains("CREATE TABLE IF NOT EXISTS"));

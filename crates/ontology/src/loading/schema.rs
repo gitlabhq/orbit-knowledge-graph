@@ -55,6 +55,8 @@ pub(super) struct SettingsYaml {
     pub denormalization: Vec<DenormalizationEntryYaml>,
     #[serde(default)]
     pub statistics: Option<StatisticsYaml>,
+    #[serde(default)]
+    pub partition: Option<PartitionYaml>,
     pub internal_column_prefix: String,
     #[serde(default)]
     pub local_db: Option<LocalSettingsYaml>,
@@ -103,6 +105,12 @@ pub(super) struct StatisticsYaml {
 pub(super) struct StatisticsExcludeYaml {
     pub node: String,
     pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct PartitionYaml {
+    pub partition_by: String,
+    pub required_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

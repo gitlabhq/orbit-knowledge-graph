@@ -507,7 +507,6 @@ fn parse_rust_file_standalone(
     root_path: &str,
 ) -> Result<ParsedRustFile, RustFileError> {
     let abs_path = to_absolute_path(root_path, file_path);
-    // Never read a file that resolves outside the repo root.
     let Some(relative_path) = relative_path_if_under_root(root_path, &abs_path) else {
         return Err((
             file_path.to_string(),
@@ -1485,7 +1484,10 @@ mod tests {
         use crate::v2::error::{AnalyzerError, FileFault};
         let (path, err) = match super::catch_rust_file_panic("src/lib.rs", || {
             panic!("analysis exploded");
-            #[allow(unreachable_code)]
+            #[expect(
+                unreachable_code,
+                reason = "deliberately unreachable — the preceding panic!() is the test subject; this call exists only to give the closure a concrete return type"
+            )]
             super::parse_rust_file_standalone("src/lib.rs", "/tmp")
         }) {
             Ok(_) => panic!("panic should be converted to a fault"),

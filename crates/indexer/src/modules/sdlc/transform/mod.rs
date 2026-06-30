@@ -139,10 +139,8 @@ pub(in crate::modules::sdlc) struct TransformRegistry {
 }
 
 impl TransformRegistry {
-    /// Register a named Rust transform factory. Called from each transform
-    /// module's `register()` during handler setup, before the registry is
-    /// frozen behind an `Arc`. `data_fusion` is not stored here — it is the
-    /// default arm of [`TransformSpec`] and built inline by [`TransformRegistry::build`].
+    /// Called from each transform module's `register()` during handler setup,
+    /// before the registry is frozen behind an `Arc`.
     pub(in crate::modules::sdlc) fn register(
         &mut self,
         name: impl Into<String>,

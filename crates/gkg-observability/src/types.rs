@@ -1,12 +1,8 @@
 use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter, ObservableGauge, UpDownCounter};
 use serde::Serialize;
 
-/// Source-of-truth description of a single metric.
-///
-/// Declared once per metric as a `pub const` in a domain submodule and
-/// collected via the module's `CATALOG` slice. Instruments are built by
-/// calling one of the typed `build_*` methods, which panic if the spec's
-/// declared `kind` doesn't match the requested instrument type.
+/// The typed `build_*` methods panic if the spec's declared `kind` doesn't
+/// match the requested instrument type.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct MetricSpec {
     pub otel_name: &'static str,
@@ -48,10 +44,8 @@ pub enum Stability {
 }
 
 impl MetricSpec {
-    /// Build a non-histogram spec with the given kind. Histograms must go
-    /// through [`histogram_f64`](Self::histogram_f64) or
-    /// [`histogram_u64`](Self::histogram_u64) because they require a bucket
-    /// set.
+    /// Histograms must go through [`histogram_f64`](Self::histogram_f64) or
+    /// [`histogram_u64`](Self::histogram_u64) because they require a bucket set.
     const fn instrument(
         otel_name: &'static str,
         description: &'static str,
@@ -180,11 +174,9 @@ impl MetricSpec {
         }
     }
 
-    /// Prometheus-exposed metric name that `opentelemetry-prometheus` would
-    /// produce for this spec.
-    ///
-    /// Sanitises dots to underscores, appends a unit suffix if the unit maps
-    /// to a recognised UCUM suffix, then appends `_total` for counters.
+    /// Must match the name `opentelemetry-prometheus` produces: dots to
+    /// underscores, a UCUM unit suffix if the unit maps to one, then `_total`
+    /// for counters.
     pub fn prom_name(&self) -> String {
         let mut name = self.otel_name.replace('.', "_");
         if let Some(unit) = self.unit
@@ -280,8 +272,6 @@ impl MetricSpec {
         b.build()
     }
 
-    /// Observable gauges require the caller to supply the callback closure,
-    /// which this helper wires into the instrument builder.
     pub fn build_observable_gauge_i64<F>(&self, meter: &Meter, callback: F) -> ObservableGauge<i64>
     where
         F: Fn(&dyn opentelemetry::metrics::AsyncInstrument<i64>) + Send + Sync + 'static,

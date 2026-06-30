@@ -3,9 +3,8 @@ use crate::v2::error::FileReason;
 use crate::v2::inventory::{
     FamilyFileInput, FileInput, build_file_inventory_graph, group_parseable_inventory,
 };
-use crate::v2::sink::{BatchSink, GraphConverter};
+use crate::v2::sink::{GraphConverter, OnBatch};
 use arrow::record_batch::RecordBatch;
-use crossbeam_channel::Sender;
 use indicatif::{ProgressBar, ProgressStyle};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
@@ -41,7 +40,6 @@ pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
 }
 
 /// Cooperative cancellation token. Clone-cheap (`Arc`).
-/// Set `cancel()` from any thread to request pipeline shutdown.
 #[derive(Clone, Default)]
 pub struct CancellationToken(Arc<AtomicBool>);
 
@@ -56,7 +54,6 @@ impl CancellationToken {
         self.0.store(true, Ordering::Relaxed);
     }
 
-    /// Check if cancellation has been requested.
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
@@ -185,12 +182,6 @@ fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput]
     }
 }
 
-/// Immutable context shared across the entire pipeline run.
-/// Bundles config, tracer, root path, and cancellation — everything
-/// that doesn't change per-language or per-file.
-///
-/// Owned so it can be stored in `Arc` and shared across threads
-/// and into structs like `CodeGraph`.
 /// Max file timing entries retained (top-N by total_ms).
 const MAX_FILE_TIMINGS: usize = 100;
 
@@ -205,9 +196,7 @@ pub struct PipelineContext {
     /// `gkg.indexer.code.file_faults{kind}` and contribute to
     /// `files.processed{outcome="errored"}`.
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
-    /// Per-file timing entries collected across all languages.
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
-    /// Per-language phase timing entries.
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
 }
 
@@ -276,7 +265,6 @@ impl PipelineContext {
         }
     }
 
-    /// Drain collected timings, sorted by total_ms descending.
     pub fn drain_slowest_files(&self) -> Vec<FileTimingEntry> {
         let mut timings = self
             .file_timings
@@ -292,8 +280,6 @@ impl PipelineContext {
     }
 }
 
-/// Per-language context built inside `process_files`. Bundles the
-/// pipeline-wide context with the language-specific spec and rules.
 pub struct LanguageContext {
     pub pipeline: Arc<PipelineContext>,
     pub spec: crate::v2::dsl::types::LanguageSpec,
@@ -322,11 +308,6 @@ impl LanguageContext {
     }
 }
 
-/// Handle for streaming Arrow batches out of a pipeline.
-///
-/// Wraps a channel sender, converter reference, and stat counters.
-/// Language pipelines call `send_graph()` for graph-based output
-/// or `send_raw()` for pre-built Arrow batches.
 #[derive(Clone, Copy)]
 pub struct GraphStatsCounters<'a> {
     directories: &'a AtomicUsize,
@@ -378,7 +359,7 @@ impl<'a> GraphStatsCounters<'a> {
 }
 
 pub struct BatchTx<'a> {
-    tx: &'a Sender<(String, RecordBatch)>,
+    on_batch: &'a OnBatch,
     converter: &'a dyn GraphConverter,
     errors: &'a Mutex<Vec<PipelineError>>,
     stats: GraphStatsCounters<'a>,
@@ -386,13 +367,13 @@ pub struct BatchTx<'a> {
 
 impl<'a> BatchTx<'a> {
     pub fn new(
-        tx: &'a Sender<(String, RecordBatch)>,
+        on_batch: &'a OnBatch,
         converter: &'a dyn GraphConverter,
         errors: &'a Mutex<Vec<PipelineError>>,
         stats: GraphStatsCounters<'a>,
     ) -> Self {
         Self {
-            tx,
+            on_batch,
             converter,
             errors,
             stats,
@@ -401,8 +382,6 @@ impl<'a> BatchTx<'a> {
 }
 
 impl BatchTx<'_> {
-    /// Count graph stats, convert to Arrow batches, and send to the
-    /// writer thread. Takes ownership — graph is dropped after conversion.
     pub fn send_graph(&self, graph: CodeGraph) {
         self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
@@ -418,12 +397,11 @@ impl BatchTx<'_> {
             }
         };
         for (table, batch) in batches {
-            if let Err(crossbeam_channel::SendError((table, _))) = self.tx.send((table, batch)) {
+            if let Err(error) = (self.on_batch)(&table, batch) {
                 self.errors.lock().unwrap().push(
                     crate::v2::error::CodeGraphError::SinkWrite {
                         table,
-                        message: "batch channel closed before writer accepted graph output"
-                            .to_string(),
+                        message: error.to_string(),
                     }
                     .into(),
                 );
@@ -432,13 +410,12 @@ impl BatchTx<'_> {
         }
     }
 
-    /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
     pub fn send_raw(&self, table: String, batch: RecordBatch) {
-        if let Err(crossbeam_channel::SendError((table, _))) = self.tx.send((table, batch)) {
+        if let Err(error) = (self.on_batch)(&table, batch) {
             self.errors.lock().unwrap().push(
                 crate::v2::error::CodeGraphError::SinkWrite {
                     table,
-                    message: "batch channel closed before writer accepted raw output".to_string(),
+                    message: error.to_string(),
                 }
                 .into(),
             );
@@ -449,7 +426,7 @@ impl BatchTx<'_> {
 fn write_graph_direct(
     graph: CodeGraph,
     converter: &dyn GraphConverter,
-    sink: &dyn BatchSink,
+    on_batch: &OnBatch,
     errors: &Mutex<Vec<PipelineError>>,
     stats: GraphStatsCounters<'_>,
 ) {
@@ -467,7 +444,7 @@ fn write_graph_direct(
         }
     };
     for (table, batch) in batches {
-        if let Err(error) = sink.write_batch(&table, &batch) {
+        if let Err(error) = on_batch(&table, batch) {
             errors.lock().unwrap().push(
                 crate::v2::error::CodeGraphError::SinkWrite {
                     table,
@@ -480,11 +457,6 @@ fn write_graph_direct(
     }
 }
 
-/// Trait for language-specific pipeline execution.
-///
-/// All pipelines stream their output through a `BatchTx` handle.
-/// Graph-based pipelines use `btx.send_graph()`.
-/// Batch-based pipelines use `btx.send_raw()`.
 pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
@@ -597,7 +569,6 @@ pub struct PipelineStats {
     pub edges_count: usize,
     /// Per-file timing entries, sorted by total_ms descending.
     pub slowest_files: Vec<FileTimingEntry>,
-    /// Per-language phase breakdown.
     pub language_timings: Vec<LanguageTimings>,
     /// Top-level pipeline phase durations (non-overlapping).
     pub phase_timings: PhaseTimings,
@@ -687,7 +658,7 @@ impl Pipeline {
         config: PipelineConfig,
         stream_reasons: &FxHashMap<String, FilterSkip>,
         converter: Arc<dyn GraphConverter>,
-        sink: Arc<dyn BatchSink>,
+        on_batch: Arc<OnBatch>,
     ) -> PipelineResult {
         Self::run_with_tracer(
             root,
@@ -696,16 +667,11 @@ impl Pipeline {
             stream_reasons,
             Tracer::new(false),
             converter,
-            sink,
+            on_batch,
         )
     }
 
-    /// Run the pipeline. Each language gets its own CPU thread and a
-    /// dedicated writer thread. Results stream through a per-language
-    /// channel as phases complete — nodes after Phase 1, edges after
-    /// Phase 2/3. Graphs are dropped immediately after conversion.
-    ///
-    /// Blocks until all languages finish processing and writing.
+    /// Blocks until all languages finish processing.
     pub fn run_with_tracer(
         root: &Path,
         file_inventory: Arc<[FileInventoryEntry]>,
@@ -713,7 +679,7 @@ impl Pipeline {
         stream_reasons: &FxHashMap<String, FilterSkip>,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
-        sink: Arc<dyn BatchSink>,
+        on_batch: Arc<OnBatch>,
     ) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
         config.emit_file_inventory_graph = true;
@@ -751,8 +717,8 @@ impl Pipeline {
 
         // 2. Process languages with bounded concurrency. At most
         //    max_concurrent_languages run at once (default 2), each
-        //    with its own rayon pool and writer thread. Limits peak
-        //    memory to N CodeGraphs + N rayon pools.
+        //    with its own rayon pool. Limits peak memory to N
+        //    CodeGraphs + N rayon pools.
         let max_langs = match ctx.config.max_concurrent_languages {
             0 => 2,
             n => n,
@@ -777,12 +743,11 @@ impl Pipeline {
 
         std::thread::scope(|s| {
             for (family, files) in &files_by_family {
-                // Block until a slot opens
                 sem_rx.recv().unwrap();
 
                 let ctx = &ctx;
                 let converter = &converter;
-                let sink = &sink;
+                let on_batch: &OnBatch = &*on_batch;
                 let sem_tx = &sem_tx;
                 let files_parsed = &files_parsed;
                 let files_skipped = &files_skipped;
@@ -792,28 +757,6 @@ impl Pipeline {
                 let imports_count = &imports_count;
                 let edges_count = &edges_count;
                 let all_errors = &all_errors;
-
-                // Per-language channel: CPU thread → writer thread.
-                // Bounded to cap memory if the writer is slower than the converter.
-                let (tx, rx) = crossbeam_channel::bounded::<(String, RecordBatch)>(8);
-
-                // Writer thread: drain channel, write each batch to sink
-                s.spawn(move || {
-                    for (table, batch) in rx {
-                        if let Err(e) = sink.write_batch(&table, &batch) {
-                            all_errors.lock().unwrap().push(
-                                crate::v2::error::CodeGraphError::SinkWrite {
-                                    table: table.clone(),
-                                    message: e.to_string(),
-                                }
-                                .into(),
-                            );
-                        }
-                    }
-                });
-
-                // CPU thread: acquire permit, build rayon pool, process,
-                // release permit when done
                 let worker_threads = ctx.config.worker_threads;
                 s.spawn(move || {
                     if ctx.is_cancelled() {
@@ -844,7 +787,7 @@ impl Pipeline {
                     };
 
                     let btx = BatchTx {
-                        tx: &tx,
+                        on_batch,
                         converter: converter.as_ref(),
                         errors: all_errors,
                         stats: GraphStatsCounters::new(
@@ -869,7 +812,6 @@ impl Pipeline {
                         }))
                     });
 
-                    // Pool dropped here — rayon threads freed
                     drop(pool);
 
                     match result.unwrap_or_else(|payload| {
@@ -965,12 +907,10 @@ impl Pipeline {
                     if let Some(cb) = &ctx.config.on_progress {
                         cb();
                     }
-                    // Release permit — next family can start
                     sem_tx.send(()).ok();
-                    // tx dropped here — writer thread exits
                 });
             }
-        }); // all threads join here
+        });
         let language_processing_ms = t_languages.elapsed().as_secs_f64() * 1000.0;
 
         let skipped = ctx
@@ -1004,7 +944,7 @@ impl Pipeline {
             write_graph_direct(
                 structural_graph,
                 converter.as_ref(),
-                sink.as_ref(),
+                &*on_batch,
                 &all_errors,
                 GraphStatsCounters::new(
                     &directories_count,
@@ -1101,8 +1041,6 @@ where
     }
 }
 
-// ── FamilyPipeline ──────────────────────────────────────────────
-
 /// Pipeline for language families with multiple member languages.
 ///
 /// Parses each file with its language-specific `LanguageSpec`, but
@@ -1156,8 +1094,20 @@ impl FamilyPipeline {
             })
             .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
+        let import_rewriters: FxHashMap<Language, Box<crate::v2::dsl::types::ImportRewriter>> =
+            member_ctxs
+                .iter()
+                .filter_map(|(&language, lctx)| {
+                    let build = lctx.spec.hooks.import_rewriter?;
+                    let paths = files
+                        .iter()
+                        .filter(|file| file.language == language)
+                        .map(|file| file.path.as_str())
+                        .collect::<Vec<_>>();
+                    Some((language, build(&paths, expected_sep)))
+                })
+                .collect();
 
-        // ── Phase 1a: parallel parse with per-file spec ─────────
         let pb = progress_bar(file_count as u64, "parse + graph");
 
         use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
@@ -1231,10 +1181,17 @@ impl FamilyPipeline {
                     walk: ctx.config.per_file_walk_timeout,
                     ssa: ctx.config.per_file_ssa_timeout,
                 };
-                let result = match lctx
-                    .spec
-                    .parse_full_collect(&source, &f.path, f.language, tracer, timeouts)
-                {
+                let result = lctx.spec.parse_full_collect_with_options(
+                    &source,
+                    &f.path,
+                    f.language,
+                    tracer,
+                    timeouts,
+                    crate::v2::dsl::engine::ParseFullOptions {
+                        import_rewriter: import_rewriters.get(&f.language).map(|r| r.as_ref()),
+                    },
+                );
+                let result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
                         tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
@@ -1311,7 +1268,6 @@ impl FamilyPipeline {
             faults.extend(parsed_faults);
         }
 
-        // ── Phase 1b: add all defs to one shared CodeGraph ──────
         struct FileWithRefs {
             info: FileInfo,
             language: Language,
@@ -1369,7 +1325,6 @@ impl FamilyPipeline {
         graph.drop_construction_indexes();
         let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
 
-        // ── Phase 1c: patch unresolved SSA aliases ──────────────
         for fwr in files_with_refs.iter_mut().flatten() {
             if fwr.unresolved_aliases.is_empty() {
                 continue;
@@ -1387,7 +1342,6 @@ impl FamilyPipeline {
             }
         }
 
-        // ── Phase 2: resolve refs with per-file lang_ctx ────────
         let needs_include = member_ctxs.values().any(|lc| {
             lc.rules
                 .import_strategies
@@ -1400,6 +1354,18 @@ impl FamilyPipeline {
         } else {
             None
         };
+
+        let reexport_builders: Vec<_> = member_ctxs
+            .values()
+            .filter_map(|lc| lc.rules.hooks.reexport_index_builder)
+            .collect();
+        assert!(
+            reexport_builders.len() <= 1,
+            "FamilyPipeline supports at most one reexport_index_builder per family"
+        );
+        let shared_reexport_index = reexport_builders
+            .first()
+            .map(|build| Arc::new(build(&graph, expected_sep)));
 
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
@@ -1441,6 +1407,9 @@ impl FamilyPipeline {
                 resolver.set_inferred_returns(&fwr.inferred_returns);
                 if let Some(idx) = &shared_include_index {
                     resolver.set_include_index(Arc::clone(idx));
+                }
+                if let Some(idx) = &shared_reexport_index {
+                    resolver.set_reexport_index(Arc::clone(idx));
                 }
 
                 let t_resolve = std::time::Instant::now();
@@ -1506,7 +1475,6 @@ impl FamilyPipeline {
             t2.elapsed()
         ));
 
-        // Insert Phase 2 edges and collect failed chains
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
         let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
 
@@ -1535,7 +1503,6 @@ impl FamilyPipeline {
             }
         }
 
-        // ── Phase 3: re-resolve failed chains ───────────────────
         if !all_inferred.is_empty() {
             for (def_nodes, inferred) in &all_inferred {
                 for (def_idx, rt) in inferred {
@@ -1570,6 +1537,9 @@ impl FamilyPipeline {
                     );
                     if let Some(idx) = &shared_include_index {
                         resolver.set_include_index(Arc::clone(idx));
+                    }
+                    if let Some(idx) = &shared_reexport_index {
+                        resolver.set_reexport_index(Arc::clone(idx));
                     }
                     let mut edges = Vec::new();
                     for failed in failed_chains {
@@ -1663,10 +1633,9 @@ impl FamilyPipeline {
 mod tests {
     use super::*;
     use crate::v2::linker::CodeGraph;
-    use crate::v2::sink::{GraphConverter, NullSink, SinkError};
+    use crate::v2::sink::{GraphConverter, SinkError};
     use crate::v2::types::{DefKind, NodeKind};
 
-    /// Test-only converter that captures CodeGraphs for inspection.
     struct TestCapture {
         graphs: std::sync::Mutex<Vec<CodeGraph>>,
     }
@@ -1732,7 +1701,8 @@ mod tests {
             language_timings: std::sync::Mutex::new(Vec::new()),
         });
         let capture = Arc::new(TestCapture::new());
-        let (tx, _rx) = crossbeam_channel::unbounded();
+        let noop = |_: &str, _: RecordBatch| Ok(());
+        let null_batch: &OnBatch = &noop;
         let dirs = AtomicUsize::new(0);
         let files = AtomicUsize::new(0);
         let defs = AtomicUsize::new(0);
@@ -1740,7 +1710,7 @@ mod tests {
         let edgs = AtomicUsize::new(0);
         let errors = Mutex::new(Vec::new());
         let btx = BatchTx::new(
-            &tx,
+            null_batch,
             capture.as_ref(),
             &errors,
             GraphStatsCounters::new(&dirs, &files, &defs, &imps, &edgs),
@@ -1786,7 +1756,7 @@ mod tests {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
-            Arc::new(NullSink),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.errors.len(), 0);
@@ -1821,7 +1791,7 @@ mod tests {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
-            Arc::new(NullSink),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.errors.len(), 0);
@@ -1869,7 +1839,7 @@ mod tests {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
-            Arc::new(NullSink),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.errors.len(), 0);
@@ -1897,7 +1867,7 @@ mod tests {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(OffsetOverflowOnParsedGraph),
-            Arc::new(NullSink),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.errors.len(), 1);
@@ -1934,7 +1904,7 @@ mod tests {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TypedOffsetOverflowOnParsedGraph),
-            Arc::new(NullSink),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.errors.len(), 1);
@@ -1991,7 +1961,7 @@ mod tests {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
-            Arc::new(NullSink),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.errors.len(), 0, "Should have no errors");
@@ -2041,7 +2011,7 @@ mod tests {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
-            Arc::new(NullSink),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.errors.len(), 0);
@@ -2057,8 +2027,6 @@ mod tests {
             .collect();
         assert_eq!(structural_files, vec!["listed.py".to_string()]);
     }
-
-    // ── Python fixture ──────────────────────────────────────────────
 
     #[test]
     fn python_definitions_fixture() {
@@ -2088,8 +2056,6 @@ mod tests {
         assert!(class_count > 0, "Should find at least one class");
     }
 
-    // ── Java fixture ────────────────────────────────────────────────
-
     #[test]
     fn java_comprehensive_fixture() {
         let path = fixture_path("java/ComprehensiveJavaDefinitions.java");
@@ -2106,8 +2072,6 @@ mod tests {
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
         assert!(kinds.contains(&DefKind::Method), "Should have a method");
     }
-
-    // ── Kotlin fixture ──────────────────────────────────────────────
 
     #[test]
     fn kotlin_comprehensive_fixture() {
@@ -2126,8 +2090,6 @@ mod tests {
         assert!(kinds.contains(&DefKind::Function), "Should have a function");
     }
 
-    // ── C# fixture ──────────────────────────────────────────────────
-
     #[test]
     fn csharp_comprehensive_fixture() {
         let path = fixture_path("csharp/ComprehensiveCSharp.cs");
@@ -2143,8 +2105,6 @@ mod tests {
         let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
         assert!(kinds.contains(&DefKind::Class), "Should have a class");
     }
-
-    // ── Full pipeline e2e ───────────────────────────────────────────
 
     #[test]
     fn full_pipeline_on_fixture_directory() {
@@ -2212,7 +2172,6 @@ namespace MyApp {
         .unwrap();
 
         let capture = Arc::new(TestCapture::new());
-        let sink = Arc::new(NullSink);
         let result = Pipeline::run_with_tracer(
             root,
             Arc::from(vec![
@@ -2241,7 +2200,7 @@ namespace MyApp {
             &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
-            sink,
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
         );
 
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");

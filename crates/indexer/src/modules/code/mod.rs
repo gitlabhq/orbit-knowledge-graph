@@ -1,9 +1,3 @@
-//! Code Indexing Module
-//!
-//! This module processes code indexing tasks from the Siphon CDC stream,
-//! fetches repository code from Gitaly, runs the code-graph, and
-//! writes the resulting graph data to ClickHouse.
-
 mod arrow_converter;
 mod checkpoint;
 pub mod config;
@@ -21,6 +15,7 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
 use crate::clickhouse::ClickHouseConfigurationExt;
+
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
@@ -42,6 +37,7 @@ pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
@@ -90,23 +86,16 @@ pub async fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-    let concurrency_limit = config
-        .engine
-        .topics
-        .get(CODE_INDEXING_TASK_TOPIC)
-        .and_then(|t| t.concurrency_group.as_deref())
-        .and_then(|g| config.engine.concurrency_groups.get(g).copied())
-        .unwrap_or(0);
-
+    let pipeline_config = code_indexing_task_config.pipeline.clone();
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
+        writer,
         Arc::clone(&checkpoint_store),
         stale_data_cleaner,
         metrics.clone(),
         table_names,
         Arc::new(ontology.clone()),
-        code_indexing_task_config.pipeline.clone(),
-        concurrency_limit,
+        pipeline_config,
     ));
 
     let mut subscription = CodeIndexingTaskRequest::subscription();

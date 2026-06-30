@@ -1,5 +1,3 @@
-//! Stateless MCP server over stdio exposing the local DuckDB graph.
-
 use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
 use rmcp::{
@@ -31,7 +29,6 @@ pub struct RunSqlArgs {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct GetGraphSchemaArgs {
-    /// Optional override for the DuckDB file path.
     #[serde(default)]
     pub db: Option<PathBuf>,
 }

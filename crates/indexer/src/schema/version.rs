@@ -1,9 +1,3 @@
-//! Schema version tracking with table prefix support.
-//!
-//! Loads the schema version from `config/SCHEMA_VERSION` (embedded at compile
-//! time via `include_str!`) and persists it in the `gkg_schema_version`
-//! ClickHouse control table.
-//!
 //! Table prefix derivation maps a version number to the string prepended to
 //! graph table names. Version 0 uses no prefix (backward compatible); version N
 //! uses `vN_`.
@@ -19,7 +13,9 @@ use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
-use tokio::time::{Instant, sleep};
+use tokio::time::Instant;
+
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_until};
 use tracing::{info, warn};
 
 const VERSION_TABLE: &str = "gkg_schema_version";
@@ -63,6 +59,7 @@ fn version_table_ddl() -> CreateTable {
         indexes: vec![],
         projections: vec![],
         engine: Engine::replacing_merge_tree_version_only("created_at"),
+        partition_by: vec![],
         order_by: vec!["version".into()],
         primary_key: None,
         settings: vec![],
@@ -141,13 +138,10 @@ pub fn table_prefix(schema_version: u32) -> String {
     }
 }
 
-/// Returns the fully-qualified (prefixed) table name for the given schema version.
 pub fn prefixed_table_name(table: &str, schema_version: u32) -> String {
     format!("{}{}", table_prefix(schema_version), table)
 }
 
-/// Creates the `gkg_schema_version` control table if it does not exist.
-///
 /// This table is never prefixed or dropped across schema versions — it is the
 /// single source of truth for which version is active.
 pub async fn ensure_version_table(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
@@ -180,7 +174,6 @@ pub async fn read_active_version(
     Ok(None)
 }
 
-/// Records the given version as the active version in ClickHouse.
 pub async fn write_schema_version(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -245,7 +238,6 @@ pub async fn read_migrating_version(
     Ok(None)
 }
 
-/// Schema version entry with its status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionEntry {
     pub version: u32,
@@ -272,7 +264,6 @@ pub async fn read_all_versions(
     Ok(entries)
 }
 
-/// Marks a schema version as `active` in ClickHouse.
 pub async fn mark_version_active(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -285,7 +276,6 @@ pub async fn mark_version_active(
     Ok(())
 }
 
-/// Marks a schema version as `retired` in ClickHouse.
 pub async fn mark_version_retired(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -298,7 +288,6 @@ pub async fn mark_version_retired(
     Ok(())
 }
 
-/// Marks a schema version as `dropped` in ClickHouse.
 pub async fn mark_version_dropped(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -384,67 +373,60 @@ pub async fn wait_until_ready(
     );
 
     let deadline = Instant::now() + timeout;
-    let mut attempt: u32 = 0;
+    let policy = RetryPolicy {
+        mode: RetryMode::Local,
+        backoff: Backoff::Exponential {
+            base: poll_interval,
+            cap: MAX_BACKOFF_INTERVAL,
+        },
+        max_attempts: u32::MAX, // the deadline is the real bound
+        dead_letter: false,
+    };
 
-    loop {
-        // A failed read is treated as "unknown" (None) so the other read can
-        // still drive an outdated/ready decision; both failing falls through to
-        // a retry within the budget.
-        let active = match read_active_version(graph).await {
-            Ok(version) => version,
-            Err(error) => {
+    // Carried state is the last-seen (active, migrating), read back by on_deadline for the report.
+    drive_until(
+        &policy,
+        deadline,
+        (None, None),
+        |_carried, _attempt| async move {
+            // A failed read is "unknown" (None) so the other can still decide; both failing retries.
+            let active = read_active_version(graph).await.unwrap_or_else(|error| {
                 warn!(%error, "failed to read active schema version — retrying");
                 None
-            }
-        };
-        let migrating = match read_migrating_version(graph).await {
-            Ok(version) => version,
-            Err(error) => {
+            });
+            let migrating = read_migrating_version(graph).await.unwrap_or_else(|error| {
                 warn!(%error, "failed to read migrating schema version — retrying");
                 None
-            }
-        };
+            });
 
-        match classify_readiness(active, migrating, target_version) {
-            SchemaReadiness::Ready => {
-                info!(target_version, "schema version is ready — proceeding");
-                return Ok(());
-            }
-            SchemaReadiness::Outdated => {
-                return Err(SchemaWaitError::Outdated {
+            match classify_readiness(active, migrating, target_version) {
+                SchemaReadiness::Ready => {
+                    info!(target_version, "schema version is ready — proceeding");
+                    Step::Done(())
+                }
+                SchemaReadiness::Outdated => Step::GiveUp(SchemaWaitError::Outdated {
                     embedded: target_version,
                     active: active.expect("Outdated requires a known active version"),
-                });
+                }),
+                SchemaReadiness::Pending => {
+                    info!(
+                        target_version,
+                        active_version = ?active,
+                        migrating_version = ?migrating,
+                        "schema version not ready yet — dispatcher has not prepared it"
+                    );
+                    Step::Retry((active, migrating))
+                }
             }
-            SchemaReadiness::Pending => {
-                info!(
-                    target_version,
-                    active_version = ?active,
-                    migrating_version = ?migrating,
-                    "schema version not ready yet — dispatcher has not prepared it"
-                );
-            }
-        }
-
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(SchemaWaitError::Timeout {
-                target: target_version,
-                seconds: timeout.as_secs(),
-                active,
-                migrating,
-            });
-        }
-
-        let backoff = backoff_interval(poll_interval, attempt).min(remaining);
-        sleep(backoff).await;
-        attempt = attempt.saturating_add(1);
-    }
-}
-
-fn backoff_interval(base: Duration, attempt: u32) -> Duration {
-    base.saturating_mul(2u32.saturating_pow(attempt.min(16)))
-        .min(MAX_BACKOFF_INTERVAL)
+        },
+        |(active, migrating)| SchemaWaitError::Timeout {
+            target: target_version,
+            seconds: timeout.as_secs(),
+            active: *active,
+            migrating: *migrating,
+        },
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -572,15 +554,5 @@ mod tests {
             classify_readiness(Some(3), Some(2), 2),
             SchemaReadiness::Outdated
         );
-    }
-
-    #[test]
-    fn backoff_grows_exponentially_then_caps() {
-        let base = Duration::from_secs(5);
-        assert_eq!(backoff_interval(base, 0), Duration::from_secs(5));
-        assert_eq!(backoff_interval(base, 1), Duration::from_secs(10));
-        assert_eq!(backoff_interval(base, 2), Duration::from_secs(20));
-        assert_eq!(backoff_interval(base, 3), MAX_BACKOFF_INTERVAL);
-        assert_eq!(backoff_interval(base, 99), MAX_BACKOFF_INTERVAL);
     }
 }

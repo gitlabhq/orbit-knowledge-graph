@@ -1,3 +1,11 @@
+# Local-development defaults, loaded automatically at startup (required: false).
+# Production values come from Helm chart values, GKG_* env vars, and /etc/secrets/ mounts.
+#
+# Do not rename this file. The filename "default" is a deploy contract: the Helm chart
+# (gkg-helm-charts) renders the runtime config into a ConfigMap keyed `default.yaml` mounted
+# at /app/config, and the loader reads it via `config::File::with_name("config/default")`
+# (crates/gkg-server-config/src/app.rs). Renaming breaks config loading in every deployed pod.
+
 bind_address: "127.0.0.1:4200"
 grpc_bind_address: "127.0.0.1:50054"
 jwt_clock_skew_secs: 60
@@ -56,6 +64,7 @@ graph:
 #   key_path: "/path/to/key.pem"
 
 engine:
+  # Universal-pool defaults; production splits into per-module pools that override these (gkg-helm-charts `indexer.pools`).
   max_concurrent_workers: 16
   concurrency_groups:
     sdlc: 12
@@ -71,7 +80,7 @@ engine:
       retry_interval_secs: 60
     code-indexing-task:
       concurrency_group: code
-      max_attempts: 5  # event-driven, must retry to avoid data loss
+      max_attempts: 3  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
       dead_letter_on_exhaustion: true
     namespace-deletion:
@@ -88,7 +97,7 @@ engine:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
-        max_total_bytes: 10000000000
+        max_total_bytes: 2000000000
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 2000
@@ -97,14 +106,22 @@ engine:
         per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
         job_timeout_secs: 250
-        fetch_concurrency: 6
+        fetch_concurrency: 10
+        write_channel_capacity: 8
+        write_slice_rows: 500000
+        write_buffer_age_secs: 60
+        write_max_concurrent: 4
+        small_repo_max_files: 650
+        small_indexing_slots: 6
+        big_indexing_slots: 2
 
 schedule:
   tasks:
     global:
       cron: "0 */1 * * * *"           # every minute
     namespace:
-      cron: "0 */1 * * * *"           # every minute
+      cron: "*/30 * * * * *"          # every 30 seconds
+      sweep_interval_secs: 3600        # hourly full re-dispatch safety net
     code-backfill:
       cron: "0 */1 * * * *"           # every minute
     table-cleanup:

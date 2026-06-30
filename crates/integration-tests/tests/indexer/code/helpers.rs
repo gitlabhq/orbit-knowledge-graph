@@ -37,6 +37,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
+    pub clickhouse_config: gkg_server_config::ClickHouseConfiguration,
     cache_dir: tempfile::TempDir,
 }
 
@@ -72,15 +73,23 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
+        let writer = Arc::new(
+            indexer::clickhouse::ClickHouseWriter::new(
+                clickhouse.config.clone(),
+                Arc::new(indexer::metrics::EngineMetrics::new()),
+            )
+            .expect("writer must build"),
+        );
+
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
+            writer,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
             table_names,
             Arc::new(ontology),
             pipeline_config,
-            0,
         ));
 
         Self {
@@ -88,12 +97,53 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
+            clickhouse_config: clickhouse.config.clone(),
             cache_dir,
         }
     }
 
     pub fn cache_dir_path(&self) -> &std::path::Path {
         self.cache_dir.path()
+    }
+
+    pub fn code_indexing_task_handler_with_writer(
+        &self,
+        writer: Arc<indexer::clickhouse::ClickHouseWriter>,
+    ) -> CodeIndexingTaskHandler {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let table_names =
+            Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
+        let graph_client = Arc::new(self.clickhouse_config.build_client());
+        let stale_data_cleaner =
+            Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
+
+        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+            self.cache_dir.path().to_path_buf(),
+            u64::MAX,
+            0,
+            self.metrics.clone(),
+        ));
+        let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
+        let config = CodeIndexingPipelineConfig::default();
+        let pipeline = Arc::new(CodeIndexingPipeline::new(
+            resolver,
+            writer,
+            Arc::clone(&self.checkpoint_store) as _,
+            stale_data_cleaner,
+            self.metrics.clone(),
+            table_names,
+            Arc::new(ontology),
+            config,
+        ));
+        CodeIndexingTaskHandler::new(
+            pipeline,
+            Arc::clone(&self.repository_service),
+            Arc::clone(&self.checkpoint_store) as _,
+            self.metrics.clone(),
+            std::time::Duration::from_secs(60),
+            CodeIndexingTaskRequest::subscription(),
+            indexer::analytics::IndexingAnalytics::disabled(),
+        )
     }
 
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
@@ -108,10 +158,6 @@ impl CodeIndexingDeps {
         )
     }
 }
-
-// ---------------------------------------------------------------------------
-// Mock GitLab server -- serves /api/v4/internal/orbit/project/... endpoints
-// ---------------------------------------------------------------------------
 
 struct MockState {
     projects: Mutex<HashMap<i64, ProjectData>>,
@@ -316,23 +362,9 @@ fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
     encoder.finish().expect("gz finish failed")
 }
 
-// ---------------------------------------------------------------------------
-// Shared test helpers
-// ---------------------------------------------------------------------------
-
-pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
-    use indexer::clickhouse::ClickHouseDestination;
-    use indexer::metrics::EngineMetrics;
-
-    let destination = ClickHouseDestination::new(
-        clickhouse.config.clone(),
-        Arc::new(EngineMetrics::default()),
-    )
-    .expect("failed to create destination");
-
+pub fn handler_context() -> HandlerContext {
     let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
-        Arc::new(destination),
         mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),

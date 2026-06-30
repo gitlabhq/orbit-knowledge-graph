@@ -10,7 +10,7 @@ use crate::t;
 /// Fixed replication timestamp injected when a seeded row omits
 /// `_siphon_replicated_at`. Must stay below the default test watermark
 /// (2024-01-21) or the indexer window would exclude the row.
-const DEFAULT_REPLICATED_AT: &str = "2024-01-20 12:00:00";
+pub const DEFAULT_REPLICATED_AT: &str = "2024-01-20 12:00:00";
 
 const PREFIXED_AUX_TABLES: [&str; 3] = [
     "checkpoint",

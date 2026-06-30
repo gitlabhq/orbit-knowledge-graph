@@ -10,9 +10,11 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
+use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
+
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
@@ -25,6 +27,14 @@ use crate::types::{Envelope, Subscription};
 /// `(traversal_path, project_id)` and ignores branch, so any non-empty value
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
+
+/// A timed-out job is likely transiently slow: retry once, then dead-letter (engine reads this policy).
+const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
+    mode: RetryMode::Global,
+    backoff: Backoff::Fixed(&[]),
+    max_attempts: 2,
+    dead_letter: true,
+};
 
 fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
@@ -43,6 +53,11 @@ pub struct CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
+    /// Flush buffered writes and wait until durable. For tests and shutdown.
+    pub async fn flush(&self) -> Result<(), HandlerError> {
+        self.pipeline.flush().await
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
@@ -99,7 +114,7 @@ impl Handler for CodeIndexingTaskHandler {
             "received code indexing task"
         );
 
-        self.process_task(&context, &request).await
+        self.process_task(&context, &request, message.attempt).await
     }
 }
 
@@ -131,6 +146,7 @@ impl CodeIndexingTaskHandler {
         &self,
         context: &HandlerContext,
         request: &CodeIndexingTaskRequest,
+        attempt: u32,
     ) -> Result<(), HandlerError> {
         let started_at = Utc::now();
 
@@ -215,21 +231,18 @@ impl CodeIndexingTaskHandler {
                 &branch,
                 had_prior_checkpoint,
                 started_at,
+                attempt,
                 &mut observer,
             )
             .await;
 
         let outcome = match &result {
-            Ok(Some(IndexOutcome::Indexed)) => "indexed",
-            Ok(Some(IndexOutcome::EmptyRepository)) => "empty_repository",
+            Ok(Some(label)) => label,
             Ok(None) => "skipped_lock",
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        if matches!(
-            &result,
-            Ok(Some(IndexOutcome::Indexed | IndexOutcome::EmptyRepository))
-        ) {
+        if matches!(&result, Ok(Some(_))) {
             self.metrics.record_repository_indexed(outcome);
         }
         self.metrics.record_handler_duration(started_at);
@@ -245,6 +258,10 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
+    )]
     async fn index_with_lock(
         &self,
         context: &HandlerContext,
@@ -252,8 +269,9 @@ impl CodeIndexingTaskHandler {
         branch: &str,
         had_prior_checkpoint: bool,
         started_at: DateTime<Utc>,
+        attempt: u32,
         observer: &mut dyn IndexingObserver,
-    ) -> Result<Option<IndexOutcome>, HandlerError> {
+    ) -> Result<Option<&'static str>, HandlerError> {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
@@ -287,7 +305,7 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits; the error is transient (retried, then DLQ'd).
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
         let work =
             self.pipeline
@@ -303,14 +321,19 @@ impl CodeIndexingTaskHandler {
                         timeout_secs = timeout.as_secs(),
                         "code indexing job exceeded wall-clock timeout"
                     );
-                    Err(HandlerError::Processing(format!(
-                        "code indexing job exceeded the {}s timeout",
-                        timeout.as_secs()
-                    )))
+                    Err(JOB_TIMEOUT_RETRY.global_failure(
+                        attempt,
+                        format!(
+                            "code indexing job exceeded the {}s timeout",
+                            timeout.as_secs()
+                        ),
+                    ))
                 }
             },
             None => work.await,
         };
+
+        let result = result.map(|outcome| outcome.metric_label());
 
         context
             .indexing_status
@@ -357,7 +380,7 @@ mod tests {
     use crate::modules::code::repository::service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
-    use crate::testkit::{MockDestination, MockLockService, MockNatsServices};
+    use crate::testkit::{MockLockService, MockNatsServices};
     use crate::types::Event;
     use chrono::Utc;
 
@@ -404,13 +427,13 @@ mod tests {
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
+                crate::testkit::test_writer(),
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
                 gkg_server_config::CodeIndexingPipelineConfig::default(),
-                0,
             ));
 
             let handler = CodeIndexingTaskHandler::new(
@@ -435,7 +458,6 @@ mod tests {
 
         fn handler_context(&self) -> HandlerContext {
             HandlerContext::new(
-                Arc::new(MockDestination::new()),
                 self.mock_nats.clone(),
                 self.mock_locks.clone(),
                 ProgressNotifier::noop(),
@@ -660,14 +682,14 @@ mod tests {
         assert_eq!(checkpoint.last_task_id, 7);
     }
 
-    #[test]
-    fn handler_name() {
+    #[tokio::test]
+    async fn handler_name() {
         let ctx = TestContext::new();
         assert_eq!(ctx.handler.name(), "code_indexing_task");
     }
 
-    #[test]
-    fn handler_subscription_matches_request_subscription() {
+    #[tokio::test]
+    async fn handler_subscription_matches_request_subscription() {
         let ctx = TestContext::new();
         let subscription = ctx.handler.subscription();
         let expected = CodeIndexingTaskRequest::subscription();

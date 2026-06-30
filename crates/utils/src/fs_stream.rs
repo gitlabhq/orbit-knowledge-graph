@@ -21,7 +21,6 @@ pub enum Decision {
     Load,
     /// Record the file as a node without loading its bytes.
     ListOnly,
-    /// Exclude the file entirely.
     Drop,
 }
 
@@ -71,7 +70,6 @@ fn normalize_relative_path(path: &str) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-/// An aggregate cap tripped mid-stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{metric} cap exceeded ({count} > {cap})")]
 pub struct CapExceeded {
@@ -121,10 +119,7 @@ pub trait FileStreamHooks {
     }
 }
 
-/// Run the per-file hook sequence: `admit` charges caps for every file, then
-/// `on_header` may settle it without reading, and otherwise `content` is filled
-/// via `sniff` and `on_content` gives the final [`Decision`]. `content` is
-/// caller-owned to reuse across entries.
+/// `content` is caller-owned to reuse across entries.
 pub fn step<H: FileStreamHooks>(
     hooks: &mut H,
     file: &FileInventoryEntry,

@@ -1,14 +1,7 @@
-//! CLI integration test harness.
-//!
-//! Helpers for spawning real `orbit` processes and asserting on their
-//! JSON output. Each process gets its own PID and DuckDB connection.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
-
-// ── Binary helpers ──────────────────────────────────────────────
 
 pub fn orbit_bin() -> PathBuf {
     let mut p = std::env::current_exe().unwrap();
@@ -41,8 +34,6 @@ pub fn orbit_index(repo: &Path, data_dir: &Path) -> bool {
         .success()
 }
 
-/// Run a raw SQL query via `orbit sql -F json`. Returns the JSON array of row
-/// objects produced by Arrow.
 pub fn orbit_sql(sql: &str, data_dir: &Path) -> Value {
     let out = orbit_cmd()
         .args(["sql", "-F", "json", sql])
@@ -56,8 +47,6 @@ pub fn orbit_sql(sql: &str, data_dir: &Path) -> Value {
     );
     serde_json::from_slice(&out.stdout).expect("invalid JSON")
 }
-
-// ── JSON helpers ────────────────────────────────────────────────
 
 pub fn rows(v: &Value) -> Vec<&Value> {
     v.as_array().map(|a| a.iter().collect()).unwrap_or_default()
@@ -76,8 +65,6 @@ pub fn sorted_ids(v: &Value) -> Vec<i64> {
     ids
 }
 
-// ── Git helpers ─────────────────────────────────────────────────
-
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(args)
@@ -93,9 +80,6 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-// ── Repo helpers ────────────────────────────────────────────────
-
-/// Create a git repo at a specific path with given files.
 /// Use this when the repo must be at a controlled location (e.g.
 /// nested inside another repo). For standalone repos, prefer
 /// [`create_test_repo`] which uses gitalisk's `LocalGitRepository`.
@@ -130,8 +114,6 @@ pub fn create_test_repo() -> gitalisk_core::repository::testing::local::LocalGit
     repo.add_all().commit("initial");
     repo
 }
-
-// ── MCP helpers ─────────────────────────────────────────────────
 
 pub fn mcp_roundtrip(data_dir: &Path, requests: &[Value]) -> Vec<Value> {
     use std::io::{BufRead, BufReader, Write};

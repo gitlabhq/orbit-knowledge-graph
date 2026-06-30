@@ -1,5 +1,3 @@
-//! Parquet file reader for loading generated data into ClickHouse.
-
 use anyhow::Result;
 use arrow::array::RecordBatch;
 use arrow::datatypes::Schema;
@@ -8,7 +6,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Reads Parquet data for loading into ClickHouse.
 pub struct ParquetReader {
     input_dir: PathBuf,
 }
@@ -20,7 +17,6 @@ impl ParquetReader {
         }
     }
 
-    /// List all organization directories.
     pub fn list_organizations(&self) -> Result<Vec<u32>> {
         let mut orgs = Vec::new();
 
@@ -40,14 +36,12 @@ impl ParquetReader {
         Ok(orgs)
     }
 
-    /// Get the path to a Parquet file.
     pub fn file_path(&self, org_id: u32, table_name: &str) -> PathBuf {
         self.input_dir
             .join(format!("org_{}", org_id))
             .join(format!("{}.parquet", table_name.to_lowercase()))
     }
 
-    /// Read all batches from a Parquet file.
     pub fn read_batches(&self, org_id: u32, table_name: &str) -> Result<Vec<RecordBatch>> {
         let file_path = self.file_path(org_id, table_name);
 
@@ -63,12 +57,10 @@ impl ParquetReader {
         Ok(batches?)
     }
 
-    /// Read edges from a Parquet file.
     pub fn read_edges(&self, org_id: u32) -> Result<Vec<RecordBatch>> {
         self.read_batches(org_id, "edges")
     }
 
-    /// Get the schema for a table from the first org's Parquet file.
     pub fn get_schema(&self, table_name: &str) -> Result<Option<Arc<Schema>>> {
         let orgs = self.list_organizations()?;
         if orgs.is_empty() {

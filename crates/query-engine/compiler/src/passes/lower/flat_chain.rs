@@ -1,5 +1,3 @@
-//! Emit: flat edge chain.
-
 use std::collections::HashSet;
 
 use ontology::constants::*;
@@ -125,7 +123,6 @@ fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
     })
 }
 
-/// Collect all edge predicates for a hop into a target vec.
 #[allow(clippy::too_many_arguments)]
 fn collect_edge_predicates(
     target: &mut Vec<Expr>,
@@ -246,15 +243,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     if (is_filter_only || elevated_skip)
                         && filter_only_done.insert(node_alias.clone())
                     {
-                        let node_table = np.table.as_deref().unwrap_or("");
-                        let node_sk = plan
-                            .table_sort_keys
-                            .get(node_table)
-                            .map(|v| v.as_slice())
-                            .unwrap_or(&[]);
-                        narrow_in.extend(emit_filter_subquery(
-                            np, &alias, edge_col, &mut ctes, node_sk,
-                        )?);
+                        narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
                     }
                 }
             }
@@ -291,7 +280,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 } else {
                     where_parts.extend(narrow_in);
                 }
-                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)
+                dedup_edge_scan(&hop.edge_table, &alias, inner)
             } else {
                 where_parts.extend(narrow_in);
                 where_parts.extend(edge_scope_predicate(hop, &alias));

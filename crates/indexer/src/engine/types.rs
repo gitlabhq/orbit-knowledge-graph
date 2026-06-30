@@ -1,7 +1,3 @@
-//! Core types for message handling.
-//!
-//! These types are transport-agnostic and used throughout the ETL engine.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,19 +5,17 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use gkg_server_config::SubscriptionConfig;
 use serde::{Serialize, de::DeserializeOwned};
+
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use thiserror::Error;
 use uuid::Uuid;
 
-/// Errors that can occur during serialization/deserialization.
 #[derive(Debug, Error)]
 pub enum SerializationError {
-    /// Failed to serialize or deserialize a message.
     #[error("serialization failed: {0}")]
     Json(#[from] serde_json::Error),
 }
 
-/// A NATS JetStream subscription target with message processing policy.
-///
 /// Identity (Hash/Eq) uses only `stream` + `subject`. The remaining fields
 /// are message-level processing config applied at handler registration time.
 #[derive(Clone, Debug)]
@@ -98,16 +92,23 @@ impl Subscription {
     pub fn retry_interval(&self) -> Option<Duration> {
         self.retry_interval_secs.map(Duration::from_secs)
     }
+
+    /// The global retry policy, or `None` when no retry is configured (a transient failure is
+    /// acked, not retried). The nack delay stays `retry_interval`, so `backoff` is unused here.
+    pub fn retry_policy(&self) -> Option<RetryPolicy> {
+        self.max_attempts.map(|max_attempts| RetryPolicy {
+            mode: RetryMode::Global,
+            backoff: Backoff::Fixed(&[]),
+            max_attempts,
+            dead_letter: self.dead_letter_on_exhaustion,
+        })
+    }
 }
 
-/// A unique identifier for a message.
-///
-/// Uses `Arc<str>` internally for cheap cloning.
 #[derive(Clone)]
 pub struct MessageId(pub Arc<str>);
 
 impl MessageId {
-    /// Creates a new unique message ID.
     pub fn unique() -> MessageId {
         MessageId(Uuid::new_v4().to_string().into())
     }
@@ -141,20 +142,16 @@ impl MessageId {
 /// ```
 #[derive(Clone)]
 pub struct Envelope {
-    /// Unique identifier for this message.
     pub id: MessageId,
 
-    /// The NATS subject this message was published to.
     /// Empty for outbound envelopes created via `Envelope::new`.
     pub subject: Arc<str>,
 
-    /// The serialized message payload.
     pub payload: Bytes,
 
-    /// When the message was created.
     pub timestamp: DateTime<Utc>,
 
-    /// The current delivery attempt number (starts at 1).
+    /// Starts at 1.
     pub attempt: u32,
 }
 
@@ -182,14 +179,10 @@ pub struct Envelope {
 /// }
 /// ```
 pub trait Event: Serialize + DeserializeOwned + Send + Sync + 'static {
-    /// Returns the subscription this event should be published to.
     fn subscription() -> Subscription;
 }
 
 impl Envelope {
-    /// Creates a new envelope from a typed event.
-    ///
-    /// The event is serialized to JSON and wrapped with metadata.
     pub fn new<T: Event>(payload: &T) -> Result<Self, SerializationError> {
         let payload = Bytes::from(serde_json::to_vec(payload)?);
 
@@ -202,12 +195,10 @@ impl Envelope {
         })
     }
 
-    /// Deserializes the payload into a typed event.
     pub fn to_event<T: Event>(&self) -> Result<T, SerializationError> {
         Ok(serde_json::from_slice(&self.payload)?)
     }
 
-    /// Increments the attempt counter for retry tracking.
     pub fn retry(&mut self) -> &mut Self {
         self.attempt += 1;
         self

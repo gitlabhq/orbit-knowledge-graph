@@ -1,23 +1,18 @@
-//! Consolidated SDLC integration tests.
-//!
 //! Entity-ETL coverage lives in the YAML scenarios under
 //! `tests/indexer/scenarios/sdlc/`, executed by `scenario_indexing`. The Rust
 //! subtests below cover behavioral mechanics the scenario format does not yet
 //! model: watermarks, cursors, partitioning, and checkpoint paging.
 //!
-//! Each subtest is written as seed -> run -> assert so it maps onto a future
-//! YAML scenario. The scenario format already seeds the `checkpoint` table,
-//! sequences multiple runs via `steps:`, and (via `seed_settings:`) plants
-//! source rows the default insert path cannot express. What still keeps these in Rust is
-//! per-run config (partition count, `datalake_batch_size`) and filtered
-//! checkpoint assertions (live vs tombstoned rows by key prefix), both needed by
-//! the partitioning subtests.
+//! What keeps these in Rust is per-run config (partition count,
+//! `datalake_batch_size`) and filtered checkpoint assertions (live vs tombstoned
+//! rows by key prefix), both needed by the partitioning subtests.
 //!
 //! Each `#[tokio::test]` starts a single ClickHouse container and runs all
 //! subtests in parallel, forking an isolated database per subtest to avoid
 //! cross-test contamination while eliminating per-test container startup overhead.
 
 mod partitioning;
+mod targeting;
 mod windowing;
 
 use std::sync::Arc;
@@ -59,5 +54,6 @@ async fn namespace_indexing() {
         &ctx,
         windowing::composite_keyset_resume_skips_processed_groups,
         partitioning::namespaced_entities_partition_by_id_within_scope,
+        targeting::targeted_request_indexes_only_selected_entity,
     );
 }
