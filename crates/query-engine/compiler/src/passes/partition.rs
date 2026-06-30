@@ -36,9 +36,19 @@ fn prune_query(
     let preds: Vec<Expr> = collect_aliased_tables(&q.from)
         .into_iter()
         .filter(|(_, table)| ontology.is_table_path_scopable(table))
-        .filter_map(|(alias, _)| {
+        .filter_map(|(alias, table)| {
             let prefix = ctx.scope_prefixes.get(&alias)?;
-            prefix_pins_partition(strategy, prefix)
+            // Match the security pass's tight-prefix arm: only when the prefix is
+            // authorized does its scan reduce to a single namespace, so only then
+            // does the bucket predicate prune anything.
+            let min_role = ontology
+                .min_access_level_for_table(&table)
+                .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+            let authorized = ctx
+                .paths_at_least(min_role)
+                .iter()
+                .any(|p| prefix.starts_with(p));
+            (authorized && prefix_pins_partition(strategy, prefix))
                 .then(|| bucket_predicate(strategy, &alias, prefix))
         })
         .collect();
@@ -106,7 +116,11 @@ mod tests {
     use crate::ast::{SelectExpr, TableRef};
 
     fn scoped_project_where(prefix: Option<&str>) -> Option<Expr> {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        scoped_project_where_authorized(prefix, "1/")
+    }
+
+    fn scoped_project_where_authorized(prefix: Option<&str>, authorized: &str) -> Option<Expr> {
+        let ctx = SecurityContext::new(1, vec![authorized.into()]).unwrap();
         let ctx = match prefix {
             Some(p) => ctx.with_scope_prefixes([("p".to_string(), p.to_string())].into()),
             None => ctx,
@@ -155,6 +169,11 @@ mod tests {
     #[test]
     fn no_prune_for_org_only_prefix() {
         assert!(scoped_project_where(Some("1/")).is_none());
+    }
+
+    #[test]
+    fn no_prune_when_prefix_outside_authorized_paths() {
+        assert!(scoped_project_where_authorized(Some("2/100/1000/"), "1/").is_none());
     }
 
     #[test]
