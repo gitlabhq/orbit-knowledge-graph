@@ -66,10 +66,11 @@ fn prune_query_from(from: &mut TableRef, strategy: &PartitionStrategy) {
 
 /// Collects `(alias, prefix)` for every `startsWith(alias.traversal_path,
 /// '<prefix>')` in `expr` whose prefix pins the strategy's partition input.
-/// Deduplicated so one alias filtered twice yields one predicate.
+/// Deduplicated so an alias filtered more than once yields one predicate.
 fn pinning_prefixes(expr: &Expr, strategy: &PartitionStrategy) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = Vec::new();
     collect_pinning(expr, strategy, &mut found);
+    found.sort();
     found.dedup();
     found
 }

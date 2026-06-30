@@ -10,18 +10,10 @@ use serde_json::Value;
 pub fn emit_partition_expr(e: &Expr) -> String {
     match e {
         Expr::Identifier(name) => name.clone(),
-        Expr::Column { table, column } => format!("{table}.{column}"),
         Expr::Param { value, .. } | Expr::Literal(value) => emit_partition_literal(value),
         Expr::FuncCall { name, args } => {
             let args: Vec<String> = args.iter().map(emit_partition_expr).collect();
             format!("{name}({})", args.join(", "))
-        }
-        Expr::BinaryOp { op, left, right } => {
-            format!(
-                "({} {op} {})",
-                emit_partition_expr(left),
-                emit_partition_expr(right)
-            )
         }
         other => panic!("unsupported partition expression node: {other:?}"),
     }
