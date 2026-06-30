@@ -290,6 +290,7 @@ cargo +<pinned> test -p ontology                          # ~128 tests: load, co
 cargo +<pinned> test -p integration-tests scenario_indexing   # end-to-end siphon->graph (needs Docker ClickHouse)
 ```
 
+
 - Find the pinned version in `rust-toolchain.toml` (e.g. `1.95.0`). Running via
   `mise run …` uses the right toolchain automatically.
 - `integration-tests` pulls in heavy code-graph deps that require the **newer**
