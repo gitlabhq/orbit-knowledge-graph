@@ -171,13 +171,13 @@ agent-file-sync-check:
 
 mr-title-check:
   stage: lint
-  image: oven/bun:1.3-alpine
+  image: node:22-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
     - .mr-only-rules
   before_script:
-    - bun install -g @commitlint/cli @commitlint/config-conventional
+    - npm ci --ignore-scripts
   script:
     - ./scripts/check-mr-title.sh
 

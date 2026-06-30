@@ -87,10 +87,5 @@ Languages not currently indexed: Swift, COBOL, Terraform, YAML.
 - Files in archived projects (SDLC metadata for archived projects is still indexed)
 - Private content the requesting user does not have access to (authorization is enforced at query time)
 
-## Authorization
-
-Orbit enforces GitLab access controls at query time. A query returns only entities
-the requesting user has access to in GitLab. There is no separate Orbit permission model.
-
-A group Owner who enables Orbit does not grant other users broader access than they
-already have in GitLab.
+For the roles required to query, and the Security Manager role needed for security data,
+see [Security](security.md).

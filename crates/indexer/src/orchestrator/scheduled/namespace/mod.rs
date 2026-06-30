@@ -1,5 +1,4 @@
-mod change_detection;
-mod sweep;
+mod datalake;
 
 use std::future::Future;
 use std::sync::Arc;
@@ -9,34 +8,22 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use tracing::info;
 
-use change_detection::{DatalakeChangeDetector, NamespaceChangeDetector};
-use sweep::{DatalakeEnabledNamespaceReader, EnabledNamespaceReader};
-
 use crate::campaign::CampaignState;
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::nats::NatsServices;
-use crate::orchestrator::dispatch::NamespaceIndexingDispatch;
+use crate::orchestrator::dispatch::{NamespaceDispatchRequest, NamespaceIndexingDispatch};
 use crate::orchestrator::scheduled::ScheduledTaskMetrics;
 use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
+use datalake::{
+    DatalakeChangeDetector, DatalakeEnabledNamespaceReader, EnabledNamespaceReader,
+    NamespaceChangeDetector,
+};
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
-pub use sweep::NamespaceSweepDispatcher;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct DispatchNamespace {
-    pub namespace_id: i64,
-    pub traversal_path: String,
-}
-
-impl DispatchNamespace {
-    fn into_pair(self) -> (i64, String) {
-        (self.namespace_id, self.traversal_path)
-    }
-}
-
 pub const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
+pub const SWEEP_CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.sweep";
 
 pub struct NamespaceDispatcher {
     detector: Arc<dyn NamespaceChangeDetector>,
@@ -113,22 +100,22 @@ impl ScheduledTask for NamespaceDispatcher {
 impl NamespaceDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let upper = Utc::now();
-        let namespaces = self.namespaces_to_dispatch(upper).await?;
+        let sweeping = self.sweep_due(upper).await?;
+        let namespaces = self.namespaces_to_dispatch(sweeping, upper).await?;
 
         let changed_count = namespaces.len();
-        let pairs: Vec<(i64, String)> = namespaces
-            .into_iter()
-            .map(DispatchNamespace::into_pair)
-            .collect();
         let outcome = self
             .publisher
-            .dispatch_for_namespaces(&pairs, upper, self.campaign.current())
+            .dispatch_for_namespaces(&namespaces, upper, self.campaign.current())
             .await
             .inspect_err(|_| {
                 self.metrics.record_error(self.name(), "publish");
             })?;
 
-        self.save_checkpoint(&upper).await?;
+        self.save_checkpoint(CHECKPOINT_KEY, &upper).await?;
+        if sweeping {
+            self.save_checkpoint(SWEEP_CHECKPOINT_KEY, &upper).await?;
+        }
 
         self.metrics
             .record_requests_published(self.name(), outcome.dispatched);
@@ -139,7 +126,8 @@ impl NamespaceDispatcher {
             dispatched = outcome.dispatched,
             skipped = outcome.skipped,
             changed_namespaces = changed_count,
-            "dispatched changed namespace indexing requests"
+            sweeping,
+            "dispatched namespace indexing requests"
         );
 
         Ok(())
@@ -147,12 +135,29 @@ impl NamespaceDispatcher {
 
     async fn namespaces_to_dispatch(
         &self,
+        sweeping: bool,
         upper: DateTime<Utc>,
-    ) -> Result<Vec<DispatchNamespace>, TaskError> {
+    ) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         match self.resume_watermark().await? {
-            Some(watermark) => self.changed_since(watermark, upper).await,
-            None => self.all_enabled_namespaces().await,
+            Some(watermark) if !sweeping => self.changed_since(watermark, upper).await,
+            _ => self.all_enabled_namespaces().await,
         }
+    }
+
+    async fn sweep_due(&self, upper: DateTime<Utc>) -> Result<bool, TaskError> {
+        let Some(last_sweep) = self
+            .checkpoint_store
+            .load(SWEEP_CHECKPOINT_KEY)
+            .await
+            .map_err(TaskError::new)?
+        else {
+            return Ok(true);
+        };
+
+        let interval = chrono::Duration::seconds(
+            i64::try_from(self.config.sweep_interval_secs).unwrap_or(i64::MAX),
+        );
+        Ok(upper.signed_duration_since(last_sweep.watermark) >= interval)
     }
 
     async fn resume_watermark(&self) -> Result<Option<DateTime<Utc>>, TaskError> {
@@ -168,7 +173,7 @@ impl NamespaceDispatcher {
         &self,
         watermark: DateTime<Utc>,
         upper: DateTime<Utc>,
-    ) -> Result<Vec<DispatchNamespace>, TaskError> {
+    ) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         self.timed_query(
             "namespace_changes",
             self.detector.changed_namespaces(watermark, upper),
@@ -176,7 +181,7 @@ impl NamespaceDispatcher {
         .await
     }
 
-    async fn all_enabled_namespaces(&self) -> Result<Vec<DispatchNamespace>, TaskError> {
+    async fn all_enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         self.timed_query("enabled_namespaces", self.reader.enabled_namespaces())
             .await
     }
@@ -184,8 +189,8 @@ impl NamespaceDispatcher {
     async fn timed_query(
         &self,
         metric: &str,
-        query: impl Future<Output = Result<Vec<DispatchNamespace>, TaskError>>,
-    ) -> Result<Vec<DispatchNamespace>, TaskError> {
+        query: impl Future<Output = Result<Vec<NamespaceDispatchRequest>, TaskError>>,
+    ) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         let started = Instant::now();
         let namespaces = query
             .await
@@ -195,9 +200,9 @@ impl NamespaceDispatcher {
         Ok(namespaces)
     }
 
-    async fn save_checkpoint(&self, upper: &DateTime<Utc>) -> Result<(), TaskError> {
+    async fn save_checkpoint(&self, key: &str, upper: &DateTime<Utc>) -> Result<(), TaskError> {
         self.checkpoint_store
-            .save_completed(CHECKPOINT_KEY, upper, WriteDurability::Durable)
+            .save_completed(key, upper, WriteDurability::Durable)
             .await
             .map_err(TaskError::new)
     }
@@ -209,24 +214,32 @@ mod tests {
     use crate::checkpoint::{Checkpoint, CheckpointError};
     use crate::testkit::mocks::MockNatsServices;
     use chrono::Duration;
+    use std::collections::BTreeMap;
     use std::sync::Mutex;
 
     #[derive(Default)]
     struct StubCheckpointStore {
-        loaded: Mutex<Option<Checkpoint>>,
-        saved: Mutex<Vec<DateTime<Utc>>>,
+        loaded: Mutex<BTreeMap<String, Checkpoint>>,
+        saved: Mutex<Vec<(String, DateTime<Utc>)>>,
     }
 
     impl StubCheckpointStore {
+        fn seed(&self, key: &str, watermark: DateTime<Utc>) {
+            self.loaded
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), checkpoint_at(watermark));
+        }
+
         fn saved(&self) -> Vec<DateTime<Utc>> {
-            self.saved.lock().unwrap().clone()
+            self.saved.lock().unwrap().iter().map(|(_, w)| *w).collect()
         }
     }
 
     #[async_trait]
     impl CheckpointStore for StubCheckpointStore {
-        async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
-            Ok(self.loaded.lock().unwrap().clone())
+        async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
+            Ok(self.loaded.lock().unwrap().get(key).cloned())
         }
 
         async fn save_progress(
@@ -239,11 +252,14 @@ mod tests {
 
         async fn save_completed(
             &self,
-            _key: &str,
+            key: &str,
             watermark: &DateTime<Utc>,
             _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
-            self.saved.lock().unwrap().push(*watermark);
+            self.saved
+                .lock()
+                .unwrap()
+                .push((key.to_string(), *watermark));
             Ok(())
         }
 
@@ -264,7 +280,7 @@ mod tests {
     }
 
     struct StubDetector {
-        result: Result<Vec<DispatchNamespace>, &'static str>,
+        result: Result<Vec<NamespaceDispatchRequest>, &'static str>,
     }
 
     #[async_trait]
@@ -273,7 +289,7 @@ mod tests {
             &self,
             _lower: DateTime<Utc>,
             _upper: DateTime<Utc>,
-        ) -> Result<Vec<DispatchNamespace>, TaskError> {
+        ) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
             self.result.clone().map_err(TaskError::new)
         }
     }
@@ -307,19 +323,19 @@ mod tests {
             &self,
             lower: DateTime<Utc>,
             _upper: DateTime<Utc>,
-        ) -> Result<Vec<DispatchNamespace>, TaskError> {
+        ) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
             *self.captured_lower.lock().unwrap() = Some(lower);
             Ok(Vec::new())
         }
     }
 
     struct StubReader {
-        result: Result<Vec<DispatchNamespace>, &'static str>,
+        result: Result<Vec<NamespaceDispatchRequest>, &'static str>,
         called: Mutex<bool>,
     }
 
     impl StubReader {
-        fn new(result: Result<Vec<DispatchNamespace>, &'static str>) -> Arc<Self> {
+        fn new(result: Result<Vec<NamespaceDispatchRequest>, &'static str>) -> Arc<Self> {
             Arc::new(Self {
                 result,
                 called: Mutex::new(false),
@@ -333,7 +349,7 @@ mod tests {
 
     #[async_trait]
     impl EnabledNamespaceReader for StubReader {
-        async fn enabled_namespaces(&self) -> Result<Vec<DispatchNamespace>, TaskError> {
+        async fn enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
             *self.called.lock().unwrap() = true;
             self.result.clone().map_err(TaskError::new)
         }
@@ -347,9 +363,14 @@ mod tests {
         }
     }
 
+    fn recent() -> DateTime<Utc> {
+        Utc::now() - Duration::seconds(5)
+    }
+
     fn checkpoint_store_with_checkpoint() -> Arc<StubCheckpointStore> {
         let store = Arc::new(StubCheckpointStore::default());
-        *store.loaded.lock().unwrap() = Some(checkpoint_at(Utc::now() - Duration::seconds(5)));
+        store.seed(CHECKPOINT_KEY, recent());
+        store.seed(SWEEP_CHECKPOINT_KEY, Utc::now());
         store
     }
 
@@ -369,10 +390,11 @@ mod tests {
         )
     }
 
-    fn one_namespace() -> Vec<DispatchNamespace> {
-        vec![DispatchNamespace {
+    fn one_namespace() -> Vec<NamespaceDispatchRequest> {
+        vec![NamespaceDispatchRequest {
             namespace_id: 9,
             traversal_path: "1/9/".to_string(),
+            targets: Vec::new(),
         }]
     }
 
@@ -453,7 +475,11 @@ mod tests {
             "detector should be skipped on cold start"
         );
         assert_eq!(nats.get_published().len(), 1);
-        assert_eq!(checkpoint_store.saved().len(), 1);
+        assert_eq!(
+            checkpoint_store.saved().len(),
+            2,
+            "a sweep advances both the change watermark and the sweep cursor"
+        );
     }
 
     #[tokio::test]
@@ -461,7 +487,8 @@ mod tests {
         let detector = CapturingDetector::new();
         let reader = StubReader::new(Ok(one_namespace()));
         let checkpoint_store = Arc::new(StubCheckpointStore::default());
-        *checkpoint_store.loaded.lock().unwrap() = Some(checkpoint_at(DateTime::<Utc>::UNIX_EPOCH));
+        checkpoint_store.seed(CHECKPOINT_KEY, DateTime::<Utc>::UNIX_EPOCH);
+        checkpoint_store.seed(SWEEP_CHECKPOINT_KEY, Utc::now());
         let dispatcher = dispatcher_with(
             detector.clone(),
             reader.clone(),
@@ -479,12 +506,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn elapsed_sweep_interval_takes_the_full_sweep_path() {
+        let detector = CapturingDetector::new();
+        let reader = StubReader::new(Ok(one_namespace()));
+        let checkpoint_store = Arc::new(StubCheckpointStore::default());
+        checkpoint_store.seed(CHECKPOINT_KEY, recent());
+        checkpoint_store.seed(SWEEP_CHECKPOINT_KEY, DateTime::<Utc>::UNIX_EPOCH);
+        let dispatcher = dispatcher_with(
+            detector.clone(),
+            reader.clone(),
+            Arc::new(MockNatsServices::new()),
+            checkpoint_store,
+        );
+
+        dispatcher.dispatch_inner().await.unwrap();
+
+        assert!(reader.was_called(), "an overdue sweep runs the full path");
+        assert!(!detector.was_called());
+    }
+
+    #[tokio::test]
     async fn checkpoint_is_used_verbatim() {
         let detector = CapturingDetector::new();
         let reader = StubReader::new(Ok(Vec::new()));
-        let watermark = Utc::now() - Duration::seconds(5);
+        let watermark = recent();
         let checkpoint_store = Arc::new(StubCheckpointStore::default());
-        *checkpoint_store.loaded.lock().unwrap() = Some(checkpoint_at(watermark));
+        checkpoint_store.seed(CHECKPOINT_KEY, watermark);
+        checkpoint_store.seed(SWEEP_CHECKPOINT_KEY, Utc::now());
         let dispatcher = dispatcher_with(
             detector.clone(),
             reader.clone(),

@@ -253,13 +253,11 @@
             "cron": "0 */5 * * * *"
           },
           "namespace": {
-            "cron": "*/30 * * * * *"
+            "cron": "*/30 * * * * *",
+            "sweep_interval_secs": 3600
           },
           "namespace-deletion": {
             "cron": "0 0 3 * * *"
-          },
-          "namespace-sweep": {
-            "cron": "0 0 * * * *"
           },
           "siphon": {
             "batch_size": 100,
@@ -1057,20 +1055,12 @@
             "null"
           ],
           "default": null
-        }
-      }
-    },
-    "NamespaceSweepConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
-      "type": "object",
-      "properties": {
-        "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
+        },
+        "sweep_interval_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 0
         }
       }
     },
@@ -1530,13 +1520,11 @@
               "cron": "0 */5 * * * *"
             },
             "namespace": {
-              "cron": "*/30 * * * * *"
+              "cron": "*/30 * * * * *",
+              "sweep_interval_secs": 3600
             },
             "namespace-deletion": {
               "cron": "0 0 3 * * *"
-            },
-            "namespace-sweep": {
-              "cron": "0 0 * * * *"
             },
             "siphon": {
               "batch_size": 100,
@@ -1578,19 +1566,14 @@
         "namespace": {
           "$ref": "#/$defs/NamespaceDispatcherConfig",
           "default": {
-            "cron": "*/30 * * * * *"
+            "cron": "*/30 * * * * *",
+            "sweep_interval_secs": 3600
           }
         },
         "namespace-deletion": {
           "$ref": "#/$defs/NamespaceDeletionSchedulerConfig",
           "default": {
             "cron": "0 0 3 * * *"
-          }
-        },
-        "namespace-sweep": {
-          "$ref": "#/$defs/NamespaceSweepConfig",
-          "default": {
-            "cron": "0 0 * * * *"
           }
         },
         "siphon": {

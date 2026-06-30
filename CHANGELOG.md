@@ -1,3 +1,51 @@
+## [0.83.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.83.0...v0.83.1) (2026-06-30)
+
+### Fixes
+
+* **config:** name required by Helm chart configmap ([07b88af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/07b88afe196d15fa184505a83903d251697e7a33)) by Michael Angelo Rivera
+
+### Other
+
+* **deps:** update rust crate regex to v1.12.4 ([fa6eb69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fa6eb6976aaf5e0cddef4aeb643a6a4c511ebf1d)) by GitLab Renovate Bot
+
+## [0.83.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.82.0...v0.83.0) (2026-06-30)
+
+### Features
+
+* **code-graph:** add Scala language support (Phase 1 - definitions) ([e0a7d83](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e0a7d83bcccd1a01779134a024c023b06b76e3ff)) by vivek shukla
+* **code-graph:** record file size_bytes on gl_file ([cfbbb4b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cfbbb4b8b905398e57ed2de6281a77333231073b)) by Michael Usachenko
+* **indexer:** bin-pack small backfill code jobs into a [secure] writer ([62c79a7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/62c79a713656fea8ac0040bf300d1ee9b2545c71)) by Michael Usachenko
+* **indexer:** dead-letter timed-out jobs, retry transient write failures ([78e0c0b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/78e0c0b435b7f62299952478431cf3ba5abbd62c)) by Michael Usachenko
+* **indexer:** dispatch namespace changes incrementally ([f5a5847](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f5a58478b8b71a1a106db880a79bb68bec6a254b)) by Jean-Gabriel Doyon
+* **indexer:** entity-level incremental SDLC dispatch ([07b22e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/07b22e82462704308f5c34ef8651fdf00e5d9929)) by Jean-Gabriel Doyon
+* **query-engine:** surface valid candidates in validator errors ([02cf79a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02cf79a95ad9fe623d60f87a39159f4f0eda165c)) by Dmitry Gruzd
+
+### Fixes
+
+* **code-graph:** resolve Python re-export imports to definitions ([e824024](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e8240246826b23998f4449421969b47d141dfee9)) by Michael Angelo Rivera
+* **indexer:** reclaim inflight slot on dropped code-index commit ([8eda29f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8eda29f620ab79ac4317d036f2dd19fcab79a22e)) by Dmitry Gruzd
+* **tools:** accept entity_types alias in get_graph_schema ([d553ee6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d553ee64b5ad644c937214651903b1bfe8bbc919)) by michaelangeloio
+
+### Performance
+
+* **indexer:** bound per-repo disk to 2GB, fix partial-extraction leak, raise concurrency ([b34b437](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b34b43705a534695c466dc8a7ee0cde2801de57c)) by Michael Usachenko
+* **query:** scope a query's authorization filter to its resolved namespace ([6bdfd35](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6bdfd354dd40e8383855a5aa82a3ac3564055cbc)) by Michael Angelo Rivera
+
+### Other
+
+* **code-graph:** deny bare allow attributes without reason ([f06463a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f06463abe7415ee0691b302657997e9460ae4863)) by Dmitry Gruzd
+* **config:** rename default.yaml to example.yaml ([36c8fda](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36c8fda01c33b353ac134904602156e16735818b)) by Michael Angelo Rivera
+* **deps:** bump oxc to 0.137.0 and oxc_resolver to 11.21.3 ([b10c637](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b10c637c494fceab201a2eb96832b55dfc7eca61)) by Michael Angelo Rivera
+* **deps:** bump rust-analyzer (ra_ap) crates to 0.0.340 ([3e0017d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e0017d8c57580f4bec7c88383d81b9b9f298087)) by Michael Angelo Rivera
+* **deps:** update rust crate config to v0.15.24 ([fed455a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fed455ac3664dc4c705b254bf9bff4bb1579133b)) by GitLab Renovate Bot
+* **deps:** update rust crate prost-types to v0.14.4 ([52f5d64](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/52f5d6479d6e68aa32c97890e67d6943793aea79)) by GitLab Renovate Bot
+* **i18n:** [Translation] Update ja-jp for commit 600c7593 ([9396504](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/939650422f5a4ebb0e7fcb1e3536f39fb989df68)) by Lauren Barker
+* **indexer:** unify retry/backoff loops behind one engine harness ([28d50e1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/28d50e1121bb18b2b4d1e1c38e25669f536c9ea2)) by Michael Usachenko
+* **local-dev:** align fresh-droid GKG setup with GDK ([0adab5f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0adab5f3daeb4d2bd63d013b88964b0c79dbf2ed)) by Dmitry Gruzd
+* prune low-value comments across the codebase ([656ac37](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/656ac370168690d5fc4570487a94afaf69fbf1e0)) by Michael Angelo Rivera
+* **remote:** add Orbit permissions section with role requirements ([549c89b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/549c89bfaa72bc1254e8a387fb54dc66a8f914cd)) by Michael Angelo Rivera
+* **skills:** expand remove-llm-comments with tighten/de-dup/redundancy cases ([d2e5d1e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d2e5d1e8879983be14894922b74067ef1d7f5f0e)) by Dmitry Gruzd
+
 ## [0.82.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.81.0...v0.82.0) (2026-06-26)
 
 ### Features

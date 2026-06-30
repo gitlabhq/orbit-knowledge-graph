@@ -12,6 +12,7 @@
 //! cross-test contamination while eliminating per-test container startup overhead.
 
 mod partitioning;
+mod targeting;
 mod windowing;
 
 use std::sync::Arc;
@@ -53,5 +54,6 @@ async fn namespace_indexing() {
         &ctx,
         windowing::composite_keyset_resume_skips_processed_groups,
         partitioning::namespaced_entities_partition_by_id_within_scope,
+        targeting::targeted_request_indexes_only_selected_entity,
     );
 }

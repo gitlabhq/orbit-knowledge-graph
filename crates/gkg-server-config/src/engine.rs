@@ -423,6 +423,8 @@ pub struct GlobalDispatcherConfig {
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+    #[serde(default = "default_namespace_sweep_interval_secs")]
+    pub sweep_interval_secs: u64,
 }
 
 impl Default for NamespaceDispatcherConfig {
@@ -431,24 +433,13 @@ impl Default for NamespaceDispatcherConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("*/30 * * * * *".into()),
             },
+            sweep_interval_secs: default_namespace_sweep_interval_secs(),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct NamespaceSweepConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-}
-
-impl Default for NamespaceSweepConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                cron: Some("0 0 * * * *".into()),
-            },
-        }
-    }
+fn default_namespace_sweep_interval_secs() -> u64 {
+    3600
 }
 
 fn default_events_stream_name() -> String {
@@ -564,8 +555,6 @@ pub struct ScheduledTasksConfiguration {
     pub global: GlobalDispatcherConfig,
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
-    #[serde(default)]
-    pub namespace_sweep: NamespaceSweepConfig,
     #[serde(default)]
     pub siphon: SiphonRouterConfig,
     #[serde(default)]

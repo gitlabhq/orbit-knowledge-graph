@@ -5,7 +5,7 @@ pub mod code_backfill;
 pub mod namespace_indexing;
 
 pub use code_backfill::CodeBackfill;
-pub use namespace_indexing::NamespaceIndexingDispatch;
+pub use namespace_indexing::{NamespaceDispatchRequest, NamespaceIndexingDispatch};
 
 pub struct DispatchOutcome {
     pub dispatched: u64,

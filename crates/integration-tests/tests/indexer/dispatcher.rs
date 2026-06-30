@@ -14,7 +14,7 @@ use indexer::checkpoint::{CheckpointStore, ClickHouseCheckpointStore};
 use indexer::durability::WriteDurability;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
-use indexer::orchestrator::scheduled::namespace::CHECKPOINT_KEY;
+use indexer::orchestrator::scheduled::namespace::{CHECKPOINT_KEY, SWEEP_CHECKPOINT_KEY};
 use indexer::orchestrator::scheduled::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::orchestrator::siphon::{CdcContext, EnabledNamespacesRoute, Route};
@@ -29,6 +29,9 @@ use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
+
+/// Margin so second-precision `now()` insert watermarks stay inside the change window.
+const CLOCK_SKEW_MARGIN_SECS: i64 = 60;
 
 struct Namespace {
     id: i64,
@@ -127,6 +130,8 @@ struct NamespaceRequest {
     namespace: i64,
     traversal_path: String,
     watermark: DateTime<Utc>,
+    #[serde(default)]
+    targets: Vec<String>,
 }
 
 struct TestContext {
@@ -178,6 +183,16 @@ impl TestContext {
                 "INSERT INTO work_items \
                  (id, title, created_at, updated_at, description, iid, work_item_type_id, namespace_id, traversal_path, assignees, label_ids, award_emojis) \
                  VALUES (1, 'Changed work item', now64(6), now64(6), '', 1, 1, 1, '{traversal_path}', [], [], [])"
+            ))
+            .await;
+    }
+
+    async fn given_changed_label_link(&self, traversal_path: &str) {
+        self.clickhouse
+            .execute(&format!(
+                "INSERT INTO siphon_label_links \
+                 (id, label_id, target_id, target_type, traversal_path) \
+                 VALUES (1, 1, 1, 'MergeRequest', '{traversal_path}')"
             ))
             .await;
     }
@@ -265,8 +280,18 @@ impl TestContext {
     /// so `run()` takes the incremental path instead of the cold-start sweep.
     async fn seed_change_checkpoint(&self) {
         let store = ClickHouseCheckpointStore::new(Arc::new(self.clickhouse.config.build_client()));
+        let lower = self.created_at - chrono::Duration::seconds(CLOCK_SKEW_MARGIN_SECS);
         store
-            .save_completed(CHECKPOINT_KEY, &self.created_at, WriteDurability::Durable)
+            .save_completed(CHECKPOINT_KEY, &lower, WriteDurability::Durable)
+            .await
+            .unwrap();
+        // A recent sweep cursor keeps run() on the incremental path (sweep not due).
+        store
+            .save_completed(
+                SWEEP_CHECKPOINT_KEY,
+                &self.created_at,
+                WriteDurability::Durable,
+            )
             .await
             .unwrap();
     }
@@ -552,6 +577,37 @@ async fn namespace_dispatcher_detects_project_and_merge_request_sources() {
     let namespaces = context.dispatch_namespace_changes().await;
 
     assert_dispatched_namespaces(&namespaces, &[(100, "1/100/"), (200, "2/200/")]);
+
+    let targets = |id: i64| -> Vec<String> {
+        namespaces
+            .iter()
+            .find(|r| r.namespace == id)
+            .expect("namespace dispatched")
+            .targets
+            .clone()
+    };
+    assert!(targets(100).contains(&"Project".to_string()));
+    assert!(targets(200).contains(&"MergeRequest".to_string()));
+}
+
+#[tokio::test]
+async fn namespace_dispatcher_detects_standalone_edge_source() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([namespace(100, "1/100/")])
+        .await;
+    context.given_changed_label_link("1/100/").await;
+
+    let namespaces = context.dispatch_namespace_changes().await;
+
+    assert_dispatched_namespaces(&namespaces, &[(100, "1/100/")]);
+    let targets = &namespaces
+        .iter()
+        .find(|r| r.namespace == 100)
+        .expect("namespace dispatched")
+        .targets;
+    assert!(targets.contains(&"HAS_LABEL".to_string()));
 }
 
 #[tokio::test]

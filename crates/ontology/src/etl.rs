@@ -71,6 +71,7 @@ pub struct EdgeMapping {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReindexSource {
     pub table: String,
+    pub target: String,
     pub traversal_path: PathResolution,
 }
 

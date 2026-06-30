@@ -5,6 +5,8 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use gkg_server_config::SubscriptionConfig;
 use serde::{Serialize, de::DeserializeOwned};
+
+use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -89,6 +91,17 @@ impl Subscription {
 
     pub fn retry_interval(&self) -> Option<Duration> {
         self.retry_interval_secs.map(Duration::from_secs)
+    }
+
+    /// The global retry policy, or `None` when no retry is configured (a transient failure is
+    /// acked, not retried). The nack delay stays `retry_interval`, so `backoff` is unused here.
+    pub fn retry_policy(&self) -> Option<RetryPolicy> {
+        self.max_attempts.map(|max_attempts| RetryPolicy {
+            mode: RetryMode::Global,
+            backoff: Backoff::Fixed(&[]),
+            max_attempts,
+            dead_letter: self.dead_letter_on_exhaustion,
+        })
     }
 }
 

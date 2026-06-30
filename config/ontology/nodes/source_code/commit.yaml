@@ -1,0 +1,106 @@
+# config/ontology/nodes/source_code/commit.yaml
+
+node_type: Commit
+domain: source_code
+description: A Git commit, shared target for commit-related edges
+label: sha
+destination_table: gl_commit
+default_columns: [id, sha, project_id]
+sort_key: [traversal_path, project_id, id]
+
+style:
+  size: 24
+  color: "#8B5CF6"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Synthetic id: sipHash64(target_project_id, sha). Edges must derive target_id with the same formula."
+
+  sha:
+    type: string
+    source: sha
+    nullable: false
+    mutable: false
+    description: "Clean hex commit SHA (40-char SHA-1 or 64-char SHA-256)."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+# Emitted from merge_requests (Siphon has no commit table). Duplicate
+# (project_id, sha) rows collapse in gl_commit via ReplacingMergeTree.
+# Commit.id is sign-bit-masked so the Int64 keyset cursor stays positive.
+# Bytea decode details: see siphon#248.
+#
+# DRIFT WARNING: keep decoded_sha and the masked hash in sync with
+# merge_request.yaml, or MERGED_AT_COMMIT points at a non-existent node.
+#
+# Shared-commit transient: deleting one MR can tombstone a Commit still
+# referenced by another MR. The next re-index re-inserts it.
+etl:
+  type: query
+  source: merge_requests
+  select: >-
+    toInt64(bitAnd(sipHash64(m.target_project_id, m.decoded_sha), toUInt64(9223372036854775807))) AS id,
+    m.decoded_sha AS sha,
+    m.target_project_id AS project_id,
+    m.traversal_path AS traversal_path
+  from: >-
+    (
+      SELECT
+        *,
+        coalesce(
+          if(
+            startsWith(merged_commit_sha, '\\x'),
+            unhex(substring(merged_commit_sha, 3)),
+            nullIf(merged_commit_sha, '')
+          ),
+          nullIf(merge_commit_sha, ''),
+          if(
+            startsWith(squash_commit_sha, '\\x'),
+            substring(squash_commit_sha, 3),
+            lower(hex(nullIf(squash_commit_sha, '')))
+          )
+        ) AS decoded_sha
+      FROM merge_requests
+    ) AS m
+  where: >-
+    m.state_id = 3 AND m.decoded_sha IS NOT NULL
+  traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
+  watermark: m.{{watermark_column}}
+  table_alias: m
+  deleted: m.{{deleted_column}}
+  order_by: [traversal_path, project_id, id]
+  reindex_on: [merge_requests]
+
+storage:
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: sha, type: "String", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_sha, column: sha, type: "bloom_filter(0.0001)", granularity: 1}

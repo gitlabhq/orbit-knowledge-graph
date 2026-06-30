@@ -51,6 +51,20 @@ PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 5
 ORDER BY (traversal_path, project_id, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
+CREATE TABLE IF NOT EXISTS gl_commit (
+    id Int64 CODEC(Delta(8), LZ4),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
+    sha String CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
+    INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
+    INDEX idx_sha sha TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, project_id, id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+
 CREATE TABLE IF NOT EXISTS gl_container_repository (
     id Int64 CODEC(T64, ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
@@ -398,8 +412,6 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     discussion_locked Nullable(Bool),
     prepared_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     project_id Int64 CODEC(T64, ZSTD(1)),
-    merged_commit_sha String DEFAULT '' CODEC(ZSTD(1)),
-    squash_commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     latest_build_started_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     latest_build_finished_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     first_deployed_to_production_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
@@ -426,6 +438,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     source_project_id Nullable(Int64) CODEC(Delta(8), LZ4),
     head_pipeline_id Nullable(Int64) CODEC(Delta(8), LZ4),
     latest_merge_request_diff_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    merged_commit_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -456,7 +469,8 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_last_edited_by_id last_edited_by_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_closed_by_id closed_by_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_head_pipeline_id head_pipeline_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_latest_merge_request_diff_id latest_merge_request_diff_id TYPE bloom_filter(0.0001) GRANULARITY 1
+    INDEX idx_latest_merge_request_diff_id latest_merge_request_diff_id TYPE bloom_filter(0.0001) GRANULARITY 1,
+    INDEX idx_merged_commit_id merged_commit_id TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)

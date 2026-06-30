@@ -57,6 +57,117 @@ fn scala_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
+fn scala_extract_imports(
+    node: &N<'_>,
+    imports: &mut Vec<crate::v2::types::CanonicalImport>,
+) -> bool {
+    use crate::v2::types::{CanonicalImport, ImportBindingKind, ImportMode};
+
+    if node.kind().as_ref() != "import_declaration" {
+        return false;
+    }
+
+    let path_parts: Vec<String> = node
+        .children()
+        .filter(|c| c.kind().as_ref() == "identifier")
+        .map(|c| c.text().to_string())
+        .collect();
+
+    if path_parts.is_empty() {
+        return false;
+    }
+
+    let mut has_mixed_wildcard = false;
+    let selectors: Vec<(String, Option<String>)> = node
+        .children()
+        .filter(|c| c.kind().as_ref() == "namespace_selectors")
+        .flat_map(|s| {
+            s.children()
+                .filter(|c| c.is_named())
+                .filter_map(|c| {
+                    if c.kind().as_ref() == "namespace_wildcard" {
+                        has_mixed_wildcard = true;
+                        None
+                    } else if c.kind().as_ref() == "arrow_renamed_identifier" {
+                        let name = c
+                            .field("name")
+                            .map(|n| n.text().to_string())
+                            .unwrap_or_default();
+                        let alias = c.field("alias").map(|a| a.text().to_string());
+                        Some((name, alias))
+                    } else {
+                        Some((c.text().to_string(), None))
+                    }
+                })
+                .filter(|(name, _)| !name.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let has_wildcard = node
+        .children()
+        .any(|c| c.kind().as_ref() == "namespace_wildcard")
+        || has_mixed_wildcard;
+
+    let base_path = path_parts.join(".");
+
+    if has_wildcard {
+        imports.push(CanonicalImport {
+            import_type: "WildcardImport",
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
+            path: base_path.clone(),
+            name: None,
+            alias: None,
+            scope_fqn: None,
+            range: crate::v2::types::Range::empty(),
+            is_type_only: false,
+            wildcard: true,
+        });
+    }
+
+    if !selectors.is_empty() {
+        for (name, alias) in selectors {
+            imports.push(CanonicalImport {
+                import_type: if alias.is_some() {
+                    "AliasedImport"
+                } else {
+                    "GroupedImport"
+                },
+                binding_kind: ImportBindingKind::Named,
+                mode: ImportMode::Declarative,
+                path: base_path.clone(),
+                name: Some(name),
+                alias,
+                scope_fqn: None,
+                range: crate::v2::types::Range::empty(),
+                is_type_only: false,
+                wildcard: false,
+            });
+        }
+    } else if !has_wildcard {
+        let (path, name) = base_path
+            .rsplit_once('.')
+            .map(|(p, n)| (p.to_string(), Some(n.to_string())))
+            .unwrap_or((base_path, None));
+
+        imports.push(CanonicalImport {
+            import_type: "Import",
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
+            path,
+            name,
+            alias: None,
+            scope_fqn: None,
+            range: crate::v2::types::Range::empty(),
+            is_type_only: false,
+            wildcard: false,
+        });
+    }
+
+    true
+}
+
 impl DslLanguage for ScalaDsl {
     fn name() -> &'static str {
         "scala"
@@ -133,33 +244,7 @@ impl DslLanguage for ScalaDsl {
     }
 
     fn imports() -> Vec<ImportRule> {
-        fn scala_import_classify(node: &N<'_>) -> &'static str {
-            for child in node.children() {
-                let k = child.kind();
-                if k == "namespace_wildcard" {
-                    return "WildcardImport";
-                }
-                if k == "namespace_selectors" {
-                    for inner in child.children() {
-                        if inner.kind() == "arrow_renamed_identifier" {
-                            return "AliasedImport";
-                        }
-                    }
-                    return "GroupedImport";
-                }
-                if k == "arrow_renamed_identifier" {
-                    return "AliasedImport";
-                }
-            }
-            "Import"
-        }
-
-        vec![
-            import("import_declaration")
-                .classify(scala_import_classify)
-                .split_last(".")
-                .wildcard_child("namespace_wildcard"),
-        ]
+        vec![]
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
@@ -242,6 +327,7 @@ impl DslLanguage for ScalaDsl {
         types::LanguageHooks {
             return_kinds: &["return_expression"],
             expression_body_kinds: &[],
+            on_import: Some(scala_extract_imports),
             ..Default::default()
         }
     }
@@ -385,5 +471,53 @@ mod tests {
                 .unwrap();
         assert!(result.definitions.iter().any(|d| d.name == "name"));
         assert!(result.definitions.iter().any(|d| d.name == "counter"));
+    }
+
+    #[test]
+    fn import_extraction() {
+        let result = parse(
+            "package com.example\nimport com.example.models.User\nimport com.example.utils._\nimport com.example.{A, B}\nclass Service {}\n"
+        ).unwrap();
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name == Some("User".to_string()) && i.path == "com.example.models")
+        );
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.wildcard && i.path == "com.example.utils")
+        );
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name == Some("A".to_string()) && i.path == "com.example")
+        );
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name == Some("B".to_string()) && i.path == "com.example")
+        );
+    }
+
+    #[test]
+    fn mixed_import_with_wildcard() {
+        let result = parse("import com.example.{A, _}\nclass Service {}\n").unwrap();
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.wildcard && i.path == "com.example")
+        );
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|i| i.name == Some("A".to_string()) && i.path == "com.example")
+        );
     }
 }

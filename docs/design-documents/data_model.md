@@ -36,7 +36,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Group`               | Represents a GitLab group namespace.                                                                    | `id`, `name`, `full_path`, `visibility_level`                                 |
 | `Project`             | Represents a GitLab project/repository.                                                                 | `id`, `name`, `full_path`, `namespace_id`                                   |
-| `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id`, `merged_commit_sha`, `squash_commit_sha`, denormalized `metric_*` snapshot columns |
+| `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id`, `merged_commit_id`, denormalized `metric_*` snapshot columns |
 | `Pipeline`            | Represents a CI/CD pipeline.                                                                            | `id`, `status`, `source`, `project_id`, `user_id`                             |
 | `Deployment`          | Represents a deployment of a commit to a CI/CD environment.                                             | `id`, `iid`, `project_id`, `status`, `ref`, `sha`                             |
 | `Environment`         | Represents a CI/CD deployment target (production, staging, review app, etc.).                           | `id`, `project_id`, `name`, `slug`, `state`, `tier`, `environment_type`       |
@@ -152,6 +152,7 @@ graph TD
 | `ASSIGNED`                          | `User`         | `MergeRequest`, `WorkItem` | A user is assigned to a merge request or work item.                                         |
 | `FIXES`                             | `MergeRequest` | `Vulnerability`| A merge request fixes a vulnerability.                                                                  |
 | `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | A work item is related to or blocks another work item (edge property `link_type`: `relates_to`, `blocks`). |
+| `MERGED_AT_COMMIT`                  | `MergeRequest` | `Commit`       | The commit a merge request was merged at. Write-once FK (immutable). |
 | `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
 | `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
 | `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
@@ -167,6 +168,7 @@ The Code Graph represents the structure and relationships within the source code
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
+| `Commit`              | A Git commit, shared target for commit-related edges. | `id`, `sha`, `project_id`                                  |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
 | `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |
