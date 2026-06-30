@@ -40,14 +40,14 @@ Replace `payments-service` with the module or library you want to trace.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "sym",
     "entity": "ImportedSymbol",
     "columns": ["file_path", "import_path", "identifier_name"],
     "filters": {
       "import_path": {"op": "contains", "value": "payments-service"}
     }
-  },
+  }],
   "limit": 100
 }
 ```
@@ -171,12 +171,12 @@ Answer: "Where are our CI/CD problems?"
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "j",
     "entity": "Job",
     "columns": ["name", "status", "failure_reason"],
     "filters": {"status": "failed"}
-  },
+  }],
   "limit": 10
 }
 ```
@@ -275,14 +275,14 @@ Use `limit: 1` when fetching full file content to avoid large responses.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "f",
     "entity": "File",
     "columns": ["path", "language", "content"],
     "filters": {
       "path": {"op": "ends_with", "value": "app/models/project.rb"}
     }
-  },
+  }],
   "limit": 1
 }
 ```
@@ -295,14 +295,14 @@ not the full file.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "d",
     "entity": "Definition",
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"],
     "filters": {
       "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
     }
-  },
+  }],
   "limit": 5
 }
 ```

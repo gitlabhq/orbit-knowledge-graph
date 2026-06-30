@@ -49,8 +49,7 @@ The JSON query schema supports four query types through a single unified structu
 | Field | Type | Description |
 |-------|------|-------------|
 | `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `neighbors` |
-| `nodes` | `array` | Node selectors to match (required for multi-node traversal, aggregation, path_finding) |
-| `node` | `object` | Single node selector (required for `neighbors`, allowed for single-entity `traversal`) |
+| `nodes` | `array` | Node selectors to match (required for every query type; `neighbors` and single-entity `traversal` take exactly one) |
 
 ### Optional Fields
 
@@ -69,7 +68,7 @@ The JSON query schema supports four query types through a single unified structu
 
 ## Node Selectors
 
-Each node selector specifies which graph nodes to match. For `neighbors` queries and single-entity `traversal` lookups, use the `node` field (singular). For multi-node `traversal`, `aggregation`, and `path_finding` queries, use the `nodes` array. You cannot specify both.
+Each node selector specifies which graph nodes to match. `nodes` is always an array. `neighbors` queries and single-entity `traversal` lookups take a single-element `nodes` array; multi-node `traversal`, `aggregation`, and `path_finding` queries take 2+.
 
 ```json
 {
@@ -273,31 +272,31 @@ Find paths between nodes using recursive CTEs.
 
 ### Single-entity Traversal (lookup)
 
-Match a single entity type with optional filters — a `traversal` query with one node and no relationships. Use the `node` field (singular) instead of `nodes`.
+Match a single entity type with optional filters — a `traversal` query with one node and no relationships, given as a single-element `nodes` array.
 
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "u",
     "entity": "User",
     "columns": ["username", "email"],
     "filters": {
       "username": {"op": "starts_with", "value": "admin"}
     }
-  },
+  }],
   "limit": 10
 }
 ```
 
 ### Neighbors Queries
 
-Find all nodes connected to a given node. Neighbors queries use the `node` field (singular) and require a `neighbors` configuration.
+Find all nodes connected to a given node. Neighbors queries take a single-element `nodes` array and require a `neighbors` configuration.
 
 ```json orbit-query
 {
   "query_type": "neighbors",
-  "node": {"id": "u", "entity": "User", "node_ids": [100]},
+  "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
   "neighbors": {
     "node": "u",
     "direction": "both",

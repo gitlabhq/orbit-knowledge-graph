@@ -7,7 +7,7 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -25,7 +25,7 @@ pub(super) async fn cursor_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 2, "page_size": 2}
@@ -43,7 +43,7 @@ pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 4, "page_size": 10}
@@ -61,7 +61,7 @@ pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
             "limit": 100,
             "cursor": {"offset": 50, "page_size": 10}
         }"#,
@@ -77,8 +77,8 @@ pub(super) async fn cursor_with_filter(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
-                     "filters": {"state": "active"}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+                     "filters": {"state": "active"}}],
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -97,8 +97,8 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
-                     "filters": {"state": "active"}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+                     "filters": {"state": "active"}}],
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 2, "page_size": 2}
@@ -121,7 +121,7 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -143,7 +143,7 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 2, "page_size": 10}
@@ -163,7 +163,7 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
         let json = format!(
             r#"{{
                 "query_type": "traversal",
-"node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+"nodes": [{{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}}],
                  "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
                  "limit": 100,
                  "cursor": {{"offset": {offset}, "page_size": 2}}
@@ -295,7 +295,7 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
     // Without explicit order_by, cursor queries now inject a default ORDER BY id ASC.
     let query = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
         "limit": 100,
         "cursor": {"offset": 0, "page_size": 3}
     }"#;
@@ -321,7 +321,7 @@ pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestConte
         let json = format!(
             r#"{{
                 "query_type": "traversal",
-"node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+"nodes": [{{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}}],
                  "limit": 100,
                  "cursor": {{"offset": {offset}, "page_size": 2}}
             }}"#

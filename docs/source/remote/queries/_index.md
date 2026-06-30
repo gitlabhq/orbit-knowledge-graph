@@ -54,12 +54,12 @@ merge request. Request virtual columns explicitly by name.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345],
     "columns": ["iid", "title", "state", "diff"]
-  },
+  }],
   "limit": 1
 }
 ```
@@ -121,14 +121,14 @@ path and returns the raw file text.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "file",
     "entity": "File",
     "filters": {
       "path": {"op": "ends_with", "value": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
-  },
+  }],
   "limit": 5
 }
 ```

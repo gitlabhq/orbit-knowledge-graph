@@ -5,8 +5,8 @@ pub(crate) async fn like_contains_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "lic"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "contains", "value": "lic"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -24,8 +24,8 @@ pub(crate) async fn like_contains_matches_multiple(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "arl"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "contains", "value": "arl"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -43,8 +43,8 @@ pub(crate) async fn like_contains_no_match_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "zzz"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "contains", "value": "zzz"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -62,8 +62,8 @@ pub(crate) async fn like_starts_with_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "starts_with", "value": "ali"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "starts_with", "value": "ali"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -81,8 +81,8 @@ pub(crate) async fn like_starts_with_no_match(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "starts_with", "value": "xyz"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "starts_with", "value": "xyz"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -100,8 +100,8 @@ pub(crate) async fn like_ends_with_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "ends_with", "value": "ice"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "ends_with", "value": "ice"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -119,8 +119,8 @@ pub(crate) async fn like_percent_matched_literally(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "100%"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "contains", "value": "100%"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -138,8 +138,8 @@ pub(crate) async fn like_underscore_matched_literally(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "a_b"}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"op": "contains", "value": "a_b"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -159,8 +159,8 @@ pub(crate) async fn like_equality_on_email_returns_correct_row(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
-                     "filters": {"email": "alice@example.com"}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
+                     "filters": {"email": "alice@example.com"}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -179,8 +179,8 @@ pub(crate) async fn like_in_filter_on_email_works(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
-                     "filters": {"email": {"op": "in", "value": ["alice@example.com", "bob@example.com"]}}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "email"],
+                     "filters": {"email": {"op": "in", "value": ["alice@example.com", "bob@example.com"]}}}],
             "limit": 10
         }"#,
         &allow_all(),

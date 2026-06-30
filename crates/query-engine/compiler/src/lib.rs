@@ -23,7 +23,7 @@
 //!
 //! let json = r#"{
 //!     "query_type": "traversal",
-//!     "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+//!     "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
 //!     "limit": 10
 //! }"#;
 //!
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn allowlist_rejected_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let query = r#"{"query_type":"traversal","node":{"id":"x","entity":"NotARealEntity","columns":["id"]},"limit":1}"#;
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}"#;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
@@ -234,8 +234,8 @@ mod tests {
         use std::sync::atomic::Ordering;
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
             "limit": 1
         }"#;
         let ctx =
@@ -263,8 +263,8 @@ mod tests {
     fn traversal_path_shape_rejection_is_validate_pass_error() {
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": 1}}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": 1}}}],
             "limit": 1
         }"#;
         let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
@@ -292,7 +292,7 @@ mod tests {
     fn compile_with_prefixed_ontology_produces_prefixed_sql() {
         let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
 
-        let query = r#"{"query_type":"traversal","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}"#;
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
@@ -777,7 +777,7 @@ mod tests {
     fn wildcard_neighbors_infers_relationship_kinds_from_center_entity() {
         let query = r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "outgoing"},
             "limit": 10
         }"#;
@@ -798,7 +798,7 @@ mod tests {
     fn cursor_neighbors_both_orders_by_projected_columns() {
         let query = r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]}],
             "neighbors": {"node": "mr", "direction": "both"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 20}
@@ -1444,7 +1444,7 @@ mod tests {
                 "traversal",
                 r#"{
                     "query_type": "traversal",
-                    "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
                     "limit": 10
                 }"#,
             ),
@@ -1479,7 +1479,7 @@ mod tests {
                 "neighbors",
                 r#"{
                     "query_type": "neighbors",
-                    "node": {"id": "mr", "entity": "MergeRequest", "filters": {"title": {"op": "contains", "value": "fix"}}},
+                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"title": {"op": "contains", "value": "fix"}}}],
                     "neighbors": {"node": "mr", "direction": "both"},
                     "limit": 10
                 }"#,
@@ -1906,7 +1906,7 @@ mod tests {
     fn single_ref_cte_is_not_materialized() {
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "limit": 10
         }"#;
 
@@ -1964,7 +1964,7 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest",
+            "nodes": [{"id": "mr", "entity": "MergeRequest",
                      "node_ids": [1],
                      "filters": {
                          "created_at": [
@@ -1972,7 +1972,7 @@ mod tests {
                              {"op": "lt", "value": "2026-05-01T00:00:00Z"}
                          ]
                      },
-                     "columns": ["id", "created_at"]},
+                     "columns": ["id", "created_at"]}],
             "limit": 10
         }"#;
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
@@ -1990,10 +1990,10 @@ mod tests {
         let compiled = compile(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "f", "entity": "File",
+                "nodes": [{"id": "f", "entity": "File",
                          "node_ids": [1],
                          "filters": {"content": {"op": "eq", "value": "x"}},
-                         "columns": ["path", "content"]},
+                         "columns": ["path", "content"]}],
                 "limit": 5
             }"#,
             &ontology,
@@ -2023,9 +2023,9 @@ mod tests {
         let err = compile(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "f", "entity": "File",
+                "nodes": [{"id": "f", "entity": "File",
                          "node_ids": [1],
-                         "filters": {"content": {"op": "gt", "value": "x"}}},
+                         "filters": {"content": {"op": "gt", "value": "x"}}}],
                 "limit": 5
             }"#,
             &ontology,

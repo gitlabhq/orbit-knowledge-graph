@@ -135,7 +135,7 @@ async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),
@@ -198,7 +198,7 @@ async fn empty_result_still_emits_section_markers(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]}],
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),
@@ -221,7 +221,7 @@ async fn quoting_handles_strings_with_spaces_and_escapes(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [2], "columns": ["name"]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [2], "columns": ["name"]}],
             "limit": 1}"#,
         &allow_all(),
         test_security_context(),

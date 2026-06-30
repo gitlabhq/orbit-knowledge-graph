@@ -90,11 +90,11 @@ q3_bidirectional_neighbors_on_project:
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "p",
         "entity": "Project",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
         "node": "p",
         "direction": "both",
@@ -617,11 +617,11 @@ q15_neighbors_many_rel_types:
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "u",
         "entity": "User",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
         "node": "u",
         "direction": "both",
@@ -1668,11 +1668,11 @@ b2_bidirectional_neighbors_group:
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "g",
         "entity": "Group",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
         "node": "g",
         "direction": "both"

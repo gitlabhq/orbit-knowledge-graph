@@ -672,7 +672,7 @@ mod tests {
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "traversal",
-                    "node": {"id": "p", "entity": "Project"},
+                    "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
                 }))
                 .unwrap(),
@@ -880,7 +880,7 @@ mod tests {
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "traversal",
-                    "node": {"id": "p", "entity": "Project"},
+                    "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
                 }))
                 .unwrap(),

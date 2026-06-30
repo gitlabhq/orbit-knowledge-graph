@@ -6,7 +6,7 @@ pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestConte
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -26,7 +26,7 @@ pub(super) async fn search_scoped_to_single_project_namespace(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -43,7 +43,7 @@ pub(super) async fn search_multi_path_returns_union_of_scopes(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -62,7 +62,7 @@ pub(super) async fn search_scoped_mr_excludes_other_namespaces(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -81,8 +81,8 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
-                     "filters": {"visibility_level": "public"}},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
+                     "filters": {"visibility_level": "public"}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -105,10 +105,10 @@ pub(super) async fn search_traversal_path_filter_returns_matching_descendants(ct
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
+            "nodes": [{"id": "p", "entity": "Project",
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["name", "traversal_path"],
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/200/"}}},
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/200/"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -132,8 +132,8 @@ pub(super) async fn search_traversal_path_filter_outside_scope_rejects_at_compil
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
             "limit": 10
         }"#,
         &ontology,
@@ -319,8 +319,8 @@ pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestCon
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"is_admin": true}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"is_admin": true}}],
             "limit": 10
         }"#,
         &ontology,
@@ -341,7 +341,7 @@ pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestC
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
             "limit": 10
         }"#,
@@ -428,7 +428,7 @@ pub(super) async fn admin_only_non_admin_wildcard_columns_excludes_admin_fields(
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -457,10 +457,10 @@ pub(super) async fn admin_only_non_admin_explicit_columns_silently_stripped(ctx:
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
+            "nodes": [{"id": "u", "entity": "User",
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["username", "is_admin", "is_auditor"],
-                     "node_ids": [1]},
+                     "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -487,8 +487,8 @@ pub(super) async fn admin_only_admin_filter_compiles(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"],
-                     "filters": {"is_admin": false}, "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"],
+                     "filters": {"is_admin": false}, "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -516,7 +516,7 @@ pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
     compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
             "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
             "limit": 10
         }"#,
@@ -557,7 +557,7 @@ pub(super) async fn admin_only_admin_wildcard_columns_includes_admin_fields(ctx:
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -590,7 +590,7 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
             "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
@@ -634,7 +634,7 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_center_node_strips_ad
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
@@ -715,7 +715,7 @@ pub(super) async fn admin_only_admin_neighbors_dynamic_wildcard_includes_admin_f
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
             "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
@@ -747,7 +747,7 @@ pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 50
         }"#,
         &allow_all(),
@@ -819,7 +819,7 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 50
         }"#,
         &svc,
@@ -1129,7 +1129,7 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]},
+            "nodes": [{"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1557,7 +1557,7 @@ pub(super) async fn aggregation_user_only_neighbors_query_is_not_blocked(ctx: &T
     compile(
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "limit": 10
         }"#,

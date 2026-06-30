@@ -1129,7 +1129,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
                 "order_by": {"node": "u", "property": "username", "direction": "ASC"}
             }"#,
         );
@@ -1149,7 +1149,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "neighbors": {"node": "u", "direction": "both"}
             }"#,
         );
@@ -1245,7 +1245,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "p", "entity": "Project", "node_ids": [1]},
+                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
                 "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}]
             }"#,
             "only supported for aggregation",
@@ -1281,7 +1281,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "order_by": {"node": "missing", "property": "username", "direction": "ASC"}
             }"#,
             "undefined node \"missing\"",
@@ -1290,7 +1290,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "order_by": {"node": "u", "property": "nonexistent", "direction": "ASC"}
             }"#,
             "does not exist",
@@ -1325,7 +1325,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "neighbors": {"node": "ghost", "direction": "both"}
             }"#,
             "undefined node \"ghost\"",
@@ -1555,7 +1555,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "aggregation",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [
                     {"function": "count", "target": "u", "alias": "total"}
                 ]
@@ -1568,7 +1568,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"username": "alice"}}
+                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "alice"}}]
             }"#,
         );
     }
@@ -1595,7 +1595,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 42}}
+                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 42}}]
             }"#,
         );
     }
@@ -1606,7 +1606,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}
+                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}]
             }"#,
         );
     }
@@ -1616,7 +1616,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "n", "entity": "Note", "filters": {"confidential": true}}
+                "nodes": [{"id": "n", "entity": "Note", "filters": {"confidential": true}}]
             }"#,
         );
     }
@@ -1626,10 +1626,10 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {
+                "nodes": [{
                     "id": "u", "entity": "User",
                     "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
-                }
+                }]
             }"#,
         );
     }
@@ -1639,10 +1639,10 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {
+                "nodes": [{
                     "id": "n", "entity": "Note",
                     "filters": {"noteable_id": {"op": "in", "value": [1, 2, 3]}}
-                }
+                }]
             }"#,
         );
     }
@@ -1652,10 +1652,10 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {
+                "nodes": [{
                     "id": "u", "entity": "User",
                     "filters": {"username": {"op": "is_null"}}
-                }
+                }]
             }"#,
         );
     }
@@ -1665,7 +1665,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"username": 42}}
+                "nodes": [{"id": "u", "entity": "User", "filters": {"username": 42}}]
             }"#,
             "expected String",
         );
@@ -1676,7 +1676,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": "abc"}}
+                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": "abc"}}]
             }"#,
             "expected Int",
         );
@@ -1687,7 +1687,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "n", "entity": "Note", "filters": {"confidential": "yes"}}
+                "nodes": [{"id": "n", "entity": "Note", "filters": {"confidential": "yes"}}]
             }"#,
             "expected Bool",
         );
@@ -1698,10 +1698,10 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {
+                "nodes": [{
                     "id": "n", "entity": "Note",
                     "filters": {"noteable_id": {"op": "in", "value": [1, "two", 3]}}
-                }
+                }]
             }"#,
             "element [1]",
         );
@@ -1712,7 +1712,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 3.14}}
+                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 3.14}}]
             }"#,
             "is a float, not an integer",
         );
@@ -1728,7 +1728,7 @@ mod tests {
         let input = parse_input(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "m", "entity": "Metric", "filters": {"score": 42}}
+                "nodes": [{"id": "m", "entity": "Metric", "filters": {"score": 42}}]
             }"#,
         )
         .unwrap();
@@ -1740,7 +1740,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"user_type": "human"}}
+                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": "human"}}]
             }"#,
         );
     }
@@ -1751,7 +1751,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"user_type": 0}}
+                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": 0}}]
             }"#,
         );
     }
@@ -1761,7 +1761,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"user_type": true}}
+                "nodes": [{"id": "u", "entity": "User", "filters": {"user_type": true}}]
             }"#,
             "not a string or integer",
         );
@@ -1775,7 +1775,7 @@ mod tests {
         let input = parse_input(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": "bad"}}
+                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": "bad"}}]
             }"#,
         )
         .unwrap();
@@ -1787,10 +1787,10 @@ mod tests {
         let input = parse_input(
             r#"{
                 "query_type": "traversal",
-                "node": {
+                "nodes": [{
                     "id": "n", "entity": "Note",
                     "filters": {"noteable_id": {"op": "in", "value": [1, "bad", 3]}}
-                }
+                }]
             }"#,
         )
         .unwrap();
@@ -2138,21 +2138,21 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "neighbors": {"node": "u", "direction": "both"}
             }"#,
         );
         assert_ok(
             r#"{
                 "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "filters": {"username": "root"}},
+                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "root"}}],
                 "neighbors": {"node": "u", "direction": "both"}
             }"#,
         );
         assert_rejects(
             r#"{
                 "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User"},
+                "nodes": [{"id": "u", "entity": "User"}],
                 "neighbors": {"node": "u", "direction": "both"}
             }"#,
             "center node",
@@ -2161,19 +2161,19 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"username": "root"}}
+                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "root"}}]
             }"#,
         );
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]}
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]
             }"#,
         );
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User"}
+                "nodes": [{"id": "u", "entity": "User"}]
             }"#,
             "full edge table scans",
         );
@@ -2260,13 +2260,13 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}
+                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}]
             }"#,
         );
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}
+                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
             }"#,
             "full edge table scans",
         );
@@ -2354,8 +2354,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "contains", "value": "ab"}}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"username": {"op": "contains", "value": "ab"}}}],
             "limit": 10
         }"#,
         )
@@ -2376,8 +2376,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"email": {"op": "contains", "value": "example"}}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": {"op": "contains", "value": "example"}}}],
             "limit": 10
         }"#,
         )
@@ -2397,8 +2397,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"email": "test@example.com"}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": "test@example.com"}}],
             "limit": 10
         }"#,
         )
@@ -2417,8 +2417,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"private_note": "secret"}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"private_note": "secret"}}],
             "limit": 10
         }"#,
         )
@@ -2460,8 +2460,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
             "limit": 10
         }"#,
         )
@@ -2480,8 +2480,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1],
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1],
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
             "limit": 10
         }"#,
         )
@@ -2501,8 +2501,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "contains", "value": "100"}}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "contains", "value": "100"}}}],
             "limit": 10
         }"#,
         )
@@ -2522,8 +2522,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}}],
             "limit": 10
         }"#,
         )
@@ -2572,8 +2572,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"name": "Public Group"}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"name": "Public Group"}}],
             "limit": 10
         }"#,
         )
@@ -2590,12 +2590,12 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User",
+                "nodes": [{"id": "u", "entity": "User",
                          "node_ids": [1],
                          "filters": {"created_at": [
                              {"op": "gte", "value": "2026-04-01T00:00:00Z"},
                              {"op": "lt", "value": "2026-05-01T00:00:00Z"}
-                         ]}}
+                         ]}}]
             }"#,
         );
     }
@@ -2605,12 +2605,12 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "u", "entity": "User",
+                "nodes": [{"id": "u", "entity": "User",
                          "node_ids": [1],
                          "filters": {"created_at": [
                              {"op": "gte", "value": "2026-04-01T00:00:00Z"},
                              {"op": "lt", "value": 12345}
-                         ]}}
+                         ]}}]
             }"#,
             "not a string",
         );

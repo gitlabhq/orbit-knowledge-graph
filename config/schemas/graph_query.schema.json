@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v2",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v3",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -9,13 +9,9 @@
     "query_type": {
       "$ref": "#/$defs/QueryType"
     },
-    "node": {
-      "$ref": "#/$defs/NodeSelector",
-      "description": "Single node selector"
-    },
     "nodes": {
       "type": "array",
-      "description": "Array of nodes for traversal, aggregation, path_finding queries",
+      "description": "Array of node selectors. One canonical shape for all query types; neighbors takes exactly one.",
       "minItems": 1,
       "maxItems": 5,
       "items": {
@@ -106,23 +102,17 @@
         }
       },
       "then": {
-        "required": ["node"],
-        "not": {
-          "required": ["nodes"]
+        "required": ["nodes"],
+        "properties": {
+          "nodes": {
+            "minItems": 1,
+            "maxItems": 1,
+            "description": "Neighbors queries take exactly one center node"
+          }
         }
       },
       "else": {
-        "oneOf": [
-          {
-            "required": ["nodes"],
-            "not": { "required": ["node"] }
-          },
-          {
-            "required": ["node"],
-            "not": { "required": ["nodes"] },
-            "description": "Single-node traversal: 1 node, 0 relationships"
-          }
-        ]
+        "required": ["nodes"]
       }
     },
     {
@@ -208,7 +198,7 @@
         }
       },
       "then": {
-        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal requires only a node.",
+        "description": "Multi-node traversal requires 2+ nodes + relationships. Single-node traversal requires exactly 1 node and no relationships.",
         "oneOf": [
           {
             "required": ["relationships"],
@@ -224,8 +214,14 @@
             }
           },
           {
-            "required": ["node"],
+            "required": ["nodes"],
             "not": { "required": ["relationships"] },
+            "properties": {
+              "nodes": {
+                "minItems": 1,
+                "maxItems": 1
+              }
+            },
             "description": "Single-node traversal (table scan)"
           }
         ]

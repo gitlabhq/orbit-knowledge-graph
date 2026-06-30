@@ -108,11 +108,11 @@
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "mr",
         "entity": "MergeRequest",
         "node_ids": "$sample:3"
-      },
+      }],
       "neighbors": {
         "node": "mr",
         "direction": "both"
@@ -131,11 +131,11 @@
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "p",
         "entity": "Project",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
         "node": "p",
         "direction": "outgoing",
@@ -386,7 +386,7 @@
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "pipe",
         "entity": "Pipeline",
         "filters": {
@@ -397,7 +397,7 @@
           "status",
           "ref"
         ]
-      },
+      }],
       "limit": 50,
       "cursor": {
         "offset": 0,
@@ -412,7 +412,7 @@
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "mr",
         "entity": "MergeRequest",
         "columns": [
@@ -430,7 +430,7 @@
             ]
           }
         }
-      },
+      }],
       "limit": 100,
       "cursor": {
         "offset": 0,

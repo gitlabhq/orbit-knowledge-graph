@@ -1046,7 +1046,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "filters": {"username": "admin"}}
+            "nodes": [{"id": "u", "entity": "User", "filters": {"username": "admin"}}]
         }"#,
         )
         .unwrap();
@@ -1062,7 +1062,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": "*"}
+            "nodes": [{"id": "u", "entity": "User", "columns": "*"}]
         }"#,
         )
         .unwrap();
@@ -1075,7 +1075,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "email", "created_at"]}
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username", "email", "created_at"]}]
         }"#,
         )
         .unwrap();
@@ -1095,7 +1095,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"}
+            "nodes": [{"id": "u", "entity": "User"}]
         }"#,
         )
         .unwrap();
@@ -1129,7 +1129,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [100]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
             "neighbors": {"node": "u", "direction": "both"}
         }"#,
         )
@@ -1144,7 +1144,7 @@ mod tests {
     #[test]
     fn options_default_when_omitted() {
         let input =
-            parse_input(r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}}"#)
+            parse_input(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#)
                 .unwrap();
 
         assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
@@ -1155,7 +1155,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u"},
             "options": {"dynamic_columns": "*"}
         }"#,
@@ -1170,7 +1170,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u"},
             "options": {"dynamic_columns": "default"}
         }"#,
@@ -1185,7 +1185,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"},
+            "nodes": [{"id": "u", "entity": "User"}],
             "options": {}
         }"#,
         )
@@ -1200,7 +1200,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"},
+            "nodes": [{"id": "u", "entity": "User"}],
             "options": {"include_debug_sql": true}
         }"#,
         )
@@ -1214,7 +1214,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"},
+            "nodes": [{"id": "u", "entity": "User"}],
             "options": {"dynamic_columns": "*"}
         }"#,
         )
@@ -1228,11 +1228,11 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {
+            "nodes": [{
                 "id": "u",
                 "entity": "User",
                 "node_ids": [1, "9007199254740993", -42]
-            }
+            }]
         }"#,
         )
         .unwrap();
@@ -1245,11 +1245,11 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {
+            "nodes": [{
                 "id": "u",
                 "entity": "User",
                 "id_range": {"start": 1, "end": "9007199254740993"}
-            }
+            }]
         }"#,
         )
         .unwrap();

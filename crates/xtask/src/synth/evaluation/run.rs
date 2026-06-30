@@ -266,7 +266,8 @@ mod tests {
     fn test_query_entry_parse() {
         let entry = QueryEntry {
             desc: "test query".into(),
-            query: r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}}"#.into(),
+            query: r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#
+                .into(),
         };
         let value = entry.parse_query().unwrap();
         assert_eq!(value["query_type"], "traversal");

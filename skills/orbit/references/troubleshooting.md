@@ -80,13 +80,13 @@ Put the request body in `/tmp/q-min.json`:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "filters": {
         "full_path": {"op": "starts_with", "value": "gitlab-org/"}
       }
-    },
+    }],
     "limit": 1
   }
 }
@@ -103,11 +103,9 @@ has no matches.
 
 **Cause:** Query did not match the DSL JSON Schema. Common culprits:
 
-- Using `node` (singular) with `aggregation` / `path_finding`
-  (they require `nodes`, plural).
-- Using `nodes` (plural) with `neighbors` or single-node `traversal`
-  (they require `node`, singular).
-- Multi-node `traversal` (uses `nodes`) without at least 2 nodes and 1 relationship.
+- Using the removed singular `node` key. All query types use `nodes` (an array);
+  `neighbors` and single-node `traversal` take exactly one element.
+- Multi-node `traversal` without at least 2 nodes and 1 relationship.
 - `query_type: "aggregation"` without any `aggregations` entries.
 - `max_hops` or `max_depth` > 3 (server-enforced ceiling).
 - `cursor.offset + cursor.page_size > limit`.

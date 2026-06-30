@@ -355,7 +355,7 @@ async fn neighbors_dynamic_hydration(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -381,7 +381,7 @@ async fn neighbors_hydrated_property_values(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -409,7 +409,7 @@ async fn neighbors_json_format(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -441,7 +441,7 @@ async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
         "limit": 10
     }"#;
 
@@ -481,7 +481,7 @@ async fn hydration_query_type_rejected_from_user_input(_ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "hydration",
-        "node": {"id": "h", "entity": "User", "node_ids": [1]},
+        "nodes": [{"id": "h", "entity": "User", "node_ids": [1]}],
         "limit": 10
     }"#;
 
@@ -564,7 +564,7 @@ async fn neighbors_hydration_after_partial_redaction(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [2, 3]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [2, 3]}],
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -683,7 +683,7 @@ async fn consolidated_hydration_filters_null_properties(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -875,7 +875,7 @@ async fn neighbors_dynamic_hydration_indirect_auth_entities(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "f", "entity": "File", "node_ids": [5001]},
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [5001]}],
         "neighbors": {"node": "f", "direction": "outgoing"}
     }"#;
 
