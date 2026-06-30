@@ -1,24 +1,7 @@
-//! Partition-pruning pass. Wherever a scan's filter confines an alias to one or
-//! more namespaces via `startsWith(alias.traversal_path, '<prefix>')`, ANDs a
-//! predicate on the `_partition_id` virtual column so ClickHouse prunes parts
-//! before reading data. Pure optimization: the security pass owns the
-//! authorization filters, so over-scanning (emitting nothing, or a superset of
-//! buckets) is always safe; the predicate can never drop an authorized row
-//! because every pinning prefix's rows live in the matched bucket. Runs after
-//! `security`.
-//!
-//! `_partition_id` is ClickHouse's per-part virtual column holding the formatted
-//! partition value, so the row side is free (resolved from part metadata, no
-//! column read). The bucket constant is computed in ClickHouse from the prefix
-//! via the same expression the DDL uses, so the two stay identical by
-//! construction.
-//!
-//! A namespaced scan with no pinning `startsWith` (a far node reached through a
-//! cross-namespace edge) still cannot hold rows outside the caller's authorized
-//! top-level namespaces, so it gets an `_partition_id IN (<authorized bucket
-//! set>)` predicate — over-scanning within the tenant instead of all buckets.
-//! This is skipped when the authorized set is unbounded (an org-only prefix
-//! pins no namespace) or covers as many buckets as the table has anyway.
+//! Partition-pruning pass: ANDs a `_partition_id` predicate on namespaced scans
+//! so ClickHouse prunes parts. Over-scanning is always safe (the security pass
+//! owns authorization); the bucket constant is computed in ClickHouse, matching
+//! the DDL. Runs after `security`.
 
 use std::collections::BTreeSet;
 
@@ -31,7 +14,7 @@ use crate::error::Result;
 use crate::passes::security::collect_aliased_tables;
 use crate::types::SecurityContext;
 
-/// ClickHouse virtual column holding a part's formatted partition value.
+/// ClickHouse per-part virtual column holding the formatted partition value.
 const PARTITION_ID_COLUMN: &str = "_partition_id";
 
 pub fn apply_partition_pruning(
@@ -56,8 +39,7 @@ fn prune_query(q: &mut Query, strategy: &PartitionStrategy, authorized: Option<&
             .iter()
             .map(|(alias, prefixes)| partition_id_predicate(strategy, alias, prefixes))
             .collect();
-        // Namespaced scans in this scope without a pinning prefix fall back to
-        // the authorized bucket set (the far-node case).
+        // Namespaced scans with no pinning prefix fall back to the tenant set.
         if let Some(buckets) = authorized {
             for (alias, _) in collect_aliased_tables(&q.from) {
                 if !pinned.iter().any(|(a, _)| *a == alias) {
@@ -79,10 +61,7 @@ fn prune_query(q: &mut Query, strategy: &PartitionStrategy, authorized: Option<&
         prune_query(&mut cte.query, strategy, authorized);
     }
     prune_query_from(&mut q.from, strategy, authorized);
-    // Cascade-anchor / narrowing subqueries embedded in the WHERE clause
-    // (`… IN (SELECT … FROM gl_edge AS e0p WHERE startsWith(…))`) are their own
-    // scans; prune each in its own scope so a confined cascade alias is not left
-    // reading every bucket.
+    // Subqueries in the WHERE (cascade/narrowing) are their own scans.
     if let Some(where_clause) = &mut q.where_clause {
         prune_subqueries_in_expr(where_clause, strategy, authorized);
     }
@@ -138,11 +117,10 @@ fn prune_query_from(
     }
 }
 
-/// The bucket-id constant expressions for every top-level namespace the caller
-/// is authorized for. `None` when the set cannot prune: any authorized path is
-/// org-only (pins no namespace), or the distinct buckets cover the whole table.
-/// Derived from the full authorized set, so it is always a superset of any
-/// role-floored subset a given alias sees — a safe over-scan.
+/// Bucket-id constants for every top-level namespace the caller is authorized
+/// for, or `None` when it cannot prune (admin, org-only path, or more
+/// namespaces than buckets). The full set is a safe superset of any alias's
+/// role-floored subset.
 fn authorized_bucket_ids(strategy: &PartitionStrategy, ctx: &SecurityContext) -> Option<Vec<Expr>> {
     if ctx.admin {
         return None;
@@ -150,17 +128,13 @@ fn authorized_bucket_ids(strategy: &PartitionStrategy, ctx: &SecurityContext) ->
     let mut tlns: BTreeSet<String> = BTreeSet::new();
     for tp in &ctx.traversal_paths {
         let segments: Vec<&str> = tp.path.split('/').filter(|s| !s.is_empty()).collect();
-        // An org-only path (`1/`) pins no top-level namespace, so the authorized
-        // set spans every bucket; bail rather than emit a useless full set.
+        // An org-only path pins no namespace, so it spans every bucket.
         if segments.len() < 2 {
             return None;
         }
         tlns.insert(segments[1].to_string());
     }
-    // More distinct namespaces than buckets guarantees near-full coverage, so
-    // the IN-list buys nothing; bail. Bounding on the TLN count (not the hashed
-    // bucket count) keeps the hash entirely in ClickHouse — no Rust sipHash to
-    // drift from the DDL.
+    // Count TLNs, not hashed buckets, so the hash stays in ClickHouse.
     if tlns.is_empty() || tlns.len() >= bucket_count(strategy) {
         return None;
     }
@@ -169,8 +143,6 @@ fn authorized_bucket_ids(strategy: &PartitionStrategy, ctx: &SecurityContext) ->
             .map(|tln| {
                 Expr::func(
                     "toString",
-                    // Reuse the DDL strategy expression over the `<org>/<tln>/`
-                    // shape it hashes from; only segment 2 (the tln) is read.
                     vec![partition_expr(strategy, Expr::string(format!("0/{tln}/")))],
                 )
             })
@@ -193,10 +165,7 @@ fn in_bucket_set(alias: &str, buckets: &[Expr]) -> Expr {
     )
 }
 
-/// Per alias, the distinct set of pinning prefixes from its
-/// `startsWith(alias.traversal_path, '<prefix>')` filters. An alias filtered by
-/// several prefixes (a multi-namespace `OR`) is kept: its rows span exactly
-/// those prefixes' buckets, so an `IN` over that bucket set is exhaustive.
+/// Per alias, the distinct pinning prefixes from its `startsWith` filters.
 fn pinning_prefixes_by_alias(
     expr: &Expr,
     strategy: &PartitionStrategy,
@@ -249,9 +218,7 @@ fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(Str
     }
 }
 
-/// `alias._partition_id = bucket(prefix)` for one prefix, or
-/// `alias._partition_id IN tuple(bucket(p1), …)` for several. ClickHouse folds
-/// each bucket constant and prunes parts on the virtual column.
+/// `alias._partition_id = bucket(prefix)` for one prefix, else `IN tuple(…)`.
 fn partition_id_predicate(strategy: &PartitionStrategy, alias: &str, prefixes: &[String]) -> Expr {
     let col = Expr::col(alias, PARTITION_ID_COLUMN);
     let mut buckets = prefixes.iter().map(|p| bucket_id(strategy, p));
@@ -270,9 +237,7 @@ fn partition_id_predicate(strategy: &PartitionStrategy, alias: &str, prefixes: &
     }
 }
 
-/// `toString(<partition expression over the prefix literal>)`, matching the
-/// `_partition_id` string form. Computed in ClickHouse so it is byte-identical
-/// to the DDL `PARTITION BY`.
+/// `toString(partition_expr(prefix))`, matching the `_partition_id` string form.
 fn bucket_id(strategy: &PartitionStrategy, prefix: &str) -> Expr {
     Expr::func(
         "toString",
@@ -320,8 +285,7 @@ mod tests {
     use super::*;
     use crate::ast::{JoinType, SelectExpr, TableRef};
 
-    /// Org-only scope: `authorized_bucket_ids` returns `None`, so the far-node
-    /// fallback is off and these tests isolate the pinning-prefix behavior.
+    /// Org-only scope: no far-node fallback, so tests isolate pinning behavior.
     fn org_ctx() -> SecurityContext {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
     }
@@ -538,7 +502,6 @@ mod tests {
                 alias: None,
             }],
             from: TableRef::scan("gl_edge", "e"),
-            // No pinning startsWith: only the broad org filter.
             where_clause: Some(starts_with("e", "1/")),
             ..Default::default()
         }));
