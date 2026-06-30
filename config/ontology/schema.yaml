@@ -1,8 +1,12 @@
 # yaml-language-server: $schema=ontology.schema.json
 type: main
 schema_version: 0.1
+# Property-graph model of GitLab and Code Graph entities: nouns are nodes, verbs are edges.
+# This is not a 1:1 mirror of GitLab database tables. This file is human-facing;
+# get_graph_schema builds its LLM context from the loaded ontology nodes, edges, and
+# properties, not this top-level description, to generate Knowledge Graph DSL (LLM Cypher JSON) queries.
 description: >
-  User and AI facing GitLab Knowledge Graph schema. It models GitLab and Code Graph entities
+  User and AI facing GitLab Knowledge Graph schema. Models GitLab and Code Graph entities
   as a property graph for Orbit queries, not as a 1:1 mirror of GitLab database tables.
 
 settings:
