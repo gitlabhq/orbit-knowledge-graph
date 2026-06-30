@@ -400,8 +400,6 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     discussion_locked Nullable(Bool),
     prepared_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     project_id Int64 CODEC(T64, ZSTD(1)),
-    merged_commit_sha String DEFAULT '' CODEC(ZSTD(1)),
-    squash_commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     latest_build_started_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     latest_build_finished_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     first_deployed_to_production_at Nullable(DateTime64(0, 'UTC')) CODEC(Delta(8), ZSTD(1)),

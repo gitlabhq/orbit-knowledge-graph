@@ -128,18 +128,6 @@ properties:
     mutable: false
     description: "Owning project ID. Stored on the node for redaction without an edge lookup."
 
-  merged_commit_sha:
-    type: string
-    source: merged_commit_sha
-    nullable: false
-    description: "Commit SHA landed on target branch (may differ from merge_commit_sha for fast-forward merges)."
-
-  squash_commit_sha:
-    type: string
-    source: squash_commit_sha
-    nullable: false
-    description: "Squash commit SHA, if squashed."
-
   merged_commit_id:
     type: int64
     source: merged_commit_id
@@ -364,8 +352,6 @@ etl:
     m.updated_by_id AS updated_by_id,
     m.last_edited_by_id AS last_edited_by_id,
     m.milestone_id AS milestone_id,
-    m.merged_commit_sha AS merged_commit_sha,
-    m.squash_commit_sha AS squash_commit_sha,
     if(
       m.state_id = 3 AND m.decoded_sha IS NOT NULL,
       toInt64(bitAnd(sipHash64(m.target_project_id, m.decoded_sha), toUInt64(9223372036854775807))),
@@ -599,8 +585,6 @@ storage:
     - {name: discussion_locked, type: "Nullable(Bool)"}
     - {name: prepared_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
-    - {name: merged_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: squash_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: latest_build_started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: latest_build_finished_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: first_deployed_to_production_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
