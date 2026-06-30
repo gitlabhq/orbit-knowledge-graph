@@ -326,19 +326,14 @@ etl:
   # time because the upstream `merge_requests_mv` only re-fires on parent
   # inserts and routinely leaves those columns NULL on the destination.
   #
-  # merged_commit_id (the MERGED_AT_COMMIT FK target) is the masked
-  # sipHash64(target_project_id, decoded_sha) gated on state_id=3, where decoded_sha
-  # is hoisted into the `from` subquery below. merged_commit_sha and
-  # squash_commit_sha are Postgres `bytea` columns (Siphon replicates them as `\x` +
-  # hex-of-ASCII), so they are unhex-decoded; merge_commit_sha is clean `varchar`.
-  # The sipHash64 is sign-bit-masked (bitAnd ... 0x7FFFFFFFFFFFFFFF) so the Int64
-  # stays positive -- commit.yaml's id is the keyset cursor column and a negative id
-  # loops paging forever.
+  # MERGED_AT_COMMIT uses a synthetic FK because Siphon does not expose a commit
+  # table. The FK is sipHash64(target_project_id, decoded_sha), masked positive so
+  # it can share Commit.id's Int64 keyset cursor safely. Only merged MRs emit it.
+  # decoded_sha is COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha);
+  # the first and third columns are Postgres bytea replicated as `\x` + hex ASCII.
   #
-  # DRIFT WARNING: the `decoded_sha` expression and the masked
-  # sipHash64(target_project_id, decoded_sha) here must stay BYTE-IDENTICAL with
-  # commit.yaml's `decoded_sha` and id, or the edge target stops joining its Commit
-  # node. See #924.
+  # Keep decoded_sha and the masked hash expression in sync with commit.yaml, or
+  # MERGED_AT_COMMIT points at a Commit node that was never emitted. See #924.
   type: query
   source: merge_requests
   select: >-
@@ -401,7 +396,24 @@ etl:
   # aggregates over every metrics/reviewers/approvals row in the namespace on
   # every batch (~2 GB peak on 1/9970/ for what should be a 30-row batch).
   from: >-
-    (SELECT *, coalesce(if(startsWith(merged_commit_sha, '\\x'), unhex(substring(merged_commit_sha, 3)), nullIf(merged_commit_sha, '')), nullIf(merge_commit_sha, ''), if(startsWith(squash_commit_sha, '\\x'), unhex(substring(squash_commit_sha, 3)), nullIf(squash_commit_sha, ''))) AS decoded_sha FROM merge_requests) AS m LEFT JOIN (
+    (
+      SELECT
+        *,
+        coalesce(
+          if(
+            startsWith(merged_commit_sha, '\\x'),
+            unhex(substring(merged_commit_sha, 3)),
+            nullIf(merged_commit_sha, '')
+          ),
+          nullIf(merge_commit_sha, ''),
+          if(
+            startsWith(squash_commit_sha, '\\x'),
+            unhex(substring(squash_commit_sha, 3)),
+            nullIf(squash_commit_sha, '')
+          )
+        ) AS decoded_sha
+      FROM merge_requests
+    ) AS m LEFT JOIN (
       SELECT
         traversal_path AS _mt_tp,
         merge_request_id AS _mt_mr,
@@ -512,15 +524,9 @@ etl:
       as: HAS_HEAD_PIPELINE
       direction: outgoing
       mutable: true
-    # Immutable (write-once FK), unlike the "latest" siblings above whose target
-    # legitimately advances. A merged MR is terminal in Rails (reopen only goes
-    # closed -> opened; there is no transition out of merged) and the commit-SHA
-    # columns are set at merge and not rewritten by user action, so there is never
-    # a prior target to orphan and the stale-edge sweep has nothing to do here.
-    # Accepted tradeoff: were an upstream datalake correction to re-replicate a
-    # *different* SHA onto an already-merged MR (not a user action, and not the
-    # NULL->value backfill, which has no prior edge), an immutable edge would not
-    # self-heal that rare stale orphan. We accept that over a perpetual sweep.
+    # Not marked mutable: Rails treats merged MRs as terminal and does not rewrite
+    # the merge commit SHA after merge. If an upstream datalake correction changes
+    # that SHA later, the old MERGED_AT_COMMIT edge can remain until re-indexed.
     merged_commit_id:
       to: Commit
       as: MERGED_AT_COMMIT
