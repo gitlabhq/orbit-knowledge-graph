@@ -1,69 +1,109 @@
-//! Partition-pruning pass: emits the table's partition expression as a
-//! predicate for a query scoped to a single top-level namespace, so ClickHouse
-//! prunes to one bucket. Runs after `security`.
+//! Partition-pruning pass. Wherever a scan's filter already confines an alias
+//! to a single namespace via `startsWith(alias.traversal_path, '<prefix>')`,
+//! ANDs the table's partition expression equated to that prefix so ClickHouse
+//! prunes to one bucket. Pure optimization: the security pass owns the
+//! authorization filters, so over-scanning (emitting nothing) is always safe;
+//! a tight `startsWith` proves the rows can only live in the matched bucket,
+//! so the predicate can never drop an authorized row. Runs after `security`.
 
 use ontology::{Ontology, PartitionStrategy};
+use serde_json::Value;
 
-use crate::ast::{Expr, Node, Query};
+use crate::ast::{Expr, Node, Query, TableRef};
+use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::Result;
-use crate::passes::security::collect_aliased_tables;
-use crate::types::SecurityContext;
 
-pub fn apply_partition_pruning(
-    node: &mut Node,
-    ctx: &SecurityContext,
-    ontology: &Ontology,
-) -> Result<()> {
+pub fn apply_partition_pruning(node: &mut Node, ontology: &Ontology) -> Result<()> {
     let Some(partition) = ontology.partition() else {
         return Ok(());
     };
-    let Node::Query(q) = node else {
-        return Ok(());
-    };
-    for cte in &mut q.ctes {
-        prune_query(&mut cte.query, ctx, ontology, &partition.strategy);
+    if let Node::Query(q) = node {
+        prune_query(q, &partition.strategy);
     }
-    prune_query(q, ctx, ontology, &partition.strategy);
     Ok(())
 }
 
-fn prune_query(
-    q: &mut Query,
-    ctx: &SecurityContext,
-    ontology: &Ontology,
-    strategy: &PartitionStrategy,
-) {
-    let preds: Vec<Expr> = collect_aliased_tables(&q.from)
-        .into_iter()
-        .filter(|(_, table)| ontology.is_table_path_scopable(table))
-        .filter_map(|(alias, table)| {
-            let prefix = ctx.scope_prefixes.get(&alias)?;
-            // Match the security pass's tight-prefix arm: only when the prefix is
-            // authorized does its scan reduce to a single namespace, so only then
-            // does the bucket predicate prune anything.
-            let min_role = ontology
-                .min_access_level_for_table(&table)
-                .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-            let authorized = ctx
-                .paths_at_least(min_role)
-                .iter()
-                .any(|p| prefix.starts_with(p));
-            (authorized && prefix_pins_partition(strategy, prefix))
-                .then(|| bucket_predicate(strategy, &alias, prefix))
-        })
-        .collect();
-
-    if !preds.is_empty() {
-        q.where_clause = Expr::and_all(
-            preds
-                .into_iter()
-                .map(Some)
-                .chain(std::iter::once(q.where_clause.take())),
-        );
+fn prune_query(q: &mut Query, strategy: &PartitionStrategy) {
+    if let Some(where_clause) = &q.where_clause {
+        let preds: Vec<Expr> = pinning_prefixes(where_clause, strategy)
+            .into_iter()
+            .map(|(alias, prefix)| bucket_predicate(strategy, &alias, &prefix))
+            .collect();
+        if !preds.is_empty() {
+            q.where_clause = Expr::and_all(
+                preds
+                    .into_iter()
+                    .map(Some)
+                    .chain(std::iter::once(q.where_clause.take())),
+            );
+        }
     }
 
+    for cte in &mut q.ctes {
+        prune_query(&mut cte.query, strategy);
+    }
+    prune_query_from(&mut q.from, strategy);
     for arm in &mut q.union_all {
-        prune_query(arm, ctx, ontology, strategy);
+        prune_query(arm, strategy);
+    }
+}
+
+fn prune_query_from(from: &mut TableRef, strategy: &PartitionStrategy) {
+    match from {
+        TableRef::Scan { .. } => {}
+        TableRef::Join { left, right, .. } => {
+            prune_query_from(left, strategy);
+            prune_query_from(right, strategy);
+        }
+        TableRef::Subquery { query, .. } => prune_query(query, strategy),
+        TableRef::Union { queries, .. } => {
+            for q in queries {
+                prune_query(q, strategy);
+            }
+        }
+    }
+}
+
+/// Collects `(alias, prefix)` for every `startsWith(alias.traversal_path,
+/// '<prefix>')` in `expr` whose prefix pins the strategy's partition input.
+/// Deduplicated so one alias filtered twice yields one predicate.
+fn pinning_prefixes(expr: &Expr, strategy: &PartitionStrategy) -> Vec<(String, String)> {
+    let mut found: Vec<(String, String)> = Vec::new();
+    collect_pinning(expr, strategy, &mut found);
+    found.dedup();
+    found
+}
+
+fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(String, String)>) {
+    match expr {
+        Expr::FuncCall { name, args } if name == "startsWith" && args.len() == 2 => {
+            if let (
+                Expr::Column { table, column },
+                Expr::Param {
+                    value: Value::String(prefix),
+                    ..
+                },
+            ) = (&args[0], &args[1])
+                && column == TRAVERSAL_PATH_COLUMN
+                && prefix_pins_partition(strategy, prefix)
+            {
+                out.push((table.clone(), prefix.clone()));
+            }
+        }
+        Expr::FuncCall { args, .. } => {
+            for a in args {
+                collect_pinning(a, strategy, out);
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            collect_pinning(left, strategy, out);
+            collect_pinning(right, strategy, out);
+        }
+        Expr::UnaryOp { expr, .. }
+        | Expr::InSubquery { expr, .. }
+        | Expr::InSelect { expr, .. } => collect_pinning(expr, strategy, out),
+        Expr::Lambda { body, .. } => collect_pinning(body, strategy, out),
+        _ => {}
     }
 }
 
@@ -113,28 +153,20 @@ fn prefix_pins_partition(strategy: &PartitionStrategy, prefix: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{SelectExpr, TableRef};
+    use crate::ast::{JoinType, SelectExpr, TableRef};
 
-    fn scoped_project_where(prefix: Option<&str>) -> Option<Expr> {
-        scoped_project_where_authorized(prefix, "1/")
-    }
-
-    fn scoped_project_where_authorized(prefix: Option<&str>, authorized: &str) -> Option<Expr> {
-        let ctx = SecurityContext::new(1, vec![authorized.into()]).unwrap();
-        let ctx = match prefix {
-            Some(p) => ctx.with_scope_prefixes([("p".to_string(), p.to_string())].into()),
-            None => ctx,
-        };
+    fn where_with(filter: Expr) -> Option<Expr> {
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
                 expr: Expr::col("p", "id"),
                 alias: None,
             }],
             from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(filter),
             limit: Some(10),
             ..Default::default()
         }));
-        apply_partition_pruning(&mut node, &ctx, &Ontology::load_embedded().unwrap()).unwrap();
+        apply_partition_pruning(&mut node, &Ontology::load_embedded().unwrap()).unwrap();
         let Node::Query(q) = node else { unreachable!() };
         q.where_clause
     }
@@ -160,24 +192,85 @@ mod tests {
         }
     }
 
+    fn starts_with(alias: &str, prefix: &str) -> Expr {
+        Expr::func(
+            "startsWith",
+            vec![Expr::col(alias, "traversal_path"), Expr::string(prefix)],
+        )
+    }
+
     #[test]
-    fn prunes_when_prefix_pins_namespace() {
-        let where_clause = scoped_project_where(Some("1/100/1000/")).unwrap();
+    fn prunes_alias_with_pinning_startswith() {
+        let where_clause = where_with(starts_with("p", "1/100/1000/")).unwrap();
         assert!(has_modulo_over(&where_clause, "p"));
     }
 
     #[test]
     fn no_prune_for_org_only_prefix() {
-        assert!(scoped_project_where(Some("1/")).is_none());
+        let where_clause = where_with(starts_with("p", "1/")).unwrap();
+        assert!(!has_modulo_over(&where_clause, "p"));
     }
 
     #[test]
-    fn no_prune_when_prefix_outside_authorized_paths() {
-        assert!(scoped_project_where_authorized(Some("2/100/1000/"), "1/").is_none());
+    fn no_prune_without_startswith() {
+        let where_clause = where_with(Expr::eq(Expr::col("p", "id"), Expr::int(1))).unwrap();
+        assert!(!has_modulo_over(&where_clause, "p"));
     }
 
     #[test]
-    fn no_prune_without_scope_prefix() {
-        assert!(scoped_project_where(None).is_none());
+    fn prunes_edge_alias_in_join() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::subquery(
+                    Query {
+                        select: vec![SelectExpr {
+                            expr: Expr::Star,
+                            alias: None,
+                        }],
+                        from: TableRef::scan("gl_edge", "e"),
+                        where_clause: Some(starts_with("e", "1/100/1000/")),
+                        ..Default::default()
+                    },
+                    "e",
+                ),
+                Expr::lit(true),
+            ),
+            where_clause: Some(starts_with("p", "1/100/1000/")),
+            limit: Some(10),
+            ..Default::default()
+        }));
+        apply_partition_pruning(&mut node, &Ontology::load_embedded().unwrap()).unwrap();
+        let Node::Query(q) = node else { unreachable!() };
+        assert!(has_modulo_over(q.where_clause.as_ref().unwrap(), "p"));
+        let TableRef::Join { right, .. } = &q.from else {
+            unreachable!()
+        };
+        let TableRef::Subquery { query, .. } = right.as_ref() else {
+            unreachable!()
+        };
+        assert!(has_modulo_over(query.where_clause.as_ref().unwrap(), "e"));
+    }
+
+    #[test]
+    fn no_op_without_partition_config() {
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("p", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(starts_with("p", "1/100/1000/")),
+            ..Default::default()
+        }));
+        let ontology = Ontology::new();
+        apply_partition_pruning(&mut node, &ontology).unwrap();
+        let Node::Query(q) = node else { unreachable!() };
+        assert!(!has_modulo_over(q.where_clause.as_ref().unwrap(), "p"));
     }
 }

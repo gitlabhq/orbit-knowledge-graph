@@ -752,14 +752,14 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let compiled = compile(json, &embedded_ontology(), &scoped_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    // The anchor node carries the prefix twice (its startsWith filter and the
-    // partition-pruning predicate's constant side), plus the IN_PROJECT edge and
-    // the cascade anchor's IN-subquery; the cross-namespace RELATED_TO edge and
-    // its rel node must not.
+    // The anchor node and the same-namespace IN_PROJECT edge each carry the
+    // prefix twice (startsWith filter + partition-pruning predicate); the
+    // cascade anchor's IN-subquery carries it once. The cross-namespace
+    // RELATED_TO edge and its rel node must carry it zero times.
     assert_eq!(
         sql.matches(SCOPED_PREFIX).count(),
-        4,
-        "prefix on the anchor node (startsWith + partition predicate), IN_PROJECT edge, and cascade anchor subquery"
+        5,
+        "anchor node and IN_PROJECT edge (startsWith + partition predicate each), plus cascade anchor subquery"
     );
 
     let scoped_filter = sql.split("WHERE").nth(1).unwrap();

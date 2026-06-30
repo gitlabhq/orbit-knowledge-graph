@@ -75,7 +75,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [node]
         }
         partition {
-            reads_env: [security_ctx, ontology]
+            reads_env: [ontology]
             mutates: [node]
         }
         check {
@@ -193,10 +193,9 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn partition(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let security_ctx = ctx.security_ctx().clone();
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
-    partition::apply_partition_pruning(&mut node, &security_ctx, &ontology)?;
+    partition::apply_partition_pruning(&mut node, &ontology)?;
     ctx.set_node(node);
     Ok(())
 }
