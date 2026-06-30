@@ -57,6 +57,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence (`Vulnerabilities::Finding` in Rails).              | `id`, `uuid`, `report_type`, `severity`, `location`                           |
 | `Package` | Represents a package published to the package registry (npm, Maven, PyPI, NuGet, and other formats). | `id`, `name`, `version`, `package_type`, `status`, `project_id` |
 | `ContainerRepository` | Represents a container image repository in a project's container registry. | `id`, `name`, `status`, `project_id` |
+| `Dependency` | Represents a dependency declared by a package (npm, Maven, NuGet, Composer, and other formats). | `id`, `name`, `version_pattern`, `project_id` |
 | `VulnerabilityScanner` | Represents the scanner that produced vulnerability data.                                               | `id`, `external_id`, `name`, `vendor`                                         |
 | `VulnerabilityIdentifier` | Represents a vulnerability identifier such as CVE or GHSA.                                         | `id`, `external_type`, `external_id`, `name`                                  |
 
@@ -95,7 +96,9 @@ graph TD
 
     Package -- IN_PROJECT --> Project
     Package -- BUILT_BY --> Pipeline
+    Package -- DECLARES_DEPENDENCY --> Dependency
     ContainerRepository -- IN_PROJECT --> Project
+    Dependency -- IN_PROJECT --> Project
 ```
 
 ### Implemented Relationship Types
@@ -103,8 +106,9 @@ graph TD
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`, `User`, `Project`, `WorkItem` | `Group`, `Project`, `Branch`, `WorkItem` | A group contains a subgroup or project; a user namespace contains a project; a project contains a branch; a work item contains a child work item. |
-| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `ContainerRepository` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
 | `BUILT_BY`                          | `Package`      | `Pipeline`     | A package was built by a CI/CD pipeline (sourced from the `packages_build_infos` join table).           |
+| `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
 | `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
 | `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
 | `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |

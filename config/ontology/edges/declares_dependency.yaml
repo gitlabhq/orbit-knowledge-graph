@@ -1,0 +1,20 @@
+# config/ontology/edges/declares_dependency.yaml
+
+description: Package declares a dependency
+
+variants:
+  - from_node: { type: Package, id: id }
+    to_node: { type: Dependency, id: id }
+    scope: same_namespace
+    description: "Package declares a dependency."
+
+etl:
+  - scope: namespaced
+    source: siphon_packages_dependency_links
+    order_by: [traversal_path, id]
+    from:
+      id: package_id
+      type: Package
+    to:
+      id: dependency_id
+      type: Dependency
