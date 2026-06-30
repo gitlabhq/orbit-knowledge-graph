@@ -161,6 +161,8 @@ impl CodeIndexingPipeline {
             pipeline_config.write_channel_capacity,
             pipeline_config.write_slice_rows,
             pipeline_config.write_buffer_age(),
+            pipeline_config.write_min_flush_rows,
+            pipeline_config.write_max_flush_age(),
             pipeline_config.write_max_concurrent,
         );
         Self {
@@ -302,9 +304,11 @@ impl CodeIndexingPipeline {
         // start its Gitaly download while we wait for an indexing slot.
         drop(_fetch_slot);
 
-        // Phase 2: Process. File count picks the lane only; a reserved big lane keeps a flood
-        // of small repos from starving monorepos.
-        let lane = if repository.file_inventory.len() <= self.small_repo_max_files {
+        // Phase 2: Process. Parsable-file count picks the lane only; a reserved big lane keeps a
+        // flood of small repos from starving monorepos. Counting parse candidates (not raw files)
+        // keeps a repo of images or lockfiles off the big lane.
+        let parseable = code_graph::v2::inventory::parseable_file_count(&repository.file_inventory);
+        let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
             &self.big_indexing_slots

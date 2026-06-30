@@ -84,6 +84,8 @@
               "write_buffer_age_secs": 60,
               "write_channel_capacity": 8,
               "write_max_concurrent": 4,
+              "write_max_flush_age_secs": 120,
+              "write_min_flush_rows": 50000,
               "write_slice_rows": 500000
             }
           },
@@ -491,7 +493,7 @@
           "minimum": 0
         },
         "small_repo_max_files": {
-          "description": "Post-filter file count at or below which a repository runs on the small lane. Defaults to 650.",
+          "description": "Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane. Defaults to 650.",
           "type": "integer",
           "format": "uint",
           "default": 650,
@@ -504,7 +506,7 @@
           "minimum": 0
         },
         "write_buffer_age_secs": {
-          "description": "Flush the write coalescer after this many seconds even below `write_slice_rows`, bounding latency. Keep below `nats.ack_wait_secs`. Defaults to 60.",
+          "description": "Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick. Defaults to 60.",
           "type": "integer",
           "format": "uint64",
           "default": 60,
@@ -522,6 +524,20 @@
           "type": "integer",
           "format": "uint",
           "default": 4,
+          "minimum": 0
+        },
+        "write_max_flush_age_secs": {
+          "description": "Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`. Defaults to 120.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 120,
+          "minimum": 0
+        },
+        "write_min_flush_rows": {
+          "description": "Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached. Defaults to 50000.",
+          "type": "integer",
+          "format": "uint",
+          "default": 50000,
           "minimum": 0
         },
         "write_slice_rows": {
@@ -558,6 +574,8 @@
             "write_buffer_age_secs": 60,
             "write_channel_capacity": 8,
             "write_max_concurrent": 4,
+            "write_max_flush_age_secs": 120,
+            "write_min_flush_rows": 50000,
             "write_slice_rows": 500000
           }
         }
@@ -661,6 +679,8 @@
                 "write_buffer_age_secs": 60,
                 "write_channel_capacity": 8,
                 "write_max_concurrent": 4,
+                "write_max_flush_age_secs": 120,
+                "write_min_flush_rows": 50000,
                 "write_slice_rows": 500000
               }
             },
@@ -914,6 +934,8 @@
               "write_buffer_age_secs": 60,
               "write_channel_capacity": 8,
               "write_max_concurrent": 4,
+              "write_max_flush_age_secs": 120,
+              "write_min_flush_rows": 50000,
               "write_slice_rows": 500000
             }
           }

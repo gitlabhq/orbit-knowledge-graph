@@ -22,6 +22,16 @@ pub struct FamilyFileInput {
     pub path: FileInput,
 }
 
+/// Count the files the pipeline will actually parse (`Decision::Parse`), excluding resolver-only
+/// inputs and list-only nodes (configs, images, oversized, binary). Used to size a repository by
+/// work rather than by raw file count.
+pub fn parseable_file_count(inventory: &[FileInventoryEntry]) -> usize {
+    inventory
+        .iter()
+        .filter(|entry| entry.decision == Decision::Parse)
+        .count()
+}
+
 /// Select the parse candidates (loaded, language-detected, under `max_files`;
 /// `0` = unlimited) and group them by language family. Also returns the path →
 /// language map for the structural graph.
@@ -123,5 +133,25 @@ mod tests {
             1,
             "only Keep files are parse candidates"
         );
+    }
+
+    fn with_decision(path: &str, decision: Decision) -> FileInventoryEntry {
+        FileInventoryEntry {
+            path: path.into(),
+            size: 10,
+            decision,
+        }
+    }
+
+    #[test]
+    fn parseable_count_excludes_non_parse_decisions() {
+        let inventory = [
+            keep("a.rs"),
+            keep("b.rs"),
+            with_decision("Cargo.lock", Decision::Load),
+            with_decision("logo.png", Decision::ListOnly),
+            with_decision("ignored", Decision::Drop),
+        ];
+        assert_eq!(parseable_file_count(&inventory), 2);
     }
 }
