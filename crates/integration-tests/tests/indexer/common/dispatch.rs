@@ -3,16 +3,25 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use clickhouse_client::ClickHouseConfigurationExt;
 use futures::StreamExt;
-use gkg_server_config::{NamespaceDispatcherConfig, NatsConfiguration};
+use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
+use indexer::campaign::CampaignState;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::nats::versioning::NATS_VERSIONER;
-use indexer::orchestrator::scheduled::{NamespaceDispatcher, ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
+use indexer::orchestrator::scheduled::{
+    GlobalDispatcher, NamespaceDispatcher, ScheduledTask, ScheduledTaskMetrics,
+};
+use indexer::orchestrator::siphon::{CdcContext, EnabledNamespacesRoute, Route};
 use indexer::topic::{
     CODE_INDEXING_TASK_SUBJECT_PATTERN, GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM,
     NAMESPACE_INDEXING_SUBJECT_PATTERN,
 };
 use integration_testkit::TestContext;
-use integration_testkit::scenario::{DispatchedMessage, ScenarioHandlers, Scope};
+use integration_testkit::scenario::{
+    CdcEvent, CdcOperation, DispatchedMessage, ScenarioHandlers, Scope,
+};
+use siphon_proto::replication_event::{Column, Operation};
+use siphon_proto::{LogicalReplicationEvents, ReplicationEvent, Value, value};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -42,11 +51,16 @@ impl ScenarioHandlers for DispatchScenarioHandlers {
         ctx: &TestContext,
         handler: &str,
         _scope: Option<Scope>,
+        cdc: &[CdcEvent],
     ) -> Vec<DispatchedMessage> {
         let _serial = self.serial.lock().await;
         recreate_stream(&self.nats_url).await;
         match handler {
             "dispatch_namespace" => run_namespace_dispatcher(ctx, &self.nats_url).await,
+            "dispatch_global" => run_global_dispatcher(&self.nats_url).await,
+            "dispatch_enabled_namespace_cdc" => {
+                dispatch_enabled_namespace_cdc(ctx, &self.nats_url, cdc).await
+            }
             other => panic!("unknown dispatch scenario handler '{other}'"),
         }
     }
@@ -89,6 +103,106 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
     dispatcher.run().await.unwrap();
 
     drain(nats_url, NAMESPACE_INDEXING_SUBJECT_PATTERN, "namespace").await
+}
+
+async fn run_global_dispatcher(nats_url: &str) -> Vec<DispatchedMessage> {
+    let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
+        .await
+        .unwrap();
+    let dispatcher = GlobalDispatcher::new(
+        services.nats,
+        ScheduledTaskMetrics::new(),
+        GlobalDispatcherConfig::default(),
+        Arc::new(CampaignState::new()),
+    );
+
+    dispatcher.run().await.unwrap();
+
+    drain(nats_url, GLOBAL_INDEXING_SUBJECT, "global").await
+}
+
+async fn dispatch_enabled_namespace_cdc(
+    ctx: &TestContext,
+    nats_url: &str,
+    cdc: &[CdcEvent],
+) -> Vec<DispatchedMessage> {
+    let services = indexer::orchestrator::scheduled::connect(&nats_config(nats_url))
+        .await
+        .unwrap();
+    let backfill = Arc::new(CodeBackfill::new(
+        services.nats.clone(),
+        ctx.config.build_client(),
+        ctx.config.build_client(),
+        ScheduledTaskMetrics::new(),
+        Arc::new(CampaignState::new()),
+    ));
+    let route =
+        EnabledNamespacesRoute::new(NamespaceIndexingDispatch::new(services.nats), backfill);
+    let events: Vec<LogicalReplicationEvents> = cdc.iter().map(replication_event).collect();
+
+    route
+        .dispatch(
+            &CdcContext {
+                dispatch_id: uuid::Uuid::new_v4(),
+                campaign_id: None,
+            },
+            &events,
+        )
+        .await
+        .unwrap();
+
+    let mut drained = drain(nats_url, NAMESPACE_INDEXING_SUBJECT_PATTERN, "namespace").await;
+    drained.extend(drain(nats_url, CODE_INDEXING_TASK_SUBJECT_PATTERN, "code_task").await);
+    drained
+}
+
+fn replication_event(event: &CdcEvent) -> LogicalReplicationEvents {
+    let operation = match event.operation {
+        CdcOperation::Insert => Operation::Insert,
+        CdcOperation::Update => Operation::Update,
+        CdcOperation::Delete => Operation::Delete,
+    };
+    let columns: Vec<String> = event
+        .rows
+        .first()
+        .expect("cdc event has at least one row")
+        .keys()
+        .cloned()
+        .collect();
+    let events = event
+        .rows
+        .iter()
+        .map(|row| ReplicationEvent {
+            operation: operation as i32,
+            columns: columns
+                .iter()
+                .enumerate()
+                .map(|(index, name)| Column {
+                    column_index: index as u32,
+                    value: Some(proto_value(&row[name])),
+                })
+                .collect(),
+        })
+        .collect();
+
+    LogicalReplicationEvents {
+        event: 1,
+        table: event.table.clone(),
+        schema: "public".to_string(),
+        application_identifier: "test".to_string(),
+        columns,
+        events,
+        version_hash: 0,
+    }
+}
+
+fn proto_value(value: &serde_yaml::Value) -> Value {
+    let inner = match value {
+        serde_yaml::Value::Number(n) if n.is_i64() => value::Value::Int64Value(n.as_i64().unwrap()),
+        serde_yaml::Value::String(s) => value::Value::StringValue(s.clone()),
+        other => panic!("cdc column value must be an integer or string, got {other:?}"),
+    };
+    Value { value: Some(inner) }
 }
 
 async fn recreate_stream(nats_url: &str) {

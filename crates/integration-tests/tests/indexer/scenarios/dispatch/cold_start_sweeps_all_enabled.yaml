@@ -5,7 +5,7 @@ seed:
     - { id: 1, root_namespace_id: 100, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
     - { id: 2, root_namespace_id: 200, traversal_path: "2/200/", created_at: "2024-01-15", updated_at: "2024-01-15" }
 
-run: dispatch_namespace
+dispatch: namespace
 
 expect:
   dispatched:
