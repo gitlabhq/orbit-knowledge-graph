@@ -2,7 +2,7 @@
 
 node_type: Commit
 domain: source_code
-description: A Git commit, shared target for commit-related edges (MERGED_AT_COMMIT, CONTAINS_COMMIT per #925)
+description: A Git commit, shared target for commit-related edges
 label: sha
 destination_table: gl_commit
 default_columns: [id, sha, project_id]
