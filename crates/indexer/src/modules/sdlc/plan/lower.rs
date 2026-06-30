@@ -234,6 +234,7 @@ fn lower_standalone_edge_plan(
     let name = plan_name(
         &input.relationship_kind,
         &input.extract.source,
+        &input.extract.base_table,
         &input.target_kind,
     );
     let mut plan = lower_extract_plan(input.extract, batch_size);
@@ -259,7 +260,12 @@ fn lower_standalone_edge_plan(
     plan
 }
 
-fn plan_name(relationship_kind: &str, source: &ExtractSource, target_kind: &EdgeKind) -> String {
+fn plan_name(
+    relationship_kind: &str,
+    source: &ExtractSource,
+    base_table: &str,
+    target_kind: &EdgeKind,
+) -> String {
     // A relationship kind can have several ETLs over the same source table that
     // differ only by their target (REOPENED: one MR-targeted, one WorkItem-
     // targeted, both filtered on `siphon_resource_state_events`). The plan name
@@ -271,7 +277,10 @@ fn plan_name(relationship_kind: &str, source: &ExtractSource, target_kind: &Edge
     };
     match source {
         ExtractSource::Table(table) => format!("{relationship_kind}_{table}{target_suffix}"),
-        ExtractSource::Raw(_) => format!("{relationship_kind}{target_suffix}"),
+        // `base_table` holds the concrete source table even when the scan is a
+        // raw join/subquery, so two `from_table` ETLs for the same relationship
+        // and target kind get distinct, stable plan names (and checkpoint keys).
+        ExtractSource::Raw(_) => format!("{relationship_kind}_{base_table}{target_suffix}"),
     }
 }
 
@@ -1154,6 +1163,30 @@ mod tests {
             sql.contains("ORDER BY traversal_path, source_id, target_id"),
             "sql: {sql}"
         );
+    }
+
+    #[test]
+    fn raw_source_plan_name_disambiguates_by_base_table() {
+        // Two `from_table` ETLs for the same relationship + target kind must get
+        // distinct plan names (checkpoint keys) via their concrete base table,
+        // otherwise `assert_unique_plan_names` panics at boot.
+        let a = plan_name(
+            "HAS_VULNERABILITY",
+            &ExtractSource::Raw("(SELECT ...) AS e".to_string()),
+            "siphon_sbom_occurrences_vulnerabilities",
+            &EdgeKind::Literal("Vulnerability".to_string()),
+        );
+        let b = plan_name(
+            "HAS_VULNERABILITY",
+            &ExtractSource::Raw("(SELECT ...) AS e".to_string()),
+            "siphon_other_source",
+            &EdgeKind::Literal("Vulnerability".to_string()),
+        );
+        assert_eq!(
+            a,
+            "HAS_VULNERABILITY_siphon_sbom_occurrences_vulnerabilities_Vulnerability"
+        );
+        assert_ne!(a, b, "distinct base tables must yield distinct plan names");
     }
 
     #[test]
