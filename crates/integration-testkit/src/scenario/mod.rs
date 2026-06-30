@@ -16,8 +16,8 @@ use crate::collect_subtest_results;
 use crate::context::TestContext;
 
 pub use format::{
-    ContainsMatcher, DispatchExpect, EdgeExpect, Expect, Matcher, NodeExpect, RunSpec, Scenario,
-    Scope, Seed, SeedSettings, Step,
+    CdcEvent, CdcOperation, ContainsMatcher, DispatchExpect, DispatchKind, DispatchSpec,
+    EdgeExpect, Expect, Matcher, NodeExpect, RunSpec, Scenario, Scope, Seed, SeedSettings, Step,
 };
 pub use seed::DEFAULT_REPLICATED_AT;
 
@@ -40,6 +40,7 @@ pub trait ScenarioHandlers: Send + Sync {
         ctx: &TestContext,
         handler: &str,
         scope: Option<Scope>,
+        cdc: &[CdcEvent],
     ) -> Vec<DispatchedMessage>;
 }
 
@@ -117,7 +118,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
         seed::apply_seed(ctx, &step.seed, &step.seed_settings, &columns, &location).await;
         let mut dispatched = Vec::new();
         for handler in step.handlers() {
-            dispatched.extend(handlers.run(ctx, handler, scope).await);
+            dispatched.extend(handlers.run(ctx, handler, scope, &step.cdc).await);
         }
         if let Some(expect) = &step.expect {
             expect::check_expect(ctx, expect, &dispatched, &location).await;

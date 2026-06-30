@@ -1,4 +1,4 @@
-description: Incremental dispatch targets the namespace of a changed standalone edge source
+description: The global and namespace dispatchers each publish their request in a single run
 
 seed:
   checkpoint:
@@ -6,14 +6,17 @@ seed:
     - { key: dispatch.sdlc.namespace.sweep, watermark: { sql: "now64(6)" }, cursor_values: "null" }
   siphon_knowledge_graph_enabled_namespaces:
     - { id: 1, root_namespace_id: 100, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
-  siphon_label_links:
-    - { id: 1, label_id: 1, target_id: 1, target_type: MergeRequest, traversal_path: "1/100/" }
+    - { id: 2, root_namespace_id: 200, traversal_path: "2/200/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  projects:
+    - { id: 2000, namespace_id: 200, traversal_path: "2/200/2000/" }
 
-dispatch: namespace
+dispatch: [global, namespace]
 
 expect:
   dispatched:
+    - kind: global
+      count: 1
     - kind: namespace
       count: 1
       rows:
-        - { namespace: 100, traversal_path: "1/100/", targets: { contains: HAS_LABEL } }
+        - { namespace: 200, traversal_path: "2/200/" }

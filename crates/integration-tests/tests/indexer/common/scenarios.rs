@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use integration_testkit::TestContext;
-use integration_testkit::scenario::{DispatchedMessage, ScenarioHandlers, Scope};
+use integration_testkit::scenario::{CdcEvent, DispatchedMessage, ScenarioHandlers, Scope};
 
 use super::handlers::{
     global_envelope, global_handler, handler_context, namespace_envelope, namespace_handler,
@@ -16,6 +16,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
         ctx: &TestContext,
         handler: &str,
         scope: Option<Scope>,
+        _cdc: &[CdcEvent],
     ) -> Vec<DispatchedMessage> {
         match handler {
             "namespace" => {

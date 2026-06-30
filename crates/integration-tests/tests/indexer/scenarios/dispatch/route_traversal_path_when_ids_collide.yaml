@@ -19,7 +19,7 @@ seed:
     - { id: 3000, source_id: 300, source_type: Namespace, namespace_id: 300, traversal_path: "3/300/" }
     - { id: 4000, source_id: 4000, source_type: Project, namespace_id: 400, traversal_path: "4/400/4000/" }
 
-run: dispatch_namespace
+dispatch: namespace
 
 expect:
   dispatched:
