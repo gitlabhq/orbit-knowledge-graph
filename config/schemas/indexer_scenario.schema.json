@@ -11,6 +11,9 @@
     "seed": { "$ref": "#/definitions/seed" },
     "seed_settings": { "$ref": "#/definitions/seedSettings" },
     "run": { "$ref": "#/definitions/run" },
+    "dispatch": { "$ref": "#/definitions/dispatch" },
+    "cdc": { "$ref": "#/definitions/cdc" },
+    "targets": { "$ref": "#/definitions/targets" },
     "expect": { "$ref": "#/definitions/expect" },
     "steps": {
       "type": "array",
@@ -66,17 +69,59 @@
     },
     "run": {
       "oneOf": [
-        { "$ref": "#/definitions/handler" },
+        { "$ref": "#/definitions/runKind" },
         {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/definitions/handler" }
+          "items": { "$ref": "#/definitions/runKind" }
         }
       ]
     },
-    "handler": {
+    "runKind": {
       "type": "string",
-      "enum": ["namespace", "global", "system_notes", "dispatch_namespace"]
+      "enum": ["namespace", "global", "stale_edge_reconciliation"]
+    },
+    "dispatch": {
+      "description": "Dispatcher(s) to run; drains the requests they publish for expect.dispatched.",
+      "oneOf": [
+        { "$ref": "#/definitions/dispatchKind" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/dispatchKind" }
+        }
+      ]
+    },
+    "dispatchKind": {
+      "type": "string",
+      "enum": ["namespace", "global", "enabled_namespaces"]
+    },
+    "cdc": {
+      "type": "array",
+      "description": "Siphon logical-replication events fed to a CDC route at run time.",
+      "items": { "$ref": "#/definitions/cdcEvent" }
+    },
+    "cdcEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "operation", "rows"],
+      "properties": {
+        "table": { "type": "string" },
+        "operation": { "type": "string", "enum": ["insert", "update", "delete"] },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": { "type": ["string", "integer"] }
+          }
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "description": "Entity types the namespace handler restricts indexing to (empty means all).",
+      "items": { "type": "string" }
     },
     "step": {
       "type": "object",
@@ -85,6 +130,9 @@
         "seed": { "$ref": "#/definitions/seed" },
         "seed_settings": { "$ref": "#/definitions/seedSettings" },
         "run": { "$ref": "#/definitions/run" },
+        "dispatch": { "$ref": "#/definitions/dispatch" },
+        "cdc": { "$ref": "#/definitions/cdc" },
+        "targets": { "$ref": "#/definitions/targets" },
         "expect": { "$ref": "#/definitions/expect" }
       }
     },

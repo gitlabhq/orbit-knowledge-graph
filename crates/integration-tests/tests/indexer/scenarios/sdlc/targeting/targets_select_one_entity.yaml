@@ -1,0 +1,22 @@
+description: A targets filter indexes only the selected entity and leaves the other's checkpoint unset
+
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+    targets: [Group]
+    run: namespace
+    expect:
+      nodes:
+        gl_group: { count: 1, rows: [{ id: 100 }] }
+        gl_project: { count: 0 }
+
+  - targets: [Project]
+    run: namespace
+    expect:
+      nodes:
+        gl_project: { count: 1, rows: [{ id: 1000 }] }

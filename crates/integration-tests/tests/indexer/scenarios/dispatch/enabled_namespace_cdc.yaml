@@ -1,0 +1,24 @@
+description: An enabled-namespace CDC insert dispatches both SDLC and code indexing requests
+
+seed:
+  project_namespace_traversal_paths:
+    - { id: 7000, traversal_path: "7/700/7000/" }
+
+cdc:
+  - table: knowledge_graph_enabled_namespaces
+    operation: insert
+    rows:
+      - { root_namespace_id: 700, traversal_path: "7/700/" }
+
+dispatch: enabled_namespaces
+
+expect:
+  dispatched:
+    - kind: namespace
+      count: 1
+      rows:
+        - { namespace: 700, traversal_path: "7/700/" }
+    - kind: code_task
+      count: 1
+      rows:
+        - { project_id: 7000, traversal_path: "7/700/7000/" }

@@ -1,10 +1,11 @@
 use async_trait::async_trait;
+use indexer::orchestrator::scheduled::ScheduledTask;
 use integration_testkit::TestContext;
-use integration_testkit::scenario::{DispatchedMessage, ScenarioHandlers, Scope};
+use integration_testkit::scenario::{DispatchedMessage, HandlerInput, ScenarioHandlers, Scope};
 
 use super::handlers::{
-    global_envelope, global_handler, handler_context, namespace_envelope, namespace_handler,
-    system_notes_handler,
+    global_envelope, global_handler, handler_context, namespace_envelope_with_targets,
+    namespace_handler, stale_edge_task,
 };
 
 pub struct SdlcScenarioHandlers;
@@ -15,16 +16,20 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
         &self,
         ctx: &TestContext,
         handler: &str,
-        scope: Option<Scope>,
+        input: HandlerInput<'_>,
     ) -> Vec<DispatchedMessage> {
         match handler {
             "namespace" => {
-                let scope = require_scope(handler, scope);
+                let scope = require_scope(handler, input.scope);
                 namespace_handler(ctx)
                     .await
                     .handle(
                         handler_context(),
-                        namespace_envelope(scope.organization, scope.namespace),
+                        namespace_envelope_with_targets(
+                            scope.organization,
+                            scope.namespace,
+                            input.targets,
+                        ),
                     )
                     .await
                     .unwrap();
@@ -36,17 +41,7 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
                     .await
                     .unwrap();
             }
-            "system_notes" => {
-                let scope = require_scope(handler, scope);
-                system_notes_handler(ctx)
-                    .await
-                    .handle(
-                        handler_context(),
-                        namespace_envelope(scope.organization, scope.namespace),
-                    )
-                    .await
-                    .unwrap();
-            }
+            "stale_edge_reconciliation" => stale_edge_task(ctx).run().await.unwrap(),
             other => panic!("unknown scenario handler '{other}'"),
         }
         Vec::new()

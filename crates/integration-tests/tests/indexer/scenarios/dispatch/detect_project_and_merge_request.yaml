@@ -13,7 +13,7 @@ seed:
   merge_requests:
     - { id: 2000, target_branch: main, source_branch: feature, title: MR 2000, description: "", target_project_id: 1, iid: 2000, traversal_path: "2/200/", created_at: "2024-01-15", updated_at: "2024-01-15" }
 
-run: dispatch_namespace
+dispatch: namespace
 
 expect:
   dispatched:

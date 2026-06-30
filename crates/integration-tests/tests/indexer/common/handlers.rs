@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Once};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::IndexerConfig;
 use indexer::clickhouse::ClickHouseWriter;
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
@@ -104,43 +105,6 @@ pub async fn global_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     build_fan_out(ctx, "global_fan_out", GlobalIndexingRequest::subscription()).await
 }
 
-/// Runs only the `SystemNote` entity handler in isolation, so the rest of the
-/// namespace fan-out does not also write to `gl_edge`.
-pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
-    // SystemNotes is feature-flagged off by default; the global is process-wide
-    // and init panics if called twice, so guard it for the subtests sharing a run.
-    static ENABLE_SYSTEM_NOTES: Once = Once::new();
-    ENABLE_SYSTEM_NOTES.call_once(|| {
-        gkg_server_config::features::init(gkg_server_config::FeaturesConfig::from_iter([(
-            gkg_server_config::Feature::SystemNotes,
-            gkg_server_config::FeatureScope {
-                enabled: true,
-                ..Default::default()
-            },
-        )]));
-    });
-
-    let config = create_test_indexer_config(&ctx.config);
-    let writer = Arc::new(
-        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("writer"),
-    );
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(
-        &registry,
-        &config,
-        &ontology,
-        writer,
-        indexer::analytics::IndexingAnalytics::disabled(),
-    )
-    .await
-    .expect("failed to register SDLC handlers");
-    registry
-        .find_by_name("entity.systemnote")
-        .expect("system-notes handler must be registered")
-}
-
 pub async fn entity_handler_with_partitions(
     ctx: &TestContext,
     entity_name: &str,
@@ -180,14 +144,39 @@ pub fn default_test_watermark() -> DateTime<Utc> {
 }
 
 pub fn namespace_envelope(org_id: i64, namespace_id: i64) -> Envelope {
+    namespace_envelope_with_targets(org_id, namespace_id, &[])
+}
+
+pub fn namespace_envelope_with_targets(
+    org_id: i64,
+    namespace_id: i64,
+    targets: &[String],
+) -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
             "namespace": namespace_id,
             "traversal_path": format!("{org_id}/{namespace_id}/"),
             "watermark": default_test_watermark().to_rfc3339(),
             "dispatch_id": uuid::Uuid::new_v4(),
+            "targets": targets,
         })
         .to_string(),
+    )
+}
+
+pub fn stale_edge_task(
+    ctx: &TestContext,
+) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
+        Arc::new(ctx.config.build_client()),
+    ));
+    indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
+        ctx.config.build_client(),
+        &ontology,
+        checkpoint_store,
+        indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),
+        gkg_server_config::StaleEdgeReconciliationConfig::default(),
     )
 }
 

@@ -1,0 +1,19 @@
+description: A stale HAS_LATEST_DIFF edge is tombstoned and the current one kept
+
+seed:
+  gl_merge_request:
+    - { id: 10, traversal_path: "1/9970/", latest_merge_request_diff_id: 200, _version: "2099-01-01 00:00:00.000000", _deleted: false }
+  gl_diff_edge:
+    - { traversal_path: "1/9970/", source_id: 10, source_kind: MergeRequest, relationship_kind: HAS_LATEST_DIFF, target_id: 100, target_kind: MergeRequestDiff, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+    - { traversal_path: "1/9970/", source_id: 10, source_kind: MergeRequest, relationship_kind: HAS_LATEST_DIFF, target_id: 200, target_kind: MergeRequestDiff, _version: "2024-01-01 00:00:00.000000", _deleted: false }
+
+run: stale_edge_reconciliation
+
+expect:
+  edges:
+    - kind: HAS_LATEST_DIFF
+      from: MergeRequest
+      to: MergeRequestDiff
+      count: 1
+      rows:
+        - { source_id: 10, target_id: 200 }

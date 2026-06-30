@@ -1,0 +1,17 @@
+description: An incremental global load excludes users replicated before the checkpoint watermark
+
+seed:
+  checkpoint:
+    - { key: global.User, watermark: "2024-01-19 00:00:00.000000", cursor_values: "null" }
+  siphon_users:
+    - { id: 1, email: u1@t, username: u1, name: User 1, state: active, organization_id: 1, _siphon_replicated_at: "2024-01-18 12:00:00" }
+    - { id: 2, email: u2@t, username: u2, name: User 2, state: active, organization_id: 1, _siphon_replicated_at: "2024-01-20 12:00:00" }
+
+run: global
+
+expect:
+  nodes:
+    gl_user:
+      count: 1
+      rows:
+        - { id: 2 }
