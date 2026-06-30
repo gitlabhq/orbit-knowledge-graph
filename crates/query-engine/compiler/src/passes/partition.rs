@@ -1,17 +1,27 @@
-//! Partition-pruning pass. Wherever a scan's filter already confines an alias
-//! to a single namespace via `startsWith(alias.traversal_path, '<prefix>')`,
-//! ANDs the table's partition expression equated to that prefix so ClickHouse
-//! prunes to one bucket. Pure optimization: the security pass owns the
-//! authorization filters, so over-scanning (emitting nothing) is always safe;
-//! a tight `startsWith` proves the rows can only live in the matched bucket,
-//! so the predicate can never drop an authorized row. Runs after `security`.
+//! Partition-pruning pass. Wherever a scan's filter confines an alias to one or
+//! more namespaces via `startsWith(alias.traversal_path, '<prefix>')`, ANDs a
+//! predicate on the `_partition_id` virtual column so ClickHouse prunes parts
+//! before reading data. Pure optimization: the security pass owns the
+//! authorization filters, so over-scanning (emitting nothing, or a superset of
+//! buckets) is always safe; the predicate can never drop an authorized row
+//! because every pinning prefix's rows live in the matched bucket. Runs after
+//! `security`.
+//!
+//! `_partition_id` is ClickHouse's per-part virtual column holding the formatted
+//! partition value, so the row side is free (resolved from part metadata, no
+//! column read). The bucket constant is computed in ClickHouse from the prefix
+//! via the same expression the DDL uses, so the two stay identical by
+//! construction.
 
 use ontology::{Ontology, PartitionStrategy};
 use serde_json::Value;
 
-use crate::ast::{Expr, Node, Query, TableRef};
+use crate::ast::{Expr, Node, Op, Query, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::Result;
+
+/// ClickHouse virtual column holding a part's formatted partition value.
+const PARTITION_ID_COLUMN: &str = "_partition_id";
 
 pub fn apply_partition_pruning(node: &mut Node, ontology: &Ontology) -> Result<()> {
     let Some(partition) = ontology.partition() else {
@@ -25,9 +35,9 @@ pub fn apply_partition_pruning(node: &mut Node, ontology: &Ontology) -> Result<(
 
 fn prune_query(q: &mut Query, strategy: &PartitionStrategy) {
     if let Some(where_clause) = &q.where_clause {
-        let preds: Vec<Expr> = single_prefix_aliases(where_clause, strategy)
+        let preds: Vec<Expr> = pinning_prefixes_by_alias(where_clause, strategy)
             .into_iter()
-            .map(|(alias, prefix)| bucket_predicate(strategy, &alias, &prefix))
+            .map(|(alias, prefixes)| partition_id_predicate(strategy, &alias, &prefixes))
             .collect();
         if !preds.is_empty() {
             q.where_clause = Expr::and_all(
@@ -43,8 +53,38 @@ fn prune_query(q: &mut Query, strategy: &PartitionStrategy) {
         prune_query(&mut cte.query, strategy);
     }
     prune_query_from(&mut q.from, strategy);
+    // Cascade-anchor / narrowing subqueries embedded in the WHERE clause
+    // (`… IN (SELECT … FROM gl_edge AS e0p WHERE startsWith(…))`) are their own
+    // scans; prune each in its own scope so a confined cascade alias is not left
+    // reading every bucket.
+    if let Some(where_clause) = &mut q.where_clause {
+        prune_subqueries_in_expr(where_clause, strategy);
+    }
     for arm in &mut q.union_all {
         prune_query(arm, strategy);
+    }
+}
+
+fn prune_subqueries_in_expr(expr: &mut Expr, strategy: &PartitionStrategy) {
+    match expr {
+        Expr::InSelect { expr, query } => {
+            prune_subqueries_in_expr(expr, strategy);
+            prune_query(query, strategy);
+        }
+        Expr::FuncCall { args, .. } => {
+            for a in args {
+                prune_subqueries_in_expr(a, strategy);
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            prune_subqueries_in_expr(left, strategy);
+            prune_subqueries_in_expr(right, strategy);
+        }
+        Expr::UnaryOp { expr, .. } | Expr::InSubquery { expr, .. } => {
+            prune_subqueries_in_expr(expr, strategy);
+        }
+        Expr::Lambda { body, .. } => prune_subqueries_in_expr(body, strategy),
+        _ => {}
     }
 }
 
@@ -64,21 +104,27 @@ fn prune_query_from(from: &mut TableRef, strategy: &PartitionStrategy) {
     }
 }
 
-/// `(alias, prefix)` for aliases confined to exactly one pinning prefix. An
-/// alias filtered by several prefixes (a multi-path `OR`) spans buckets, so it
-/// is excluded: ANDing one bucket would contradict the others and drop all
-/// rows. The single survivor is the only case where one bucket is provably
-/// exhaustive.
-fn single_prefix_aliases(expr: &Expr, strategy: &PartitionStrategy) -> Vec<(String, String)> {
+/// Per alias, the distinct set of pinning prefixes from its
+/// `startsWith(alias.traversal_path, '<prefix>')` filters. An alias filtered by
+/// several prefixes (a multi-namespace `OR`) is kept: its rows span exactly
+/// those prefixes' buckets, so an `IN` over that bucket set is exhaustive.
+fn pinning_prefixes_by_alias(
+    expr: &Expr,
+    strategy: &PartitionStrategy,
+) -> Vec<(String, Vec<String>)> {
     let mut found: Vec<(String, String)> = Vec::new();
     collect_pinning(expr, strategy, &mut found);
     found.sort();
     found.dedup();
-    found
-        .iter()
-        .filter(|(alias, _)| found.iter().filter(|(a, _)| a == alias).count() == 1)
-        .cloned()
-        .collect()
+
+    let mut by_alias: Vec<(String, Vec<String>)> = Vec::new();
+    for (alias, prefix) in found {
+        match by_alias.last_mut() {
+            Some((a, prefixes)) if *a == alias => prefixes.push(prefix),
+            _ => by_alias.push((alias, vec![prefix])),
+        }
+    }
+    by_alias
 }
 
 fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(String, String)>) {
@@ -114,11 +160,34 @@ fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(Str
     }
 }
 
-/// `expr(column) = expr(prefix)`; ClickHouse folds the constant side and prunes.
-fn bucket_predicate(strategy: &PartitionStrategy, alias: &str, prefix: &str) -> Expr {
-    Expr::eq(
-        partition_expr(strategy, Expr::col(alias, strategy.column())),
-        partition_expr(strategy, Expr::string(prefix)),
+/// `alias._partition_id = bucket(prefix)` for one prefix, or
+/// `alias._partition_id IN tuple(bucket(p1), …)` for several. ClickHouse folds
+/// each bucket constant and prunes parts on the virtual column.
+fn partition_id_predicate(strategy: &PartitionStrategy, alias: &str, prefixes: &[String]) -> Expr {
+    let col = Expr::col(alias, PARTITION_ID_COLUMN);
+    let mut buckets = prefixes.iter().map(|p| bucket_id(strategy, p));
+    let first = buckets
+        .next()
+        .expect("alias has at least one pinning prefix");
+    match buckets.next() {
+        None => Expr::eq(col, first),
+        Some(second) => {
+            let elems = std::iter::once(first)
+                .chain(std::iter::once(second))
+                .chain(buckets)
+                .collect();
+            Expr::binary(Op::In, col, Expr::func("tuple", elems))
+        }
+    }
+}
+
+/// `toString(<partition expression over the prefix literal>)`, matching the
+/// `_partition_id` string form. Computed in ClickHouse so it is byte-identical
+/// to the DDL `PARTITION BY`.
+fn bucket_id(strategy: &PartitionStrategy, prefix: &str) -> Expr {
+    Expr::func(
+        "toString",
+        vec![partition_expr(strategy, Expr::string(prefix))],
     )
 }
 
@@ -178,25 +247,45 @@ mod tests {
         q.where_clause
     }
 
-    fn has_modulo_over(expr: &Expr, alias: &str) -> bool {
-        fn refs(e: &Expr, alias: &str) -> bool {
-            match e {
-                Expr::Column { table, .. } => table == alias,
-                Expr::FuncCall { args, .. } => args.iter().any(|a| refs(a, alias)),
-                Expr::BinaryOp { left, right, .. } => refs(left, alias) || refs(right, alias),
-                _ => false,
+    /// `_partition_id` predicates referencing `alias`, returned as `(is_in, n_buckets)`.
+    fn partition_id_pred(expr: &Expr, alias: &str) -> Option<(bool, usize)> {
+        fn refs_partition_col(e: &Expr, alias: &str) -> bool {
+            matches!(e, Expr::Column { table, column } if table == alias && column == PARTITION_ID_COLUMN)
+        }
+        fn count_buckets(rhs: &Expr) -> usize {
+            match rhs {
+                Expr::FuncCall { name, args } if name == "tuple" => args.len(),
+                _ => 1,
             }
         }
         match expr {
-            Expr::FuncCall { name, args } if name == "modulo" => {
-                args.iter().any(|a| refs(a, alias))
+            Expr::BinaryOp {
+                op: Op::Eq,
+                left,
+                right,
+            } if refs_partition_col(left, alias) => {
+                let _ = right;
+                Some((false, count_buckets(right)))
             }
-            Expr::FuncCall { args, .. } => args.iter().any(|a| has_modulo_over(a, alias)),
+            Expr::BinaryOp {
+                op: Op::In,
+                left,
+                right,
+            } if refs_partition_col(left, alias) => Some((true, count_buckets(right))),
             Expr::BinaryOp { left, right, .. } => {
-                has_modulo_over(left, alias) || has_modulo_over(right, alias)
+                partition_id_pred(left, alias).or_else(|| partition_id_pred(right, alias))
             }
-            _ => false,
+            Expr::FuncCall { args, .. } => args.iter().find_map(|a| partition_id_pred(a, alias)),
+            Expr::UnaryOp { expr, .. }
+            | Expr::InSubquery { expr, .. }
+            | Expr::InSelect { expr, .. } => partition_id_pred(expr, alias),
+            Expr::Lambda { body, .. } => partition_id_pred(body, alias),
+            _ => None,
         }
+    }
+
+    fn has_partition_pred(expr: &Expr, alias: &str) -> bool {
+        partition_id_pred(expr, alias).is_some()
     }
 
     fn starts_with(alias: &str, prefix: &str) -> Expr {
@@ -209,32 +298,33 @@ mod tests {
     #[test]
     fn prunes_alias_with_pinning_startswith() {
         let where_clause = where_with(starts_with("p", "1/100/1000/")).unwrap();
-        assert!(has_modulo_over(&where_clause, "p"));
+        assert_eq!(partition_id_pred(&where_clause, "p"), Some((false, 1)));
     }
 
     #[test]
     fn no_prune_for_org_only_prefix() {
         let where_clause = where_with(starts_with("p", "1/")).unwrap();
-        assert!(!has_modulo_over(&where_clause, "p"));
+        assert!(!has_partition_pred(&where_clause, "p"));
     }
 
     #[test]
     fn no_prune_without_startswith() {
         let where_clause = where_with(Expr::eq(Expr::col("p", "id"), Expr::int(1))).unwrap();
-        assert!(!has_modulo_over(&where_clause, "p"));
+        assert!(!has_partition_pred(&where_clause, "p"));
     }
 
     #[test]
-    fn no_prune_for_multi_path_or() {
+    fn multi_namespace_or_prunes_to_bucket_set() {
         let filter = Expr::binary(
-            crate::ast::Op::Or,
+            Op::Or,
             starts_with("p", "1/100/1000/"),
             starts_with("p", "1/200/2000/"),
         );
         let where_clause = where_with(filter).unwrap();
-        assert!(
-            !has_modulo_over(&where_clause, "p"),
-            "an alias spanning two namespaces must not be pinned to one bucket"
+        assert_eq!(
+            partition_id_pred(&where_clause, "p"),
+            Some((true, 2)),
+            "a multi-namespace alias prunes to the IN-set of its buckets"
         );
     }
 
@@ -268,14 +358,59 @@ mod tests {
         }));
         apply_partition_pruning(&mut node, &Ontology::load_embedded().unwrap()).unwrap();
         let Node::Query(q) = node else { unreachable!() };
-        assert!(has_modulo_over(q.where_clause.as_ref().unwrap(), "p"));
+        assert!(has_partition_pred(q.where_clause.as_ref().unwrap(), "p"));
         let TableRef::Join { right, .. } = &q.from else {
             unreachable!()
         };
         let TableRef::Subquery { query, .. } = right.as_ref() else {
             unreachable!()
         };
-        assert!(has_modulo_over(query.where_clause.as_ref().unwrap(), "e"));
+        assert!(has_partition_pred(
+            query.where_clause.as_ref().unwrap(),
+            "e"
+        ));
+    }
+
+    #[test]
+    fn prunes_alias_inside_in_subquery() {
+        let inner = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e0p", "source_id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_edge", "e0p"),
+            where_clause: Some(starts_with("e0p", "1/24/23/")),
+            ..Default::default()
+        };
+        let where_clause = Expr::binary(
+            Op::In,
+            Expr::col("e", "source_id"),
+            Expr::InSelect {
+                expr: Box::new(Expr::col("e", "source_id")),
+                query: Box::new(inner),
+            },
+        );
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("e", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_edge", "e"),
+            where_clause: Some(where_clause),
+            ..Default::default()
+        }));
+        apply_partition_pruning(&mut node, &Ontology::load_embedded().unwrap()).unwrap();
+        let Node::Query(q) = node else { unreachable!() };
+        let Some(Expr::BinaryOp { right, .. }) = q.where_clause.as_ref() else {
+            unreachable!()
+        };
+        let Expr::InSelect { query, .. } = right.as_ref() else {
+            unreachable!()
+        };
+        assert!(
+            has_partition_pred(query.where_clause.as_ref().unwrap(), "e0p"),
+            "a confined alias inside an IN-subquery must still be pruned"
+        );
     }
 
     #[test]
@@ -292,6 +427,6 @@ mod tests {
         let ontology = Ontology::new();
         apply_partition_pruning(&mut node, &ontology).unwrap();
         let Node::Query(q) = node else { unreachable!() };
-        assert!(!has_modulo_over(q.where_clause.as_ref().unwrap(), "p"));
+        assert!(!has_partition_pred(q.where_clause.as_ref().unwrap(), "p"));
     }
 }

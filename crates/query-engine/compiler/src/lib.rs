@@ -1721,9 +1721,9 @@ mod tests {
             .with_scope_prefixes([("p".to_string(), "1/9970/".to_string())].into());
         let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
         assert!(
-            sql.contains("modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(")
+            sql.contains("p._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(")
                 && sql.contains("startsWith(p.traversal_path"),
-            "scoped query should push the partition bucket predicate alongside startsWith:\n{sql}"
+            "scoped query should prune on _partition_id alongside startsWith:\n{sql}"
         );
     }
 

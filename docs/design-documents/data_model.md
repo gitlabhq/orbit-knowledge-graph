@@ -227,11 +227,19 @@ PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', trav
 
 The primary goal is **ingest/merge isolation**. Without partitioning, all ~1,100 top-level namespaces share one part budget per table, so one tenant's reindex burst can exhaust `parts_to_throw_insert` and dead-letter inserts for every tenant. Bucketing gives each bucket its own part budget and merge scope, so a busy tenant throttles only its own bucket. Because the partition is a deterministic function of `traversal_path` and every sort key leads with `traversal_path`, all versions of a row land in the same bucket, so `ReplacingMergeTree FINAL` dedup stays correct.
 
-The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone cannot prune partitions. When a query is scoped to a specific namespace (the resolved scope prefix pins a top-level namespace), the compiler emits the bucket predicate explicitly alongside the `startsWith` filter, rendering the same strategy expression over the column and over the scope prefix:
+The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone cannot prune partitions. Wherever a scan's filter already confines an alias to one or more top-level namespaces via `startsWith(alias.traversal_path, '<prefix>')`, the compiler ANDs a predicate on ClickHouse's `_partition_id` virtual column (the per-part formatted partition value, resolved from part metadata — no column read). The bucket constant is computed in ClickHouse from the prefix via the same strategy expression the DDL uses, so the two are byte-identical by construction:
 
 ```sql
-modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', p.traversal_path), 2))), 50)
-  = modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/100/'), 2))), 50)
+-- single pinned namespace
+p._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/100/'), 2))), 50))
+
+-- several pinned namespaces (a multi-path authorization OR)
+p._partition_id IN tuple(
+  toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/100/'), 2))), 50)),
+  toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/200/'), 2))), 50))
+)
 ```
 
-ClickHouse folds the constant side to a bucket and prunes to that partition. Because both the DDL and the predicate are rendered from the same `settings.partition.strategy`, they stay byte-identical by construction. A query that is not scoped to a single top-level namespace (org-only prefix, or a broad multi-path authorization set) spans buckets and gets no partition predicate.
+ClickHouse folds the constants to bucket strings and prunes parts before reading data. This is a pure optimization layered on the security pass's authorization filters: emitting a superset of buckets (or nothing) is always safe, and a pinning `startsWith` proves the rows can only live in the matched bucket(s), so the predicate can never drop an authorized row.
+
+It prunes whenever the set of top-level namespaces an alias can occupy is finite and known at compile time (a scoped or multi-path authorized set). It does **not** prune an org-only prefix (pins no namespace), nor an alias reached through a cross-namespace edge into an unknown namespace (no bounded bucket set to push down) — those over-scan and rely on the `startsWith` granule pruning plus the security filter.
