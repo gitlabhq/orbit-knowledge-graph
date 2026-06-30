@@ -35,9 +35,10 @@ pub use entities::{
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
-    NodeEntity, NodeStorage, NodeStyle, PartitionConfig, RedactionConfig, RequiredRole,
-    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
-    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    NodeEntity, NodeStorage, NodeStyle, PartitionConfig, PartitionStrategy, RedactionConfig,
+    RequiredRole, StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex,
+    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
+    VirtualSource,
 };
 pub use etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
@@ -1138,11 +1139,6 @@ impl Ontology {
     #[must_use]
     pub fn partition(&self) -> Option<&PartitionConfig> {
         self.partition.as_ref()
-    }
-
-    #[must_use]
-    pub fn partition_by(&self) -> Option<&str> {
-        self.partition.as_ref().map(|p| p.partition_by.as_str())
     }
 
     /// Returns the partition key column for a given entity's statistics MV,

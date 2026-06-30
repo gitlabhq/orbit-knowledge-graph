@@ -265,8 +265,10 @@ settings:
     exclude:
       - {node: Note, columns: [st_diff]}
   partition:
-    partition_by: "sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50"
-    required_columns: [traversal_path]
+    strategy:
+      hash_bucket:
+        buckets: 50
+        column: traversal_path
   internal_column_prefix: "_gkg_"
   local_db:
     entities:

@@ -623,20 +623,31 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .settings
         .partition
         .map(|p| -> Result<_, OntologyError> {
-            if p.partition_by.trim().is_empty() {
-                return Err(OntologyError::Validation(
-                    "partition.partition_by must be a non-empty ClickHouse expression".to_string(),
-                ));
-            }
-            if p.required_columns.is_empty() {
-                return Err(OntologyError::Validation(
-                    "partition.required_columns must list at least one column".to_string(),
-                ));
-            }
-            Ok(crate::entities::PartitionConfig {
-                partition_by: p.partition_by,
-                required_columns: p.required_columns,
-            })
+            let strategy = match p.strategy.hash_bucket {
+                Some(hb) => {
+                    if !(1..=255).contains(&hb.buckets) {
+                        return Err(OntologyError::Validation(format!(
+                            "partition.strategy.hash_bucket.buckets must be in 1..=255, got {}",
+                            hb.buckets
+                        )));
+                    }
+                    if hb.column.trim().is_empty() {
+                        return Err(OntologyError::Validation(
+                            "partition.strategy.hash_bucket.column must be non-empty".to_string(),
+                        ));
+                    }
+                    crate::entities::PartitionStrategy::HashBucket {
+                        buckets: hb.buckets,
+                        column: hb.column,
+                    }
+                }
+                None => {
+                    return Err(OntologyError::Validation(
+                        "partition.strategy must set exactly one strategy block".to_string(),
+                    ));
+                }
+            };
+            Ok(crate::entities::PartitionConfig { strategy })
         })
         .transpose()?;
 

@@ -213,14 +213,21 @@ The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` ex
 
 ## Namespace partitioning
 
-Every graph table that carries `traversal_path` (all node tables except the global hubs `User` and `Runner`, plus every edge table) is `PARTITION BY` a hash bucket of the top-level namespace. The expression is declared once in `config/ontology/schema.yaml` under `settings.partition.partition_by` and emitted verbatim into `config/graph.sql`:
+Every graph table that carries `traversal_path` (all node tables except the global hubs `User` and `Runner`, plus every edge table) is `PARTITION BY` a hash bucket of the top-level namespace. The strategy is declared once in `config/ontology/schema.yaml` under `settings.partition.strategy` and rendered into `config/graph.sql`:
 
 ```sql
-PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50)
+PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ```
 
 `splitByChar('/', '42/100/1000/')[2]` is the top-level namespace id (`100`); global edges write `traversal_path = '0/'`, so they hash to bucket 0 and co-locate there. ClickHouse derives the bucket from `traversal_path` at insert and merge time, so there is no stored partition column and no write-side code: the indexer writes exactly the columns it always has.
 
-The goal is **ingest/merge isolation**, not query latency. Without partitioning, all ~1,100 top-level namespaces share one part budget per table, so one tenant's reindex burst can exhaust `parts_to_throw_insert` and dead-letter inserts for every tenant. Bucketing gives each bucket its own part budget and merge scope, so a busy tenant throttles only its own bucket. Because the partition is a deterministic function of `traversal_path` and every sort key leads with `traversal_path`, all versions of a row land in the same bucket, so `ReplacingMergeTree FINAL` dedup stays correct.
+The primary goal is **ingest/merge isolation**. Without partitioning, all ~1,100 top-level namespaces share one part budget per table, so one tenant's reindex burst can exhaust `parts_to_throw_insert` and dead-letter inserts for every tenant. Bucketing gives each bucket its own part budget and merge scope, so a busy tenant throttles only its own bucket. Because the partition is a deterministic function of `traversal_path` and every sort key leads with `traversal_path`, all versions of a row land in the same bucket, so `ReplacingMergeTree FINAL` dedup stays correct.
 
-The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone does not prune partitions. Partition pruning for namespace-scoped queries requires the compiler to emit the bucket predicate explicitly; that pushdown is a planned follow-up.
+The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone cannot prune partitions. When a query is scoped to a specific namespace (the resolved scope prefix pins a top-level namespace), the compiler emits the bucket predicate explicitly alongside the `startsWith` filter, rendering the same strategy expression over the column and over the scope prefix:
+
+```sql
+modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', p.traversal_path), 2))), 50)
+  = modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/100/'), 2))), 50)
+```
+
+ClickHouse folds the constant side to a bucket and prunes to that partition. Because both the DDL and the predicate are rendered from the same `settings.partition.strategy`, they stay byte-identical by construction. A query that is not scoped to a single top-level namespace (org-only prefix, or a broad multi-path authorization set) spans buckets and gets no partition predicate.

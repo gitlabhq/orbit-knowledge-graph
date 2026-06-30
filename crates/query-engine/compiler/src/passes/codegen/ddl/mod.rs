@@ -339,9 +339,9 @@ fn partition_by(partition: Option<&PartitionConfig>, columns: &[StorageColumn]) 
     let Some(p) = partition else {
         return vec![];
     };
-    let present = |name: &str| columns.iter().any(|c| c.name == name);
-    if p.required_columns.iter().all(|c| present(c)) {
-        vec![p.partition_by.clone()]
+    let column = p.column();
+    if columns.iter().any(|c| c.name == column) {
+        vec![p.strategy.to_sql(column)]
     } else {
         vec![]
     }
@@ -696,19 +696,20 @@ mod tests {
     #[test]
     fn namespaced_tables_partition_global_tables_do_not() {
         let ontology = ontology();
-        let expr = ontology
-            .partition_by()
+        let partition = ontology
+            .partition()
             .expect("embedded ontology declares partitioning");
+        let expr = partition.strategy.to_sql(partition.column());
         let tables = generate_graph_tables(&ontology);
 
         let edge = tables.iter().find(|t| t.name == "gl_edge").unwrap();
-        assert_eq!(edge.partition_by, vec![expr.to_string()]);
+        assert_eq!(edge.partition_by, vec![expr.clone()]);
 
         let mr = tables
             .iter()
             .find(|t| t.name == "gl_merge_request")
             .unwrap();
-        assert_eq!(mr.partition_by, vec![expr.to_string()]);
+        assert_eq!(mr.partition_by, vec![expr.clone()]);
 
         let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
         assert!(user.partition_by.is_empty());

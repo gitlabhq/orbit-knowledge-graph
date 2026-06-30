@@ -132,12 +132,56 @@ pub struct StatisticsExclude {
     pub columns: Vec<String>,
 }
 
-/// Emits `PARTITION BY (partition_by)` on every table whose storage columns
-/// include all of `required_columns`; others stay unpartitioned.
+/// Partitioning applied to every table whose storage columns include the
+/// strategy's source column; others stay unpartitioned. The strategy is the
+/// single source of truth for the partition expression: the DDL renders it to
+/// `PARTITION BY (...)` and the query compiler renders the same expression as a
+/// pushdown predicate for namespace-scoped queries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionConfig {
-    pub partition_by: String,
-    pub required_columns: Vec<String>,
+    pub strategy: PartitionStrategy,
+}
+
+/// Each variant is a nested YAML block carrying its own parameters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartitionStrategy {
+    /// `sipHash64(toUInt64OrZero(splitByChar('/', <column>)[2]))` modulo
+    /// `buckets`. Buckets the top-level namespace (the second path segment), so
+    /// a tenant's rows co-locate and a query scoped to one namespace prunes to
+    /// one bucket.
+    HashBucket { buckets: u16, column: String },
+}
+
+impl PartitionStrategy {
+    /// The storage column the strategy reads; a table partitions only if it
+    /// has this column.
+    #[must_use]
+    pub fn column(&self) -> &str {
+        match self {
+            Self::HashBucket { column, .. } => column,
+        }
+    }
+
+    /// Renders the partition expression as ClickHouse SQL over `column_sql`.
+    /// Used by the DDL generator; the query compiler builds the equivalent
+    /// expression tree from the same strategy for its pushdown predicate.
+    #[must_use]
+    pub fn to_sql(&self, column_sql: &str) -> String {
+        match self {
+            Self::HashBucket { buckets, .. } => {
+                format!(
+                    "modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', {column_sql}), 2))), {buckets})"
+                )
+            }
+        }
+    }
+}
+
+impl PartitionConfig {
+    #[must_use]
+    pub fn column(&self) -> &str {
+        self.strategy.column()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
