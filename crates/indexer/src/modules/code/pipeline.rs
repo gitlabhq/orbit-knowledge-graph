@@ -304,9 +304,7 @@ impl CodeIndexingPipeline {
         // start its Gitaly download while we wait for an indexing slot.
         drop(_fetch_slot);
 
-        // Phase 2: Process. Parsable-file count picks the lane only; a reserved big lane keeps a
-        // flood of small repos from starving monorepos. Counting parse candidates (not raw files)
-        // keeps a repo of images or lockfiles off the big lane.
+        // A reserved big lane keeps a flood of small repos from starving monorepos.
         let parseable = code_graph::v2::inventory::parseable_file_count(&repository.file_inventory);
         let lane = if parseable <= self.small_repo_max_files {
             &self.small_indexing_slots

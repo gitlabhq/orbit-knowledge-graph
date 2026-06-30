@@ -22,10 +22,8 @@ pub struct FamilyFileInput {
     pub path: FileInput,
 }
 
-/// Count the files the pipeline will actually parse: parse candidates whose extension maps to a
-/// language, matching the predicate [`group_parseable_inventory`] applies (minus its `max_files`
-/// cap). Used to size a repository by work rather than by raw file count, so resolver inputs,
-/// list-only nodes, and parse-flagged files of unrecognized extension don't inflate the count.
+/// Count the files [`group_parseable_inventory`] would parse (minus its `max_files` cap), so a
+/// repository is sized by parse work rather than raw file count.
 pub fn parseable_file_count(inventory: &[FileInventoryEntry]) -> usize {
     inventory
         .iter()

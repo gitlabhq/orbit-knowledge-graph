@@ -154,12 +154,9 @@ enum Msg {
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
-/// Coalesces tagged writes into well-sized parts across all producers. A table flushes when it
-/// reaches `max_rows`, on the soft `flush_interval` tick once it holds at least `min_flush_rows`
-/// (so a trickle of small writes pools into one part instead of one tiny part per tick), or when
-/// its oldest unflushed row exceeds the hard `max_age` cap regardless of size. Each batch carries
-/// a [`FlushToken`] the writer notifies once the batch's part is durable or has failed, so a
-/// producer can finalize work (checkpointing) per part.
+/// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
+/// writes pools into one part instead of one tiny part per flush tick. Each batch carries a
+/// [`FlushToken`] the writer notifies once the batch's part is durable or has failed.
 #[derive(Clone)]
 pub struct BufferedWriter {
     tx: mpsc::Sender<Msg>,
@@ -272,8 +269,6 @@ async fn drain(
                     }
                 }
             },
-            // The soft tick flushes only tables that have reached the floor; tables below it keep
-            // pooling unless their oldest row has aged past the hard cap.
             _ = ticker.tick() => {
                 let now = Instant::now();
                 let ripe: Vec<String> = pending
