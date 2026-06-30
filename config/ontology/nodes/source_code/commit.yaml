@@ -2,7 +2,7 @@
 
 node_type: Commit
 domain: source_code
-description: A Git commit a merge request was merged at
+description: A Git commit, shared target for commit-related edges (MERGED_AT_COMMIT, CONTAINS_COMMIT per #925)
 label: sha
 destination_table: gl_commit
 default_columns: [id, sha, project_id]
@@ -23,14 +23,14 @@ properties:
     source: id
     nullable: false
     mutable: false
-    description: "Synthetic identifier: sipHash64(target_project_id, sha). Matches MergeRequest.merged_commit_id so MERGED_AT_COMMIT joins."
+    description: "Canonical identity: sipHash64(target_project_id, sha). Any edge into this node (MERGED_AT_COMMIT now, CONTAINS_COMMIT in #925) must derive its target_id with the same formula."
 
   sha:
     type: string
     source: sha
     nullable: false
     mutable: false
-    description: "Clean 40-char commit SHA the merge request landed on, from the bytea-decoded COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha) (merged_commit_sha and squash_commit_sha are unhex-decoded from Siphon's \\x-hex bytea form)."
+    description: "Clean commit SHA (40-char SHA-1 or 64-char SHA-256). Currently sourced from the merge_requests bytea-decoded COALESCE(merged_commit_sha, merge_commit_sha, squash_commit_sha); the first and third legs are unhex-decoded from Siphon's \\x-hex bytea form."
 
   project_id:
     type: int64
