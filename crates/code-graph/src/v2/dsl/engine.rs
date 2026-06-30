@@ -1052,8 +1052,9 @@ impl LanguageSpec {
             let module_scope = module_scope.as_deref();
             let import_rewriter = state.import_rewriter;
             for idx in import_count_before..state.imports.len() {
-                let scope_override = import_rewriter
-                    .and_then(|rewrite| rewrite(&mut state.imports[idx], module_scope, sep));
+                let scope_override = import_rewriter.and_then(|rewrite| {
+                    rewrite(&mut state.imports[idx], module_scope, sep, state.file_path)
+                });
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
                 let effective_name =

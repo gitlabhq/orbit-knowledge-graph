@@ -9,9 +9,10 @@ use crate::v2::types::{DefKind, DefinitionMetadata};
 use super::extractors::MetadataRule;
 
 /// A per-family import rewriter. Given an import (mutated in place) plus the
-/// importing module's scope and the FQN separator, it may rewrite the import
-/// path and optionally return a local-binding scope-name override.
-pub type ImportRewriter = dyn Fn(&mut crate::v2::types::CanonicalImport, Option<&str>, &str) -> Option<String>
+/// importing module's scope, the FQN separator, and the importing file's path,
+/// it may rewrite the import path and optionally return a local-binding
+/// scope-name override.
+pub type ImportRewriter = dyn Fn(&mut crate::v2::types::CanonicalImport, Option<&str>, &str, &str) -> Option<String>
     + Send
     + Sync;
 
