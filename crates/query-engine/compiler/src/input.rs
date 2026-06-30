@@ -68,7 +68,7 @@ impl Default for EntityAuthConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,
-    #[serde(flatten, deserialize_with = "deserialize_nodes_or_node")]
+    #[serde(default)]
     pub nodes: Vec<InputNode>,
     #[serde(default)]
     pub relationships: Vec<InputRelationship>,
@@ -248,32 +248,6 @@ impl Default for Input {
             compiler: CompilerMetadata::default(),
             hydration_dynamic: false,
         }
-    }
-}
-
-fn deserialize_nodes_or_node<'de, D>(deserializer: D) -> Result<Vec<InputNode>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    struct Helper {
-        #[serde(default)]
-        node: Option<InputNode>,
-        #[serde(default)]
-        nodes: Option<Vec<InputNode>>,
-    }
-
-    let helper = Helper::deserialize(deserializer)?;
-
-    match (helper.node, helper.nodes) {
-        (Some(node), None) => Ok(vec![node]),
-        (None, Some(nodes)) => Ok(nodes),
-        (Some(_), Some(_)) => Err(serde::de::Error::custom(
-            "cannot specify both 'node' and 'nodes'",
-        )),
-        (None, None) => Err(serde::de::Error::custom(
-            "must specify either 'node' or 'nodes'",
-        )),
     }
 }
 
