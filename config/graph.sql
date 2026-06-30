@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS gl_commit (
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_sha sha TYPE bloom_filter(0.0001) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
+PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50)
 ORDER BY (traversal_path, project_id, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
