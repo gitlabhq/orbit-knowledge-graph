@@ -162,27 +162,30 @@ pub struct BufferedWriter {
     tx: mpsc::Sender<Msg>,
 }
 
+/// Tunables for [`BufferedWriter::spawn`]. Named fields so callers can't transpose the several
+/// `usize`/`Duration` knobs.
+pub struct BufferedWriterConfig {
+    pub channel_capacity: usize,
+    pub max_rows: usize,
+    pub flush_interval: Duration,
+    pub min_flush_rows: usize,
+    pub max_age: Duration,
+    pub max_concurrent: usize,
+}
+
 impl BufferedWriter {
-    pub fn spawn(
-        writer: Arc<ClickHouseWriter>,
-        channel_capacity: usize,
-        max_rows: usize,
-        flush_interval: Duration,
-        min_flush_rows: usize,
-        max_age: Duration,
-        max_concurrent: usize,
-    ) -> Self {
-        let (tx, rx) = mpsc::channel(channel_capacity.max(1));
+    pub fn spawn(writer: Arc<ClickHouseWriter>, config: BufferedWriterConfig) -> Self {
+        let (tx, rx) = mpsc::channel(config.channel_capacity.max(1));
         tokio::spawn(drain(
             writer,
             rx,
             DrainLimits {
-                max_rows: max_rows.max(1),
-                flush_interval,
-                min_flush_rows,
-                max_age,
+                max_rows: config.max_rows.max(1),
+                flush_interval: config.flush_interval,
+                min_flush_rows: config.min_flush_rows,
+                max_age: config.max_age,
             },
-            max_concurrent.max(1),
+            config.max_concurrent.max(1),
         ));
         Self { tx }
     }
@@ -428,23 +431,23 @@ mod tests {
     async fn size_flush_notifies_each_batch_token_once_its_part_lands() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
-            16,
-            100,
-            Duration::from_secs(3600),
-            1,
-            Duration::from_secs(3600),
-            1,
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 100,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
-        // One batch in each of two tables. gl_edge crosses max_rows and flushes immediately;
-        // gl_code_edge stays buffered, so only one notification has fired.
+        // gl_edge crosses max_rows and flushes immediately; gl_code_edge stays buffered.
         submit(&w, "gl_edge", batch(100), token.clone()).await;
         submit(&w, "gl_code_edge", batch(10), token.clone()).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
 
-        // An explicit flush drains gl_code_edge, notifying the second batch.
         w.flush().await.unwrap();
         assert_eq!(token.flushed.load(Ordering::SeqCst), 2);
         assert_eq!(token.failed.load(Ordering::SeqCst), 0);
@@ -454,12 +457,14 @@ mod tests {
     async fn flush_waits_for_concurrent_in_flight_writes() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
-            64,
-            100,
-            Duration::from_secs(3600),
-            1,
-            Duration::from_secs(3600),
-            4,
+            BufferedWriterConfig {
+                channel_capacity: 64,
+                max_rows: 100,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 4,
+            },
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -477,12 +482,14 @@ mod tests {
     async fn soft_tick_holds_a_table_below_the_floor() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
-            16,
-            1_000_000,
-            Duration::from_millis(20),
-            500,
-            Duration::from_secs(3600),
-            1,
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 1_000_000,
+                flush_interval: Duration::from_millis(20),
+                min_flush_rows: 500,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -503,12 +510,14 @@ mod tests {
     async fn hard_cap_force_flushes_a_table_below_the_floor() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
-            16,
-            1_000_000,
-            Duration::from_millis(20),
-            500,
-            Duration::from_millis(60),
-            1,
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 1_000_000,
+                flush_interval: Duration::from_millis(20),
+                min_flush_rows: 500,
+                max_age: Duration::from_millis(60),
+                max_concurrent: 1,
+            },
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 
@@ -526,12 +535,14 @@ mod tests {
     async fn size_flush_still_fires_below_the_floor_age() {
         let w = BufferedWriter::spawn(
             Arc::new(ClickHouseWriter::noop()),
-            16,
-            100,
-            Duration::from_secs(3600),
-            1_000_000,
-            Duration::from_secs(3600),
-            1,
+            BufferedWriterConfig {
+                channel_capacity: 16,
+                max_rows: 100,
+                flush_interval: Duration::from_secs(3600),
+                min_flush_rows: 1_000_000,
+                max_age: Duration::from_secs(3600),
+                max_concurrent: 1,
+            },
         );
         let token: Arc<CountToken> = Arc::new(CountToken::default());
 

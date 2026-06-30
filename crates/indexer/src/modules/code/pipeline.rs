@@ -15,7 +15,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use crate::clickhouse::{BufferedWriter, ClickHouseWriter, FlushToken};
+use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
@@ -158,12 +158,14 @@ impl CodeIndexingPipeline {
         let big = pipeline_config.big_indexing_slots;
         let writer = BufferedWriter::spawn(
             writer,
-            pipeline_config.write_channel_capacity,
-            pipeline_config.write_slice_rows,
-            pipeline_config.write_buffer_age(),
-            pipeline_config.write_min_flush_rows,
-            pipeline_config.write_max_flush_age(),
-            pipeline_config.write_max_concurrent,
+            BufferedWriterConfig {
+                channel_capacity: pipeline_config.write_channel_capacity,
+                max_rows: pipeline_config.write_slice_rows,
+                flush_interval: pipeline_config.write_buffer_age(),
+                min_flush_rows: pipeline_config.write_min_flush_rows,
+                max_age: pipeline_config.write_max_flush_age(),
+                max_concurrent: pipeline_config.write_max_concurrent,
+            },
         );
         Self {
             resolver,
