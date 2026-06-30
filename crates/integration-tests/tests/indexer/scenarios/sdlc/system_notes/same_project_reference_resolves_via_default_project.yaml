@@ -13,7 +13,8 @@ seed:
   siphon_system_note_metadata:
     - { id: 1, note_id: 1, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
 
-run: system_notes
+run: namespace
+targets: [SystemNote]
 
 expect:
   edges:

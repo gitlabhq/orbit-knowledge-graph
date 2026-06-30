@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Feature {
-    /// SystemNotes derived-entity indexing (system-note reference edges).
-    SystemNotes,
     /// Stop background merges on retired schema versions before GC drop.
     StopMergesOnRetire,
 }
@@ -121,7 +119,7 @@ mod tests {
 
     fn scoped(enabled: bool, namespaces: Vec<i64>) -> FeaturesConfig {
         FeaturesConfig::from_iter([(
-            Feature::SystemNotes,
+            Feature::StopMergesOnRetire,
             FeatureScope {
                 enabled,
                 namespaces,
@@ -135,68 +133,78 @@ mod tests {
 
     #[test]
     fn flags_default_to_off() {
-        assert!(!FeaturesConfig::default().is_enabled(Feature::SystemNotes));
+        assert!(!FeaturesConfig::default().is_enabled(Feature::StopMergesOnRetire));
     }
 
     #[test]
     fn reads_an_enabled_flag() {
-        assert!(scoped(true, vec![]).is_enabled(Feature::SystemNotes));
+        assert!(scoped(true, vec![]).is_enabled(Feature::StopMergesOnRetire));
     }
 
     #[test]
     fn unrestricted_flag_enabled_for_every_namespace() {
         let features = scoped(true, vec![]);
-        assert!(features.is_enabled_for(Feature::SystemNotes, Some(9970)));
-        assert!(features.is_enabled_for(Feature::SystemNotes, None));
+        assert!(features.is_enabled_for(Feature::StopMergesOnRetire, Some(9970)));
+        assert!(features.is_enabled_for(Feature::StopMergesOnRetire, None));
     }
 
     #[test]
     fn allowlisted_flag_enabled_only_for_listed_namespaces() {
         let features = scoped(true, vec![9970]);
-        assert!(features.is_enabled_for(Feature::SystemNotes, Some(9970)));
-        assert!(!features.is_enabled_for(Feature::SystemNotes, Some(1234)));
-        assert!(!features.is_enabled_for(Feature::SystemNotes, None));
+        assert!(features.is_enabled_for(Feature::StopMergesOnRetire, Some(9970)));
+        assert!(!features.is_enabled_for(Feature::StopMergesOnRetire, Some(1234)));
+        assert!(!features.is_enabled_for(Feature::StopMergesOnRetire, None));
     }
 
     #[test]
     fn disabled_flag_off_even_with_allowlist() {
-        assert!(!scoped(false, vec![9970]).is_enabled(Feature::SystemNotes));
-        assert!(!scoped(false, vec![9970]).is_enabled_for(Feature::SystemNotes, Some(9970)));
+        assert!(!scoped(false, vec![9970]).is_enabled(Feature::StopMergesOnRetire));
+        assert!(!scoped(false, vec![9970]).is_enabled_for(Feature::StopMergesOnRetire, Some(9970)));
     }
 
     #[test]
     fn absent_flag_is_off() {
         let features = FeaturesConfig::default();
-        assert!(!features.is_enabled(Feature::SystemNotes));
-        assert!(!features.is_enabled_for(Feature::SystemNotes, Some(9970)));
+        assert!(!features.is_enabled(Feature::StopMergesOnRetire));
+        assert!(!features.is_enabled_for(Feature::StopMergesOnRetire, Some(9970)));
     }
 
     #[test]
     fn deserializes_scoped_flag_from_yaml() {
         let features: FeaturesConfig =
-            serde_yaml::from_str("system_notes:\n  enabled: true\n  namespaces: [9970]").unwrap();
-        assert!(features.is_enabled(Feature::SystemNotes));
-        assert_eq!(namespaces_of(&features, Feature::SystemNotes), [9970]);
+            serde_yaml::from_str("stop_merges_on_retire:\n  enabled: true\n  namespaces: [9970]")
+                .unwrap();
+        assert!(features.is_enabled(Feature::StopMergesOnRetire));
+        assert_eq!(
+            namespaces_of(&features, Feature::StopMergesOnRetire),
+            [9970]
+        );
     }
 
     #[test]
     fn parses_namespaces_from_comma_separated_string() {
         let features: FeaturesConfig =
-            serde_yaml::from_str("system_notes:\n  namespaces: \"9970, 1234\"").unwrap();
-        assert_eq!(namespaces_of(&features, Feature::SystemNotes), [9970, 1234]);
+            serde_yaml::from_str("stop_merges_on_retire:\n  namespaces: \"9970, 1234\"").unwrap();
+        assert_eq!(
+            namespaces_of(&features, Feature::StopMergesOnRetire),
+            [9970, 1234]
+        );
     }
 
     #[test]
     fn parses_single_namespace_scalar() {
         let features: FeaturesConfig =
-            serde_yaml::from_str("system_notes:\n  namespaces: 9970").unwrap();
-        assert_eq!(namespaces_of(&features, Feature::SystemNotes), [9970]);
+            serde_yaml::from_str("stop_merges_on_retire:\n  namespaces: 9970").unwrap();
+        assert_eq!(
+            namespaces_of(&features, Feature::StopMergesOnRetire),
+            [9970]
+        );
     }
 
     #[test]
     fn omitted_block_defaults_off() {
         let features: FeaturesConfig = serde_yaml::from_str("{}").unwrap();
-        assert!(!features.is_enabled(Feature::SystemNotes));
+        assert!(!features.is_enabled(Feature::StopMergesOnRetire));
     }
 
     #[test]
@@ -207,7 +215,8 @@ mod tests {
 
     #[test]
     fn unknown_scope_key_is_rejected() {
-        let result = serde_yaml::from_str::<FeaturesConfig>("system_notes:\n  not_a_key: true");
+        let result =
+            serde_yaml::from_str::<FeaturesConfig>("stop_merges_on_retire:\n  not_a_key: true");
         assert!(result.is_err());
     }
 }

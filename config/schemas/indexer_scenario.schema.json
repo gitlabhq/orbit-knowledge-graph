@@ -79,7 +79,7 @@
     },
     "runKind": {
       "type": "string",
-      "enum": ["namespace", "global", "system_notes", "stale_edge_reconciliation"]
+      "enum": ["namespace", "global", "stale_edge_reconciliation"]
     },
     "dispatch": {
       "description": "Dispatcher(s) to run; drains the requests they publish for expect.dispatched.",

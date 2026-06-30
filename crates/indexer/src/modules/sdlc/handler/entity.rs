@@ -18,17 +18,11 @@ use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
 use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats, WindowBounds};
 use crate::modules::sdlc::plan::{
-    DeletedFilter, Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
+    DeletedFilter, Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter,
 };
-use crate::modules::sdlc::transform::system_notes;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
-
-const NAMESPACE_GATED_TRANSFORMS: &[(&str, gkg_server_config::Feature)] = &[(
-    system_notes::TRANSFORM_NAME,
-    gkg_server_config::Feature::SystemNotes,
-)];
 
 pub struct EntityHandler {
     handler_name: String,
@@ -90,19 +84,6 @@ impl EntityHandler {
             subscription,
             partition_strategy,
             analytics,
-        }
-    }
-
-    fn enabled_for_namespace(&self, namespace_id: Option<i64>) -> bool {
-        let TransformSpec::Rust(name) = &self.plan.transform else {
-            return true;
-        };
-        match NAMESPACE_GATED_TRANSFORMS
-            .iter()
-            .find(|(transform, _)| transform == name)
-        {
-            Some((_, feature)) => gkg_server_config::features::enabled_for(*feature, namespace_id),
-            None => true,
         }
     }
 
@@ -428,15 +409,6 @@ impl Handler for EntityHandler {
                 target = %self.plan.target,
                 targets = ?request.targets,
                 "skipping request: target not selected"
-            );
-            return Ok(());
-        }
-
-        if !self.enabled_for_namespace(request.namespace_id) {
-            debug!(
-                entity = %self.plan.name,
-                namespace_id = ?request.namespace_id,
-                "skipping request: feature not enabled for namespace"
             );
             return Ok(());
         }

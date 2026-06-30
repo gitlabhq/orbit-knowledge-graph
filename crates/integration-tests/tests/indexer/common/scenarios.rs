@@ -4,8 +4,8 @@ use integration_testkit::TestContext;
 use integration_testkit::scenario::{DispatchedMessage, HandlerInput, ScenarioHandlers, Scope};
 
 use super::handlers::{
-    global_envelope, global_handler, handler_context, namespace_envelope,
-    namespace_envelope_with_targets, namespace_handler, stale_edge_task, system_notes_handler,
+    global_envelope, global_handler, handler_context, namespace_envelope_with_targets,
+    namespace_handler, stale_edge_task,
 };
 
 pub struct SdlcScenarioHandlers;
@@ -38,17 +38,6 @@ impl ScenarioHandlers for SdlcScenarioHandlers {
                 global_handler(ctx)
                     .await
                     .handle(handler_context(), global_envelope())
-                    .await
-                    .unwrap();
-            }
-            "system_notes" => {
-                let scope = require_scope(handler, input.scope);
-                system_notes_handler(ctx)
-                    .await
-                    .handle(
-                        handler_context(),
-                        namespace_envelope(scope.organization, scope.namespace),
-                    )
                     .await
                     .unwrap();
             }

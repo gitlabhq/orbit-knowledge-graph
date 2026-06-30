@@ -321,8 +321,11 @@ handlers:
             .env("GKG_GRAPH__DATABASE", "env_graph_db")
             .env("GKG_DATALAKE__DATABASE", "env_datalake_db")
             .env("GKG_NATS__URL", "nats://env-host:4222")
-            .env("GKG_FEATURES__SYSTEM_NOTES__ENABLED", "true")
-            .env("GKG_FEATURES__SYSTEM_NOTES__NAMESPACES", "9970,1234")
+            .env("GKG_FEATURES__STOP_MERGES_ON_RETIRE__ENABLED", "true")
+            .env(
+                "GKG_FEATURES__STOP_MERGES_ON_RETIRE__NAMESPACES",
+                "9970,1234",
+            )
             .output()
             .expect("failed to spawn subprocess");
 
@@ -360,19 +363,19 @@ handlers:
             "GKG_NATS__URL should override config/default.yaml"
         );
         assert_eq!(
-            values["system_notes_enabled"], true,
-            "GKG_FEATURES__SYSTEM_NOTES__ENABLED should override config/default.yaml"
+            values["flag_enabled"], true,
+            "GKG_FEATURES__STOP_MERGES_ON_RETIRE__ENABLED should override config/default.yaml"
         );
         assert_eq!(
-            values["system_notes_for_9970"], true,
-            "GKG_FEATURES__SYSTEM_NOTES__NAMESPACES should parse the comma-separated list"
+            values["flag_for_9970"], true,
+            "GKG_FEATURES__STOP_MERGES_ON_RETIRE__NAMESPACES should parse the comma-separated list"
         );
         assert_eq!(
-            values["system_notes_for_1234"], true,
+            values["flag_for_1234"], true,
             "second list entry should parse"
         );
         assert_eq!(
-            values["system_notes_for_5555"], false,
+            values["flag_for_5555"], false,
             "a namespace outside the list should not be enabled"
         );
     }
@@ -398,10 +401,10 @@ handlers:
                 "graph_database": config.graph.database,
                 "datalake_database": config.datalake.database,
                 "nats_url": config.nats.url,
-                "system_notes_enabled": config.features.is_enabled(Feature::SystemNotes),
-                "system_notes_for_9970": config.features.is_enabled_for(Feature::SystemNotes, Some(9970)),
-                "system_notes_for_1234": config.features.is_enabled_for(Feature::SystemNotes, Some(1234)),
-                "system_notes_for_5555": config.features.is_enabled_for(Feature::SystemNotes, Some(5555)),
+                "flag_enabled": config.features.is_enabled(Feature::StopMergesOnRetire),
+                "flag_for_9970": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(9970)),
+                "flag_for_1234": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(1234)),
+                "flag_for_5555": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(5555)),
             })
         );
     }
