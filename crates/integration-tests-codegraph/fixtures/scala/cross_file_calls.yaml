@@ -1,0 +1,247 @@
+name: Scala cross-file call resolution
+
+fixtures:
+  - path: com/example/models/User.scala
+    content: |
+      package com.example.models
+
+      case class User(id: Int, name: String)
+
+      object User {
+        def guest(): User = User(0, "guest")
+      }
+
+  - path: com/example/repo/Repository.scala
+    content: |
+      package com.example.repo
+
+      trait Repository {
+        def findById(id: Int): String
+      }
+
+  - path: com/example/repo/InMemoryRepository.scala
+    content: |
+      package com.example.repo
+
+      class InMemoryRepository extends Repository {
+        def findById(id: Int): String = id.toString
+        def lookup(id: Int): String = findById(id)
+      }
+
+  - path: com/example/utils/StringUtils.scala
+    content: |
+      package com.example.utils
+
+      object StringUtils {
+        def truncate(s: String, n: Int): String = s.take(n)
+      }
+
+  - path: com/example/service/Formatter.scala
+    content: |
+      package com.example.service
+
+      import com.example.utils._
+
+      class Formatter {
+        def format(s: String): String = truncate(s, 80)
+      }
+
+  - path: com/example/models/Animal.scala
+    content: |
+      package com.example.models
+
+      class Animal {
+        def speak(): String = "..."
+      }
+
+  - path: com/example/service/Zoo.scala
+    content: |
+      package com.example.service
+
+      import com.example.models.{ Animal => BaseAnimal }
+
+      class Zoo {
+        def makeSound(): String = new BaseAnimal().speak()
+      }
+
+  - path: com/example/models/Shapes.scala
+    content: |
+      package com.example.models
+
+      class Circle { def area(): Double = 3.14 }
+      class Square { def area(): Double = 1.0 }
+
+  - path: com/example/service/Canvas.scala
+    content: |
+      package com.example.service
+
+      import com.example.models.{ Circle, Square }
+
+      class Canvas {
+        def totalArea(): Double = new Circle().area() + new Square().area()
+      }
+
+  - path: com/example/domain/Order.scala
+    content: |
+      package com.example.domain
+
+      class Order(val id: Int)
+
+  - path: com/example/domain/OrderService.scala
+    content: |
+      package com.example.domain
+
+      class OrderService {
+        def create(id: Int): Order = new Order(id)
+      }
+
+  - path: com/example/samefile/SameFile.scala
+    content: |
+      package com.example.samefile
+
+      class Calculator {
+        def add(a: Int, b: Int): Int = a + b
+      }
+
+      class MathService {
+        val calc = new Calculator()
+        def sum(a: Int, b: Int): Int = calc.add(a, b)
+      }
+
+  - path: com/example/models/Logger.scala
+    content: |
+      package com.example.models
+
+      class Logger {
+        def log(msg: String): Unit = {}
+      }
+
+  - path: com/example/pipeline/Pipeline.scala
+    content: |
+      package com.example.pipeline
+
+      import com.example.models.{ User, Logger }
+      import com.example.utils._
+      import com.example.domain.Order
+
+      class Pipeline {
+        val logger = new Logger()
+
+        def run(userId: Int, name: String): Unit = {
+          val user = User(userId, name)
+          val formatted = truncate(name, 50)
+          val order = new Order(userId)
+          logger.log(s"Processing ${user.id}")
+        }
+      }
+
+tests:
+  - name: Companion object apply — User.guest resolves to User
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.models.User.guest'
+      AND callee.fqn = 'com.example.models.User'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Trait method — lookup resolves to findById
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.repo.InMemoryRepository.lookup'
+      AND callee.fqn = 'com.example.repo.InMemoryRepository.findById'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Wildcard import — format resolves to StringUtils.truncate
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.service.Formatter.format'
+      AND callee.fqn = 'com.example.utils.StringUtils.truncate'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Aliased import — makeSound resolves to Animal.speak
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.service.Zoo.makeSound'
+      AND callee.fqn = 'com.example.models.Animal.speak'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Grouped import — totalArea resolves to Circle.area
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.service.Canvas.totalArea'
+      AND callee.fqn = 'com.example.models.Circle.area'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Grouped import — totalArea resolves to Square.area
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.service.Canvas.totalArea'
+      AND callee.fqn = 'com.example.models.Square.area'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Same-package — OrderService.create resolves to Order
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.domain.OrderService.create'
+      AND callee.fqn = 'com.example.domain.Order'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Same-file — MathService.sum resolves to Calculator.add
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.samefile.MathService.sum'
+      AND callee.fqn = 'com.example.samefile.Calculator.add'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Advanced pipeline — run resolves to User constructor
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.pipeline.Pipeline.run'
+      AND callee.fqn = 'com.example.models.User'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Advanced pipeline — run resolves to Logger.log
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.pipeline.Pipeline.run'
+      AND callee.fqn = 'com.example.models.Logger.log'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Advanced pipeline — run resolves to StringUtils.truncate via wildcard
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.pipeline.Pipeline.run'
+      AND callee.fqn = 'com.example.utils.StringUtils.truncate'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

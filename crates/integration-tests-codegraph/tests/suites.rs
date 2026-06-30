@@ -239,6 +239,8 @@ yaml_test!(
 //Scala
 yaml_test!(scala_call_resolution, "scala_resolution.yaml");
 yaml_test!(scala_definitions, "scala/definitions.yaml");
+yaml_test!(scala_imports, "scala/imports.yaml");
+yaml_test!(scala_cross_file_calls, "scala/cross_file_calls.yaml");
 
 // Go
 yaml_test!(go_method_call, "go/method_call.yaml");
