@@ -217,22 +217,12 @@ impl BufferedWriter {
     }
 }
 
+#[derive(Default)]
 struct TableBuffer {
     batches: Vec<RecordBatch>,
     tokens: Vec<Token>,
     rows: usize,
-    first_buffered_at: Instant,
-}
-
-impl Default for TableBuffer {
-    fn default() -> Self {
-        Self {
-            batches: Vec::new(),
-            tokens: Vec::new(),
-            rows: 0,
-            first_buffered_at: Instant::now(),
-        }
-    }
+    first_buffered_at: Option<Instant>,
 }
 
 struct DrainLimits {
@@ -272,9 +262,7 @@ async fn drain(
                 }
                 Some(Msg::Submit(table, batch, token)) => {
                     let buf = pending.entry(table.clone()).or_default();
-                    if buf.batches.is_empty() {
-                        buf.first_buffered_at = Instant::now();
-                    }
+                    buf.first_buffered_at.get_or_insert_with(Instant::now);
                     buf.rows += batch.num_rows();
                     buf.batches.push(batch);
                     buf.tokens.push(token);
@@ -292,7 +280,9 @@ async fn drain(
                     .iter()
                     .filter(|(_, buf)| {
                         buf.rows >= limits.min_flush_rows
-                            || now.duration_since(buf.first_buffered_at) >= limits.max_age
+                            || buf
+                                .first_buffered_at
+                                .is_some_and(|t| now.duration_since(t) >= limits.max_age)
                     })
                     .map(|(table, _)| table.clone())
                     .collect();
