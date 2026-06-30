@@ -1,0 +1,24 @@
+description: Dependencies index with name / version_pattern plus IN_PROJECT edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_packages_dependencies:
+    - { id: 7001, project_id: 1000, name: "@gitlab/ui", version_pattern: "^1.2.0", traversal_path: "1/100/1000/" }
+    - { id: 7002, project_id: 1000, name: lodash, version_pattern: "~4.17.0", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_dependency:
+      rows:
+        - { id: 7001, name: "@gitlab/ui", version_pattern: "^1.2.0" }
+        - { id: 7002, name: lodash, version_pattern: "~4.17.0" }
+  edges:
+    - kind: IN_PROJECT
+      from: Dependency
+      to: Project
+      traversal_path: "1/100/1000/"
+      count: 2
