@@ -19,6 +19,7 @@ fn support_lang_for_extension(ext: &str) -> Option<SupportLang> {
         "js" | "jsx" | "mjs" | "cjs" => SupportLang::JavaScript,
         "php" | "phtml" => SupportLang::Php,
         "tf" | "tfvars" | "hcl" => SupportLang::Hcl,
+        "scala" | "sc" => SupportLang::Scala,
         _ => return None,
     })
 }
