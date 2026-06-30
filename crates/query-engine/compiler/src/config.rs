@@ -20,8 +20,8 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, enforce, hydrate, lower, normalize, plan, restrict, security, settings,
-    validate,
+    check, codegen, enforce, hydrate, lower, normalize, partition, plan, restrict, security,
+    settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -74,6 +74,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [security_ctx, ontology]
             mutates: [node]
         }
+        partition {
+            reads_env: [security_ctx, ontology]
+            mutates: [node]
+        }
         check {
             reads_env: [security_ctx]
             reads_state: [node]
@@ -97,7 +101,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse {
             env: [ontology, security_ctx]
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [validate, normalize, restrict, plan, lower, enforce, security, check, hydrate_plan, settings, codegen]
+            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -184,6 +188,15 @@ fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let mut node = require(ctx.take_node(), "node")?;
     security::apply_security_context(&mut node, &security_ctx, &ontology)?;
+    ctx.set_node(node);
+    Ok(())
+}
+
+fn partition(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let security_ctx = ctx.security_ctx().clone();
+    let ontology = ctx.ontology().clone();
+    let mut node = require(ctx.take_node(), "node")?;
+    partition::apply_partition_pruning(&mut node, &security_ctx, &ontology)?;
     ctx.set_node(node);
     Ok(())
 }

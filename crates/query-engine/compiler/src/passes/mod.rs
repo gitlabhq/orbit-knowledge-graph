@@ -8,6 +8,7 @@ mod errors;
 pub mod hydrate;
 pub mod lower;
 pub mod normalize;
+pub mod partition;
 pub mod plan;
 pub mod restrict;
 pub mod security;

@@ -79,25 +79,18 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
             let eligible = ctx.paths_at_least(min_role);
             // Inject the resolved scope prefix as the alias's authorization filter
             // when it sits within an eligible path; otherwise the broad path set.
-            let scope_prefix = ctx
-                .scope_prefixes
-                .get(alias)
-                .filter(|_| ontology.is_table_path_scopable(table));
-            let base = match scope_prefix {
-                Some(prefix) if eligible.iter().any(|p| prefix.starts_with(p)) => {
+            match ctx.scope_prefixes.get(alias) {
+                Some(prefix)
+                    if ontology.is_table_path_scopable(table)
+                        && eligible.iter().any(|p| prefix.starts_with(p)) =>
+                {
                     starts_with_expr(alias, prefix)
                 }
-                Some(prefix) => Expr::and(
+                Some(prefix) if ontology.is_table_path_scopable(table) => Expr::and(
                     build_path_filter(alias, &eligible),
                     starts_with_expr(alias, prefix),
                 ),
-                None => build_path_filter(alias, &eligible),
-            };
-            // A scoped prefix that pins a top-level namespace lets ClickHouse
-            // prune to one partition; the broad/global cases span buckets.
-            match scope_prefix.and_then(|prefix| partition_predicate(ontology, alias, prefix)) {
-                Some(pred) => Expr::and(base, pred),
-                None => base,
+                _ => build_path_filter(alias, &eligible),
             }
         });
         q.where_clause = Expr::and_all(
@@ -227,60 +220,6 @@ fn lowest_common_prefix(paths: &[String]) -> String {
 
 fn starts_with_expr(alias: &str, path: &str) -> Expr {
     starts_with_value_expr(alias, Expr::string(path))
-}
-
-/// Equates the table's partition expression to the same expression over the
-/// scope prefix, so ClickHouse folds the constant side to a bucket and prunes
-/// partitions. Returns `None` when partitioning is disabled or the prefix does
-/// not pin a top-level namespace (the partition input), in which case the rows
-/// span buckets and no single partition can be selected.
-fn partition_predicate(ontology: &Ontology, alias: &str, prefix: &str) -> Option<Expr> {
-    let strategy = &ontology.partition()?.strategy;
-    if !strategy_input_is_pinned(strategy, prefix) {
-        return None;
-    }
-    let column = Expr::col(alias, strategy.column());
-    Some(Expr::eq(
-        partition_expr(strategy, column),
-        partition_expr(strategy, Expr::string(prefix)),
-    ))
-}
-
-/// Whether `prefix` pins the value the strategy hashes. For hash-bucket over
-/// the second path segment, that needs at least `org/top_level/`.
-fn strategy_input_is_pinned(strategy: &ontology::PartitionStrategy, prefix: &str) -> bool {
-    match strategy {
-        ontology::PartitionStrategy::HashBucket { .. } => {
-            prefix.split('/').filter(|s| !s.is_empty()).count() >= 2
-        }
-    }
-}
-
-/// Builds the strategy's partition expression as an `Expr` over `input`,
-/// mirroring `PartitionStrategy::to_sql` (the DDL renderer) so the predicate
-/// stays byte-identical to the table's `PARTITION BY`.
-fn partition_expr(strategy: &ontology::PartitionStrategy, input: Expr) -> Expr {
-    match strategy {
-        ontology::PartitionStrategy::HashBucket { buckets, .. } => Expr::func(
-            "modulo",
-            vec![
-                Expr::func(
-                    "sipHash64",
-                    vec![Expr::func(
-                        "toUInt64OrZero",
-                        vec![Expr::func(
-                            "arrayElement",
-                            vec![
-                                Expr::func("splitByChar", vec![Expr::string("/"), input]),
-                                Expr::int(2),
-                            ],
-                        )],
-                    )],
-                ),
-                Expr::int(i64::from(*buckets)),
-            ],
-        ),
-    }
 }
 
 fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
@@ -526,37 +465,6 @@ mod tests {
             | Expr::Literal(_)
             | Expr::Param { .. }
             | Expr::Star => {}
-        }
-    }
-
-    fn has_partition_predicate_for(expr: &Expr, alias: &str) -> bool {
-        fn refs_alias_column(e: &Expr, alias: &str) -> bool {
-            match e {
-                Expr::Column { table, .. } => table == alias,
-                Expr::FuncCall { args, .. } => args.iter().any(|a| refs_alias_column(a, alias)),
-                Expr::BinaryOp { left, right, .. } => {
-                    refs_alias_column(left, alias) || refs_alias_column(right, alias)
-                }
-                _ => false,
-            }
-        }
-        match expr {
-            Expr::FuncCall { name, args } if name == "modulo" => {
-                args.iter().any(|a| refs_alias_column(a, alias))
-                    || args.iter().any(|a| has_partition_predicate_for(a, alias))
-            }
-            Expr::FuncCall { args, .. } => {
-                args.iter().any(|a| has_partition_predicate_for(a, alias))
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                has_partition_predicate_for(left, alias)
-                    || has_partition_predicate_for(right, alias)
-            }
-            Expr::UnaryOp { expr, .. }
-            | Expr::InSubquery { expr, .. }
-            | Expr::InSelect { expr, .. } => has_partition_predicate_for(expr, alias),
-            Expr::Lambda { body, .. } => has_partition_predicate_for(body, alias),
-            _ => false,
         }
     }
 
@@ -934,66 +842,6 @@ mod tests {
             vec!["1/".to_string()],
             "unscoped alias gets the broad authz set"
         );
-    }
-
-    fn project_scan() -> Node {
-        Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("p", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_project", "p"),
-            limit: Some(10),
-            ..Default::default()
-        }))
-    }
-
-    fn scoped_ctx(prefix: Option<&str>) -> SecurityContext {
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        match prefix {
-            Some(p) => {
-                let mut prefixes = std::collections::HashMap::new();
-                prefixes.insert("p".to_string(), p.to_string());
-                ctx.with_scope_prefixes(prefixes)
-            }
-            None => ctx,
-        }
-    }
-
-    fn project_where_clause(prefix: Option<&str>) -> Expr {
-        let mut node = project_scan();
-        apply_security_context(
-            &mut node,
-            &scoped_ctx(prefix),
-            &Ontology::load_embedded().unwrap(),
-        )
-        .unwrap();
-        let Node::Query(q) = node else { unreachable!() };
-        q.where_clause.unwrap()
-    }
-
-    #[test]
-    fn partition_predicate_emitted_for_pinned_namespace_prefix() {
-        assert!(has_partition_predicate_for(
-            &project_where_clause(Some("1/100/1000/")),
-            "p"
-        ));
-    }
-
-    #[test]
-    fn partition_predicate_absent_for_org_only_prefix() {
-        assert!(!has_partition_predicate_for(
-            &project_where_clause(Some("1/")),
-            "p"
-        ));
-    }
-
-    #[test]
-    fn partition_predicate_absent_without_scope_prefix() {
-        assert!(!has_partition_predicate_for(
-            &project_where_clause(None),
-            "p"
-        ));
     }
 
     #[test]

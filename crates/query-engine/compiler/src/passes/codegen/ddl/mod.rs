@@ -341,7 +341,11 @@ fn partition_by(partition: Option<&PartitionConfig>, columns: &[StorageColumn]) 
     };
     let column = p.column();
     if columns.iter().any(|c| c.name == column) {
-        vec![p.strategy.to_sql(column)]
+        let expr = crate::passes::partition::partition_expr(
+            &p.strategy,
+            crate::ast::Expr::Identifier(column.to_string()),
+        );
+        vec![clickhouse::emit_partition_expr(&expr)]
     } else {
         vec![]
     }
@@ -699,7 +703,10 @@ mod tests {
         let partition = ontology
             .partition()
             .expect("embedded ontology declares partitioning");
-        let expr = partition.strategy.to_sql(partition.column());
+        let expr = clickhouse::emit_partition_expr(&crate::passes::partition::partition_expr(
+            &partition.strategy,
+            crate::ast::Expr::Identifier(partition.column().to_string()),
+        ));
         let tables = generate_graph_tables(&ontology);
 
         let edge = tables.iter().find(|t| t.name == "gl_edge").unwrap();
