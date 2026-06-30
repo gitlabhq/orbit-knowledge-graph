@@ -513,9 +513,6 @@ etl:
       as: HAS_HEAD_PIPELINE
       direction: outgoing
       mutable: true
-    # Not marked mutable: Rails treats merged MRs as terminal and does not rewrite
-    # the merge commit SHA after merge. If an upstream datalake correction changes
-    # that SHA later, the old MERGED_AT_COMMIT edge can remain until re-indexed.
     merged_commit_id:
       to: Commit
       as: MERGED_AT_COMMIT
