@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS gl_dependency (
       GROUP BY traversal_path
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
-PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50)
+PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
