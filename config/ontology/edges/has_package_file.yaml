@@ -1,0 +1,10 @@
+# config/ontology/edges/has_package_file.yaml
+
+description: Package contains a package file
+
+variants:
+  - from_node: { type: Package, id: id }
+    to_node: { type: PackageFile, id: id }
+    fk_column: package_id
+    scope: same_namespace
+    description: "Package contains a package file."

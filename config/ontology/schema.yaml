@@ -383,6 +383,7 @@ domains:
     description: "Entities related to packages published to the package registry."
     nodes:
       Package: nodes/packages/package.yaml
+      PackageFile: nodes/packages/package_file.yaml
       Dependency: nodes/packages/dependency.yaml
   container_registry:
     description: "Entities related to container image repositories in the container registry."
@@ -396,6 +397,7 @@ edges:
   OWNER: edges/owner.yaml
   AUTHORED: edges/authored.yaml
   IN_PROJECT: edges/in_project.yaml
+  HAS_PACKAGE_FILE: edges/has_package_file.yaml
   REVIEWER: edges/reviewer.yaml
   ASSIGNED: edges/assigned.yaml
   MERGED: edges/merged.yaml
