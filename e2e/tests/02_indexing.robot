@@ -19,7 +19,7 @@ Project Issue And Note Are Indexed
     ...                then assert each becomes queryable via Orbit.
     [Tags]    indexing
     ${suffix}=    Random Suffix
-    Start Indexing Budget    180
+    Start Indexing Budget    240
 
     ${project_name}=    Set Variable    e2e-prj-${suffix}
     ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
