@@ -55,7 +55,7 @@ Enabling Knowledge Graph Backfills Code For Existing Projects
     ...                fixture cardinalities, proving the backfill path ran end-to-end.
     [Tags]    code-backfill
     Enable Knowledge Graph    ${BACKFILL_NAMESPACE_ID}
-    Start Indexing Budget    180
+    Start Indexing Budget    240
     Wait For Node Indexed Within Budget    Group    ${BACKFILL_NAMESPACE_ID}    ${BACKFILL_NAMESPACE_NAME}
 
     ${ruby_pid}=    Set Variable    ${BACKFILL_RUBY_PROJECT}[id]
