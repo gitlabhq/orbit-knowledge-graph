@@ -193,17 +193,17 @@ impl OntologyGraph {
         map.get(node_kind).map_or(&[], Vec::as_slice)
     }
 
-    /// Relationship kinds that connect `source` → `target` in that orientation.
+    /// Relationship kinds connecting `a` and `b` in either orientation, filtered
+    /// to `types` when non-empty. Direction is folded in because the lowerer
+    /// matches a triple regardless of the query's declared direction.
     #[must_use]
-    pub fn edges_between(&self, source: &str, target: &str) -> Vec<String> {
-        self.outgoing
-            .get(source)
-            .into_iter()
-            .flatten()
-            .filter(|adj| adj.neighbor_kind == target)
-            .map(|adj| adj.relationship_kind.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
+    pub fn kinds_connecting(&self, a: &str, b: &str, types: &HashSet<&str>) -> BTreeSet<&str> {
+        self.neighbors(a, EdgeDirection::Outgoing)
+            .iter()
+            .chain(self.neighbors(a, EdgeDirection::Incoming))
+            .filter(|adj| adj.neighbor_kind == b)
+            .filter(|adj| types.is_empty() || types.contains(adj.relationship_kind.as_str()))
+            .map(|adj| adj.relationship_kind.as_str())
             .collect()
     }
 
@@ -333,6 +333,10 @@ mod tests {
         items.iter().map(|s| s.to_string()).collect()
     }
 
+    fn set_ref<'a>(items: &[&'a str]) -> BTreeSet<&'a str> {
+        items.iter().copied().collect()
+    }
+
     fn embedded() -> OntologyGraph {
         Ontology::load_embedded().unwrap().graph()
     }
@@ -351,10 +355,16 @@ mod tests {
     }
 
     #[test]
-    fn edges_between_is_oriented() {
-        let g = graph_of(&[("R", "A", "B")]);
-        assert_eq!(g.edges_between("A", "B"), ["R"]);
-        assert!(g.edges_between("B", "A").is_empty());
+    fn kinds_connecting_folds_direction_and_filters_types() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "A", "B")]);
+        let none = HashSet::new();
+        assert_eq!(g.kinds_connecting("A", "B", &none), set_ref(&["R", "S"]));
+        assert_eq!(g.kinds_connecting("B", "A", &none), set_ref(&["R", "S"]));
+        assert_eq!(
+            g.kinds_connecting("A", "B", &HashSet::from(["R"])),
+            set_ref(&["R"])
+        );
+        assert!(g.kinds_connecting("A", "C", &none).is_empty());
     }
 
     #[test]

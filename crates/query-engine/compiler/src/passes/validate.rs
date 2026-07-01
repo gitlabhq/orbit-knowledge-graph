@@ -706,7 +706,7 @@ impl<'a> Validator<'a> {
             }
 
             let types: HashSet<&str> = rel.types.iter().map(String::as_str).collect();
-            let connecting = self.kinds_connecting(&graph, from, to, &types);
+            let connecting = graph.kinds_connecting(from, to, &types);
             let reachable = |src, dst| {
                 graph
                     .reachable_within_types(src, rel.max_hops as usize, Some(&types))
@@ -718,7 +718,7 @@ impl<'a> Validator<'a> {
                 continue;
             }
 
-            let alternatives = self.kinds_connecting(&graph, from, to, &HashSet::new());
+            let alternatives = graph.kinds_connecting(from, to, &HashSet::new());
             let hint = if alternatives.is_empty() {
                 let mut kinds: Vec<&str> = graph
                     .neighbors(from, ontology::EdgeDirection::Outgoing)
@@ -746,24 +746,6 @@ impl<'a> Validator<'a> {
         }
 
         Ok(())
-    }
-
-    /// Declared kinds connecting two entities in either orientation (all kinds when `types` is empty); direction is ignored because the lowerer matches triples regardless of the query's declared direction.
-    fn kinds_connecting<'g>(
-        &self,
-        graph: &'g ontology::OntologyGraph,
-        a: &str,
-        b: &str,
-        types: &HashSet<&str>,
-    ) -> std::collections::BTreeSet<&'g str> {
-        graph
-            .neighbors(a, ontology::EdgeDirection::Outgoing)
-            .iter()
-            .chain(graph.neighbors(a, ontology::EdgeDirection::Incoming))
-            .filter(|adj| adj.neighbor_kind == b)
-            .filter(|adj| types.is_empty() || types.contains(adj.relationship_kind.as_str()))
-            .map(|adj| adj.relationship_kind.as_str())
-            .collect()
     }
 
     fn check_aggregations(&self, input: &Input) -> Result<()> {
