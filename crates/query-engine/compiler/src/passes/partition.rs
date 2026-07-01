@@ -273,12 +273,6 @@ mod tests {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
     }
 
-    /// The pass logic is exercised against a fixed partitioned config so these
-    /// tests stay meaningful even when the shipped ontology disables partitioning
-    /// (the break-glass path). Coverage of the shipped config lives in the DDL
-    /// and integration tests, which gate on `ontology.partition()`. The bucket
-    /// count is only ever compared against the (smaller) authorized-TLN set, so
-    /// any value larger than the test prefixes' namespaces works.
     fn partitioned_ontology() -> Ontology {
         Ontology::load_embedded()
             .unwrap()
