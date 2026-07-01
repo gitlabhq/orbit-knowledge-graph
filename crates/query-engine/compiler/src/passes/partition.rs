@@ -37,13 +37,16 @@ fn prune_query(q: &mut Query, strategy: &PartitionStrategy, authorized: Option<&
         let pinned = pinning_prefixes_by_alias(where_clause, strategy);
         let mut preds: Vec<Expr> = pinned
             .iter()
-            .map(|(alias, prefixes)| partition_id_predicate(strategy, alias, prefixes))
+            .map(|(alias, prefixes)| {
+                let buckets = prefixes.iter().map(|p| bucket_id(strategy, p)).collect();
+                partition_id_predicate(alias, buckets)
+            })
             .collect();
         // Namespaced scans with no pinning prefix fall back to the tenant set.
         if let Some(buckets) = authorized {
             for (alias, _) in collect_aliased_tables(&q.from) {
                 if !pinned.iter().any(|(a, _)| *a == alias) {
-                    preds.push(in_bucket_set(&alias, buckets));
+                    preds.push(partition_id_predicate(&alias, buckets.to_vec()));
                 }
             }
         }
@@ -140,12 +143,7 @@ fn authorized_bucket_ids(strategy: &PartitionStrategy, ctx: &SecurityContext) ->
     }
     Some(
         tlns.iter()
-            .map(|tln| {
-                Expr::func(
-                    "toString",
-                    vec![partition_expr(strategy, Expr::string(format!("0/{tln}/")))],
-                )
-            })
+            .map(|tln| bucket_id(strategy, &format!("0/{tln}/")))
             .collect(),
     )
 }
@@ -154,15 +152,6 @@ fn bucket_count(strategy: &PartitionStrategy) -> usize {
     match strategy {
         PartitionStrategy::HashBucket { buckets, .. } => usize::from(*buckets),
     }
-}
-
-/// `alias._partition_id IN tuple(<bucket exprs>)`.
-fn in_bucket_set(alias: &str, buckets: &[Expr]) -> Expr {
-    Expr::binary(
-        Op::In,
-        Expr::col(alias, PARTITION_ID_COLUMN),
-        Expr::func("tuple", buckets.to_vec()),
-    )
 }
 
 /// Per alias, the distinct pinning prefixes from its `startsWith` filters.
@@ -218,22 +207,13 @@ fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(Str
     }
 }
 
-/// `alias._partition_id = bucket(prefix)` for one prefix, else `IN tuple(…)`.
-fn partition_id_predicate(strategy: &PartitionStrategy, alias: &str, prefixes: &[String]) -> Expr {
+/// `alias._partition_id = bucket` for one bucket, else `IN tuple(bucket…)`.
+fn partition_id_predicate(alias: &str, mut buckets: Vec<Expr>) -> Expr {
     let col = Expr::col(alias, PARTITION_ID_COLUMN);
-    let mut buckets = prefixes.iter().map(|p| bucket_id(strategy, p));
-    let first = buckets
-        .next()
-        .expect("alias has at least one pinning prefix");
-    match buckets.next() {
-        None => Expr::eq(col, first),
-        Some(second) => {
-            let elems = std::iter::once(first)
-                .chain(std::iter::once(second))
-                .chain(buckets)
-                .collect();
-            Expr::binary(Op::In, col, Expr::func("tuple", elems))
-        }
+    if buckets.len() == 1 {
+        Expr::eq(col, buckets.pop().expect("len checked"))
+    } else {
+        Expr::binary(Op::In, col, Expr::func("tuple", buckets))
     }
 }
 
@@ -326,10 +306,7 @@ mod tests {
                 op: Op::Eq,
                 left,
                 right,
-            } if refs_partition_col(left, alias) => {
-                let _ = right;
-                Some((false, count_buckets(right)))
-            }
+            } if refs_partition_col(left, alias) => Some((false, count_buckets(right))),
             Expr::BinaryOp {
                 op: Op::In,
                 left,

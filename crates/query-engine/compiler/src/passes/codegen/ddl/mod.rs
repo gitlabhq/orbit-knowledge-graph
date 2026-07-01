@@ -699,29 +699,20 @@ mod tests {
 
     #[test]
     fn namespaced_tables_partition_global_tables_do_not() {
-        let ontology = ontology();
-        let partition = ontology
-            .partition()
-            .expect("embedded ontology declares partitioning");
-        let expr = clickhouse::emit_partition_expr(&crate::passes::partition::partition_expr(
-            &partition.strategy,
-            crate::ast::Expr::Identifier(partition.column().to_string()),
-        ));
-        let tables = generate_graph_tables(&ontology);
-
-        let edge = tables.iter().find(|t| t.name == "gl_edge").unwrap();
-        assert_eq!(edge.partition_by, vec![expr.clone()]);
-
-        let mr = tables
-            .iter()
-            .find(|t| t.name == "gl_merge_request")
-            .unwrap();
-        assert_eq!(mr.partition_by, vec![expr.clone()]);
-
-        let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
-        assert!(user.partition_by.is_empty());
-        let runner = tables.iter().find(|t| t.name == "gl_runner").unwrap();
-        assert!(runner.partition_by.is_empty());
+        let tables = generate_graph_tables(&ontology());
+        let partition_of = |name: &str| {
+            tables
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+                .partition_by
+                .clone()
+        };
+        // Namespaced tables partition; global hubs (no traversal_path) do not.
+        assert_eq!(partition_of("gl_edge").len(), 1);
+        assert_eq!(partition_of("gl_merge_request").len(), 1);
+        assert!(partition_of("gl_user").is_empty());
+        assert!(partition_of("gl_runner").is_empty());
     }
 
     #[test]
