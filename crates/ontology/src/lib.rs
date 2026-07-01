@@ -505,6 +505,12 @@ impl Ontology {
         self
     }
 
+    #[must_use]
+    pub fn with_partition(mut self, config: PartitionConfig) -> Self {
+        self.partition = Some(config);
+        self
+    }
+
     /// Load ontology from a directory containing schema.yaml and referenced files.
     ///
     /// # Errors

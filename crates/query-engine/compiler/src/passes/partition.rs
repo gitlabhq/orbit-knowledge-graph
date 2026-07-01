@@ -273,8 +273,29 @@ mod tests {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
     }
 
+    /// The pass logic is exercised against a fixed partitioned config so these
+    /// tests stay meaningful even when the shipped ontology disables partitioning
+    /// (the break-glass path). Coverage of the shipped config lives in the DDL
+    /// and integration tests, which gate on `ontology.partition()`. The bucket
+    /// count is only ever compared against the (smaller) authorized-TLN set, so
+    /// any value larger than the test prefixes' namespaces works.
+    fn partitioned_ontology() -> Ontology {
+        Ontology::load_embedded()
+            .unwrap()
+            .with_partition(PartitionConfig {
+                strategy: PartitionStrategy::HashBucket {
+                    buckets: 50,
+                    column: TRAVERSAL_PATH_COLUMN.to_string(),
+                },
+                partitioned_tables: ["gl_edge", "gl_merge_request"]
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect(),
+            })
+    }
+
     fn prune(node: &mut Node, ctx: &SecurityContext) {
-        apply_partition_pruning(node, &Ontology::load_embedded().unwrap(), ctx).unwrap();
+        apply_partition_pruning(node, &partitioned_ontology(), ctx).unwrap();
     }
 
     fn where_with(filter: Expr) -> Option<Expr> {

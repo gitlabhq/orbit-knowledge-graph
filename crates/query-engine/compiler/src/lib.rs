@@ -1721,9 +1721,16 @@ mod tests {
             .with_scope_prefixes([("m".to_string(), "1/9970/".to_string())].into());
         let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
         assert!(
-            sql.contains("m._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(")
-                && sql.contains("startsWith(m.traversal_path"),
-            "scoped query should prune on _partition_id alongside startsWith:\n{sql}"
+            sql.contains("startsWith(m.traversal_path"),
+            "scoped query should always carry the startsWith prefix:\n{sql}"
+        );
+        let has_partition_pred = sql.contains(
+            "m._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(",
+        );
+        assert_eq!(
+            has_partition_pred,
+            ONTOLOGY.partition().is_some(),
+            "the _partition_id predicate should track whether the ontology partitions:\n{sql}"
         );
     }
 

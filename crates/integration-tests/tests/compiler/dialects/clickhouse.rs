@@ -749,17 +749,20 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
         ],
         "limit": 100
     }"#;
-    let compiled = compile(json, &embedded_ontology(), &scoped_ctx()).unwrap();
+    let ontology = embedded_ontology();
+    let compiled = compile(json, &ontology, &scoped_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    // Project is partition-excluded, so its anchor scan carries only the
-    // startsWith (1). The IN_PROJECT edge and the cascade anchor's IN-subquery
-    // are on the partitioned gl_edge, so each carries startsWith + _partition_id
-    // (2 + 2). The cross-namespace RELATED_TO edge and its rel node: zero.
+    // Three startsWith prefixes are always present: the Project anchor scan and
+    // the two gl_edge scans (IN_PROJECT edge + cascade anchor IN-subquery). When
+    // gl_edge is partitioned, each of those two edge scans also carries a
+    // _partition_id bound to the same prefix, adding two more. The break-glass
+    // config removes partitioning and reverts to the three startsWith only.
+    let expected = if ontology.partition().is_some() { 5 } else { 3 };
     assert_eq!(
         sql.matches(SCOPED_PREFIX).count(),
-        5,
-        "excluded Project anchor gets startsWith only; each gl_edge scan gets startsWith + _partition_id"
+        expected,
+        "startsWith on the anchor + two edge scans, plus a _partition_id per edge scan when partitioned"
     );
 
     let scoped_filter = sql.split("WHERE").nth(1).unwrap();
