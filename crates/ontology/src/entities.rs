@@ -135,6 +135,15 @@ pub struct StatisticsExclude {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionConfig {
     pub strategy: PartitionStrategy,
+    pub partitioned_tables: std::collections::BTreeSet<String>,
+}
+
+impl PartitionConfig {
+    #[must_use]
+    pub fn is_partitioned(&self, table: &str) -> bool {
+        self.partitioned_tables
+            .contains(crate::strip_schema_version_prefix(table))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -626,11 +626,36 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             let hb = p.strategy.hash_bucket.ok_or_else(|| {
                 OntologyError::Validation("partition.strategy must set a strategy block".into())
             })?;
+            let mut partitioned_tables: std::collections::BTreeSet<String> =
+                std::collections::BTreeSet::new();
+            for entity in &p.include_entities {
+                let node = ontology.nodes.get(entity).ok_or_else(|| {
+                    OntologyError::Validation(format!(
+                        "partition.include_entities: '{entity}' is not a node entity"
+                    ))
+                })?;
+                if node.global {
+                    return Err(OntologyError::Validation(format!(
+                        "partition.include_entities: '{entity}' is a global entity with no \
+                         traversal_path and cannot be partitioned"
+                    )));
+                }
+                partitioned_tables.insert(node.destination_table.clone());
+            }
+            for table in &p.include_edge_tables {
+                if !ontology.edge_table_configs.contains_key(table) {
+                    return Err(OntologyError::Validation(format!(
+                        "partition.include_edge_tables: '{table}' is not an edge table"
+                    )));
+                }
+                partitioned_tables.insert(table.clone());
+            }
             Ok(crate::entities::PartitionConfig {
                 strategy: crate::entities::PartitionStrategy::HashBucket {
                     buckets: hb.buckets,
                     column: hb.column,
                 },
+                partitioned_tables,
             })
         })
         .transpose()?;

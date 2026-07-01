@@ -110,6 +110,10 @@ pub(super) struct StatisticsExcludeYaml {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct PartitionYaml {
     pub strategy: PartitionStrategyYaml,
+    #[serde(default)]
+    pub include_entities: Vec<String>,
+    #[serde(default)]
+    pub include_edge_tables: Vec<String>,
 }
 
 /// One optional block per strategy; exactly one must be set (enforced in the

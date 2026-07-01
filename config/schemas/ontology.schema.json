@@ -693,6 +693,18 @@
               "minProperties": 1,
               "maxProperties": 1,
               "additionalProperties": false
+            },
+            "include_entities": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true,
+              "description": "Node entity names to partition; other node tables stay unpartitioned."
+            },
+            "include_edge_tables": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true,
+              "description": "Edge table names to partition; other edge tables stay unpartitioned."
             }
           },
           "required": ["strategy"],
