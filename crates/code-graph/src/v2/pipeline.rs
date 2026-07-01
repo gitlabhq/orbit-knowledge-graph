@@ -494,8 +494,6 @@ pub struct PipelineConfig {
     pub per_file_parse_timeout: Option<std::time::Duration>,
     pub per_file_walk_timeout: Option<std::time::Duration>,
     pub per_file_ssa_timeout: Option<std::time::Duration>,
-    /// Stack per parse worker; headroom for the native parse's uncatchable overflow. 0 = rayon default.
-    pub parse_worker_stack_bytes: usize,
     /// Wall-clock budget for the sequential cross-file resolution phase.
     /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.
     pub cross_file_resolve_timeout: Option<std::time::Duration>,
@@ -526,7 +524,6 @@ impl Default for PipelineConfig {
             per_file_parse_timeout: None,
             per_file_walk_timeout: None,
             per_file_ssa_timeout: None,
-            parse_worker_stack_bytes: DEFAULT_PARSE_WORKER_STACK_BYTES,
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
             on_progress: None,
@@ -772,11 +769,8 @@ impl Pipeline {
                     let file_count = files.len();
                     let t_lang = std::time::Instant::now();
 
-                    let mut pool_builder = rayon::ThreadPoolBuilder::new();
-                    if ctx.config.parse_worker_stack_bytes > 0 {
-                        pool_builder =
-                            pool_builder.stack_size(ctx.config.parse_worker_stack_bytes);
-                    }
+                    let mut pool_builder = rayon::ThreadPoolBuilder::new()
+                        .stack_size(DEFAULT_PARSE_WORKER_STACK_BYTES);
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }
