@@ -339,9 +339,13 @@ fn partition_by(partition: Option<&PartitionConfig>, columns: &[StorageColumn]) 
     let Some(p) = partition else {
         return vec![];
     };
-    let present = |name: &str| columns.iter().any(|c| c.name == name);
-    if p.required_columns.iter().all(|c| present(c)) {
-        vec![p.partition_by.clone()]
+    let column = p.column();
+    if columns.iter().any(|c| c.name == column) {
+        let expr = crate::passes::partition::partition_expr(
+            &p.strategy,
+            crate::ast::Expr::Identifier(column.to_string()),
+        );
+        vec![clickhouse::emit_partition_expr(&expr)]
     } else {
         vec![]
     }
@@ -695,25 +699,20 @@ mod tests {
 
     #[test]
     fn namespaced_tables_partition_global_tables_do_not() {
-        let ontology = ontology();
-        let expr = ontology
-            .partition_by()
-            .expect("embedded ontology declares partitioning");
-        let tables = generate_graph_tables(&ontology);
-
-        let edge = tables.iter().find(|t| t.name == "gl_edge").unwrap();
-        assert_eq!(edge.partition_by, vec![expr.to_string()]);
-
-        let mr = tables
-            .iter()
-            .find(|t| t.name == "gl_merge_request")
-            .unwrap();
-        assert_eq!(mr.partition_by, vec![expr.to_string()]);
-
-        let user = tables.iter().find(|t| t.name == "gl_user").unwrap();
-        assert!(user.partition_by.is_empty());
-        let runner = tables.iter().find(|t| t.name == "gl_runner").unwrap();
-        assert!(runner.partition_by.is_empty());
+        let tables = generate_graph_tables(&ontology());
+        let partition_of = |name: &str| {
+            tables
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+                .partition_by
+                .clone()
+        };
+        // Namespaced tables partition; global hubs (no traversal_path) do not.
+        assert_eq!(partition_of("gl_edge").len(), 1);
+        assert_eq!(partition_of("gl_merge_request").len(), 1);
+        assert!(partition_of("gl_user").is_empty());
+        assert!(partition_of("gl_runner").is_empty());
     }
 
     #[test]

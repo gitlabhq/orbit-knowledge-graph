@@ -132,12 +132,30 @@ pub struct StatisticsExclude {
     pub columns: Vec<String>,
 }
 
-/// Emits `PARTITION BY (partition_by)` on every table whose storage columns
-/// include all of `required_columns`; others stay unpartitioned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionConfig {
-    pub partition_by: String,
-    pub required_columns: Vec<String>,
+    pub strategy: PartitionStrategy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartitionStrategy {
+    HashBucket { buckets: u16, column: String },
+}
+
+impl PartitionStrategy {
+    #[must_use]
+    pub fn column(&self) -> &str {
+        match self {
+            Self::HashBucket { column, .. } => column,
+        }
+    }
+}
+
+impl PartitionConfig {
+    #[must_use]
+    pub fn column(&self) -> &str {
+        self.strategy.column()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
