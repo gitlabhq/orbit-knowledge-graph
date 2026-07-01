@@ -740,6 +740,17 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.stale_cleanup.skipped",
+      "prom_name": "gkg_indexer_code_stale_cleanup_skipped_total",
+      "description": "Runs whose destructive stale-cleanup was skipped to protect prior data (degraded run or count read failure).",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.namespace_deletion.table.duration",
       "prom_name": "gkg_indexer_namespace_deletion_table_duration_seconds",
       "description": "Duration of a single table's soft-delete INSERT-SELECT.",

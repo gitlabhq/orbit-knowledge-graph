@@ -101,6 +101,7 @@ engine:
         worker_threads: 0
         max_concurrent_languages: 0
         parse_worker_stack_bytes: 8388608
+        min_completeness_ratio: 0.5
         per_file_timeout_ms: 2000
         per_file_parse_timeout_ms: 100
         per_file_walk_timeout_ms: 100

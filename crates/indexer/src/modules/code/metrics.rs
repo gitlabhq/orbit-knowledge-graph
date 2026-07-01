@@ -16,6 +16,7 @@ pub struct CodeMetrics {
     pub(in crate::modules::code) repository_resolution_strategy: Counter<u64>,
     pub(in crate::modules::code) repository_cleanup: Counter<u64>,
     pub(in crate::modules::code) repository_empty: Counter<u64>,
+    pub(in crate::modules::code) stale_cleanup_skipped: Counter<u64>,
     pub(in crate::modules::code) repository_indexing_completed: Counter<u64>,
     pub(in crate::modules::code) repository_source_size: Histogram<u64>,
     pub(in crate::modules::code) indexing_duration: Histogram<f64>,
@@ -48,6 +49,7 @@ impl CodeMetrics {
                 .build_counter_u64(meter),
             repository_cleanup: code::REPOSITORY_CLEANUP.build_counter_u64(meter),
             repository_empty: code::REPOSITORY_EMPTY.build_counter_u64(meter),
+            stale_cleanup_skipped: code::STALE_CLEANUP_SKIPPED.build_counter_u64(meter),
             repository_indexing_completed: code::REPOSITORY_INDEXING_COMPLETED
                 .build_counter_u64(meter),
             repository_source_size: code::REPOSITORY_SOURCE_SIZE.build_histogram_u64(meter),
@@ -91,6 +93,11 @@ impl CodeMetrics {
 
     pub(in crate::modules::code) fn record_empty_repository(&self, reason: &'static str) {
         self.repository_empty
+            .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
+    }
+
+    pub(in crate::modules::code) fn record_stale_cleanup_skipped(&self, reason: &'static str) {
+        self.stale_cleanup_skipped
             .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
     }
 

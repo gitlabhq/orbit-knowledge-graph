@@ -243,6 +243,10 @@ fn default_code_indexing_parse_worker_stack_bytes() -> usize {
     8 * 1024 * 1024
 }
 
+fn default_code_indexing_min_completeness_ratio() -> f64 {
+    0.5
+}
+
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
     2000
 }
@@ -323,6 +327,9 @@ pub struct CodeIndexingPipelineConfig {
     /// Stack size in bytes for each parse worker thread. The native tree-sitter parse recurses on this stack and a deeply-nested file can overflow it with an uncatchable crash, so it needs headroom. 0 = the code-graph default (8 MiB). Defaults to 8388608.
     #[serde(default = "default_code_indexing_parse_worker_stack_bytes")]
     pub parse_worker_stack_bytes: usize,
+    /// Completeness gate for the destructive stale-cleanup: a re-index that emits fewer definitions than this fraction of the currently-live count is treated as degraded and skips cleanup, so a partial run cannot tombstone prior good data. Defaults to 0.5.
+    #[serde(default = "default_code_indexing_min_completeness_ratio")]
+    pub min_completeness_ratio: f64,
     /// Global per-file resolution timeout in milliseconds.
     /// Applied to all languages unless the language's own DSL rules
     /// specify a different value. 0 = no global timeout.
@@ -384,6 +391,7 @@ impl Default for CodeIndexingPipelineConfig {
             worker_threads: 0,
             max_concurrent_languages: 0,
             parse_worker_stack_bytes: default_code_indexing_parse_worker_stack_bytes(),
+            min_completeness_ratio: default_code_indexing_min_completeness_ratio(),
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
             per_file_parse_timeout_ms: default_code_indexing_per_file_parse_timeout_ms(),
             per_file_walk_timeout_ms: default_code_indexing_per_file_walk_timeout_ms(),

@@ -54,9 +54,12 @@ impl IndexOutcome {
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
+    emitted_definitions: AtomicUsize,
+    min_completeness_ratio: f64,
     checkpoint: CodeIndexingCheckpoint,
     store: Arc<dyn CodeCheckpointStore>,
     cleaner: Arc<dyn StaleDataCleaner>,
+    metrics: CodeMetrics,
     inflight: Arc<AtomicUsize>,
 }
 
@@ -79,10 +82,11 @@ impl ProjectCommit {
             return;
         }
         let cp = &self.checkpoint;
-        if let Err(error) = self
-            .cleaner
-            .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
-            .await
+        if self.stale_cleanup_allowed(cp).await
+            && let Err(error) = self
+                .cleaner
+                .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
+                .await
         {
             warn!(
                 project_id = cp.project_id,
@@ -102,6 +106,49 @@ impl ProjectCommit {
                 "failed to checkpoint code indexing; project will be re-indexed",
             ),
         }
+    }
+
+    /// Guard the destructive stale-cleanup: a run that re-emitted far fewer definitions than are
+    /// currently live is degraded (partial parse, upstream under-emission), and cleaning would
+    /// tombstone the prior good rows it failed to reproduce. Skip cleanup on such a run so the
+    /// worst case is bounded stale rows, never a wipe. On a count-read failure, err toward the
+    /// safe side and skip.
+    async fn stale_cleanup_allowed(&self, cp: &CodeIndexingCheckpoint) -> bool {
+        let live = match self
+            .cleaner
+            .count_live_definitions(&cp.traversal_path, cp.project_id, &cp.branch)
+            .await
+        {
+            Ok(live) => live,
+            Err(error) => {
+                warn!(
+                    project_id = cp.project_id,
+                    %error,
+                    "could not read live definition count; skipping stale cleanup this run"
+                );
+                self.metrics.record_stale_cleanup_skipped("count_failed");
+                return false;
+            }
+        };
+
+        if live == 0 {
+            return true;
+        }
+
+        let emitted = self.emitted_definitions.load(Ordering::Acquire) as f64;
+        let floor = live as f64 * self.min_completeness_ratio;
+        if emitted < floor {
+            warn!(
+                project_id = cp.project_id,
+                emitted = emitted as u64,
+                live,
+                ratio = self.min_completeness_ratio,
+                "degraded code-indexing run re-emitted too few definitions; skipping stale cleanup to protect prior data"
+            );
+            self.metrics.record_stale_cleanup_skipped("degraded_run");
+            return false;
+        }
+        true
     }
 }
 
@@ -372,6 +419,10 @@ impl CodeIndexingPipeline {
 
         self.record_indexing_results(&result, observer, request, indexing_start);
 
+        commit
+            .emitted_definitions
+            .store(result.stats.definitions_count, Ordering::Release);
+
         if let Some(error) = result.errors.iter().find(|error| error.fatal) {
             // Some batches may already have flushed; mark the commit failed and drop the
             // sentinel so it never checkpoints and the project is re-indexed.
@@ -454,6 +505,8 @@ impl CodeIndexingPipeline {
         let commit = Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1),
             failed: AtomicBool::new(false),
+            emitted_definitions: AtomicUsize::new(0),
+            min_completeness_ratio: self.pipeline_config.min_completeness_ratio,
             checkpoint: CodeIndexingCheckpoint {
                 traversal_path: request.traversal_path.clone(),
                 project_id: request.project_id,
@@ -464,6 +517,7 @@ impl CodeIndexingPipeline {
             },
             store: self.checkpoint_store.clone(),
             cleaner: self.stale_data_cleaner.clone(),
+            metrics: self.metrics.clone(),
             inflight: self.inflight.clone(),
         });
 
@@ -661,6 +715,8 @@ mod tests {
         Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1 + batches),
             failed: AtomicBool::new(false),
+            emitted_definitions: AtomicUsize::new(0),
+            min_completeness_ratio: 0.5,
             checkpoint: CodeIndexingCheckpoint {
                 traversal_path: "1/7/".into(),
                 project_id: 7,
@@ -671,6 +727,7 @@ mod tests {
             },
             store,
             cleaner,
+            metrics: CodeMetrics::with_meter(&crate::testkit::test_meter()),
             inflight,
         })
     }
@@ -733,6 +790,63 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "a failed flush must leave the project un-checkpointed for re-indexing",
+        );
+    }
+
+    #[tokio::test]
+    async fn degraded_run_skips_stale_cleanup() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        *cleaner.live_definitions.lock() = 1000;
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store, cleaner.clone(), inflight.clone(), 1);
+        commit.emitted_definitions.store(100, Ordering::Release);
+
+        commit.clone().release();
+        commit.release();
+        settle(&inflight).await;
+
+        assert!(
+            cleaner.calls.lock().is_empty(),
+            "100 emitted vs 1000 live is below the 0.5 ratio; cleanup must be skipped",
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_run_runs_stale_cleanup() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        *cleaner.live_definitions.lock() = 1000;
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store, cleaner.clone(), inflight.clone(), 1);
+        commit.emitted_definitions.store(900, Ordering::Release);
+
+        commit.clone().release();
+        commit.release();
+        settle(&inflight).await;
+
+        assert_eq!(
+            cleaner.calls.lock().len(),
+            1,
+            "900 emitted vs 1000 live clears the ratio; cleanup must run",
+        );
+    }
+
+    #[tokio::test]
+    async fn first_index_with_no_live_data_runs_cleanup() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store, cleaner.clone(), inflight.clone(), 1);
+
+        commit.clone().release();
+        commit.release();
+        settle(&inflight).await;
+
+        assert_eq!(
+            cleaner.calls.lock().len(),
+            1,
+            "zero live rows means nothing to protect; the gate must not block cleanup",
         );
     }
 
