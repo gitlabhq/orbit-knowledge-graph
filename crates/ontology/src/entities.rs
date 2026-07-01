@@ -135,8 +135,6 @@ pub struct StatisticsExclude {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionConfig {
     pub strategy: PartitionStrategy,
-    pub include_entities: Vec<String>,
-    pub include_edge_tables: Vec<String>,
     pub partitioned_tables: std::collections::BTreeSet<String>,
 }
 

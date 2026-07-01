@@ -634,6 +634,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                         "partition.include_entities: '{entity}' is not a node entity"
                     ))
                 })?;
+                if node.global {
+                    return Err(OntologyError::Validation(format!(
+                        "partition.include_entities: '{entity}' is a global entity with no \
+                         traversal_path and cannot be partitioned"
+                    )));
+                }
                 partitioned_tables.insert(node.destination_table.clone());
             }
             for table in &p.include_edge_tables {
@@ -649,8 +655,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     buckets: hb.buckets,
                     column: hb.column,
                 },
-                include_entities: p.include_entities,
-                include_edge_tables: p.include_edge_tables,
                 partitioned_tables,
             })
         })
