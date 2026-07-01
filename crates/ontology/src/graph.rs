@@ -319,103 +319,94 @@ mod tests {
         }
     }
 
-    fn chain() -> OntologyGraph {
-        let ont = Ontology::new()
-            .with_nodes(["A", "B", "C", "D"])
-            .with_edges(["R", "S"])
-            .with_edge_variant(edge("R", "A", "B"))
-            .with_edge_variant(edge("R", "B", "C"))
-            .with_edge_variant(edge("S", "C", "D"));
+    fn graph_of(variants: &[(&str, &str, &str)]) -> OntologyGraph {
+        let nodes: BTreeSet<&str> = variants.iter().flat_map(|&(_, s, t)| [s, t]).collect();
+        let kinds: BTreeSet<&str> = variants.iter().map(|&(k, _, _)| k).collect();
+        let mut ont = Ontology::new().with_nodes(nodes).with_edges(kinds);
+        for &(kind, s, t) in variants {
+            ont = ont.with_edge_variant(edge(kind, s, t));
+        }
         ont.graph()
     }
 
-    #[test]
-    fn neighbors_are_directional_and_sorted() {
-        let g = chain();
-        let out = g.neighbors("B", EdgeDirection::Outgoing);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].neighbor_kind, "C");
-        let incoming = g.neighbors("B", EdgeDirection::Incoming);
-        assert_eq!(incoming[0].neighbor_kind, "A");
+    fn set(items: &[&str]) -> BTreeSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn embedded() -> OntologyGraph {
+        Ontology::load_embedded().unwrap().graph()
     }
 
     #[test]
-    fn edges_between_lists_kinds_in_one_orientation() {
-        let g = chain();
-        assert_eq!(g.edges_between("A", "B"), vec!["R".to_string()]);
+    fn neighbors_are_directional() {
+        let g = graph_of(&[("R", "A", "B"), ("R", "B", "C")]);
+        assert_eq!(
+            g.neighbors("B", EdgeDirection::Outgoing)[0].neighbor_kind,
+            "C"
+        );
+        assert_eq!(
+            g.neighbors("B", EdgeDirection::Incoming)[0].neighbor_kind,
+            "A"
+        );
+    }
+
+    #[test]
+    fn edges_between_is_oriented() {
+        let g = graph_of(&[("R", "A", "B")]);
+        assert_eq!(g.edges_between("A", "B"), ["R"]);
         assert!(g.edges_between("B", "A").is_empty());
     }
 
     #[test]
-    fn reachable_within_respects_hop_budget() {
-        let g = chain();
-        assert_eq!(g.reachable_within("A", 0), BTreeSet::new());
-        assert_eq!(
-            g.reachable_within("A", 1),
-            BTreeSet::from(["B".to_string()])
-        );
-        assert_eq!(
-            g.reachable_within("A", 3),
-            BTreeSet::from(["B".to_string(), "C".to_string(), "D".to_string()])
-        );
+    fn reachable_within_respects_budget_and_terminates_on_cycles() {
+        let chain = graph_of(&[("R", "A", "B"), ("R", "B", "C"), ("S", "C", "D")]);
+        assert_eq!(chain.reachable_within("A", 0), set(&[]));
+        assert_eq!(chain.reachable_within("A", 1), set(&["B"]));
+        assert_eq!(chain.reachable_within("A", 3), set(&["B", "C", "D"]));
+
+        let cycle = graph_of(&[("R", "X", "Y"), ("R", "Y", "X")]);
+        assert_eq!(cycle.reachable_within("X", 10), set(&["Y"]));
     }
 
     #[test]
-    fn reachable_within_terminates_on_cycles() {
-        let ont = Ontology::new()
-            .with_nodes(["X", "Y"])
-            .with_edges(["R"])
-            .with_edge_variant(edge("R", "X", "Y"))
-            .with_edge_variant(edge("R", "Y", "X"));
-        let g = ont.graph();
-        assert_eq!(
-            g.reachable_within("X", 10),
-            BTreeSet::from(["Y".to_string()])
-        );
+    fn reachable_within_types_follows_only_declared_kinds() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "B", "C")]);
+        let only_r = HashSet::from(["R"]);
+        assert_eq!(g.reachable_within_types("A", 2, Some(&only_r)), set(&["B"]));
+        assert_eq!(g.reachable_within("A", 2), set(&["B", "C"]));
     }
 
     #[test]
     fn table_to_node_strips_version_prefix() {
-        let g = Ontology::load_embedded().unwrap().graph();
+        let g = embedded();
         assert_eq!(g.table_to_node("gl_project"), Some("Project"));
         assert_eq!(g.table_to_node("v42_gl_project"), Some("Project"));
         assert_eq!(g.table_to_node("gl_edge"), None);
     }
 
     #[test]
-    fn fk_reaches_covers_fk_synthesized_edges() {
-        let g = Ontology::load_embedded().unwrap().graph();
+    fn fk_reaches_is_directional() {
+        let g = embedded();
         assert!(g.fk_reaches("File", "Project"));
         assert!(!g.fk_reaches("Project", "File"));
     }
 
     #[test]
     fn anchor_fk_mappings_are_deduplicated_by_column() {
-        let g = Ontology::load_embedded().unwrap().graph();
+        let g = embedded();
         let mapped: Vec<_> = g.anchor_fk_mappings().collect();
-        let mut columns: Vec<&str> = mapped.iter().map(|(fk, _)| *fk).collect();
-        let unique = columns.len();
-        columns.sort();
-        columns.dedup();
-        assert_eq!(columns.len(), unique);
+        let columns: BTreeSet<&str> = mapped.iter().map(|(fk, _)| *fk).collect();
+        assert_eq!(columns.len(), mapped.len());
         assert!(mapped.contains(&("project_id", "Project")));
     }
 
     #[test]
-    fn edge_template_carries_scope_and_fk() {
-        let g = Ontology::load_embedded().unwrap().graph();
-        let contains = g
-            .edge_template("CONTAINS", "Group", "Project")
-            .expect("Group→Project CONTAINS triple exists");
+    fn templates_carry_static_facts() {
+        let g = embedded();
+        let contains = g.edge_template("CONTAINS", "Group", "Project").unwrap();
         assert!(contains.scope_preserving);
         assert_eq!(contains.destination_table, "gl_edge");
-    }
-
-    #[test]
-    fn node_template_reports_global_and_role_floor() {
-        let g = Ontology::load_embedded().unwrap().graph();
-        let user = g.node_template("User").expect("User node exists");
-        assert!(user.global);
+        assert!(g.node_template("User").unwrap().global);
         assert!(g.is_global("User"));
     }
 }

@@ -1458,77 +1458,37 @@ mod tests {
         );
     }
 
-    #[test]
-    fn rejects_relationship_type_that_does_not_connect_endpoints() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "g"}]
-            }"#,
-            "does not connect \"User\" and \"Group\"",
-        );
+    fn traversal(from: &str, to: &str, rel_type: &str, max_hops: u32) -> String {
+        format!(
+            r#"{{"query_type": "traversal",
+                "nodes": [{{"id": "a", "entity": "{from}", "node_ids": [1]}}, {{"id": "b", "entity": "{to}"}}],
+                "relationships": [{{"type": "{rel_type}", "from": "a", "to": "b", "max_hops": {max_hops}}}]}}"#
+        )
     }
 
     #[test]
-    fn reachability_hint_names_the_connecting_types() {
-        assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "g"}]
-            }"#,
-            "MEMBER_OF",
-        );
+    fn rejects_relationship_type_that_does_not_connect_endpoints() {
+        let query = traversal("User", "Group", "AUTHORED", 1);
+        assert_rejects(&query, "does not connect \"User\" and \"Group\"");
+        assert_rejects(&query, "MEMBER_OF");
     }
 
     #[test]
     fn wildcard_relationship_type_skips_reachability() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "*", "from": "u", "to": "g"}]
-            }"#,
-        );
+        assert_ok(&traversal("User", "Group", "*", 1));
     }
 
     #[test]
     fn multi_hop_reachability_is_scoped_to_declared_types() {
         assert_rejects(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [1]},
-                    {"id": "g", "entity": "Group"}
-                ],
-                "relationships": [{"type": "AUTHORED", "from": "u", "to": "g", "max_hops": 2}]
-            }"#,
+            &traversal("User", "Group", "AUTHORED", 2),
             "does not connect \"User\" and \"Group\"",
         );
     }
 
     #[test]
     fn accepts_multi_hop_path_following_declared_type() {
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [
-                    {"id": "p", "entity": "Project", "node_ids": [1]},
-                    {"id": "u", "entity": "User"}
-                ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
-            }"#,
-        );
+        assert_ok(&traversal("Project", "User", "CONTAINS", 2));
     }
 
     #[test]
