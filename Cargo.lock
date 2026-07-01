@@ -13874,6 +13874,7 @@ dependencies = [
  "cpu-time",
  "serde",
  "smallvec",
+ "stacker",
  "thiserror 2.0.18",
  "tracing",
  "tree-sitter",
