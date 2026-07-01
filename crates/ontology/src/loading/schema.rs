@@ -111,7 +111,7 @@ pub(super) struct StatisticsExcludeYaml {
 pub(super) struct PartitionYaml {
     pub strategy: PartitionStrategyYaml,
     #[serde(default)]
-    pub exclude: Vec<String>,
+    pub include: Vec<String>,
 }
 
 /// One optional block per strategy; exactly one must be set (enforced in the

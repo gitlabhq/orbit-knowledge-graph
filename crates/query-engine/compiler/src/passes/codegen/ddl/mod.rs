@@ -340,12 +340,9 @@ fn partition_by(
     table: &str,
     columns: &[StorageColumn],
 ) -> Vec<String> {
-    let Some(p) = partition else {
+    let Some(p) = partition.filter(|p| p.is_partitioned(table)) else {
         return vec![];
     };
-    if p.is_excluded(table) {
-        return vec![];
-    }
     let column = p.column();
     if columns.iter().any(|c| c.name == column) {
         let expr = crate::passes::partition::partition_expr(

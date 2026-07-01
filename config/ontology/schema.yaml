@@ -269,20 +269,9 @@ settings:
       hash_bucket:
         buckets: 50
         column: traversal_path
-    # Tables too small to benefit from bucketing (each well under the part-count
-    # pressure threshold); partitioning them only adds per-partition metadata
-    # overhead. Left as single-partition ReplacingMergeTrees.
-    exclude:
-      - gl_package
-      - gl_work_item
-      - gl_environment
-      - gl_container_repository
-      - gl_label
-      - gl_project
-      - gl_branch
-      - gl_vulnerability_scanner
-      - gl_group
-      - gl_milestone
+    # Node entities large enough to benefit from bucketing. Others stay
+    # single-partition; edge tables are always partitioned.
+    include: [MergeRequest, MergeRequestDiff, MergeRequestDiffFile, Note, Pipeline, Stage, Job, Deployment, Commit, Finding, Vulnerability, VulnerabilityOccurrence, VulnerabilityIdentifier, SecurityScan, Dependency, Definition, File, Directory, ImportedSymbol]
   internal_column_prefix: "_gkg_"
   local_db:
     entities:

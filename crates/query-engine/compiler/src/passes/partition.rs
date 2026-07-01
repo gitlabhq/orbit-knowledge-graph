@@ -35,11 +35,9 @@ pub fn apply_partition_pruning(
 fn prune_query(q: &mut Query, partition: &PartitionConfig, authorized: Option<&[Expr]>) {
     let strategy = &partition.strategy;
     if let Some(where_clause) = &q.where_clause {
-        // Aliases whose table is partitioned (not excluded); excluded tables have
-        // no PARTITION BY, so a `_partition_id` predicate there would match no part.
         let partitioned: std::collections::HashSet<String> = collect_aliased_tables(&q.from)
             .into_iter()
-            .filter(|(_, table)| !partition.is_excluded(table))
+            .filter(|(_, table)| partition.is_partitioned(table))
             .map(|(alias, _)| alias)
             .collect();
         let pinned = pinning_prefixes_by_alias(where_clause, strategy);
@@ -359,9 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn no_prune_for_excluded_table() {
-        // gl_project is in the ontology partition exclude list, so it has no
-        // PARTITION BY; a _partition_id predicate there would match no part.
+    fn no_prune_for_unpartitioned_table() {
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
                 expr: Expr::col("p", "id"),
@@ -378,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn excluded_table_skipped_by_authorized_fallback() {
+    fn unpartitioned_table_skipped_by_authorized_fallback() {
         let ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/200/".into()]).unwrap();
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {

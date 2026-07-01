@@ -694,11 +694,11 @@
               "maxProperties": 1,
               "additionalProperties": false
             },
-            "exclude": {
+            "include": {
               "type": "array",
               "items": { "type": "string" },
               "uniqueItems": true,
-              "description": "Physical table names left unpartitioned because they are too small to benefit from bucketing."
+              "description": "Node entity names to partition; other node tables stay unpartitioned. Edge tables are always partitioned."
             }
           },
           "required": ["strategy"],
