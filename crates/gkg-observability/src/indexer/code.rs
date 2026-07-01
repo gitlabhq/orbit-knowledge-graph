@@ -63,14 +63,6 @@ pub const REPOSITORY_EMPTY: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
-pub const STALE_CLEANUP_SKIPPED: MetricSpec = MetricSpec::counter(
-    "gkg.indexer.code.stale_cleanup.skipped",
-    "Runs whose destructive stale-cleanup was skipped to protect prior data (degraded run or count read failure).",
-    None,
-    &[labels::REASON],
-    DOMAIN,
-);
-
 pub const REPOSITORY_INDEXING_COMPLETED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.repository.indexing.completed",
     "Repository indexing runs completed by the code indexing handler.",
@@ -228,7 +220,6 @@ pub const CATALOG: &[&MetricSpec] = &[
     &REPOSITORY_RESOLUTION_STRATEGY,
     &REPOSITORY_CLEANUP,
     &REPOSITORY_EMPTY,
-    &STALE_CLEANUP_SKIPPED,
     &REPOSITORY_INDEXING_COMPLETED,
     &REPOSITORY_SOURCE_SIZE,
     &INDEXING_DURATION,

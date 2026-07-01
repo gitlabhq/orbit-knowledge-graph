@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use arrow::array::UInt64Array;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::try_join_all;
@@ -19,15 +18,6 @@ pub trait StaleDataCleaner: Send + Sync {
         branch: &str,
         watermark_time: DateTime<Utc>,
     ) -> Result<(), StaleDataCleanerError>;
-
-    /// Current live (non-tombstoned) definition rows for the project, i.e. the prior good data a
-    /// re-index would tombstone. The completeness gate compares this against what the run emitted.
-    async fn count_live_definitions(
-        &self,
-        traversal_path: &str,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<u64, StaleDataCleanerError>;
 }
 
 #[derive(Debug, Error)]
@@ -48,7 +38,6 @@ pub struct ClickHouseStaleDataCleaner {
     client: Arc<ArrowClickHouseClient>,
     node_queries: Vec<(String, String)>,
     edge_queries: Vec<(String, String)>,
-    definition_table: String,
 }
 
 impl ClickHouseStaleDataCleaner {
@@ -76,7 +65,6 @@ impl ClickHouseStaleDataCleaner {
             client,
             node_queries,
             edge_queries,
-            definition_table: table_names.definition.clone(),
         }
     }
 
@@ -255,49 +243,6 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
         debug!(project_id, branch, "stale data deletion complete");
         Ok(())
     }
-
-    async fn count_live_definitions(
-        &self,
-        traversal_path: &str,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<u64, StaleDataCleanerError> {
-        let table = &self.definition_table;
-        let query = format!(
-            r#"
-            SELECT count() AS live
-            FROM {table} FINAL
-            WHERE traversal_path = {{traversal_path:String}}
-              AND project_id = {{project_id:Int64}}
-              AND branch = {{branch:String}}
-              AND _deleted = false
-        "#
-        );
-
-        let batches = self
-            .client
-            .query(&query)
-            .param("traversal_path", traversal_path)
-            .param("project_id", project_id)
-            .param("branch", branch)
-            .fetch_arrow()
-            .await
-            .map_err(|e| StaleDataCleanerError::Query {
-                table: table.clone(),
-                traversal_path: traversal_path.to_string(),
-                project_id,
-                branch: branch.to_string(),
-                reason: e.to_string(),
-            })?;
-
-        let count = batches
-            .first()
-            .filter(|b| b.num_rows() > 0)
-            .and_then(|b| b.column(0).as_any().downcast_ref::<UInt64Array>())
-            .map(|c| c.value(0))
-            .unwrap_or(0);
-        Ok(count)
-    }
 }
 
 #[cfg(test)]
@@ -312,7 +257,6 @@ pub mod test_utils {
             reason = "test-only call recorder; the tuple mirrors the trait method arguments"
         )]
         pub calls: Mutex<Vec<(String, i64, String, DateTime<Utc>)>>,
-        pub live_definitions: Mutex<u64>,
     }
 
     #[async_trait]
@@ -331,15 +275,6 @@ pub mod test_utils {
                 watermark_time,
             ));
             Ok(())
-        }
-
-        async fn count_live_definitions(
-            &self,
-            _traversal_path: &str,
-            _project_id: i64,
-            _branch: &str,
-        ) -> Result<u64, StaleDataCleanerError> {
-            Ok(*self.live_definitions.lock())
         }
     }
 }

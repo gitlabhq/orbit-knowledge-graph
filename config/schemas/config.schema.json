@@ -74,7 +74,6 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "max_total_bytes": 2000000000,
-              "min_completeness_ratio": 0.5,
               "parse_worker_stack_bytes": 8388608,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
@@ -462,12 +461,6 @@
           "default": 2000000000,
           "minimum": 0
         },
-        "min_completeness_ratio": {
-          "description": "Completeness gate for the destructive stale-cleanup: a re-index that emits fewer definitions than this fraction of the currently-live count is treated as degraded and skips cleanup, so a partial run cannot tombstone prior good data. Defaults to 0.5.",
-          "type": "number",
-          "format": "double",
-          "default": 0.5
-        },
         "parse_worker_stack_bytes": {
           "description": "Stack size in bytes for each parse worker thread. The native tree-sitter parse recurses on this stack and a deeply-nested file can overflow it with an uncatchable crash, so it needs headroom. 0 = the code-graph default (8 MiB). Defaults to 8388608.",
           "type": "integer",
@@ -579,7 +572,6 @@
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
             "max_total_bytes": 2000000000,
-            "min_completeness_ratio": 0.5,
             "parse_worker_stack_bytes": 8388608,
             "per_file_parse_timeout_ms": 100,
             "per_file_ssa_timeout_ms": 100,
@@ -686,7 +678,6 @@
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
                 "max_total_bytes": 2000000000,
-                "min_completeness_ratio": 0.5,
                 "parse_worker_stack_bytes": 8388608,
                 "per_file_parse_timeout_ms": 100,
                 "per_file_ssa_timeout_ms": 100,
@@ -943,7 +934,6 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "max_total_bytes": 2000000000,
-              "min_completeness_ratio": 0.5,
               "parse_worker_stack_bytes": 8388608,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
