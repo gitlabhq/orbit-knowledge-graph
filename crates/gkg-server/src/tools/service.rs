@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use jsonschema::Validator;
 use ontology::Ontology;
-use ontology::introspection::{
-    IntrospectionScope, SchemaDomain, SchemaResponse, build_schema_response,
-};
+use ontology::introspection::{SchemaDomain, SchemaResponse, build_schema_response};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -334,7 +332,7 @@ impl ToolService {
     }
 
     fn build_graph_schema_response(&self, expand_nodes: &[String]) -> SchemaResponse {
-        build_schema_response(&self.ontology, IntrospectionScope::All, expand_nodes)
+        build_schema_response(&self.ontology, expand_nodes)
     }
 
     pub fn build_domains(&self, expand_nodes: &[String]) -> Vec<SchemaDomain> {

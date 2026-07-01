@@ -1,21 +1,11 @@
-//! Consumed by both the `gkg-server` MCP `get_graph_schema` tool (full
-//! ontology) and the local `orbit` CLI `schema` subcommand (filtered to
-//! entities present in the local DuckDB graph).
+//! Builds the `get_graph_schema` response for the `gkg-server` MCP tool.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
 use crate::etl::EdgeDirection;
-use crate::{Adjacency, EdgeEntity, Field, Ontology, OntologyGraph};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum IntrospectionScope {
-    #[default]
-    All,
-    /// Driven by `settings.local_db.entities` in the ontology YAML.
-    Local,
-}
+use crate::{Adjacency, Field, Ontology, OntologyGraph};
 
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
@@ -43,35 +33,18 @@ pub enum SchemaNode {
 
 /// `expand_nodes`: pass `["*"]` to expand every node, or specific names.
 #[must_use]
-pub fn build_schema_response(
-    ontology: &Ontology,
-    scope: IntrospectionScope,
-    expand_nodes: &[String],
-) -> SchemaResponse {
+pub fn build_schema_response(ontology: &Ontology, expand_nodes: &[String]) -> SchemaResponse {
     SchemaResponse {
-        domains: build_domains(ontology, scope, expand_nodes),
-        edges: build_edge_names(ontology, scope),
+        domains: build_domains(ontology, expand_nodes),
+        edges: ontology.edge_names().map(str::to_string).collect(),
     }
 }
 
-fn build_domains(
-    ontology: &Ontology,
-    scope: IntrospectionScope,
-    expand_nodes: &[String],
-) -> Vec<SchemaDomain> {
+fn build_domains(ontology: &Ontology, expand_nodes: &[String]) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
-
-    let local_names: Vec<&str> = match scope {
-        IntrospectionScope::Local => ontology.local_entity_names(),
-        IntrospectionScope::All => Vec::new(),
-    };
     let graph = ontology.graph();
 
     for node in ontology.nodes() {
-        if scope == IntrospectionScope::Local && !local_names.contains(&node.name.as_str()) {
-            continue;
-        }
-
         let domain_name = if node.domain.is_empty() {
             "other".to_string()
         } else {
@@ -81,16 +54,8 @@ fn build_domains(
         let should_expand = expand_nodes.iter().any(|n| n == "*" || n == &node.name);
 
         let node_info = if should_expand {
-            let fields: Vec<&Field> = match scope {
-                IntrospectionScope::Local => {
-                    ontology.local_entity_fields(&node.name).unwrap_or_default()
-                }
-                IntrospectionScope::All => node.fields.iter().collect(),
-            };
-
-            let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
-
-            let (outgoing, incoming) = node_relationships(&graph, scope, &local_names, &node.name);
+            let props: Vec<String> = node.fields.iter().map(format_property).collect();
+            let (outgoing, incoming) = node_relationships(&graph, &node.name);
 
             SchemaNode::Expanded {
                 name: node.name.clone(),
@@ -111,61 +76,14 @@ fn build_domains(
         .collect()
 }
 
-fn build_edge_names(ontology: &Ontology, scope: IntrospectionScope) -> Vec<String> {
-    let local_names: Vec<&str> = match scope {
-        IntrospectionScope::Local => ontology.local_entity_names(),
-        IntrospectionScope::All => Vec::new(),
-    };
-
-    ontology
-        .edge_names()
-        .filter(|edge_name| {
-            let variants = ontology.get_edge(edge_name).unwrap_or(&[]);
-            !filter_variants(variants, scope, &local_names).is_empty()
-        })
-        .map(|name| name.to_string())
-        .collect()
-}
-
-fn filter_variants<'a>(
-    variants: &'a [EdgeEntity],
-    scope: IntrospectionScope,
-    local_names: &[&str],
-) -> Vec<&'a EdgeEntity> {
-    match scope {
-        IntrospectionScope::All => variants.iter().collect(),
-        IntrospectionScope::Local => variants
-            .iter()
-            .filter(|e| {
-                local_names.contains(&e.source_kind.as_str())
-                    && local_names.contains(&e.target_kind.as_str())
-            })
-            .collect(),
-    }
-}
-
-fn node_relationships(
-    graph: &OntologyGraph,
-    scope: IntrospectionScope,
-    local_names: &[&str],
-    node_name: &str,
-) -> (Vec<String>, Vec<String>) {
-    let visible = |kind: &str| match scope {
-        IntrospectionScope::All => true,
-        IntrospectionScope::Local => {
-            local_names.contains(&node_name) && local_names.contains(&kind)
-        }
-    };
-
+fn node_relationships(graph: &OntologyGraph, node_name: &str) -> (Vec<String>, Vec<String>) {
     let group = |adjacencies: &[Adjacency], arrow: char| {
         let mut by_kind: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         for adj in adjacencies {
-            if visible(&adj.neighbor_kind) {
-                by_kind
-                    .entry(&adj.relationship_kind)
-                    .or_default()
-                    .insert(&adj.neighbor_kind);
-            }
+            by_kind
+                .entry(&adj.relationship_kind)
+                .or_default()
+                .insert(&adj.neighbor_kind);
         }
         by_kind
             .into_iter()
@@ -211,77 +129,9 @@ mod tests {
     }
 
     #[test]
-    fn local_scope_has_only_local_entities() {
+    fn contains_server_entities_and_edges() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
-
-        let all_node_names: Vec<String> = response
-            .domains
-            .iter()
-            .flat_map(|d| {
-                d.nodes.iter().map(|n| match n {
-                    SchemaNode::Name(s) => s.clone(),
-                    SchemaNode::Expanded { name, .. } => name.clone(),
-                })
-            })
-            .collect();
-
-        let expected: Vec<&str> = ont.local_entity_names();
-        assert_eq!(all_node_names.len(), expected.len());
-        for name in expected {
-            assert!(
-                all_node_names.iter().any(|n| n == name),
-                "expected {name} in local scope, got {all_node_names:?}"
-            );
-        }
-        for forbidden in ["User", "Project", "MergeRequest", "WorkItem"] {
-            assert!(
-                !all_node_names.iter().any(|n| n == forbidden),
-                "unexpected {forbidden} in local scope"
-            );
-        }
-    }
-
-    #[test]
-    fn local_scope_edges_are_present() {
-        let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
-
-        assert!(
-            !response.edges.is_empty(),
-            "expected at least one local edge"
-        );
-        for edge in &response.edges {
-            assert!(!edge.is_empty(), "edge name should not be empty");
-        }
-    }
-
-    #[test]
-    fn local_expand_definition_includes_traversal_path() {
-        let ont = load();
-        let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["Definition".to_string()]);
-
-        let props = response
-            .domains
-            .iter()
-            .flat_map(|d| d.nodes.iter())
-            .find_map(|n| match n {
-                SchemaNode::Expanded { name, props, .. } if name == "Definition" => Some(props),
-                _ => None,
-            })
-            .expect("Definition should be expanded");
-
-        assert!(
-            props.iter().any(|p| p.starts_with("traversal_path:")),
-            "traversal_path should be included in local scope for hydration TP narrowing"
-        );
-    }
-
-    #[test]
-    fn all_scope_contains_server_entities() {
-        let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::All, &[]);
+        let response = build_schema_response(&ont, &[]);
         let names: Vec<String> = response
             .domains
             .iter()
@@ -297,9 +147,27 @@ mod tests {
     }
 
     #[test]
+    fn expand_definition_includes_traversal_path() {
+        let ont = load();
+        let response = build_schema_response(&ont, &["Definition".to_string()]);
+
+        let props = response
+            .domains
+            .iter()
+            .flat_map(|d| d.nodes.iter())
+            .find_map(|n| match n {
+                SchemaNode::Expanded { name, props, .. } if name == "Definition" => Some(props),
+                _ => None,
+            })
+            .expect("Definition should be expanded");
+
+        assert!(props.iter().any(|p| p.starts_with("traversal_path:")));
+    }
+
+    #[test]
     fn wildcard_expands_every_node() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &["*".to_string()]);
+        let response = build_schema_response(&ont, &["*".to_string()]);
         for domain in &response.domains {
             for node in &domain.nodes {
                 assert!(
@@ -313,8 +181,7 @@ mod tests {
     #[test]
     fn expanded_nodes_list_relationships() {
         let ont = load();
-        let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]);
+        let response = build_schema_response(&ont, &["File".to_string()]);
 
         let file = response
             .domains
@@ -349,8 +216,7 @@ mod tests {
     #[test]
     fn property_format_is_name_colon_type() {
         let ont = load();
-        let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]);
+        let response = build_schema_response(&ont, &["File".to_string()]);
         let props = response
             .domains
             .iter()
