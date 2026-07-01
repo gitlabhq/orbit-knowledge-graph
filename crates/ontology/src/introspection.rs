@@ -2,11 +2,12 @@
 //! ontology) and the local `orbit` CLI `schema` subcommand (filtered to
 //! entities present in the local DuckDB graph).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::{EdgeEntity, Field, Ontology};
+use crate::etl::EdgeDirection;
+use crate::{Adjacency, EdgeEntity, Field, Ontology, OntologyGraph};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntrospectionScope {
@@ -64,6 +65,7 @@ fn build_domains(
         IntrospectionScope::Local => ontology.local_entity_names(),
         IntrospectionScope::All => Vec::new(),
     };
+    let graph = ontology.graph();
 
     for node in ontology.nodes() {
         if scope == IntrospectionScope::Local && !local_names.contains(&node.name.as_str()) {
@@ -88,7 +90,7 @@ fn build_domains(
 
             let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
 
-            let (outgoing, incoming) = node_relationships(ontology, scope, &node.name);
+            let (outgoing, incoming) = node_relationships(&graph, scope, &local_names, &node.name);
 
             SchemaNode::Expanded {
                 name: node.name.clone(),
@@ -143,50 +145,41 @@ fn filter_variants<'a>(
 }
 
 fn node_relationships(
-    ontology: &Ontology,
+    graph: &OntologyGraph,
     scope: IntrospectionScope,
+    local_names: &[&str],
     node_name: &str,
 ) -> (Vec<String>, Vec<String>) {
-    let local_names: Vec<&str> = match scope {
-        IntrospectionScope::Local => ontology.local_entity_names(),
-        IntrospectionScope::All => Vec::new(),
+    let visible = |kind: &str| match scope {
+        IntrospectionScope::All => true,
+        IntrospectionScope::Local => {
+            local_names.contains(&node_name) && local_names.contains(&kind)
+        }
     };
 
-    let mut outgoing = Vec::new();
-    let mut incoming = Vec::new();
-
-    for edge_name in ontology.edge_names() {
-        let Some(variants) = ontology.get_edge(edge_name) else {
-            continue;
-        };
-        let filtered = filter_variants(variants, scope, &local_names);
-
-        let mut out_targets: Vec<&str> = filtered
-            .iter()
-            .filter(|e| e.source_kind == node_name)
-            .map(|e| e.target_kind.as_str())
-            .collect();
-        out_targets.sort();
-        out_targets.dedup();
-
-        let mut in_sources: Vec<&str> = filtered
-            .iter()
-            .filter(|e| e.target_kind == node_name)
-            .map(|e| e.source_kind.as_str())
-            .collect();
-        in_sources.sort();
-        in_sources.dedup();
-
-        if !out_targets.is_empty() {
-            outgoing.push(format!("{} → [{}]", edge_name, out_targets.join(", ")));
+    let group = |adjacencies: &[Adjacency], arrow: char| {
+        let mut by_kind: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for adj in adjacencies {
+            if visible(&adj.neighbor_kind) {
+                by_kind
+                    .entry(&adj.relationship_kind)
+                    .or_default()
+                    .insert(&adj.neighbor_kind);
+            }
         }
-        if !in_sources.is_empty() {
-            incoming.push(format!("{} ← [{}]", edge_name, in_sources.join(", ")));
-        }
-    }
+        by_kind
+            .into_iter()
+            .map(|(kind, neighbors)| {
+                format!(
+                    "{kind} {arrow} [{}]",
+                    neighbors.into_iter().collect::<Vec<_>>().join(", ")
+                )
+            })
+            .collect()
+    };
 
-    outgoing.sort();
-    incoming.sort();
+    let outgoing = group(graph.neighbors(node_name, EdgeDirection::Outgoing), '→');
+    let incoming = group(graph.neighbors(node_name, EdgeDirection::Incoming), '←');
     (outgoing, incoming)
 }
 

@@ -187,6 +187,7 @@ impl<'a> Validator<'a> {
         self.check_duplicate_node_ids(input)?;
         self.check_pagination(input)?;
         self.check_relationships(input)?;
+        self.check_reachability(input)?;
         self.check_aggregations(input)?;
         self.check_order_by(input)?;
         self.check_path(input)?;
@@ -672,6 +673,109 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Reject a relationship whose declared endpoint entities are not connected
+    /// by any of its declared types within the hop budget. The flat schema only
+    /// checks that each edge *name* exists, so `Project -[AUTHORED]-> User`
+    /// (no such triple) passes schema validation and fails later with an opaque
+    /// empty result. This surfaces it pre-execution and names the kinds that do
+    /// connect the two endpoints.
+    fn check_reachability(&self, input: &Input) -> Result<()> {
+        if !matches!(
+            input.query_type,
+            QueryType::Traversal | QueryType::Aggregation
+        ) || input.is_search()
+        {
+            return Ok(());
+        }
+
+        let entity_of: std::collections::HashMap<&str, &str> = input
+            .nodes
+            .iter()
+            .filter_map(|n| n.entity.as_deref().map(|e| (n.id.as_str(), e)))
+            .collect();
+
+        let graph = self.ontology.graph();
+
+        for (i, rel) in input.relationships.iter().enumerate() {
+            if rel.types.iter().any(|t| t == "*") {
+                continue;
+            }
+            let (Some(&from), Some(&to)) = (
+                entity_of.get(rel.from.as_str()),
+                entity_of.get(rel.to.as_str()),
+            ) else {
+                continue;
+            };
+
+            if graph.fk_reaches(from, to) || graph.fk_reaches(to, from) {
+                continue;
+            }
+
+            let connecting = self.kinds_connecting(&graph, from, to);
+            if rel.max_hops > 1 {
+                if from == to
+                    || graph
+                        .reachable_within(from, rel.max_hops as usize)
+                        .contains(to)
+                    || graph
+                        .reachable_within(to, rel.max_hops as usize)
+                        .contains(from)
+                {
+                    continue;
+                }
+            } else if rel.types.iter().any(|t| connecting.contains(t.as_str())) {
+                continue;
+            }
+
+            let hint = if connecting.is_empty() {
+                let mut kinds: Vec<&str> = graph
+                    .neighbors(from, ontology::EdgeDirection::Outgoing)
+                    .iter()
+                    .chain(graph.neighbors(from, ontology::EdgeDirection::Incoming))
+                    .map(|a| a.neighbor_kind.as_str())
+                    .collect();
+                kinds.sort();
+                kinds.dedup();
+                if kinds.is_empty() {
+                    format!("\"{from}\" has no relationships in the ontology")
+                } else {
+                    format!("\"{from}\" connects only to: [{}]", kinds.join(", "))
+                }
+            } else {
+                format!(
+                    "relationship types connecting \"{from}\" and \"{to}\": [{}]",
+                    connecting.iter().copied().collect::<Vec<_>>().join(", ")
+                )
+            };
+
+            return Err(QueryError::ReferenceError(format!(
+                "relationship[{i}] type {:?} does not connect \"{from}\" and \"{to}\"; {hint}",
+                rel.types
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Relationship kinds connecting two entity kinds in either orientation.
+    /// Direction is deliberately ignored: the ontology stores each triple in one
+    /// canonical orientation and the lowerer matches it regardless of the
+    /// query's declared direction, so a stricter check would false-positive.
+    fn kinds_connecting<'g>(
+        &self,
+        graph: &'g ontology::OntologyGraph,
+        a: &str,
+        b: &str,
+    ) -> std::collections::BTreeSet<&'g str> {
+        graph
+            .neighbors(a, ontology::EdgeDirection::Outgoing)
+            .iter()
+            .chain(graph.neighbors(a, ontology::EdgeDirection::Incoming))
+            .filter(|adj| adj.neighbor_kind == b)
+            .map(|adj| adj.relationship_kind.as_str())
+            .collect()
+    }
+
     fn check_aggregations(&self, input: &Input) -> Result<()> {
         if input.query_type != QueryType::Aggregation {
             if !input.aggregation.group_by.is_empty() {
@@ -1042,10 +1146,28 @@ mod tests {
     use crate::input::parse_input;
     use ontology::{DataType, FieldSource, VirtualSource};
 
+    fn variant(kind: &str, source: &str, target: &str) -> ontology::EdgeEntity {
+        ontology::EdgeEntity {
+            relationship_kind: kind.to_string(),
+            source: source.to_string(),
+            source_kind: source.to_string(),
+            target: target.to_string(),
+            target_kind: target.to_string(),
+            destination_table: ontology::EDGE_TABLE.to_string(),
+            fk_column: None,
+            scope: None,
+        }
+    }
+
     fn test_ontology() -> Ontology {
         Ontology::new()
-            .with_nodes(["User", "Project", "Note"])
-            .with_edges(["AUTHORED", "CONTAINS"])
+            .with_nodes(["User", "Project", "Note", "Group", "MergeRequest"])
+            .with_edges(["AUTHORED", "CONTAINS", "MEMBER_OF"])
+            .with_edge_variant(variant("AUTHORED", "User", "Note"))
+            .with_edge_variant(variant("AUTHORED", "User", "MergeRequest"))
+            .with_edge_variant(variant("CONTAINS", "Project", "User"))
+            .with_edge_variant(variant("CONTAINS", "Project", "Project"))
+            .with_edge_variant(variant("MEMBER_OF", "User", "Group"))
             .with_fields(
                 "User",
                 [
@@ -1343,6 +1465,50 @@ mod tests {
                 ]
             }"#,
             "duplicate node id \"u\"",
+        );
+    }
+
+    #[test]
+    fn rejects_relationship_type_that_does_not_connect_endpoints() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "g"}]
+            }"#,
+            "does not connect \"User\" and \"Group\"",
+        );
+    }
+
+    #[test]
+    fn reachability_hint_names_the_connecting_types() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "g"}]
+            }"#,
+            "MEMBER_OF",
+        );
+    }
+
+    #[test]
+    fn wildcard_relationship_type_skips_reachability() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [{"type": "*", "from": "u", "to": "g"}]
+            }"#,
         );
     }
 
@@ -1960,6 +2126,7 @@ mod tests {
         let ontology = ontology::Ontology::new()
             .with_nodes(["User", "Note"])
             .with_edges(["AUTHORED"])
+            .with_edge_variant(variant("AUTHORED", "User", "Note"))
             .with_edge_columns([
                 ("traversal_path", DataType::String),
                 ("relationship_kind", DataType::String),
@@ -1994,6 +2161,7 @@ mod tests {
         let ontology = ontology::Ontology::new()
             .with_nodes(["User", "Note"])
             .with_edges(["AUTHORED"])
+            .with_edge_variant(variant("AUTHORED", "User", "Note"))
             .with_edge_columns([
                 ("traversal_path", DataType::String),
                 ("relationship_kind", DataType::String),

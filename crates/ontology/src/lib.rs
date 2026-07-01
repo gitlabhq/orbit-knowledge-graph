@@ -20,6 +20,7 @@ pub mod constants;
 mod entities;
 pub mod errors;
 pub mod etl;
+pub mod graph;
 pub mod introspection;
 mod json_schema;
 mod loading;
@@ -44,6 +45,7 @@ pub use etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
     ReindexSource,
 };
+pub use graph::{Adjacency, EdgeTemplate, NodeTemplate, OntologyGraph};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -1139,6 +1141,14 @@ impl Ontology {
     #[must_use]
     pub fn partition(&self) -> Option<&PartitionConfig> {
         self.partition.as_ref()
+    }
+
+    /// Builds the materialized [`OntologyGraph`] (adjacency, table→node index,
+    /// reachability, per-triple/per-node templates). Cheap and pure; callers
+    /// that query the graph repeatedly should build it once and hold it.
+    #[must_use]
+    pub fn graph(&self) -> OntologyGraph {
+        OntologyGraph::build(self)
     }
 
     /// Returns the partition key column for a given entity's statistics MV,
