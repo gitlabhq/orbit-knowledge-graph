@@ -586,8 +586,7 @@ impl<'a> SsaEngine<'a> {
         }
 
         for user_id in phi_users {
-            // A trivial-phi chain cascades one level per user; grow on demand so a long chain
-            // degrades gracefully instead of overflowing the parse-worker stack.
+            // Grow on demand so a long trivial-phi chain can't overflow the parse-worker stack.
             stacker::maybe_grow(SSA_READ_RED_ZONE, SSA_READ_STACK_SEGMENT, || {
                 self.try_remove_trivial_phi(user_id)
             });
@@ -754,7 +753,7 @@ impl<'a> SsaEngine<'a> {
                     return; // cycle
                 }
                 for op in &self.phis[phi_id.0].operands {
-                    // Phi-operand chains can be deep; grow on demand so they can't overflow the stack.
+                    // Grow on demand so a deep phi-operand chain can't overflow the stack.
                     stacker::maybe_grow(SSA_READ_RED_ZONE, SSA_READ_STACK_SEGMENT, || {
                         self.resolve_value_recursive(op, out, visited)
                     });

@@ -62,8 +62,7 @@ pub trait RepositoryCache: Send + Sync {
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError>;
 
-    /// Remove one run's extraction tree (the [`CachedRepository::path`] handed back by
-    /// [`RepositoryCache::extract_archive`]), leaving any concurrent run's tree untouched.
+    /// Remove one run's extraction tree, leaving any concurrent run's tree untouched.
     async fn invalidate(&self, path: &Path) -> Result<(), RepositoryCacheError>;
 }
 
@@ -112,9 +111,7 @@ impl LocalRepositoryCache {
             .join(hashed_branch_name(branch))
     }
 
-    /// A fresh, unique extraction directory. Keying on a per-run id (not just project+branch) means
-    /// two workers racing the same repo — which happens when the ack deadline lapses mid-unpack and
-    /// the task is redelivered — never share a tree, so neither clobbers the other's extraction.
+    /// A unique per-run directory so two workers racing the same repo never share (and clobber) a tree.
     fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
         self.branch_dir(project_id, branch)
             .join(Uuid::new_v4().to_string())
@@ -185,8 +182,7 @@ impl RepositoryCache for LocalRepositoryCache {
     }
 
     async fn invalidate(&self, path: &Path) -> Result<(), RepositoryCacheError> {
-        // path is `<base>/<project>/<branch>/<run-uuid>/repository`; remove the whole per-run
-        // `<run-uuid>` dir, then best-effort prune the now-possibly-empty branch and project dirs.
+        // Remove the per-run `<run-uuid>` dir, then best-effort prune the empty branch/project dirs.
         let run_dir = path.parent().unwrap_or(path);
         match tokio::fs::remove_dir_all(run_dir).await {
             Ok(()) => {}

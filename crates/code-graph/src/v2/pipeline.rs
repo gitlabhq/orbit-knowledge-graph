@@ -472,8 +472,7 @@ pub trait LanguagePipeline {
     }
 }
 
-/// Parse-worker stack default. rayon's own default is 8MB; the tree-sitter C parse recurses here
-/// and a deep file overflowed the previous 2MB setting with an uncatchable SIGSEGV.
+/// Headroom for the native tree-sitter parse, whose stack overflow is an uncatchable SIGSEGV.
 pub const DEFAULT_PARSE_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -495,9 +494,7 @@ pub struct PipelineConfig {
     pub per_file_parse_timeout: Option<std::time::Duration>,
     pub per_file_walk_timeout: Option<std::time::Duration>,
     pub per_file_ssa_timeout: Option<std::time::Duration>,
-    /// Stack size for each parse worker thread. The native tree-sitter parse recurses on this
-    /// stack and its overflow is an uncatchable SIGSEGV, so a deeply-nested file needs headroom
-    /// here rather than a guard. 0 = the rayon default.
+    /// Stack per parse worker; headroom for the native parse's uncatchable overflow. 0 = rayon default.
     pub parse_worker_stack_bytes: usize,
     /// Wall-clock budget for the sequential cross-file resolution phase.
     /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.

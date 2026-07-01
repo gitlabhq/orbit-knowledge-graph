@@ -118,8 +118,7 @@ impl<L: LanguageExt> StrDoc<L> {
                 let last_offset = AtomicU64::new(u64::MAX);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
-                    // Bail before the native parse can overflow the worker stack; the guard-page
-                    // fault is an uncatchable SIGSEGV, so a clean Break here is the only recovery.
+                    // Bail before the native parse overflows the stack; that fault is an uncatchable SIGSEGV.
                     if stacker::remaining_stack().is_some_and(|r| r < PARSE_STACK_RED_ZONE) {
                         tracing::warn!("tree-sitter parse aborted: stack near exhaustion");
                         return ControlFlow::Break(());
