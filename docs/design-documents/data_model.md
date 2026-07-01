@@ -217,7 +217,7 @@ The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` ex
 
 ## Namespace partitioning
 
-Every edge table, plus every node entity listed in `settings.partition.include`, is `PARTITION BY` a hash bucket of the top-level namespace. Node entities too small to hit part-count pressure (e.g. `Project`, `Group`, `Milestone`) are left out of the include list and stay single-partition `ReplacingMergeTree`s, since partitioning them only adds per-partition metadata overhead. Global hubs (`User`, `Runner`) have no `traversal_path` and are never partitioned. The strategy is declared once in `config/ontology/schema.yaml` under `settings.partition.strategy` and rendered into `config/graph.sql`:
+The node entities in `settings.partition.include_entities` and the edge tables in `settings.partition.include_edge_tables` are `PARTITION BY` a hash bucket of the top-level namespace. Tables too small to hit part-count pressure (e.g. `Project`, `Group`, `Milestone`) are left off those lists and stay single-partition `ReplacingMergeTree`s, since partitioning them only adds per-partition metadata overhead. Global hubs (`User`, `Runner`) have no `traversal_path` and are never partitioned. The strategy is declared once in `config/ontology/schema.yaml` under `settings.partition.strategy` and rendered into `config/graph.sql`:
 
 ```sql
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
