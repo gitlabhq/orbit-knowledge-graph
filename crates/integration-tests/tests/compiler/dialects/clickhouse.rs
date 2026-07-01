@@ -753,11 +753,6 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let compiled = compile(json, &ontology, &scoped_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    // Three startsWith prefixes are always present: the Project anchor scan and
-    // the two gl_edge scans (IN_PROJECT edge + cascade anchor IN-subquery). When
-    // gl_edge is partitioned, each of those two edge scans also carries a
-    // _partition_id bound to the same prefix, adding two more. The break-glass
-    // config removes partitioning and reverts to the three startsWith only.
     let expected = if ontology.partition().is_some() { 5 } else { 3 };
     assert_eq!(
         sql.matches(SCOPED_PREFIX).count(),

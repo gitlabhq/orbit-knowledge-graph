@@ -713,13 +713,10 @@ mod tests {
                 .partition_by
                 .clone()
         };
-        // Global hubs and excluded tables never partition, regardless of config.
         assert!(partition_of("gl_user").is_empty());
         assert!(partition_of("gl_runner").is_empty());
         assert!(partition_of("gl_project").is_empty());
 
-        // Namespaced tables partition only when the ontology opts in; the
-        // break-glass config removes the block and reverts them to unpartitioned.
         let expected = usize::from(ontology.partition().is_some());
         assert_eq!(partition_of("gl_edge").len(), expected);
         assert_eq!(partition_of("gl_merge_request").len(), expected);
