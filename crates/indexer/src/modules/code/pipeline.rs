@@ -301,6 +301,10 @@ impl CodeIndexingPipeline {
             "repository extraction completed"
         );
 
+        // Reclaim the extraction dir even if the job is dropped before its explicit cleanup below
+        // (a wall-clock timeout drops this whole future); disarmed once that cleanup has run.
+        let extraction_guard = self.resolver.extraction_guard(repository.path.clone());
+
         // Release fetch slot before waiting for the indexing slot. This is
         // the pipelining point: freeing the fetch slot lets another handler
         // start its Gitaly download while we wait for an indexing slot.
@@ -333,6 +337,7 @@ impl CodeIndexingPipeline {
         } else {
             self.metrics.record_cleanup("success");
         }
+        extraction_guard.disarm();
 
         let commit = indexing_result?;
 
