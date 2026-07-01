@@ -1143,9 +1143,10 @@ impl Ontology {
         self.partition.as_ref()
     }
 
-    /// Builds the materialized [`OntologyGraph`] (adjacency, table→node index,
-    /// reachability, per-triple/per-node templates). Cheap and pure; callers
-    /// that query the graph repeatedly should build it once and hold it.
+    /// Builds a fresh materialized [`OntologyGraph`] (adjacency, table→node
+    /// index, reachability, per-triple/per-node templates). Not cached: each
+    /// call rebuilds. Cheap and pure, but a hot-path caller should build it
+    /// once and hold it rather than call this per request.
     #[must_use]
     pub fn graph(&self) -> OntologyGraph {
         OntologyGraph::build(self)
