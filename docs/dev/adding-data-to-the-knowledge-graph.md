@@ -69,6 +69,11 @@ Answer these before touching files:
 
 ## 3. Monolith — Siphon CDC (one MR per source table)
 
+> The generic Siphon lifecycle — adding the migration and replicating the table —
+> is already documented in [ClickHouse table design with Siphon → Table replication example](https://docs.gitlab.com/development/database/clickhouse/clickhouse_table_design_with_siphon/#table-replication-example).
+> Read that first. This section only records the **review-tested conventions**
+> specific to Orbit nodes/edges — the deltas on top of the canonical flow.
+
 Branch off **fresh `master`**. One table per MR keeps `main.sql` conflicts small.
 
 ### 3.1 Generate
@@ -172,6 +177,13 @@ Skip this for edges — an edge needs no registration as long as both endpoint
 2. **Register** in `redaction_service.rb`:
    - `EE_RESOURCE_CLASSES`: `your_type: ::Fully::Qualified::Model`
    - `EE_PRELOAD_ASSOCIATIONS`: `your_type: [{ project: [:namespace, :project_feature, :group, :organization] }]`
+   - **Right-size the preloads — measure, don't guess.** Redaction runs the policy
+     per record, so a missing preload becomes an N+1. Exercise the redaction locally
+     against a realistic multi-record set and **count the PG queries** it issues
+     (`ActiveRecord::QueryRecorder`, query logging, or watch `development.log`).
+     **Dump the actual SQL and its `EXPLAIN` plan** for the queries that repeat.
+     Every association the policy touches per record must appear in
+     `EE_PRELOAD_ASSOCIATIONS` until the query count stays flat as the set grows.
 3. The registration **key string** (`your_type`) must exactly match the
    `redaction.resource_type` advertised by the ontology node (Section 5). Coordinate
    this string with the Orbit team / ontology MR.
@@ -194,6 +206,7 @@ Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Requ
 - `properties:` — **every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**: don't mark a `NOT NULL` source nullable, and don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
 - `etl: { type: table, scope: namespaced, source: siphon_<table>, order_by: [traversal_path, id], edges: { project_id: { to: Project, as: IN_PROJECT, direction: outgoing } } }`.
   - **Which edge mechanism to use:** the inline `edges:` block here is for edges derived from an **FK column on this node's own source table** (like `IN_PROJECT` from `project_id`). Use a **separate edge YAML (§5.2)** only for **join-table edges** (e.g. `DECLARES_DEPENDENCY` from `packages_dependency_links`), where the relationship lives in its own table.
+  - **How the ETL uses this (read before adding a mapping):** the `etl:` block declares an extraction plus a row-wise transform (source columns → graph columns, FK-edge resolution, type discriminators). Most nodes are a straight column projection, but if a property needs a **mapping** — an Integer-to-Enum column, a computed value, or a non-trivial rename — you must declare it here, not discover it fails at index time. See [SDLC indexing → ETL](../design-documents/indexing/sdlc_indexing.md#etl) (and the Integer-to-Enum mapping note in that doc) for how plans, transforms, and column mappings are derived from the ontology.
 - `storage:` — `primary_key`, `columns`, `indexes`, `projections`. Copy the shape from the template node.
 
 ### 5.2 Edge YAML — `config/ontology/edges/<edge>.yaml`
@@ -350,6 +363,12 @@ knowledge-graph:
 
 ---
 
-*Provenance: written from the Package/ContainerRepository/PackageFile/Dependency
-work (Orbit Phases 1–3). When a detail here conflicts with the newest merged sibling
-MR, trust the MR — conventions evolve.*
+## 9. Reflect — keep this playbook current
+
+When you finish adding a table / node / edge, **close the loop on this document**.
+Conventions drift between phases (§1), so if anything you hit diverged from what's
+written here — a new generator flag, a changed CODEC default, an extra file
+maintainers required, a redaction wrinkle, a toolchain gotcha — update the relevant
+section **in the same MR** (or an immediate fast-follow). A stale playbook is how
+the next agent re-burns the time you just spent. If nothing changed, say so
+explicitly in your summary so the next reader trusts the doc.
