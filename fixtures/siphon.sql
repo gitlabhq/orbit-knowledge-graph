@@ -1521,6 +1521,50 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
+-- Siphon source table for package files (PackageFile node)
+CREATE TABLE IF NOT EXISTS siphon_packages_package_files
+(
+    `id` Int64,
+    `package_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `size` Nullable(Int64),
+    `file_name` String,
+    `file_sha256` Nullable(String),
+    `status` Int16 DEFAULT 0,
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Siphon source table for package file build infos (join table: package file -> pipeline)
+CREATE TABLE IF NOT EXISTS siphon_packages_package_file_build_infos
+(
+    `id` Int64,
+    `package_file_id` Int64,
+    `pipeline_id` Nullable(Int64),
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
 -- Siphon source tables for container repositories
 CREATE TABLE IF NOT EXISTS siphon_container_repositories
 (
