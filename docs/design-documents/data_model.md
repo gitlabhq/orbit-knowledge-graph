@@ -217,14 +217,29 @@ The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` ex
 
 ## Namespace partitioning
 
-Every graph table that carries `traversal_path` (all node tables except the global hubs `User` and `Runner`, plus every edge table) is `PARTITION BY` a hash bucket of the top-level namespace. The expression is declared once in `config/ontology/schema.yaml` under `settings.partition.partition_by` and emitted verbatim into `config/graph.sql`:
+Every graph table that carries `traversal_path` (all node tables except the global hubs `User` and `Runner`, plus every edge table) is `PARTITION BY` a hash bucket of the top-level namespace. The strategy is declared once in `config/ontology/schema.yaml` under `settings.partition.strategy` and rendered into `config/graph.sql`:
 
 ```sql
-PARTITION BY (sipHash64(toUInt64OrZero(splitByChar('/', traversal_path)[2])) % 50)
+PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ```
 
 `splitByChar('/', '42/100/1000/')[2]` is the top-level namespace id (`100`); global edges write `traversal_path = '0/'`, so they hash to bucket 0 and co-locate there. ClickHouse derives the bucket from `traversal_path` at insert and merge time, so there is no stored partition column and no write-side code: the indexer writes exactly the columns it always has.
 
-The goal is **ingest/merge isolation**, not query latency. Without partitioning, all ~1,100 top-level namespaces share one part budget per table, so one tenant's reindex burst can exhaust `parts_to_throw_insert` and dead-letter inserts for every tenant. Bucketing gives each bucket its own part budget and merge scope, so a busy tenant throttles only its own bucket. Because the partition is a deterministic function of `traversal_path` and every sort key leads with `traversal_path`, all versions of a row land in the same bucket, so `ReplacingMergeTree FINAL` dedup stays correct.
+The primary goal is **ingest/merge isolation**. Without partitioning, all ~1,100 top-level namespaces share one part budget per table, so one tenant's reindex burst can exhaust `parts_to_throw_insert` and dead-letter inserts for every tenant. Bucketing gives each bucket its own part budget and merge scope, so a busy tenant throttles only its own bucket. Because the partition is a deterministic function of `traversal_path` and every sort key leads with `traversal_path`, all versions of a row land in the same bucket, so `ReplacingMergeTree FINAL` dedup stays correct.
 
-The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone does not prune partitions. Partition pruning for namespace-scoped queries requires the compiler to emit the bucket predicate explicitly; that pushdown is a planned follow-up.
+The hash scatters prefixes across buckets, so a `startsWith(traversal_path, …)` filter alone cannot prune partitions. Wherever a scan's filter already confines an alias to one or more top-level namespaces via `startsWith(alias.traversal_path, '<prefix>')`, the compiler ANDs a predicate on ClickHouse's `_partition_id` virtual column (the per-part formatted partition value, resolved from part metadata — no column read). The bucket constant is computed in ClickHouse from the prefix via the same strategy expression the DDL uses, so the two are byte-identical by construction:
+
+```sql
+-- single pinned namespace
+p._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/100/'), 2))), 50))
+
+-- several pinned namespaces (a multi-path authorization OR)
+p._partition_id IN tuple(
+  toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/100/'), 2))), 50)),
+  toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', '42/200/'), 2))), 50))
+)
+```
+
+ClickHouse folds the constants to bucket strings and prunes parts before reading data. This is a pure optimization layered on the security pass's authorization filters: emitting a superset of buckets (or nothing) is always safe, and a pinning `startsWith` proves the rows can only live in the matched bucket(s), so the predicate can never drop an authorized row.
+
+It prunes whenever the set of top-level namespaces an alias can occupy is finite and known at compile time (a scoped or multi-path authorized set). A namespaced scan with no pinning prefix — a far node reached through a cross-namespace edge — still cannot hold rows outside the caller's authorized top-level namespaces, so it falls back to `_partition_id IN (<bucket of each authorized TLN>)`, over-scanning within the tenant instead of across all buckets. This fallback is skipped when any authorized path is org-only (pins no namespace) or the authorized set spans at least as many namespaces as there are buckets. The whole pass is a no-op for admins. Pruning never narrows below what the security pass authorizes; the bucket set is always derived from the full authorized set, a safe superset of any role-floored subset.

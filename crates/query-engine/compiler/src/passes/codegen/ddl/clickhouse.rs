@@ -1,8 +1,31 @@
+use crate::ast::Expr;
 use crate::ast::ddl::{
     Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
     ProjectionDef,
 };
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
+use serde_json::Value;
+
+/// Renders a partition expression with literals inline, since DDL has no params.
+pub fn emit_partition_expr(e: &Expr) -> String {
+    match e {
+        Expr::Identifier(name) => name.clone(),
+        Expr::Param { value, .. } | Expr::Literal(value) => emit_partition_literal(value),
+        Expr::FuncCall { name, args } => {
+            let args: Vec<String> = args.iter().map(emit_partition_expr).collect();
+            format!("{name}({})", args.join(", "))
+        }
+        other => panic!("unsupported partition expression node: {other:?}"),
+    }
+}
+
+fn emit_partition_literal(v: &Value) -> String {
+    match v {
+        Value::String(s) => format!("'{}'", s.replace('\'', "\\'")),
+        Value::Number(n) => n.to_string(),
+        other => panic!("unsupported partition literal: {other:?}"),
+    }
+}
 
 /// ClickHouse reserved words that must be backtick-quoted when used as column identifiers.
 /// This is a conservative list of words that cause parse ambiguity in CREATE TABLE DDL.

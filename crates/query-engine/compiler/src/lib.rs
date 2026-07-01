@@ -1713,6 +1713,20 @@ mod tests {
         compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
     }
 
+    #[test]
+    fn scoped_query_pushes_down_partition_predicate() {
+        let query = r#"{"query_type":"traversal","node":{"id":"p","entity":"Project","columns":["id"],"filters":{"visibility_level":{"op":"eq","value":"public"}}},"limit":20}"#;
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_scope_prefixes([("p".to_string(), "1/9970/".to_string())].into());
+        let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
+        assert!(
+            sql.contains("p._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(")
+                && sql.contains("startsWith(p.traversal_path"),
+            "scoped query should prune on _partition_id alongside startsWith:\n{sql}"
+        );
+    }
+
     // SQL-shape smoke: the 4-hop diff chain elides CONTAINS to FK node-joins
     // (guards the orientation-agnostic emit_chain), and a non-FK survivor blocks
     // elision. `expect` is `|`-separated; a `!x` token asserts `x` is absent.

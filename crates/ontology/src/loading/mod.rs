@@ -623,19 +623,14 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .settings
         .partition
         .map(|p| -> Result<_, OntologyError> {
-            if p.partition_by.trim().is_empty() {
-                return Err(OntologyError::Validation(
-                    "partition.partition_by must be a non-empty ClickHouse expression".to_string(),
-                ));
-            }
-            if p.required_columns.is_empty() {
-                return Err(OntologyError::Validation(
-                    "partition.required_columns must list at least one column".to_string(),
-                ));
-            }
+            let hb = p.strategy.hash_bucket.ok_or_else(|| {
+                OntologyError::Validation("partition.strategy must set a strategy block".into())
+            })?;
             Ok(crate::entities::PartitionConfig {
-                partition_by: p.partition_by,
-                required_columns: p.required_columns,
+                strategy: crate::entities::PartitionStrategy::HashBucket {
+                    buckets: hb.buckets,
+                    column: hb.column,
+                },
             })
         })
         .transpose()?;

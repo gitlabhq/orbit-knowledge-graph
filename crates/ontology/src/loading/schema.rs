@@ -109,8 +109,24 @@ pub(super) struct StatisticsExcludeYaml {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct PartitionYaml {
-    pub partition_by: String,
-    pub required_columns: Vec<String>,
+    pub strategy: PartitionStrategyYaml,
+}
+
+/// One optional block per strategy; exactly one must be set (enforced in the
+/// loader). Serde's externally-tagged enums require a YAML `!tag`, which reads
+/// worse than a named nested block, so this models the choice as optionals.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PartitionStrategyYaml {
+    #[serde(default)]
+    pub hash_bucket: Option<HashBucketYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HashBucketYaml {
+    pub buckets: u16,
+    pub column: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
