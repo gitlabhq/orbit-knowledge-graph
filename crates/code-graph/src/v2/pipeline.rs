@@ -472,6 +472,10 @@ pub trait LanguagePipeline {
     }
 }
 
+/// Parse-worker stack default. rayon's own default is 8MB; the tree-sitter C parse recurses here
+/// and a deep file overflowed the previous 2MB setting with an uncatchable SIGSEGV.
+pub const DEFAULT_PARSE_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Clone)]
 pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
@@ -491,6 +495,10 @@ pub struct PipelineConfig {
     pub per_file_parse_timeout: Option<std::time::Duration>,
     pub per_file_walk_timeout: Option<std::time::Duration>,
     pub per_file_ssa_timeout: Option<std::time::Duration>,
+    /// Stack size for each parse worker thread. The native tree-sitter parse recurses on this
+    /// stack and its overflow is an uncatchable SIGSEGV, so a deeply-nested file needs headroom
+    /// here rather than a guard. 0 = the rayon default.
+    pub parse_worker_stack_bytes: usize,
     /// Wall-clock budget for the sequential cross-file resolution phase.
     /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.
     pub cross_file_resolve_timeout: Option<std::time::Duration>,
@@ -521,6 +529,7 @@ impl Default for PipelineConfig {
             per_file_parse_timeout: None,
             per_file_walk_timeout: None,
             per_file_ssa_timeout: None,
+            parse_worker_stack_bytes: DEFAULT_PARSE_WORKER_STACK_BYTES,
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
             on_progress: None,
@@ -766,8 +775,11 @@ impl Pipeline {
                     let file_count = files.len();
                     let t_lang = std::time::Instant::now();
 
-                    let mut pool_builder =
-                        rayon::ThreadPoolBuilder::new().stack_size(2 * 1024 * 1024); // 2MB per worker (vs 8MB default)
+                    let mut pool_builder = rayon::ThreadPoolBuilder::new();
+                    if ctx.config.parse_worker_stack_bytes > 0 {
+                        pool_builder =
+                            pool_builder.stack_size(ctx.config.parse_worker_stack_bytes);
+                    }
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }

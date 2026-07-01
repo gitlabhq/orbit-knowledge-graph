@@ -74,6 +74,7 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "max_total_bytes": 2000000000,
+              "parse_worker_stack_bytes": 8388608,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
@@ -460,6 +461,13 @@
           "default": 2000000000,
           "minimum": 0
         },
+        "parse_worker_stack_bytes": {
+          "description": "Stack size in bytes for each parse worker thread. The native tree-sitter parse recurses on this stack and a deeply-nested file can overflow it with an uncatchable crash, so it needs headroom. 0 = the code-graph default (8 MiB). Defaults to 8388608.",
+          "type": "integer",
+          "format": "uint",
+          "default": 8388608,
+          "minimum": 0
+        },
         "per_file_parse_timeout_ms": {
           "type": "integer",
           "format": "uint64",
@@ -564,6 +572,7 @@
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
             "max_total_bytes": 2000000000,
+            "parse_worker_stack_bytes": 8388608,
             "per_file_parse_timeout_ms": 100,
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
@@ -669,6 +678,7 @@
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
                 "max_total_bytes": 2000000000,
+                "parse_worker_stack_bytes": 8388608,
                 "per_file_parse_timeout_ms": 100,
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
@@ -924,6 +934,7 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "max_total_bytes": 2000000000,
+              "parse_worker_stack_bytes": 8388608,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,

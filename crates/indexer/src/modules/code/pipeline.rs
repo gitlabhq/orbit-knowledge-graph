@@ -411,6 +411,7 @@ impl CodeIndexingPipeline {
             max_files: self.pipeline_config.max_files,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
+            parse_worker_stack_bytes: self.pipeline_config.parse_worker_stack_bytes,
             per_file_timeout: to_timeout(self.pipeline_config.per_file_timeout_ms),
             per_file_parse_timeout: to_timeout(self.pipeline_config.per_file_parse_timeout_ms),
             per_file_walk_timeout: to_timeout(self.pipeline_config.per_file_walk_timeout_ms),

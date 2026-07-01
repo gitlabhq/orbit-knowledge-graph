@@ -239,6 +239,10 @@ fn default_code_indexing_max_total_bytes() -> u64 {
     2_000_000_000
 }
 
+fn default_code_indexing_parse_worker_stack_bytes() -> usize {
+    8 * 1024 * 1024
+}
+
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
     2000
 }
@@ -316,6 +320,9 @@ pub struct CodeIndexingPipelineConfig {
     pub worker_threads: usize,
     #[serde(default)]
     pub max_concurrent_languages: usize,
+    /// Stack size in bytes for each parse worker thread. The native tree-sitter parse recurses on this stack and a deeply-nested file can overflow it with an uncatchable crash, so it needs headroom. 0 = the code-graph default (8 MiB). Defaults to 8388608.
+    #[serde(default = "default_code_indexing_parse_worker_stack_bytes")]
+    pub parse_worker_stack_bytes: usize,
     /// Global per-file resolution timeout in milliseconds.
     /// Applied to all languages unless the language's own DSL rules
     /// specify a different value. 0 = no global timeout.
@@ -376,6 +383,7 @@ impl Default for CodeIndexingPipelineConfig {
             max_total_bytes: default_code_indexing_max_total_bytes(),
             worker_threads: 0,
             max_concurrent_languages: 0,
+            parse_worker_stack_bytes: default_code_indexing_parse_worker_stack_bytes(),
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
             per_file_parse_timeout_ms: default_code_indexing_per_file_parse_timeout_ms(),
             per_file_walk_timeout_ms: default_code_indexing_per_file_walk_timeout_ms(),
