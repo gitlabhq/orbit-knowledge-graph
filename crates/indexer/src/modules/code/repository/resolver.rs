@@ -99,10 +99,9 @@ impl RepositoryResolver {
 
     pub async fn cleanup(
         &self,
-        project_id: i64,
-        branch: &str,
+        path: &std::path::Path,
     ) -> Result<(), super::cache::RepositoryCacheError> {
-        self.cache.invalidate(project_id, branch).await
+        self.cache.invalidate(path).await
     }
 
     async fn full_download(
@@ -330,11 +329,11 @@ mod tests {
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
-        let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        assert!(path.exists());
+        let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        assert!(repo.path.exists());
 
-        resolver.cleanup(1, "main").await.unwrap();
-        assert!(!path.exists());
+        resolver.cleanup(&repo.path).await.unwrap();
+        assert!(!repo.path.exists());
     }
 
     #[tokio::test]
@@ -356,10 +355,10 @@ mod tests {
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
-        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        resolver.cleanup(1, "main").await.unwrap();
-        resolver.cleanup(1, "main").await.unwrap();
+        resolver.cleanup(&repo.path).await.unwrap();
+        resolver.cleanup(&repo.path).await.unwrap();
     }
 
     #[tokio::test]
@@ -373,7 +372,7 @@ mod tests {
             "v1"
         );
 
-        resolver.cleanup(1, "main").await.unwrap();
+        resolver.cleanup(&path1.path).await.unwrap();
 
         service.set_archive(&[("src/main.rs", "v2")], "commit2");
         let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
@@ -468,9 +467,12 @@ mod tests {
     async fn cleanup_without_prior_download_does_not_error() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
+        let (dir, resolver) = create_resolver(service);
 
-        resolver.cleanup(1, "main").await.unwrap();
+        resolver
+            .cleanup(&dir.path().join("never-extracted"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -486,7 +488,7 @@ mod tests {
         assert!(path1.join("src/main.rs").exists());
         assert!(path2.join("src/main.rs").exists());
 
-        resolver.cleanup(1, "main").await.unwrap();
+        resolver.cleanup(&path1.path).await.unwrap();
         assert!(!path1.exists());
         assert!(path2.exists());
     }

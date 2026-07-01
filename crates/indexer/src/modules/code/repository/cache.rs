@@ -11,6 +11,7 @@ use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 use tracing::warn;
+use uuid::Uuid;
 
 use super::service::ByteStream;
 use crate::modules::code::metrics::CodeMetrics;
@@ -61,7 +62,9 @@ pub trait RepositoryCache: Send + Sync {
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError>;
 
-    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
+    /// Remove one run's extraction tree (the [`CachedRepository::path`] handed back by
+    /// [`RepositoryCache::extract_archive`]), leaving any concurrent run's tree untouched.
+    async fn invalidate(&self, path: &Path) -> Result<(), RepositoryCacheError>;
 }
 
 const CACHE_DIR_NAME: &str = "gkg-repository-cache";
@@ -109,8 +112,13 @@ impl LocalRepositoryCache {
             .join(hashed_branch_name(branch))
     }
 
+    /// A fresh, unique extraction directory. Keying on a per-run id (not just project+branch) means
+    /// two workers racing the same repo — which happens when the ack deadline lapses mid-unpack and
+    /// the task is redelivered — never share a tree, so neither clobbers the other's extraction.
     fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
-        self.branch_dir(project_id, branch).join(REPOSITORY_DIR)
+        self.branch_dir(project_id, branch)
+            .join(Uuid::new_v4().to_string())
+            .join(REPOSITORY_DIR)
     }
 }
 
@@ -129,11 +137,6 @@ impl RepositoryCache for LocalRepositoryCache {
     ) -> Result<CachedRepository, RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
 
-        match tokio::fs::remove_dir_all(&repo_dir).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
         tokio::fs::create_dir_all(&repo_dir).await?;
 
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
@@ -157,8 +160,9 @@ impl RepositoryCache for LocalRepositoryCache {
         let (file_inventory, filter) = match extracted {
             Ok(ok) => ok,
             Err(e) => {
-                if let Err(cleanup) = tokio::fs::remove_dir_all(&repo_dir).await {
-                    warn!(?repo_dir, error = %cleanup, "failed to clean partial extraction after error");
+                let run_dir = repo_dir.parent().unwrap_or(&repo_dir);
+                if let Err(cleanup) = tokio::fs::remove_dir_all(run_dir).await {
+                    warn!(?run_dir, error = %cleanup, "failed to clean partial extraction after error");
                 }
                 return Err(match e {
                     StreamError::Empty => RepositoryCacheError::EmptyArchive,
@@ -180,17 +184,21 @@ impl RepositoryCache for LocalRepositoryCache {
         })
     }
 
-    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
-        let branch_dir = self.branch_dir(project_id, branch);
-        match tokio::fs::remove_dir_all(&branch_dir).await {
+    async fn invalidate(&self, path: &Path) -> Result<(), RepositoryCacheError> {
+        // path is `<base>/<project>/<branch>/<run-uuid>/repository`; remove the whole per-run
+        // `<run-uuid>` dir, then best-effort prune the now-possibly-empty branch and project dirs.
+        let run_dir = path.parent().unwrap_or(path);
+        match tokio::fs::remove_dir_all(run_dir).await {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-
-        let project_dir = self.base_dir.join(project_id.to_string());
-        let _ = tokio::fs::remove_dir(&project_dir).await;
-
+        if let Some(branch_dir) = run_dir.parent() {
+            let _ = tokio::fs::remove_dir(branch_dir).await;
+            if let Some(project_dir) = branch_dir.parent() {
+                let _ = tokio::fs::remove_dir(project_dir).await;
+            }
+        }
         Ok(())
     }
 }
@@ -276,25 +284,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extract_archive_replaces_existing_files() {
+    async fn concurrent_extractions_of_one_repo_get_isolated_dirs() {
         let (_dir, cache) = create_cache();
         let first_archive = build_tar_gz(&[("project-commit1/old_file.rs", b"old content")]);
-        cache
+        let first = cache
             .extract_archive(42, "main", archive_stream(first_archive))
             .await
             .unwrap();
 
         let second_archive = build_tar_gz(&[("project-commit2/new_file.rs", b"new content")]);
-        let path = cache
+        let second = cache
             .extract_archive(42, "main", archive_stream(second_archive))
             .await
             .unwrap();
 
-        assert!(!path.join("old_file.rs").exists());
-        let content = tokio::fs::read_to_string(path.join("new_file.rs"))
-            .await
-            .unwrap();
-        assert_eq!(content, "new content");
+        assert_ne!(first.path, second.path);
+        assert!(first.path.join("old_file.rs").exists());
+        assert!(!first.path.join("new_file.rs").exists());
+        assert!(second.path.join("new_file.rs").exists());
+        assert!(!second.path.join("old_file.rs").exists());
     }
 
     #[tokio::test]
@@ -352,14 +360,15 @@ mod tests {
             result,
             Err(RepositoryCacheError::RepositoryTooLarge)
         ));
-        let repo_dir = dir
-            .path()
-            .join("42")
-            .join(hashed_branch_name("main"))
-            .join(REPOSITORY_DIR);
+        let branch_dir = dir.path().join("42").join(hashed_branch_name("main"));
+        let orphaned = match tokio::fs::read_dir(&branch_dir).await {
+            Ok(mut entries) => entries.next_entry().await.unwrap().is_some(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => panic!("{e}"),
+        };
         assert!(
-            !repo_dir.exists(),
-            "a too-large repo must not orphan partial files on disk"
+            !orphaned,
+            "a too-large repo must not orphan its extraction dir on disk"
         );
     }
 
@@ -367,22 +376,25 @@ mod tests {
     async fn invalidate_removes_directory() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[("file.rs", b"content")]);
-        let path = cache
+        let repo = cache
             .extract_archive(42, "main", archive_stream(archive))
             .await
             .unwrap();
-        assert!(path.exists());
+        assert!(repo.path.exists());
 
-        cache.invalidate(42, "main").await.unwrap();
+        cache.invalidate(&repo.path).await.unwrap();
 
-        assert!(!path.exists());
+        assert!(!repo.path.exists());
     }
 
     #[tokio::test]
     async fn invalidate_succeeds_when_no_directory_exists() {
-        let (_dir, cache) = create_cache();
+        let (dir, cache) = create_cache();
 
-        cache.invalidate(42, "main").await.unwrap();
+        cache
+            .invalidate(&dir.path().join("42/branch/run/repository"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -402,14 +414,14 @@ mod tests {
         assert!(path_main.exists());
         assert!(path_dev.exists());
 
-        cache.invalidate(42, "main").await.unwrap();
+        cache.invalidate(&path_main.path).await.unwrap();
         assert!(!path_main.exists());
         assert!(path_dev.exists());
 
         let project_dir = dir.path().join("42");
         assert!(project_dir.exists());
 
-        cache.invalidate(42, "develop").await.unwrap();
+        cache.invalidate(&path_dev.path).await.unwrap();
         assert!(!path_dev.exists());
 
         assert!(
