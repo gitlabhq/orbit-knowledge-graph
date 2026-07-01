@@ -135,6 +135,19 @@ pub struct StatisticsExclude {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionConfig {
     pub strategy: PartitionStrategy,
+    /// Physical table names (e.g. `gl_package`) left unpartitioned because they
+    /// are too small to benefit from bucketing.
+    pub exclude: Vec<String>,
+}
+
+impl PartitionConfig {
+    /// Whether `table` is excluded from partitioning. Handles the `v{N}_`
+    /// schema-version prefix so callers can pass either the bare or prefixed name.
+    #[must_use]
+    pub fn is_excluded(&self, table: &str) -> bool {
+        let bare = crate::strip_schema_version_prefix(table);
+        self.exclude.iter().any(|t| t == bare)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

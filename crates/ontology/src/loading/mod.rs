@@ -626,11 +626,19 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             let hb = p.strategy.hash_bucket.ok_or_else(|| {
                 OntologyError::Validation("partition.strategy must set a strategy block".into())
             })?;
+            for table in &p.exclude {
+                if !all_table_names.contains(table) {
+                    return Err(OntologyError::Validation(format!(
+                        "partition.exclude: '{table}' is not an ontology-tracked table"
+                    )));
+                }
+            }
             Ok(crate::entities::PartitionConfig {
                 strategy: crate::entities::PartitionStrategy::HashBucket {
                     buckets: hb.buckets,
                     column: hb.column,
                 },
+                exclude: p.exclude,
             })
         })
         .transpose()?;

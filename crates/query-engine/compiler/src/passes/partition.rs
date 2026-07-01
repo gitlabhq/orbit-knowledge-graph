@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use ontology::{Ontology, PartitionStrategy};
+use ontology::{Ontology, PartitionConfig, PartitionStrategy};
 use serde_json::Value;
 
 use crate::ast::{Expr, Node, Op, Query, TableRef};
@@ -27,16 +27,25 @@ pub fn apply_partition_pruning(
     };
     let authorized = authorized_bucket_ids(&partition.strategy, security_ctx);
     if let Node::Query(q) = node {
-        prune_query(q, &partition.strategy, authorized.as_deref());
+        prune_query(q, partition, authorized.as_deref());
     }
     Ok(())
 }
 
-fn prune_query(q: &mut Query, strategy: &PartitionStrategy, authorized: Option<&[Expr]>) {
+fn prune_query(q: &mut Query, partition: &PartitionConfig, authorized: Option<&[Expr]>) {
+    let strategy = &partition.strategy;
     if let Some(where_clause) = &q.where_clause {
+        // Aliases whose table is partitioned (not excluded); excluded tables have
+        // no PARTITION BY, so a `_partition_id` predicate there would match no part.
+        let partitioned: std::collections::HashSet<String> = collect_aliased_tables(&q.from)
+            .into_iter()
+            .filter(|(_, table)| !partition.is_excluded(table))
+            .map(|(alias, _)| alias)
+            .collect();
         let pinned = pinning_prefixes_by_alias(where_clause, strategy);
         let mut preds: Vec<Expr> = pinned
             .iter()
+            .filter(|(alias, _)| partitioned.contains(alias))
             .map(|(alias, prefixes)| {
                 let buckets = prefixes.iter().map(|p| bucket_id(strategy, p)).collect();
                 partition_id_predicate(alias, buckets)
@@ -44,9 +53,9 @@ fn prune_query(q: &mut Query, strategy: &PartitionStrategy, authorized: Option<&
             .collect();
         // Namespaced scans with no pinning prefix fall back to the tenant set.
         if let Some(buckets) = authorized {
-            for (alias, _) in collect_aliased_tables(&q.from) {
-                if !pinned.iter().any(|(a, _)| *a == alias) {
-                    preds.push(partition_id_predicate(&alias, buckets.to_vec()));
+            for alias in &partitioned {
+                if !pinned.iter().any(|(a, _)| a == alias) {
+                    preds.push(partition_id_predicate(alias, buckets.to_vec()));
                 }
             }
         }
@@ -61,60 +70,56 @@ fn prune_query(q: &mut Query, strategy: &PartitionStrategy, authorized: Option<&
     }
 
     for cte in &mut q.ctes {
-        prune_query(&mut cte.query, strategy, authorized);
+        prune_query(&mut cte.query, partition, authorized);
     }
-    prune_query_from(&mut q.from, strategy, authorized);
+    prune_query_from(&mut q.from, partition, authorized);
     // Subqueries in the WHERE (cascade/narrowing) are their own scans.
     if let Some(where_clause) = &mut q.where_clause {
-        prune_subqueries_in_expr(where_clause, strategy, authorized);
+        prune_subqueries_in_expr(where_clause, partition, authorized);
     }
     for arm in &mut q.union_all {
-        prune_query(arm, strategy, authorized);
+        prune_query(arm, partition, authorized);
     }
 }
 
 fn prune_subqueries_in_expr(
     expr: &mut Expr,
-    strategy: &PartitionStrategy,
+    partition: &PartitionConfig,
     authorized: Option<&[Expr]>,
 ) {
     match expr {
         Expr::InSelect { expr, query } => {
-            prune_subqueries_in_expr(expr, strategy, authorized);
-            prune_query(query, strategy, authorized);
+            prune_subqueries_in_expr(expr, partition, authorized);
+            prune_query(query, partition, authorized);
         }
         Expr::FuncCall { args, .. } => {
             for a in args {
-                prune_subqueries_in_expr(a, strategy, authorized);
+                prune_subqueries_in_expr(a, partition, authorized);
             }
         }
         Expr::BinaryOp { left, right, .. } => {
-            prune_subqueries_in_expr(left, strategy, authorized);
-            prune_subqueries_in_expr(right, strategy, authorized);
+            prune_subqueries_in_expr(left, partition, authorized);
+            prune_subqueries_in_expr(right, partition, authorized);
         }
         Expr::UnaryOp { expr, .. } | Expr::InSubquery { expr, .. } => {
-            prune_subqueries_in_expr(expr, strategy, authorized);
+            prune_subqueries_in_expr(expr, partition, authorized);
         }
-        Expr::Lambda { body, .. } => prune_subqueries_in_expr(body, strategy, authorized),
+        Expr::Lambda { body, .. } => prune_subqueries_in_expr(body, partition, authorized),
         _ => {}
     }
 }
 
-fn prune_query_from(
-    from: &mut TableRef,
-    strategy: &PartitionStrategy,
-    authorized: Option<&[Expr]>,
-) {
+fn prune_query_from(from: &mut TableRef, partition: &PartitionConfig, authorized: Option<&[Expr]>) {
     match from {
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            prune_query_from(left, strategy, authorized);
-            prune_query_from(right, strategy, authorized);
+            prune_query_from(left, partition, authorized);
+            prune_query_from(right, partition, authorized);
         }
-        TableRef::Subquery { query, .. } => prune_query(query, strategy, authorized),
+        TableRef::Subquery { query, .. } => prune_query(query, partition, authorized),
         TableRef::Union { queries, .. } => {
             for q in queries {
-                prune_query(q, strategy, authorized);
+                prune_query(q, partition, authorized);
             }
         }
     }
@@ -280,7 +285,7 @@ mod tests {
                 expr: Expr::col("p", "id"),
                 alias: None,
             }],
-            from: TableRef::scan("gl_project", "p"),
+            from: TableRef::scan("gl_merge_request", "p"),
             where_clause: Some(filter),
             limit: Some(10),
             ..Default::default()
@@ -354,6 +359,42 @@ mod tests {
     }
 
     #[test]
+    fn no_prune_for_excluded_table() {
+        // gl_project is in the ontology partition exclude list, so it has no
+        // PARTITION BY; a _partition_id predicate there would match no part.
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("p", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(starts_with("p", "1/100/1000/")),
+            limit: Some(10),
+            ..Default::default()
+        }));
+        prune(&mut node, &org_ctx());
+        let Node::Query(q) = node else { unreachable!() };
+        assert!(!has_partition_pred(q.where_clause.as_ref().unwrap(), "p"));
+    }
+
+    #[test]
+    fn excluded_table_skipped_by_authorized_fallback() {
+        let ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/200/".into()]).unwrap();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("p", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_project", "p"),
+            where_clause: Some(starts_with("p", "1/")),
+            ..Default::default()
+        }));
+        prune(&mut node, &ctx);
+        let Node::Query(q) = node else { unreachable!() };
+        assert!(!has_partition_pred(q.where_clause.as_ref().unwrap(), "p"));
+    }
+
+    #[test]
     fn multi_namespace_or_prunes_to_bucket_set() {
         let filter = Expr::binary(
             Op::Or,
@@ -377,7 +418,7 @@ mod tests {
             }],
             from: TableRef::join(
                 JoinType::Inner,
-                TableRef::scan("gl_project", "p"),
+                TableRef::scan("gl_merge_request", "p"),
                 TableRef::subquery(
                     Query {
                         select: vec![SelectExpr {
@@ -460,7 +501,7 @@ mod tests {
                 expr: Expr::col("p", "id"),
                 alias: None,
             }],
-            from: TableRef::scan("gl_project", "p"),
+            from: TableRef::scan("gl_merge_request", "p"),
             where_clause: Some(starts_with("p", "1/100/1000/")),
             ..Default::default()
         }));

@@ -1715,14 +1715,14 @@ mod tests {
 
     #[test]
     fn scoped_query_pushes_down_partition_predicate() {
-        let query = r#"{"query_type":"traversal","node":{"id":"p","entity":"Project","columns":["id"],"filters":{"visibility_level":{"op":"eq","value":"public"}}},"limit":20}"#;
+        let query = r#"{"query_type":"traversal","node":{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"op":"eq","value":"opened"}}},"limit":20}"#;
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes([("p".to_string(), "1/9970/".to_string())].into());
+            .with_scope_prefixes([("m".to_string(), "1/9970/".to_string())].into());
         let sql = compile(query, &ONTOLOGY, &ctx).unwrap().base.render();
         assert!(
-            sql.contains("p._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(")
-                && sql.contains("startsWith(p.traversal_path"),
+            sql.contains("m._partition_id = toString(modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar(")
+                && sql.contains("startsWith(m.traversal_path"),
             "scoped query should prune on _partition_id alongside startsWith:\n{sql}"
         );
     }

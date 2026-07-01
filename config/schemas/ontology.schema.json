@@ -693,6 +693,12 @@
               "minProperties": 1,
               "maxProperties": 1,
               "additionalProperties": false
+            },
+            "exclude": {
+              "type": "array",
+              "items": { "type": "string" },
+              "uniqueItems": true,
+              "description": "Physical table names left unpartitioned because they are too small to benefit from bucketing."
             }
           },
           "required": ["strategy"],

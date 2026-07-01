@@ -1530,7 +1530,7 @@ impl fmt::Display for Ontology {
 /// names when an ontology built with
 /// [`Ontology::with_schema_version_prefix`] is queried with a lookup key
 /// that may or may not carry the prefix (and vice versa).
-fn strip_schema_version_prefix(table: &str) -> &str {
+pub(crate) fn strip_schema_version_prefix(table: &str) -> &str {
     let Some(rest) = table.strip_prefix('v') else {
         return table;
     };

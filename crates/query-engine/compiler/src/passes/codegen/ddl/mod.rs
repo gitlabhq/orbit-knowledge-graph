@@ -335,10 +335,17 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
     }
 }
 
-fn partition_by(partition: Option<&PartitionConfig>, columns: &[StorageColumn]) -> Vec<String> {
+fn partition_by(
+    partition: Option<&PartitionConfig>,
+    table: &str,
+    columns: &[StorageColumn],
+) -> Vec<String> {
     let Some(p) = partition else {
         return vec![];
     };
+    if p.is_excluded(table) {
+        return vec![];
+    }
     let column = p.column();
     if columns.iter().any(|c| c.name == column) {
         let expr = crate::passes::partition::partition_expr(
@@ -362,7 +369,7 @@ fn build_node_table(
         .map(storage_col_to_def)
         .collect();
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, &node.storage.columns);
+    let partition_by = partition_by(partition, &node.destination_table, &node.storage.columns);
 
     let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
     let projections: Vec<ProjectionDef> = node
@@ -411,7 +418,7 @@ fn build_edge_table(
             .map(storage_col_to_def),
     );
     columns.extend(system_columns(None));
-    let partition_by = partition_by(partition, &config.storage.columns);
+    let partition_by = partition_by(partition, name, &config.storage.columns);
 
     let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
     indexes.extend(
@@ -708,11 +715,13 @@ mod tests {
                 .partition_by
                 .clone()
         };
-        // Namespaced tables partition; global hubs (no traversal_path) do not.
+        // Namespaced tables partition; global hubs (no traversal_path) and
+        // excluded tables do not.
         assert_eq!(partition_of("gl_edge").len(), 1);
         assert_eq!(partition_of("gl_merge_request").len(), 1);
         assert!(partition_of("gl_user").is_empty());
         assert!(partition_of("gl_runner").is_empty());
+        assert!(partition_of("gl_project").is_empty());
     }
 
     #[test]
