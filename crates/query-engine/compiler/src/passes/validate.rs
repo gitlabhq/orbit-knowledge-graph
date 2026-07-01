@@ -673,12 +673,7 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
-    /// Reject a relationship whose declared endpoint entities are not connected
-    /// by any of its declared types within the hop budget. The flat schema only
-    /// checks that each edge *name* exists, so `Project -[AUTHORED]-> User`
-    /// (no such triple) passes schema validation and fails later with an opaque
-    /// empty result. This surfaces it pre-execution and names the kinds that do
-    /// connect the two endpoints.
+    /// Reject a relationship whose declared types connect neither endpoint (the schema only checks edge *names* exist, so a bogus triple otherwise runs to an empty result).
     fn check_reachability(&self, input: &Input) -> Result<()> {
         if !matches!(
             input.query_type,
@@ -706,28 +701,25 @@ impl<'a> Validator<'a> {
             ) else {
                 continue;
             };
-
-            if graph.fk_reaches(from, to) || graph.fk_reaches(to, from) {
+            if from == to || graph.fk_reaches(from, to) || graph.fk_reaches(to, from) {
                 continue;
             }
 
-            let connecting = self.kinds_connecting(&graph, from, to);
-            if rel.max_hops > 1 {
-                if from == to
-                    || graph
-                        .reachable_within(from, rel.max_hops as usize)
-                        .contains(to)
-                    || graph
-                        .reachable_within(to, rel.max_hops as usize)
-                        .contains(from)
-                {
-                    continue;
-                }
-            } else if rel.types.iter().any(|t| connecting.contains(t.as_str())) {
+            let types: HashSet<&str> = rel.types.iter().map(String::as_str).collect();
+            let connecting = self.kinds_connecting(&graph, from, to, &types);
+            let reachable = |src, dst| {
+                graph
+                    .reachable_within_types(src, rel.max_hops as usize, Some(&types))
+                    .contains(dst)
+            };
+            if !connecting.is_empty()
+                || (rel.max_hops > 1 && (reachable(from, to) || reachable(to, from)))
+            {
                 continue;
             }
 
-            let hint = if connecting.is_empty() {
+            let alternatives = self.kinds_connecting(&graph, from, to, &HashSet::new());
+            let hint = if alternatives.is_empty() {
                 let mut kinds: Vec<&str> = graph
                     .neighbors(from, ontology::EdgeDirection::Outgoing)
                     .iter()
@@ -736,15 +728,14 @@ impl<'a> Validator<'a> {
                     .collect();
                 kinds.sort();
                 kinds.dedup();
-                if kinds.is_empty() {
-                    format!("\"{from}\" has no relationships in the ontology")
-                } else {
-                    format!("\"{from}\" connects only to: [{}]", kinds.join(", "))
+                match kinds.is_empty() {
+                    true => format!("\"{from}\" has no relationships in the ontology"),
+                    false => format!("\"{from}\" connects only to: [{}]", kinds.join(", ")),
                 }
             } else {
                 format!(
                     "relationship types connecting \"{from}\" and \"{to}\": [{}]",
-                    connecting.iter().copied().collect::<Vec<_>>().join(", ")
+                    alternatives.into_iter().collect::<Vec<_>>().join(", ")
                 )
             };
 
@@ -757,21 +748,20 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
-    /// Relationship kinds connecting two entity kinds in either orientation.
-    /// Direction is deliberately ignored: the ontology stores each triple in one
-    /// canonical orientation and the lowerer matches it regardless of the
-    /// query's declared direction, so a stricter check would false-positive.
+    /// Declared kinds connecting two entities in either orientation (all kinds when `types` is empty); direction is ignored because the lowerer matches triples regardless of the query's declared direction.
     fn kinds_connecting<'g>(
         &self,
         graph: &'g ontology::OntologyGraph,
         a: &str,
         b: &str,
+        types: &HashSet<&str>,
     ) -> std::collections::BTreeSet<&'g str> {
         graph
             .neighbors(a, ontology::EdgeDirection::Outgoing)
             .iter()
             .chain(graph.neighbors(a, ontology::EdgeDirection::Incoming))
             .filter(|adj| adj.neighbor_kind == b)
+            .filter(|adj| types.is_empty() || types.contains(adj.relationship_kind.as_str()))
             .map(|adj| adj.relationship_kind.as_str())
             .collect()
     }
@@ -1508,6 +1498,35 @@ mod tests {
                     {"id": "g", "entity": "Group"}
                 ],
                 "relationships": [{"type": "*", "from": "u", "to": "g"}]
+            }"#,
+        );
+    }
+
+    #[test]
+    fn multi_hop_reachability_is_scoped_to_declared_types() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "g", "max_hops": 2}]
+            }"#,
+            "does not connect \"User\" and \"Group\"",
+        );
+    }
+
+    #[test]
+    fn accepts_multi_hop_path_following_declared_type() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "p", "entity": "Project", "node_ids": [1]},
+                    {"id": "u", "entity": "User"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
             }"#,
         );
     }

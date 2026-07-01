@@ -1,31 +1,18 @@
-//! A materialized view of the ontology's node/edge topology.
-//!
-//! [`Ontology`] stores nodes and edges as flat `BTreeMap`s with no adjacency,
-//! reachability, or table→node index. Every consumer that needs "which kinds
-//! connect X and Y", "which table backs this node", or "is Y reachable from X
-//! in N hops" rescans those maps per call — the security pass alone runs a full
-//! node-map scan per alias per query. [`OntologyGraph`] builds those indexes
-//! once so the accessors are O(1) (or O(frontier) for reachability), and adds a
-//! bounded transitive closure the flat ontology cannot express at all.
-//!
-//! Pure: derived entirely from `&Ontology`, no DB access.
+//! Materialized adjacency, table→node, template, and reachability indexes over the flat [`Ontology`] maps.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use crate::etl::EdgeDirection;
 use crate::{DenormDirection, EdgeVariantScope, Ontology, strip_schema_version_prefix};
 
-/// One directed adjacency entry: the relationship kind that connects two node
-/// kinds, plus the endpoint on the far side of the hop.
+/// A relationship kind and the node kind on the far side of the hop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Adjacency {
     pub relationship_kind: String,
     pub neighbor_kind: String,
 }
 
-/// Static, query-independent facts about one `(kind, source, target)` edge
-/// triple. The instantiation (prefix values, path sets) stays in the passes;
-/// only the invariant half lives here.
+/// Query-independent facts about one `(kind, source, target)` edge triple.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeTemplate {
     pub scope: Option<EdgeVariantScope>,
@@ -42,23 +29,17 @@ pub struct NodeTemplate {
     pub has_traversal_path: bool,
     pub global: bool,
     pub path_scopable: bool,
-    /// Role floor from the redaction config, as an access level. `None` when
-    /// the node declares no redaction.
     pub role_floor: Option<u32>,
     pub redaction_id_column: Option<String>,
 }
 
-/// Materialized topology and per-triple/per-node static templates derived from
-/// an [`Ontology`]. See the module docs for the five structures it carries.
+/// Materialized topology and per-triple/per-node templates over an [`Ontology`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OntologyGraph {
     outgoing: BTreeMap<String, Vec<Adjacency>>,
     incoming: BTreeMap<String, Vec<Adjacency>>,
     table_to_node: HashMap<String, String>,
     anchor_fk: Vec<(String, String)>,
-    /// Node kind → anchor entities it FK-reaches (its table carries an anchor
-    /// FK column). Backs the FK-synthesized edge the compiler resolves without
-    /// an edge triple, e.g. `File -[IN_PROJECT]-> Project` via `project_id`.
     fk_reachable: BTreeMap<String, BTreeSet<String>>,
     anchor_nodes: BTreeSet<String>,
     global_nodes: BTreeSet<String>,
@@ -202,8 +183,7 @@ impl OntologyGraph {
         }
     }
 
-    /// Adjacency entries leaving (`Outgoing`) or entering (`Incoming`) a node
-    /// kind. Empty slice for unknown kinds.
+    /// Adjacency leaving (`Outgoing`) or entering (`Incoming`) a node kind.
     #[must_use]
     pub fn neighbors(&self, node_kind: &str, direction: EdgeDirection) -> &[Adjacency] {
         let map = match direction {
@@ -227,10 +207,21 @@ impl OntologyGraph {
             .collect()
     }
 
-    /// Node kinds reachable from `start` within `max_hops` outgoing edges,
-    /// excluding `start` itself. `max_hops == 0` yields an empty set.
+    /// Node kinds reachable from `start` within `max_hops` outgoing edges, excluding `start`.
     #[must_use]
     pub fn reachable_within(&self, start: &str, max_hops: usize) -> BTreeSet<String> {
+        self.reachable_within_types(start, max_hops, None)
+    }
+
+    /// Like [`reachable_within`], but only traverses edges whose relationship
+    /// kind is in `types` when `Some` (any kind when `None`).
+    #[must_use]
+    pub fn reachable_within_types(
+        &self,
+        start: &str,
+        max_hops: usize,
+        types: Option<&HashSet<&str>>,
+    ) -> BTreeSet<String> {
         let mut visited: HashSet<&str> = HashSet::from([start]);
         let mut reached = BTreeSet::new();
         let mut frontier: VecDeque<(&str, usize)> = VecDeque::from([(start, 0usize)]);
@@ -240,6 +231,9 @@ impl OntologyGraph {
                 continue;
             }
             for adj in self.neighbors(kind, EdgeDirection::Outgoing) {
+                if types.is_some_and(|t| !t.contains(adj.relationship_kind.as_str())) {
+                    continue;
+                }
                 if visited.insert(adj.neighbor_kind.as_str()) {
                     reached.insert(adj.neighbor_kind.clone());
                     frontier.push_back((adj.neighbor_kind.as_str(), depth + 1));
@@ -249,8 +243,7 @@ impl OntologyGraph {
         reached
     }
 
-    /// The node kind backing a physical table, tolerating a `v{N}_` schema
-    /// prefix. `None` for edge tables, CTEs, or unknown tables.
+    /// Node kind backing a physical table (tolerating a `v{N}_` prefix); `None` for edge/CTE/unknown tables.
     #[must_use]
     pub fn table_to_node(&self, table: &str) -> Option<&str> {
         self.table_to_node
@@ -258,8 +251,8 @@ impl OntologyGraph {
             .map(String::as_str)
     }
 
-    /// `(fk_column, anchor_entity)` pairs from `namespace_anchor` variants,
-    /// deduplicated by FK column.
+    /// `(fk_column, anchor_entity)` pairs from `namespace_anchor` variants, deduped by column.
+    #[must_use = "returns the mapping iterator without mutating the graph"]
     pub fn anchor_fk_mappings(&self) -> impl Iterator<Item = (&str, &str)> {
         self.anchor_fk
             .iter()
@@ -271,8 +264,7 @@ impl OntologyGraph {
         self.anchor_nodes.contains(entity)
     }
 
-    /// Whether `node`'s table carries an anchor FK column resolving to `anchor`,
-    /// i.e. the compiler can synthesize a `node -> anchor` edge without a triple.
+    /// Whether `node`'s table carries an anchor FK to `anchor` (edge-triple-free synthesis).
     #[must_use]
     pub fn fk_reaches(&self, node: &str, anchor: &str) -> bool {
         self.fk_reachable
@@ -296,9 +288,7 @@ impl OntologyGraph {
         self.node_templates.get(entity)
     }
 
-    /// Relationship kinds that carry node property `prop` of `entity` on their
-    /// edge table in the given direction — the coverage relation hydration
-    /// re-walks per node per query.
+    /// Relationship kinds carrying `entity`'s `prop` on their edge table in `direction`.
     #[must_use]
     pub fn denorm_kinds(
         &self,
