@@ -10,6 +10,7 @@ use crate::proto::{
     ClusterStatus, ComponentHealth, GetClusterHealthResponse, ReplicaStatus, ResponseFormat,
     StructuredClusterHealth, get_cluster_health_response,
 };
+use crate::version;
 use crate::webserver::InfrastructureHealthClient;
 
 pub struct ClusterHealthChecker {
@@ -22,10 +23,7 @@ impl ClusterHealthChecker {
         let health_client = health_check_url.map(InfrastructureHealthClient::new);
 
         Self {
-            version: std::env::var("GKG_VERSION")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+            version: version::get().to_string(),
             health_client,
         }
     }
