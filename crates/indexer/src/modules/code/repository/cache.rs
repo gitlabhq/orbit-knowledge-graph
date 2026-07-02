@@ -53,20 +53,10 @@ impl CachedRepository {
     }
 }
 
-impl std::ops::Deref for CachedRepository {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        self.dir.path()
-    }
-}
-
 #[async_trait]
 pub trait RepositoryCache: Send + Sync {
     async fn extract_archive(
         &self,
-        project_id: i64,
-        branch: &str,
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError>;
 }
@@ -114,8 +104,6 @@ impl LocalRepositoryCache {
 impl RepositoryCache for LocalRepositoryCache {
     async fn extract_archive(
         &self,
-        _project_id: i64,
-        _branch: &str,
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError> {
         // A unique per-run dir under the cache root; its `TempDir` owns cleanup on drop. On a
@@ -227,15 +215,15 @@ mod tests {
         ]);
 
         let path = cache
-            .extract_archive(42, "main", archive_stream(archive))
+            .extract_archive(archive_stream(archive))
             .await
             .unwrap();
 
-        let content = tokio::fs::read_to_string(path.join("src/main.rs"))
+        let content = tokio::fs::read_to_string(path.path().join("src/main.rs"))
             .await
             .unwrap();
         assert_eq!(content, "fn main() {}");
-        let content = tokio::fs::read_to_string(path.join("src/lib.rs"))
+        let content = tokio::fs::read_to_string(path.path().join("src/lib.rs"))
             .await
             .unwrap();
         assert_eq!(content, "pub mod lib;");
@@ -246,13 +234,13 @@ mod tests {
         let (_dir, cache) = create_cache();
         let first_archive = build_tar_gz(&[("project-commit1/old_file.rs", b"old content")]);
         let first = cache
-            .extract_archive(42, "main", archive_stream(first_archive))
+            .extract_archive(archive_stream(first_archive))
             .await
             .unwrap();
 
         let second_archive = build_tar_gz(&[("project-commit2/new_file.rs", b"new content")]);
         let second = cache
-            .extract_archive(42, "main", archive_stream(second_archive))
+            .extract_archive(archive_stream(second_archive))
             .await
             .unwrap();
 
@@ -269,20 +257,20 @@ mod tests {
         let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         let path_1 = cache
-            .extract_archive(1, "main", archive_stream(archive.clone()))
+            .extract_archive(archive_stream(archive.clone()))
             .await
             .unwrap();
         let path_2 = cache
-            .extract_archive(2, "develop", archive_stream(archive))
+            .extract_archive(archive_stream(archive))
             .await
             .unwrap();
-        assert!(path_1.exists());
-        assert!(path_2.exists());
+        assert!(path_1.path().exists());
+        assert!(path_2.path().exists());
 
         cache.purge_all().await.unwrap();
 
-        assert!(!path_1.exists());
-        assert!(!path_2.exists());
+        assert!(!path_1.path().exists());
+        assert!(!path_2.path().exists());
         let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
         assert!(
             entries.next_entry().await.unwrap().is_none(),
@@ -310,9 +298,7 @@ mod tests {
             ("repo-abc/second.rs", b"bbbbbb"),
         ]);
 
-        let result = cache
-            .extract_archive(42, "main", archive_stream(archive))
-            .await;
+        let result = cache.extract_archive(archive_stream(archive)).await;
 
         assert!(matches!(
             result,
@@ -330,7 +316,7 @@ mod tests {
         let (dir, cache) = create_cache();
         let archive = build_tar_gz(&[("file.rs", b"content")]);
         let repo = cache
-            .extract_archive(42, "main", archive_stream(archive))
+            .extract_archive(archive_stream(archive))
             .await
             .unwrap();
         let path = repo.path().to_path_buf();
@@ -352,11 +338,11 @@ mod tests {
         let archive = build_tar_gz(&[("file.rs", b"content")]);
 
         let path_1 = cache
-            .extract_archive(1, "main", archive_stream(archive.clone()))
+            .extract_archive(archive_stream(archive.clone()))
             .await
             .unwrap();
         let path_2 = cache
-            .extract_archive(2, "main", archive_stream(archive))
+            .extract_archive(archive_stream(archive))
             .await
             .unwrap();
 
@@ -376,7 +362,7 @@ mod tests {
         let (_dir, cache) = create_cache();
 
         let err = cache
-            .extract_archive(42, "main", archive_stream(Vec::new()))
+            .extract_archive(archive_stream(Vec::new()))
             .await
             .unwrap_err();
 
@@ -395,7 +381,7 @@ mod tests {
         let (_dir, cache) = create_cache();
 
         let err = cache
-            .extract_archive(42, "main", archive_stream(truncated))
+            .extract_archive(archive_stream(truncated))
             .await
             .unwrap_err();
 
@@ -430,7 +416,7 @@ mod tests {
         ]);
 
         let path = cache
-            .extract_archive(7, "main", archive_stream(archive))
+            .extract_archive(archive_stream(archive))
             .await
             .unwrap();
         let inventory_paths: Vec<_> = path
@@ -447,19 +433,19 @@ mod tests {
             "retained non-parsable files should be present in archive inventory"
         );
 
-        assert!(path.join("src/main.rs").exists());
-        assert!(!path.join("assets/logo.png").exists());
-        assert!(!path.join("static/banner.gif").exists());
-        assert!(!path.join("fonts/Inter.woff2").exists());
-        assert!(!path.join("dist/build.zip").exists());
-        assert!(path.join("Cargo.toml").exists());
-        assert!(path.join("Cargo.lock").exists());
-        assert!(path.join("package.json").exists());
-        assert!(path.join("tsconfig.json").exists());
-        assert!(path.join(".gitignore").exists());
+        assert!(path.path().join("src/main.rs").exists());
+        assert!(!path.path().join("assets/logo.png").exists());
+        assert!(!path.path().join("static/banner.gif").exists());
+        assert!(!path.path().join("fonts/Inter.woff2").exists());
+        assert!(!path.path().join("dist/build.zip").exists());
+        assert!(path.path().join("Cargo.toml").exists());
+        assert!(path.path().join("Cargo.lock").exists());
+        assert!(path.path().join("package.json").exists());
+        assert!(path.path().join("tsconfig.json").exists());
+        assert!(path.path().join(".gitignore").exists());
         // Anything outside the denylist passes through, even if the
         // parser will ignore it later.
-        assert!(path.join("README.md").exists());
+        assert!(path.path().join("README.md").exists());
     }
 
     #[tokio::test]
@@ -471,7 +457,7 @@ mod tests {
         ]);
 
         let path = cache
-            .extract_archive(7, "main", archive_stream(archive))
+            .extract_archive(archive_stream(archive))
             .await
             .unwrap();
 
@@ -481,9 +467,9 @@ mod tests {
                 .any(|entry| entry.path == "big.rs"),
             "oversize files should still be present in archive inventory"
         );
-        assert!(path.join("small.rs").exists());
+        assert!(path.path().join("small.rs").exists());
         assert!(
-            !path.join("big.rs").exists(),
+            !path.path().join("big.rs").exists(),
             "files larger than max_file_size must not be written to disk"
         );
     }
@@ -497,7 +483,7 @@ mod tests {
         ]);
 
         let path = cache
-            .extract_archive(7, "main", archive_stream(archive))
+            .extract_archive(archive_stream(archive))
             .await
             .unwrap();
 
@@ -507,9 +493,9 @@ mod tests {
                 .any(|entry| entry.path == "model/weights.onnx"),
             "binary files should still be present in archive inventory"
         );
-        assert!(path.join("src/main.rs").exists());
+        assert!(path.path().join("src/main.rs").exists());
         assert!(
-            !path.join("model/weights.onnx").exists(),
+            !path.path().join("model/weights.onnx").exists(),
             "binary content must not be written to disk"
         );
     }

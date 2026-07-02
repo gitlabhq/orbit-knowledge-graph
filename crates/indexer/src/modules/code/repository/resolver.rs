@@ -124,11 +124,7 @@ impl RepositoryResolver {
             }
         };
 
-        match self
-            .cache
-            .extract_archive(project_id, branch, archive_stream)
-            .await
-        {
+        match self.cache.extract_archive(archive_stream).await {
             Ok(path) => Ok(path),
             Err(RepositoryCacheError::EmptyArchive) => Err(ResolveError::EmptyRepository {
                 reason: EmptyRepositoryReason::EmptyArchive,
@@ -284,8 +280,8 @@ mod tests {
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(path.join("src/main.rs").exists());
-        let content = std::fs::read_to_string(path.join("src/main.rs")).unwrap();
+        assert!(path.path().join("src/main.rs").exists());
+        let content = std::fs::read_to_string(path.path().join("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
     }
 
@@ -296,13 +292,13 @@ mod tests {
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
         let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
-        assert!(path1.join("src/main.rs").exists());
+        assert!(path1.path().join("src/main.rs").exists());
 
         service.set_archive(&[("src/new.rs", "fn new() {}")], "commit2");
         let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(path2.join("src/new.rs").exists());
-        assert!(!path2.join("src/main.rs").exists());
+        assert!(path2.path().join("src/new.rs").exists());
+        assert!(!path2.path().join("src/main.rs").exists());
     }
 
     #[tokio::test]
@@ -313,7 +309,7 @@ mod tests {
 
         let path = resolver.resolve(1, "main", None).await.unwrap();
 
-        assert!(path.join("src/main.rs").exists());
+        assert!(path.path().join("src/main.rs").exists());
     }
 
     #[tokio::test]

@@ -324,8 +324,8 @@ impl CodeIndexingPipeline {
 
         // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
         // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
-        let commit = indexing_result?;
         self.metrics.record_cleanup("success");
+        let commit = indexing_result?;
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
