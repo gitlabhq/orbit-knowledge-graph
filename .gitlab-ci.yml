@@ -1,6 +1,7 @@
 variables:
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
+  CLICKHOUSE_VERSION: "26.2"
   DEP_PROXY: 
   DEV_PREFIX: "dev"
   GCLOUD_PROJECT: gitlab-ci-runners-signing
@@ -625,12 +626,12 @@ integration-test:
         echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
       fi
     - |
-      docker pull clickhouse/clickhouse-server:25.12 &
+      docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} &
       docker pull nats:2.11-alpine &
       wait
     - |
       if [ -n "" ]; then
-        docker tag clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
+        docker tag clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
         docker tag nats:2.11-alpine nats:2.11-alpine
       fi
   script:
@@ -659,10 +660,10 @@ corpus-smoke-test:
       if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "" ]; then
         echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
       fi
-    - docker pull clickhouse/clickhouse-server:26.2
+    - docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
     - |
       if [ -n "" ]; then
-        docker tag clickhouse/clickhouse-server:26.2 clickhouse/clickhouse-server:26.2
+        docker tag clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
       fi
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
