@@ -97,14 +97,6 @@ impl RepositoryResolver {
         self.full_download(project_id, branch, ref_name).await
     }
 
-    pub async fn cleanup(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<(), super::cache::RepositoryCacheError> {
-        self.cache.invalidate(project_id, branch).await
-    }
-
     async fn full_download(
         &self,
         project_id: i64,
@@ -132,11 +124,7 @@ impl RepositoryResolver {
             }
         };
 
-        match self
-            .cache
-            .extract_archive(project_id, branch, archive_stream)
-            .await
-        {
+        match self.cache.extract_archive(archive_stream).await {
             Ok(path) => Ok(path),
             Err(RepositoryCacheError::EmptyArchive) => Err(ResolveError::EmptyRepository {
                 reason: EmptyRepositoryReason::EmptyArchive,
@@ -292,8 +280,8 @@ mod tests {
 
         let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
 
-        assert!(path.join("src/main.rs").exists());
-        let content = std::fs::read_to_string(path.join("src/main.rs")).unwrap();
+        assert!(path.path().join("src/main.rs").exists());
+        let content = std::fs::read_to_string(path.path().join("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
     }
 
@@ -304,13 +292,13 @@ mod tests {
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
         let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
-        assert!(path1.join("src/main.rs").exists());
+        assert!(path1.path().join("src/main.rs").exists());
 
         service.set_archive(&[("src/new.rs", "fn new() {}")], "commit2");
         let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
 
-        assert!(path2.join("src/new.rs").exists());
-        assert!(!path2.join("src/main.rs").exists());
+        assert!(path2.path().join("src/new.rs").exists());
+        assert!(!path2.path().join("src/main.rs").exists());
     }
 
     #[tokio::test]
@@ -321,19 +309,20 @@ mod tests {
 
         let path = resolver.resolve(1, "main", None).await.unwrap();
 
-        assert!(path.join("src/main.rs").exists());
+        assert!(path.path().join("src/main.rs").exists());
     }
 
     #[tokio::test]
-    async fn cleanup_removes_downloaded_files() {
+    async fn dropping_repository_removes_downloaded_files() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
-        let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let path = repo.path().to_path_buf();
         assert!(path.exists());
 
-        resolver.cleanup(1, "main").await.unwrap();
+        drop(repo);
         assert!(!path.exists());
     }
 
@@ -351,34 +340,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_is_idempotent() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
-
-        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-
-        resolver.cleanup(1, "main").await.unwrap();
-        resolver.cleanup(1, "main").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn resolve_works_after_cleanup() {
+    async fn resolve_works_after_drop() {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "v1")], "commit1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
-        let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
+        let repo1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(path1.join("src/main.rs")).unwrap(),
+            std::fs::read_to_string(repo1.path().join("src/main.rs")).unwrap(),
             "v1"
         );
-
-        resolver.cleanup(1, "main").await.unwrap();
+        drop(repo1);
 
         service.set_archive(&[("src/main.rs", "v2")], "commit2");
-        let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
+        let repo2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(path2.join("src/main.rs")).unwrap(),
+            std::fs::read_to_string(repo2.path().join("src/main.rs")).unwrap(),
             "v2"
         );
     }
@@ -465,29 +441,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_without_prior_download_does_not_error() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
-
-        resolver.cleanup(1, "main").await.unwrap();
-    }
-
-    #[tokio::test]
     async fn multiple_projects_are_independent() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
-        let path1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let path2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
+        let repo1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let repo2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
 
-        assert_ne!(path1, path2);
-        assert!(path1.join("src/main.rs").exists());
-        assert!(path2.join("src/main.rs").exists());
+        assert_ne!(repo1.path(), repo2.path());
+        assert!(repo1.path().join("src/main.rs").exists());
+        assert!(repo2.path().join("src/main.rs").exists());
 
-        resolver.cleanup(1, "main").await.unwrap();
-        assert!(!path1.exists());
+        let path2 = repo2.path().to_path_buf();
+        drop(repo1);
         assert!(path2.exists());
     }
 }

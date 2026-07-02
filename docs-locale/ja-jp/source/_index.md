@@ -40,6 +40,9 @@ Orbitはお使いのGitLabインスタンスをインデックス作成し、SDL
 
 *Orbitはある時点でのSDLCインサイトを目的とした分析システムであり、リアルタイムやトランザクション処理のユースケースには対応していません。結果は最後のインデックスサイクル時点のデータの状態を反映しています。*
 
+クリックスルーデモについては、[GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/)をご覧ください。
+<!-- Demo published on 2026-06-30 -->
+
 ## Orbit Remote {#orbit-remote}
 
 GitLab.comでは、Orbit RemoteはGitLabインフラストラクチャ上で独立したサービスとして動作します。トップレベルグループで有効にすると、グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、脆弱性、ソースコードなど、SDLC全体とコードを自動的にインデックス作成し、マネージドClickHouseグラフに格納します。

@@ -268,6 +268,7 @@ fn strip_wrapper<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 fn table_settings(
     index_granularity: Option<u32>,
     has_projections: bool,
+    partitioned: bool,
     explicit_settings: &BTreeMap<String, String>,
 ) -> Vec<TableSetting> {
     let mut s = Vec::new();
@@ -282,6 +283,10 @@ fn table_settings(
         "allow_experimental_replacing_merge_with_cleanup",
         "1",
     );
+    if partitioned {
+        upsert_setting(&mut s, "min_age_to_force_merge_seconds", "3600");
+        upsert_setting(&mut s, "min_age_to_force_merge_on_partition_only", "1");
+    }
     for (key, value) in explicit_settings {
         upsert_setting(&mut s, key, value);
     }
@@ -367,6 +372,7 @@ fn build_node_table(
         .collect();
     columns.extend(system_columns(None));
     let partition_by = partition_by(partition, &node.destination_table, &node.storage.columns);
+    let partitioned = !partition_by.is_empty();
 
     let indexes: Vec<IndexDef> = node.storage.indexes.iter().map(convert_index).collect();
     let projections: Vec<ProjectionDef> = node
@@ -388,10 +394,15 @@ fn build_node_table(
         indexes,
         projections: projections.clone(),
         engine,
+        settings: table_settings(
+            Some(1024),
+            !projections.is_empty(),
+            partitioned,
+            &node.storage.settings,
+        ),
         partition_by,
         order_by: node.sort_key.clone(),
         primary_key: node.storage.primary_key.clone(),
-        settings: table_settings(Some(1024), !projections.is_empty(), &node.storage.settings),
     }
 }
 
@@ -416,6 +427,7 @@ fn build_edge_table(
     );
     columns.extend(system_columns(None));
     let partition_by = partition_by(partition, name, &config.storage.columns);
+    let partitioned = !partition_by.is_empty();
 
     let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
     indexes.extend(
@@ -444,6 +456,7 @@ fn build_edge_table(
         settings: table_settings(
             Some(config.storage.index_granularity.unwrap_or(1024)),
             !projections.is_empty(),
+            partitioned,
             &config.storage.settings,
         ),
     }
@@ -486,7 +499,7 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
         partition_by: vec![],
         order_by: aux.order_by.clone(),
         primary_key: None,
-        settings: table_settings(None, !projections.is_empty(), &empty_settings),
+        settings: table_settings(None, !projections.is_empty(), false, &empty_settings),
     }
 }
 

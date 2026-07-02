@@ -586,7 +586,9 @@ impl<'a> SsaEngine<'a> {
         }
 
         for user_id in phi_users {
-            self.try_remove_trivial_phi(user_id);
+            stacker::maybe_grow(SSA_READ_RED_ZONE, SSA_READ_STACK_SEGMENT, || {
+                self.try_remove_trivial_phi(user_id)
+            });
         }
 
         replacement
@@ -750,7 +752,9 @@ impl<'a> SsaEngine<'a> {
                     return; // cycle
                 }
                 for op in &self.phis[phi_id.0].operands {
-                    self.resolve_value_recursive(op, out, visited);
+                    stacker::maybe_grow(SSA_READ_RED_ZONE, SSA_READ_STACK_SEGMENT, || {
+                        self.resolve_value_recursive(op, out, visited)
+                    });
                 }
             }
             SsaValue::Opaque | SsaValue::Marker => {} // don't include in results
@@ -1222,5 +1226,29 @@ mod tests {
             depth_capped > 0,
             "a chain past MAX_SSA_READ_DEPTH must degrade, not recurse unbounded"
         );
+    }
+
+    // A deep phi-operand chain would overflow a small stack without the maybe_grow guard.
+    #[test]
+    fn deep_phi_chain_resolves_without_overflow() {
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let mut ssa = SsaEngine::new();
+                let block = ssa.add_block();
+                let mut prev = SsaValue::LocalDef(0);
+                for _ in 0..50_000 {
+                    let phi = ssa.new_phi(block, "x");
+                    ssa.phis[phi.0].operands.push(prev);
+                    prev = SsaValue::Phi(phi);
+                }
+                let mut out = SmallVec::new();
+                let mut visited = FxHashSet::default();
+                ssa.resolve_value_recursive(&prev, &mut out, &mut visited);
+                assert_eq!(out.as_slice(), &[SsaValue::LocalDef(0)]);
+            })
+            .unwrap()
+            .join()
+            .expect("deep phi-operand resolution overflowed the worker stack");
     }
 }

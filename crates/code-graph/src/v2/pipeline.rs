@@ -472,6 +472,9 @@ pub trait LanguagePipeline {
     }
 }
 
+/// Headroom for the native tree-sitter parse, whose stack overflow is an uncatchable SIGSEGV.
+pub const DEFAULT_PARSE_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Clone)]
 pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
@@ -766,8 +769,8 @@ impl Pipeline {
                     let file_count = files.len();
                     let t_lang = std::time::Instant::now();
 
-                    let mut pool_builder =
-                        rayon::ThreadPoolBuilder::new().stack_size(2 * 1024 * 1024); // 2MB per worker (vs 8MB default)
+                    let mut pool_builder = rayon::ThreadPoolBuilder::new()
+                        .stack_size(DEFAULT_PARSE_WORKER_STACK_BYTES);
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }
