@@ -28,7 +28,7 @@ gkg-billing = { path = "../gkg-billing" }
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
-health-check = { path = "../health-check" }
+health-check = { workspace = true }
 indexer = { path = "../indexer" }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
@@ -60,7 +60,6 @@ toon-format = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
-prost-build = { workspace = true }
 
 [dev-dependencies]
 gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }

@@ -2233,7 +2233,6 @@ dependencies = [
  "jsonschema",
  "ontology",
  "opentelemetry",
- "pretty_assertions",
  "regex",
  "serde",
  "serde_json",
@@ -4133,12 +4132,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "diff"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5385,7 +5378,6 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "prost 0.14.4",
- "prost-build 0.14.3",
  "query-engine",
  "reqwest 0.13.4",
  "rustls",
@@ -8566,7 +8558,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 58.3.0",
- "async-trait",
  "clap",
  "code-graph",
  "dirs",
@@ -8576,7 +8567,6 @@ dependencies = [
  "gkg-utils",
  "mimalloc",
  "ontology",
- "query-engine",
  "rmcp",
  "schemars 1.2.1",
  "serde",
@@ -8584,7 +8574,6 @@ dependencies = [
  "strum 0.28.0",
  "tempfile",
  "tokio",
- "toon-format",
  "tracing",
  "tracing-subscriber",
 ]
@@ -9660,16 +9649,6 @@ name = "pretty-hex"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a65843dfefbafd3c879c683306959a6de478443ffe9c9adf02f5976432402d7"
-
-[[package]]
-name = "pretty_assertions"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
-dependencies = [
- "diff",
- "yansi",
-]
 
 [[package]]
 name = "prettyplease"
@@ -15043,12 +15022,6 @@ dependencies = [
  "encoding_rs",
  "hashlink 0.11.0",
 ]
-
-[[package]]
-name = "yansi"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yasna"

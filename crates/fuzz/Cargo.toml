@@ -63,6 +63,9 @@ name = "fuzz_indexer_messages"
 path = "tests/fuzz_indexer_messages/fuzz_target.rs"
 harness = false
 
+[package.metadata.cargo-shear]
+ignored = ["code-graph", "indexer"] # used in [[test]] harnesses; bolero fuzz targets need them as deps
+
 # Override workspace lint: bolero's libfuzzer harness requires unsafe glue.
 [lints.rust]
 unsafe_code = "allow"
