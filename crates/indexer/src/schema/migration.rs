@@ -5,6 +5,8 @@
 //! `gkg_schema_version`. Indexers do not migrate; they wait for the version to
 //! become ready via [`crate::schema::version::wait_until_ready`].
 //!
+//! **Forward migration** (`active < SCHEMA_VERSION`):
+//!
 //! 1. **Acquire lock** — NATS KV `indexing_locks/schema_migration` (TTL-based),
 //!    serializing migration across dispatcher replicas.
 //! 2. **Create new-prefix tables** — DDL from the ontology via
@@ -15,6 +17,9 @@
 //!
 //! New-prefix checkpoints start empty, so the dispatcher's normal namespace
 //! poll cycle re-dispatches backfill work automatically.
+//!
+//! **Rollback** (`active > SCHEMA_VERSION`, an older binary was deployed):
+//! see [`run_rollback`] for the two cases (tables retained vs. already GC'd).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,8 +38,9 @@ use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
 use crate::schema::version::{
-    SCHEMA_VERSION, SchemaVersionError, read_active_version, table_prefix, write_migrating_version,
-    write_schema_version,
+    SCHEMA_VERSION, SchemaVersionError, mark_version_active, mark_version_retired,
+    read_active_version, read_all_versions, table_prefix, version_tables_exist,
+    write_migrating_version, write_schema_version,
 };
 
 /// NATS KV key used to serialize schema migrations across pods.
@@ -94,6 +100,23 @@ pub async fn run_if_needed(
             metrics.record("complete", "skipped");
             Ok(())
         }
+        Some(active_version) if active_version > *SCHEMA_VERSION => {
+            warn!(
+                active_version,
+                embedded_version = *SCHEMA_VERSION,
+                "active schema version is newer than this binary — rolling back to the embedded version"
+            );
+            run_rollback(
+                graph,
+                source,
+                lock_service,
+                ontology,
+                metrics,
+                campaign,
+                active_version,
+            )
+            .await
+        }
         Some(active_version) => {
             info!(
                 active_version,
@@ -114,6 +137,109 @@ pub async fn run_if_needed(
     }
 }
 
+/// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is
+/// deployed on top of a newer active version.
+///
+/// Distinguishes two cases by table existence, not `gkg_schema_version`
+/// status (which can lag or lie under concurrent writers):
+///
+/// - **Tables retained**: a pointer swap — mark the embedded version
+///   `active` and retire the newer one. No re-indexing; the tables are
+///   already complete for this binary.
+/// - **Tables GC'd**: reuses [`run_migration_locked`] to rebuild. Promotion
+///   back to `active` is handled by `MigrationCompletionChecker`, which
+///   doesn't care whether the migrating version is above or below active.
+async fn run_rollback(
+    graph: &ArrowClickHouseClient,
+    source: &DictionarySource<'_>,
+    lock_service: &Arc<dyn LockService>,
+    ontology: &ontology::Ontology,
+    metrics: &MigrationMetrics,
+    campaign: &CampaignState,
+    active_version: u32,
+) -> Result<(), MigrationError> {
+    acquire_migration_lock(lock_service, metrics).await?;
+
+    // Re-read after acquiring the lock — another pod may have already rolled
+    // back while this pod was waiting.
+    let current_active = read_active_version(graph).await?;
+    if current_active == Some(*SCHEMA_VERSION) {
+        info!(
+            version = *SCHEMA_VERSION,
+            "rollback already completed by another pod — releasing lock"
+        );
+        let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
+        metrics.record("complete", "skipped");
+        return Ok(());
+    }
+
+    let tables_exist = match version_tables_exist(graph, *SCHEMA_VERSION).await {
+        Ok(exists) => exists,
+        Err(e) => {
+            warn!(error = %e, "failed to check whether embedded version's tables exist — releasing lock");
+            let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
+            return Err(e.into());
+        }
+    };
+
+    if tables_exist {
+        info!(
+            active_version,
+            target_version = *SCHEMA_VERSION,
+            "embedded version's tables are intact — rolling back via direct re-activation"
+        );
+
+        let reactivate_result = reactivate_version(graph, *SCHEMA_VERSION).await;
+        if let Err(e) = reactivate_result {
+            warn!(error = %e, "failed to re-activate embedded version — releasing lock");
+            let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
+            return Err(e.into());
+        }
+
+        let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
+        metrics.record("complete", "rollback_reactivated");
+
+        info!(
+            version = *SCHEMA_VERSION,
+            "rollback complete — resuming on existing tables"
+        );
+        return Ok(());
+    }
+
+    info!(
+        active_version,
+        target_version = *SCHEMA_VERSION,
+        "embedded version's tables were already garbage-collected — rolling back via rebuild"
+    );
+    run_migration_locked(
+        graph,
+        source,
+        lock_service,
+        ontology,
+        metrics,
+        campaign,
+        active_version,
+    )
+    .await
+}
+
+/// Same shape as `MigrationCompletionChecker`'s promotion
+/// (`migration_completion.rs`) — a direct-reactivation rollback is a
+/// pointer swap onto already-complete tables, so it skips the `migrating`
+/// phase that promotion normally follows.
+async fn reactivate_version(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), SchemaVersionError> {
+    let versions = read_all_versions(graph).await?;
+    for entry in &versions {
+        if entry.status == "active" && entry.version != version {
+            mark_version_retired(graph, entry.version).await?;
+        }
+    }
+    mark_version_active(graph, version).await
+}
+
 async fn run_migration(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,
@@ -126,11 +252,9 @@ async fn run_migration(
     acquire_migration_lock(lock_service, metrics).await?;
 
     // Re-read after acquiring the lock — another pod may have completed the
-    // migration while we were waiting.
+    // migration while this pod was waiting.
     let current_active = read_active_version(graph).await?;
-    if let Some(v) = current_active
-        && v == *SCHEMA_VERSION
-    {
+    if current_active == Some(*SCHEMA_VERSION) {
         info!(
             version = *SCHEMA_VERSION,
             "migration already completed by another pod — releasing lock"
@@ -140,6 +264,30 @@ async fn run_migration(
         return Ok(());
     }
 
+    run_migration_locked(
+        graph,
+        source,
+        lock_service,
+        ontology,
+        metrics,
+        campaign,
+        active_version,
+    )
+    .await
+}
+
+/// DDL + mark-migrating body shared by a forward migration and a
+/// rebuild-rollback. Assumes the caller already holds the migration lock and
+/// has re-read the active version; releases the lock on every exit path.
+async fn run_migration_locked(
+    graph: &ArrowClickHouseClient,
+    source: &DictionarySource<'_>,
+    lock_service: &Arc<dyn LockService>,
+    ontology: &ontology::Ontology,
+    metrics: &MigrationMetrics,
+    campaign: &CampaignState,
+    active_version: u32,
+) -> Result<(), MigrationError> {
     // Drain is a no-op: the dispatcher runs no engine, so no in-flight messages
     // exist. Reserved for future dual-write scenarios.
     metrics.record("drain", "success");

@@ -7,11 +7,13 @@
 
 use std::collections::HashSet;
 
-use clickhouse_client::ClickHouseConfigurationExt;
+use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use gkg_server_config::NatsConfiguration;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::dispatch::CodeBackfill;
-use indexer::orchestrator::scheduled::ScheduledTaskMetrics;
+use indexer::orchestrator::scheduled::{
+    MigrationCompletionChecker, ScheduledTask, ScheduledTaskMetrics,
+};
 use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, prefixed_table_name, write_migrating_version,
     write_schema_version,
@@ -260,5 +262,153 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         project_ids,
         HashSet::from([10, 12]),
         "checkpointed project 11 must not be re-dispatched"
+    );
+}
+
+/// End-to-end for the rebuild-rollback path: `MigrationCompletionChecker`
+/// promotes a rebuilt version once its SDLC checkpoint covers every enabled
+/// namespace, the same as a forward migration — promotion only looks at
+/// which version is `migrating`, not whether it's above or below active.
+#[tokio::test]
+async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
+    let context = TestContext::new().await;
+
+    common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
+    context.given_enabled_namespaces([100]).await;
+
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    write_schema_version(&graph, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+    write_migrating_version(&graph, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    context
+        .clickhouse
+        .execute(&format!(
+            "INSERT INTO {checkpoint_table} (key, watermark) \
+             VALUES ('ns.100.sdlc', now())"
+        ))
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+
+    let checker = MigrationCompletionChecker::new(
+        context.clickhouse.create_client(),
+        context.clickhouse.create_client(),
+        std::sync::Arc::new(indexer::testkit::MockLockService::new()),
+        std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
+        gkg_server_config::SchemaConfig::default(),
+        gkg_server_config::MigrationCompletionConfig::default(),
+        ScheduledTaskMetrics::new(),
+        std::sync::Arc::new(indexer::campaign::CampaignState::new()),
+        services.nats_client.clone(),
+    );
+
+    checker.run().await.unwrap();
+
+    let result = context
+        .clickhouse
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["active"],
+        "the rebuilt version must be promoted once its checkpoint covers all enabled namespaces"
+    );
+
+    let result = context
+        .clickhouse
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION + 1
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["retired"],
+        "the version that was active before promotion must be retired"
+    );
+}
+
+/// A dispatcher must not promote a migrating version it does not embed — doing
+/// so would complete a migration whose schema it doesn't run and flip itself
+/// Outdated. Such a version parks until a dispatcher that embeds it runs.
+#[tokio::test]
+async fn migration_completion_checker_does_not_promote_version_it_does_not_embed() {
+    let context = TestContext::new().await;
+
+    common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
+    context.given_enabled_namespaces([100]).await;
+
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    write_schema_version(&graph, *SCHEMA_VERSION).await.unwrap();
+    write_migrating_version(&graph, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let sdlc = prefixed_table_name("checkpoint", *SCHEMA_VERSION + 1);
+    let sdlc_src = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    let code = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION + 1);
+    let code_src = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+    context
+        .clickhouse
+        .execute(&format!("CREATE TABLE {sdlc} AS {sdlc_src}"))
+        .await;
+    context
+        .clickhouse
+        .execute(&format!("CREATE TABLE {code} AS {code_src}"))
+        .await;
+    context
+        .clickhouse
+        .execute(&format!(
+            "INSERT INTO {sdlc} (key, watermark) VALUES ('ns.100.sdlc', now())"
+        ))
+        .await;
+
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
+        .await
+        .unwrap();
+
+    let checker = MigrationCompletionChecker::new(
+        context.clickhouse.create_client(),
+        context.clickhouse.create_client(),
+        std::sync::Arc::new(indexer::testkit::MockLockService::new()),
+        std::sync::Arc::new(ontology::Ontology::load_embedded().unwrap()),
+        gkg_server_config::SchemaConfig::default(),
+        gkg_server_config::MigrationCompletionConfig::default(),
+        ScheduledTaskMetrics::new(),
+        std::sync::Arc::new(indexer::campaign::CampaignState::new()),
+        services.nats_client.clone(),
+    );
+
+    checker.run().await.unwrap();
+
+    let result = context
+        .clickhouse
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION + 1
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["migrating"],
+        "a migrating version this binary does not embed must not be promoted"
     );
 }

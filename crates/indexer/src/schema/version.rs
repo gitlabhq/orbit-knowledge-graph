@@ -5,7 +5,7 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use arrow::datatypes::UInt32Type;
+use arrow::datatypes::{UInt32Type, UInt64Type};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
 use query_engine::compiler::ast::ddl::{ColumnDef, ColumnType, CreateTable, Engine};
@@ -300,6 +300,38 @@ pub async fn mark_version_dropped(
     Ok(())
 }
 
+const COUNT_VERSION_TABLES: &str = "\
+SELECT count() AS cnt FROM system.tables \
+WHERE database = {db:String} AND startsWith(name, {prefix:String})";
+
+/// Returns `true` if at least one `v<version>_*` table exists. Used to tell
+/// a rollback that can re-activate a version directly (tables intact) from
+/// one that must rebuild it (tables GC'd after retirement).
+///
+/// Version 0 has no prefix and is never dropped by GC, so this always
+/// returns `true` for it.
+pub async fn version_tables_exist(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<bool, SchemaVersionError> {
+    if version == 0 {
+        return Ok(true);
+    }
+
+    let batches = graph
+        .query(COUNT_VERSION_TABLES)
+        .param("db", graph.database())
+        .param("prefix", table_prefix(version))
+        .fetch_arrow()
+        .await?;
+
+    let count = batches
+        .first()
+        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "cnt", 0))
+        .unwrap_or(0);
+    Ok(count > 0)
+}
+
 /// Ensures the `gkg_schema_version` table exists.
 ///
 /// Called by all service modes (Indexer, Webserver, DispatchIndexing) at
@@ -325,14 +357,17 @@ fn classify_readiness(
     migrating: Option<u32>,
     embedded: u32,
 ) -> SchemaReadiness {
+    // A binary whose version is active or migrating must process, even when a
+    // higher version is active — that is the rollback-rebuild case (Case 2),
+    // where the dispatcher marks this older version migrating to backfill it.
+    if active == Some(embedded) || migrating == Some(embedded) {
+        return SchemaReadiness::Ready;
+    }
+
     if let Some(active_version) = active
         && active_version > embedded
     {
         return SchemaReadiness::Outdated;
-    }
-
-    if active == Some(embedded) || migrating == Some(embedded) {
-        return SchemaReadiness::Ready;
     }
 
     SchemaReadiness::Pending
@@ -469,6 +504,13 @@ mod tests {
     }
 
     #[test]
+    fn count_version_tables_query_scopes_to_db_and_prefix() {
+        assert!(COUNT_VERSION_TABLES.contains("system.tables"));
+        assert!(COUNT_VERSION_TABLES.contains("database = {db:String}"));
+        assert!(COUNT_VERSION_TABLES.contains("startsWith(name, {prefix:String})"));
+    }
+
+    #[test]
     fn create_table_ddl_uses_replacing_merge_tree() {
         let ddl = emit_create_table(&version_table_ddl());
         assert!(ddl.contains("ReplacingMergeTree"));
@@ -548,11 +590,14 @@ mod tests {
         );
     }
 
+    // A rollback rebuild (Case 2) marks the embedded version migrating while a
+    // higher version is still active; the indexer must process to backfill it,
+    // so a matching migrating version wins over the higher-active outdated check.
     #[test]
-    fn readiness_outdated_takes_precedence_over_matching_migrating() {
+    fn readiness_matching_migrating_takes_precedence_over_higher_active() {
         assert_eq!(
             classify_readiness(Some(3), Some(2), 2),
-            SchemaReadiness::Outdated
+            SchemaReadiness::Ready
         );
     }
 }
