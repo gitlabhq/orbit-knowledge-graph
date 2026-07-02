@@ -83,7 +83,7 @@ Set a type label (pick one):
 /label ~"type::maintenance"
 
 Set the milestone to the current release, e.g.:
-/milestone %19.2
+/milestone %<current-release>
 
 /request_review @jgdoyon1 @michaelangeloio @michaelusa @bohdanpk
 -->
