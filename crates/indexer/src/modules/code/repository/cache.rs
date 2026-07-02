@@ -36,10 +36,7 @@ pub enum RepositoryCacheError {
 
 #[derive(Debug)]
 pub struct CachedRepository {
-    /// Owns the extraction directory: dropping this removes the tree, whether the job returns,
-    /// errors, or is dropped mid-run (e.g. on the wall-clock timeout). A unique dir per run means
-    /// two workers racing the same repo (redelivery while the first is still unpacking) never
-    /// share a tree and can't clobber each other.
+    /// Unique per run; dropping it removes the tree, so concurrent runs never clobber each other.
     dir: TempDir,
     pub file_inventory: Arc<[FileInventoryEntry]>,
     /// Per-path reason for files the stream settled as bare nodes, carried to the
