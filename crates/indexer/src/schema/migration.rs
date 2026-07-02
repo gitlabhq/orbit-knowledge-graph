@@ -137,11 +137,8 @@ pub async fn run_if_needed(
     }
 }
 
-/// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is
-/// deployed on top of a newer active version. Re-activate vs. rebuild is
-/// decided by table existence, not `gkg_schema_version` status, which can
-/// lag under concurrent writers; a rebuild is promoted later by
-/// `MigrationCompletionChecker`, same as a forward migration.
+/// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer
+/// active version. Re-activate vs. rebuild is decided by table existence, not lag-prone status.
 async fn run_rollback(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,

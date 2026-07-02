@@ -353,9 +353,7 @@ fn classify_readiness(
     migrating: Option<u32>,
     embedded: u32,
 ) -> SchemaReadiness {
-    // Checked before the outdated guard: a rollback rebuild marks the embedded
-    // version migrating while a higher version is still active, and that
-    // binary must be Ready to backfill it.
+    // Checked before the outdated guard: a rollback rebuild must be Ready while a higher version is active.
     if active == Some(embedded) || migrating == Some(embedded) {
         return SchemaReadiness::Ready;
     }
