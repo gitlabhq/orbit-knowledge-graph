@@ -53,6 +53,9 @@ pub struct StrDoc<L: LanguageExt> {
 /// byte offset is clearly pathological -- normal parsing always advances.
 const DEFAULT_MAX_STALL: u64 = 100_000;
 
+/// Abort the parse when the worker stack drops below this, before a deep native recursion overflows it.
+const PARSE_STACK_RED_ZONE: usize = 256 * 1024;
+
 /// Per-thread CPU-time budget (create and check on the same thread); ignores preempted time, unlike a wall-clock deadline.
 #[derive(Clone, Copy)]
 pub struct CpuBudget {
@@ -115,6 +118,11 @@ impl<L: LanguageExt> StrDoc<L> {
                 let last_offset = AtomicU64::new(u64::MAX);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
+                    // Bail before the native parse overflows the stack; that fault is an uncatchable SIGSEGV.
+                    if stacker::remaining_stack().is_some_and(|r| r < PARSE_STACK_RED_ZONE) {
+                        tracing::warn!("tree-sitter parse aborted: stack near exhaustion");
+                        return ControlFlow::Break(());
+                    }
                     if let Some(budget) = budget
                         && budget.expired()
                     {
