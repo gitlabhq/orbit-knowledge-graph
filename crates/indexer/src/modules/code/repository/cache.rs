@@ -102,28 +102,30 @@ impl RepositoryCache for LocalRepositoryCache {
         &self,
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError> {
-        // A unique per-run dir under the cache root; its `TempDir` owns cleanup on drop. On a
-        // mid-stream failure (cap exceeded, truncated body) the drop also reclaims partial output.
         let dir = TempDir::new_in(&self.base_dir)?;
 
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
-        let repo_dir_owned = dir.path().to_path_buf();
         let mut filter = CodeFilter::new(
             self.max_file_size,
             self.max_total_bytes,
             detect_language_from_path,
         );
+        // The blocking task owns the `TempDir` for the duration of extraction and hands it back.
+        // If this future is dropped (a wall-clock timeout), the `spawn_blocking` still runs to
+        // completion detached and drops the `TempDir` itself, so the extractor never writes into a
+        // directory whose cleanup already ran.
         let extracted = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            extract_tar_gz(bridge, &repo_dir_owned, &mut filter).map(|inv| (inv, filter))
+            let result = extract_tar_gz(bridge, dir.path(), &mut filter).map(|inv| (inv, filter));
+            (dir, result)
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?;
 
-        let (file_inventory, filter) = match extracted {
-            Ok(ok) => ok,
-            Err(e) => {
+        let (dir, (file_inventory, filter)) = match extracted {
+            (dir, Ok(ok)) => (dir, ok),
+            (_dir, Err(e)) => {
                 return Err(match e {
                     StreamError::Empty => RepositoryCacheError::EmptyArchive,
                     StreamError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
