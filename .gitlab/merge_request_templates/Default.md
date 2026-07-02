@@ -73,9 +73,17 @@ this block.
 
 </details>
 
-/label ~"devops::analytics" ~"section::analytics" ~"knowledge graph"
+/label ~"devops::analytics" ~"section::analytics" ~"knowledge graph" ~"group::knowledge-graph"
 
 /assign me
 <!--
+Set a type label (pick one):
+/label ~"type::feature"
+/label ~"type::bug"
+/label ~"type::maintenance"
+
+Set the milestone to the current release, e.g.:
+/milestone %19.2
+
 /request_review @jgdoyon1 @michaelangeloio @michaelusa @bohdanpk
 -->
