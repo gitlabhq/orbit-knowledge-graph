@@ -36,7 +36,6 @@ pub enum RepositoryCacheError {
 
 #[derive(Debug)]
 pub struct CachedRepository {
-    /// Unique per run; dropping it removes the tree, so concurrent runs never clobber each other.
     dir: TempDir,
     pub file_inventory: Arc<[FileInventoryEntry]>,
     /// Per-path reason for files the stream settled as bare nodes, carried to the
