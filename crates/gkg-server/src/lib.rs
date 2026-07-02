@@ -14,5 +14,4 @@ pub mod schema_watcher;
 pub mod shutdown;
 pub mod tls;
 pub mod tools;
-pub mod version;
 pub mod webserver;
