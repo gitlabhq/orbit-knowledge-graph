@@ -85,5 +85,5 @@ Set a type label (pick one):
 Set the milestone to the current release, e.g.:
 /milestone %<current-release>
 
-/request_review @jgdoyon1 @michaelangeloio @michaelusa @bohdanpk
+/request_review @jgdoyon1 @michaelangeloio @michaelusa @bohdanpk @dgruzd @aalgutifan
 -->
