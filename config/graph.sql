@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS gl_commit (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, project_id, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_container_repository (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_dependency (
     id Int64 CODEC(Delta(8), LZ4),
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS gl_dependency (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_deployment (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -170,7 +170,7 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_directory (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_environment (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_finding (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -280,7 +280,7 @@ CREATE TABLE IF NOT EXISTS gl_finding (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_group (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_job (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -388,7 +388,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_label (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -492,7 +492,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -518,7 +518,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -554,7 +554,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_milestone (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -615,7 +615,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_package (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -683,7 +683,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_project (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -756,7 +756,7 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_stage (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -779,7 +779,7 @@ CREATE TABLE IF NOT EXISTS gl_stage (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_user (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -860,7 +860,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -885,7 +885,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -922,7 +922,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -1005,7 +1005,7 @@ CREATE TABLE IF NOT EXISTS gl_ci_edge (
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind, source_id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_code_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -1030,7 +1030,7 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, relationship_kind, project_id, branch, source_id, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind, project_id, branch)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_diff_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -1051,7 +1051,7 @@ CREATE TABLE IF NOT EXISTS gl_diff_edge (
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind, source_id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -1072,7 +1072,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind, source_id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_sec_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -1093,7 +1093,7 @@ CREATE TABLE IF NOT EXISTS gl_sec_edge (
 PARTITION BY (modulo(sipHash64(toUInt64OrZero(arrayElement(splitByChar('/', traversal_path), 2))), 50))
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind, source_id)
-SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, min_age_to_force_merge_seconds = 3600, min_age_to_force_merge_on_partition_only = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE DICTIONARY IF NOT EXISTS gl_project_traversal_paths_dict (
     id Int64,
