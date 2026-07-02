@@ -70,7 +70,8 @@ Answer these before touching files:
 ## 3. Monolith — Siphon CDC (one MR per source table)
 
 > The generic Siphon lifecycle — adding the migration and replicating the table —
-> is already documented in [ClickHouse table design with Siphon → Table replication example](https://docs.gitlab.com/development/database/clickhouse/clickhouse_table_design_with_siphon/#table-replication-example).
+> is already documented in [ClickHouse table design with Siphon → Table replication example](https://docs.gitlab.com/development/database/clickhouse/clickhouse_table_design_with_siphon/#table-replication-example)
+> (the CDC service itself lives at [`gitlab-org/analytics-section/siphon`](https://gitlab.com/gitlab-org/analytics-section/siphon)).
 > Read that first. This section only records the **review-tested conventions**
 > specific to Orbit nodes/edges — the deltas on top of the canonical flow.
 
