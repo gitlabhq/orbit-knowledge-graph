@@ -27,6 +27,11 @@ ignore = [
     "RUSTSEC-2024-0436",
     # proc-macro-error2 unmaintained - transitive dep from tabled_derive
     "RUSTSEC-2026-0173",
+    # quick-xml < 0.41 DoS advisories — transitive via reqsign/opendal under lance-graph.
+    # No safe upgrade until upstream bumps quick-xml >= 0.41. See #18.
+    # Remove when upstream updates (check: cargo tree -i quick-xml)
+    "RUSTSEC-2026-0194", # quadratic attribute-name duplicate check
+    "RUSTSEC-2026-0195", # unbounded NsReader namespace-declaration allocation
 ]
 
 [licenses]
