@@ -2,7 +2,7 @@
 version = "0.1.0"
 
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
   "crates/circuit-breaker",
   "crates/code-graph",
