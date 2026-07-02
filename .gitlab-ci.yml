@@ -367,6 +367,15 @@ system-note-actions-check:
     - apk add --no-cache bash curl python3
     - bash ./scripts/check-system-note-actions.sh
 
+unused-deps-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo shear
+
 fmt-check:
   stage: lint
   extends:
