@@ -6228,7 +6228,6 @@ dependencies = [
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "siphon-proto",
  "tar",
  "tempfile",
