@@ -71,7 +71,6 @@ impl ClickHouseStaleDataCleaner {
     fn build_node_delete_query(table: &str) -> String {
         format!(
             r#"
-            INSERT INTO {table} (traversal_path, project_id, branch, id, _version, _deleted)
             SELECT
                 traversal_path,
                 project_id,
@@ -94,8 +93,6 @@ impl ClickHouseStaleDataCleaner {
         if edge_table.contains("code_edge") {
             return format!(
                 r#"
-                INSERT INTO {edge_table}
-                    (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
                 SELECT
                     traversal_path,
                     project_id,
@@ -138,8 +135,6 @@ impl ClickHouseStaleDataCleaner {
 
         format!(
             r#"
-            INSERT INTO {edge_table}
-                (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
             SELECT
                 traversal_path,
                 source_id,
@@ -157,69 +152,47 @@ impl ClickHouseStaleDataCleaner {
         )
     }
 
-    async fn delete_stale_nodes(
+    async fn tombstone_stale_rows(
         &self,
+        table: &str,
+        query: &str,
         traversal_path: &str,
         project_id: i64,
         branch: &str,
         formatted_watermark: &str,
     ) -> Result<(), StaleDataCleanerError> {
-        let futures = self.node_queries.iter().map(|(table, query)| async move {
-            debug!(table, project_id, branch, "deleting stale nodes");
+        let query_error = |reason: String| StaleDataCleanerError::Query {
+            table: table.to_string(),
+            traversal_path: traversal_path.to_string(),
+            project_id,
+            branch: branch.to_string(),
+            reason,
+        };
 
-            self.client
-                .insert_query(query)
-                .param("traversal_path", traversal_path)
-                .param("project_id", project_id)
-                .param("branch", branch)
-                .param("watermark_time", formatted_watermark)
-                .execute()
-                .await
-                .map_err(|e| StaleDataCleanerError::Query {
-                    table: table.to_string(),
-                    traversal_path: traversal_path.to_string(),
-                    project_id,
-                    branch: branch.to_string(),
-                    reason: e.to_string(),
-                })
-        });
+        debug!(
+            table,
+            traversal_path, project_id, branch, "tombstoning stale rows"
+        );
+        let stale = self
+            .client
+            .query(query)
+            .param("traversal_path", traversal_path)
+            .param("project_id", project_id)
+            .param("branch", branch)
+            .param("watermark_time", formatted_watermark)
+            .fetch_arrow()
+            .await
+            .map_err(|e| query_error(e.to_string()))?;
 
-        try_join_all(futures).await?;
-        Ok(())
-    }
+        let stale: Vec<_> = stale.into_iter().filter(|b| b.num_rows() > 0).collect();
+        if stale.is_empty() {
+            return Ok(());
+        }
 
-    async fn delete_stale_edges(
-        &self,
-        traversal_path: &str,
-        project_id: i64,
-        branch: &str,
-        formatted_watermark: &str,
-    ) -> Result<(), StaleDataCleanerError> {
-        let futures = self.edge_queries.iter().map(|(table, query)| async move {
-            debug!(
-                table,
-                traversal_path, project_id, branch, "deleting stale edges"
-            );
-
-            self.client
-                .insert_query(query)
-                .param("traversal_path", traversal_path)
-                .param("project_id", project_id)
-                .param("branch", branch)
-                .param("watermark_time", formatted_watermark)
-                .execute()
-                .await
-                .map_err(|e| StaleDataCleanerError::Query {
-                    table: table.to_string(),
-                    traversal_path: traversal_path.to_string(),
-                    project_id,
-                    branch: branch.to_string(),
-                    reason: e.to_string(),
-                })
-        });
-
-        try_join_all(futures).await?;
-        Ok(())
+        self.client
+            .insert_arrow(table, &stale)
+            .await
+            .map_err(|e| query_error(e.to_string()))
     }
 }
 
@@ -234,11 +207,19 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
     ) -> Result<(), StaleDataCleanerError> {
         let formatted_watermark = watermark_time.format(TIMESTAMP_FORMAT).to_string();
 
-        self.delete_stale_nodes(traversal_path, project_id, branch, &formatted_watermark)
+        for queries in [&self.node_queries, &self.edge_queries] {
+            try_join_all(queries.iter().map(|(table, query)| {
+                self.tombstone_stale_rows(
+                    table,
+                    query,
+                    traversal_path,
+                    project_id,
+                    branch,
+                    &formatted_watermark,
+                )
+            }))
             .await?;
-
-        self.delete_stale_edges(traversal_path, project_id, branch, &formatted_watermark)
-            .await?;
+        }
 
         debug!(project_id, branch, "stale data deletion complete");
         Ok(())
