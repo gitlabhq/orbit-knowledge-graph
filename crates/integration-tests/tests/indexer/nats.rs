@@ -9,7 +9,9 @@ use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
-use indexer::nats::versioning::{NATS_VERSIONER, NatsVersioner, cleanup_version};
+use indexer::nats::versioning::{
+    NATS_VERSIONER, NatsVersioner, cleanup_release_messaging, cleanup_schema_state,
+};
 use indexer::types::{Envelope, Event, Subscription};
 use nats_client::{KvBucketConfig, KvPutOptions};
 use serde::{Deserialize, Serialize};
@@ -606,15 +608,16 @@ async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
 }
 
 #[tokio::test]
-async fn cleanup_version_deletes_streams_and_kv_buckets() {
+async fn cleanup_release_and_schema_delete_their_own_entities() {
     let (_container, url) = start_nats_container().await;
     let client = async_nats::connect(format!("nats://{url}"))
         .await
         .expect("failed to connect to NATS");
     let jetstream = async_nats::jetstream::new(client.clone());
 
-    let version = 999;
-    let v = NatsVersioner::new(version);
+    let release = "0-84-1";
+    let schema_version = 999;
+    let v = NatsVersioner::new(release, schema_version);
 
     let stream_names = ["GKG_INDEXER", "GKG_DEAD_LETTERS"].map(|s| v.stream(s));
     let bucket_names = ["indexing_locks", "orbit_indexing_progress"].map(|b| v.bucket(b));
@@ -639,20 +642,23 @@ async fn cleanup_version_deletes_streams_and_kv_buckets() {
             .unwrap_or_else(|e| panic!("failed to create bucket {name}: {e}"));
     }
 
-    cleanup_version(&client, version)
+    cleanup_release_messaging(&client, release)
         .await
-        .expect("cleanup_version failed");
+        .expect("cleanup_release_messaging failed");
+    cleanup_schema_state(&client, schema_version)
+        .await
+        .expect("cleanup_schema_state failed");
 
     for name in &stream_names {
         assert!(
             jetstream.get_stream(name).await.is_err(),
-            "stream {name} should have been deleted by cleanup_version",
+            "stream {name} should have been deleted by cleanup_release_messaging",
         );
     }
     for name in &bucket_names {
         assert!(
             jetstream.get_key_value(name).await.is_err(),
-            "KV bucket {name} should have been deleted by cleanup_version",
+            "KV bucket {name} should have been deleted by cleanup_schema_state",
         );
     }
 }
@@ -705,13 +711,16 @@ async fn broker_kv_path_targets_versioned_bucket() {
 }
 
 #[tokio::test]
-async fn cleanup_version_is_idempotent() {
+async fn cleanup_is_idempotent() {
     let (_container, url) = start_nats_container().await;
     let client = async_nats::connect(format!("nats://{url}"))
         .await
         .expect("failed to connect to NATS");
 
-    cleanup_version(&client, 888)
+    cleanup_release_messaging(&client, "0-0-0-missing")
         .await
-        .expect("cleanup_version failed unexpectedly for non-existent version");
+        .expect("cleanup_release_messaging failed for non-existent release");
+    cleanup_schema_state(&client, 888)
+        .await
+        .expect("cleanup_schema_state failed for non-existent schema version");
 }
