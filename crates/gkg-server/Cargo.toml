@@ -60,14 +60,10 @@ toon-format = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
-prost-build = { workspace = true }
 
 [dev-dependencies]
 gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
 tokio = { workspace = true }
-
-[package.metadata.cargo-shear]
-ignored = ["prost-build"] # transitive dep of tonic-prost-build, kept explicit for build.rs proto codegen
 
 [lints.rust]
 # workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars

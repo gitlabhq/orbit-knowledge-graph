@@ -5378,7 +5378,6 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "prost 0.14.4",
- "prost-build 0.14.3",
  "query-engine",
  "reqwest 0.13.4",
  "rustls",
