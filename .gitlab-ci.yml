@@ -2,7 +2,6 @@ variables:
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
   CLICKHOUSE_VERSION: "26.2"
-  DEP_PROXY: 
   DEV_PREFIX: "dev"
   GCLOUD_PROJECT: gitlab-ci-runners-signing
   SERVICE_ACCOUNT: gitlab-orbit-kg-signer@gitlab-ci-runners-signing.iam.gserviceaccount.com
@@ -15,34 +14,28 @@ workflow:
     # Security fork
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_TAG
       variables:
-        DEP_PROXY: ""
         DEV_PREFIX: "sec"
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
       variables:
-        DEP_PROXY: ""
         DEV_PREFIX: "sec"
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
-        DEP_PROXY: ""
         DEV_PREFIX: "sec"
     # Non-canonical (other forks)
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG
       variables:
-        DEP_PROXY: ""
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
       variables:
-        DEP_PROXY: ""
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
-        DEP_PROXY: ""
         RUNNER_LARGE: saas-linux-medium-amd64
         RUNNER_LARGE_ARM: saas-linux-medium-arm64
     # Canonical project — original behavior
@@ -622,18 +615,9 @@ integration-test:
   before_script:
     - !reference [.sccache-template, before_script]
     - |
-      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "" ]; then
-        echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
-      fi
-    - |
       docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} &
       docker pull nats:2.11-alpine &
       wait
-    - |
-      if [ -n "" ]; then
-        docker tag clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
-        docker tag nats:2.11-alpine nats:2.11-alpine
-      fi
   script:
     # corpus-smoke runs as its own parallel job below.
     - cargo nextest run --profile ci --all-features --test containers -E 'not test(corpus_smoke)'
@@ -656,15 +640,7 @@ corpus-smoke-test:
   needs: []
   before_script:
     - !reference [.sccache-template, before_script]
-    - |
-      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "" ]; then
-        echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
-      fi
     - docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
-    - |
-      if [ -n "" ]; then
-        docker tag clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
-      fi
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
