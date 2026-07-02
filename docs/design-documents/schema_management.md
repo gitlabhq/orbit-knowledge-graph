@@ -178,11 +178,11 @@ Non-schema ontology changes (descriptions, comments) can bypass the check by add
 
 The **dispatcher** owns schema migration. At boot, before its task loops start, it compares the
 embedded `SCHEMA_VERSION` with the active version in `gkg_schema_version`. If the embedded version
-is **newer** (`active < SCHEMA_VERSION`), it runs a forward migration (below). If the embedded
-version is **older** (`active > SCHEMA_VERSION` — an older binary was deployed), it runs an
-automatic **rollback** (see "Rolling back" below) rather than failing: redeploying an old binary
-is the operational rollback mechanism, not a mistake to refuse. Indexers do not run DDL; they gate
-on the version becoming ready (see "Indexer readiness gate" below).
+is newer (`active < SCHEMA_VERSION`), it runs a forward migration (below). If it is older
+(`active > SCHEMA_VERSION`, meaning an older binary was deployed), it rolls back automatically
+instead of failing (see "Rolling back" below): redeploying an old binary is how operators roll
+back, not a mistake to refuse. Indexers do not run DDL; they gate on the version becoming ready
+(see "Indexer readiness gate" below).
 
 ### Migration flow
 
@@ -232,10 +232,11 @@ and decides against the embedded version:
 | only a version `< N` is active, or no version yet | wait and retry within the budget |
 | a version `> N` is active, and `N` is not `migrating` | outdated binary — fail fast, exit non-zero |
 
-The `active`/`migrating` match takes precedence over the outdated check: during a
-rollback rebuild (Case 2) the dispatcher marks `N` `migrating` while a higher
-version is still `active`, and `N`'s indexer must proceed to backfill it —
-otherwise the rebuild could never reach the completion checker's promotion gate.
+The `active`/`migrating` match is checked before the outdated check on purpose. During a
+rollback rebuild (case 2 under "Rolling back" below) the dispatcher marks `N` `migrating`
+while a higher version is still `active`, and `N`'s indexer must proceed to backfill it.
+If the outdated check won, the rebuild could never reach the completion checker's
+promotion gate.
 
 If the budget (`schema.indexer_schema_wait_timeout_secs`, default `300`) is exhausted, the indexer
 exits non-zero and Kubernetes restarts it (`CrashLoopBackoff`), which self-heals once the
@@ -301,11 +302,11 @@ data correctness validation is deferred to staging E2E tests.
 
 ### Status transitions on completion
 
-A dispatcher only promotes a `migrating` version it embeds (`migrating == SCHEMA_VERSION`). This
-stops a straggler or rolled-back dispatcher from completing a migration whose schema it does not
-run — which would promote it and immediately flip itself `Outdated`. A `migrating` version that no
-running dispatcher embeds simply parks (surfaced by `migrating_age_seconds`) until one that embeds
-it runs, or an operator aborts it.
+A dispatcher only promotes a `migrating` version it embeds (`migrating == SCHEMA_VERSION`).
+Otherwise a straggler or rolled-back dispatcher could complete a migration whose schema it does
+not run, promoting it and immediately flipping itself `Outdated`. A `migrating` version that no
+running dispatcher embeds parks (visible in `migrating_age_seconds`) until one that embeds it
+runs or an operator aborts it.
 
 When completion is detected:
 
@@ -342,10 +343,10 @@ Cleanup logic:
 ### Safety guarantees
 
 - Only tables for versions with status `retired` are dropped — never `active` or `migrating`.
-  The GC keep-set protects **every** `migrating` version, regardless of whether it sits above or
-  below the active version. This is required, not incidental: a rebuild-rollback (see "Rolling
-  back" below) marks a version below active `migrating` while it rebuilds, and that version's
-  tables must survive GC for the rebuild to complete.
+  The GC keep-set includes every `migrating` version whether it sits above or below the active
+  one. Rollbacks depend on this: a rebuild-rollback (see "Rolling back" below) marks a version
+  below active as `migrating` while it rebuilds, and its tables must survive GC for the rebuild
+  to complete.
 - `DROP TABLE IF EXISTS` is idempotent — safe to retry on partial failures.
 - The cleanup runs under the `schema_migration` NATS KV lock — no concurrent cleanup attempts.
 - `DROP TABLE` uses async drop (no `SYNC` keyword) since table names are monotonically
@@ -355,40 +356,39 @@ Cleanup logic:
 
 ### Rolling back
 
-Deploying an older binary **is** the rollback mechanism: when the dispatcher finds `active >
+Deploying an older binary is the rollback mechanism: when the dispatcher finds `active >
 SCHEMA_VERSION`, `schema::migration::run_rollback` rolls back to the embedded version
-automatically, after acquiring the migration lock and re-checking (another pod may have already
-rolled back while this pod waited). Which of two cases applies is decided by **table existence**,
-not `gkg_schema_version` status — status can lag or be stale under concurrent writers, but a
-`system.tables` lookup for `v<SCHEMA_VERSION>_*` is authoritative:
+automatically, after taking the migration lock and re-checking that another pod hasn't already
+done it. The rollback picks between two cases based on table existence rather than
+`gkg_schema_version` status, since status rows can lag under concurrent writers while a
+`system.tables` lookup for `v<SCHEMA_VERSION>_*` reflects what actually exists:
 
 1. **Tables retained** (the embedded version is within the retention window, so GC never dropped
    its tables) — direct re-activation. The dispatcher marks the embedded version `active` and
-   retires whatever was active before, with no `migrating` phase: the existing tables are already
-   complete for the version this binary understands, so no re-indexing is needed. Indexing resumes
-   immediately on the existing `vN_*` tables via the normal namespace sweep.
+   retires whatever was active before. There is no `migrating` phase and no re-indexing: the
+   existing tables are already complete for the version this binary understands, and indexing
+   resumes on them through the normal namespace sweep.
 
-2. **Tables GC'd** (the embedded version was retired and later dropped by a forward migration
-   that has since happened) — rebuild. This is mechanically identical to a forward migration:
-   create the `vN_*` tables from the ontology and mark the version `migrating`. The existing
-   `MigrationCompletionChecker` promotes it once re-indexing catches up — completion detection and
-   promotion don't care whether the migrating version is above or below the current active version
-   (see "Migration completion detection" below).
+2. **Tables GC'd** (the embedded version was retired and a later forward migration dropped its
+   tables) — rebuild. Mechanically this is a forward migration: create the `vN_*` tables from
+   the ontology and mark the version `migrating`. The existing `MigrationCompletionChecker`
+   promotes it once re-indexing catches up; completion detection and promotion don't care
+   whether the migrating version is above or below the current active one (see "Migration
+   completion detection" below).
 
    Because the dispatcher and indexer boot independently, the indexer can run its first readiness
    poll in the window before the dispatcher has written the `migrating` row. In that window the
    active version is still higher than the embedded one with nothing migrating, so the readiness
    gate classifies it `Outdated` and the indexer exits non-zero. This is expected: Kubernetes
    restarts it (`CrashLoopBackoff`), and once the dispatcher's `migrating` mark is durable the next
-   boot proceeds. A Case 2 rebuild therefore completes after at least one indexer restart rather
-   than on the first boot.
+   boot proceeds. A case 2 rebuild therefore costs at least one indexer restart rather than
+   completing on the first boot.
 
-Operational note: this means **any** older-binary deploy triggers a rollback, not just an
-intentional one. There is no separate "confirm this is a deliberate rollback" step — redeploying
-an older binary on top of a newer active version always rolls back to it, whether that binary is a
-deliberate rollback target or a stale image. Case 1 is fast and reversible (the newer version's
-tables are only retired, not dropped, so rolling forward again is another instant pointer swap
-within the retention window). Case 2 re-indexes from scratch, same cost as a forward migration.
+Operational note: any older-binary deploy triggers this, deliberate or not. There is no
+confirmation step, so a stale image rolls the schema back just as readily as an intentional
+rollback. Case 1 is cheap and reversible: the newer version's tables are only retired, not
+dropped, so rolling forward again within the retention window is another instant pointer swap.
+Case 2 re-indexes from scratch, at the same cost as a forward migration.
 
 ### Configuration
 
