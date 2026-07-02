@@ -96,10 +96,8 @@ WHERE _deleted = false \
 
 /// Single query that computes the keep-set in SQL and returns every
 /// `v<N>_*` object outside it. The keep-set is: active + newest
-/// `retired_slots` retired + every migrating version, regardless of its
-/// relationship to active. A migrating version can sit below active during
-/// a rebuild-rollback (`schema::migration::run_rollback`) or above it during
-/// a forward migration; both must survive GC.
+/// `retired_slots` retired + every migrating version — a rebuild-rollback
+/// migrates *below* active, so position relative to active is no filter.
 /// Returns zero rows if no active version exists (safety guard).
 const LIST_DEAD_VERSION_OBJECTS: &str = "\
 SELECT \

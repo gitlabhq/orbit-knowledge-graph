@@ -138,17 +138,10 @@ pub async fn run_if_needed(
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is
-/// deployed on top of a newer active version.
-///
-/// Distinguishes two cases by table existence, not `gkg_schema_version`
-/// status (which can lag or lie under concurrent writers):
-///
-/// - **Tables retained**: a pointer swap — mark the embedded version
-///   `active` and retire the newer one. No re-indexing; the tables are
-///   already complete for this binary.
-/// - **Tables GC'd**: reuses [`run_migration_locked`] to rebuild. Promotion
-///   back to `active` is handled by `MigrationCompletionChecker`, which
-///   doesn't care whether the migrating version is above or below active.
+/// deployed on top of a newer active version. Re-activate vs. rebuild is
+/// decided by table existence, not `gkg_schema_version` status, which can
+/// lag under concurrent writers; a rebuild is promoted later by
+/// `MigrationCompletionChecker`, same as a forward migration.
 async fn run_rollback(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,
@@ -160,8 +153,6 @@ async fn run_rollback(
 ) -> Result<(), MigrationError> {
     acquire_migration_lock(lock_service, metrics).await?;
 
-    // Re-read after acquiring the lock — another pod may have already rolled
-    // back while this pod was waiting.
     let current_active = read_active_version(graph).await?;
     if current_active == Some(*SCHEMA_VERSION) {
         info!(
@@ -223,10 +214,6 @@ async fn run_rollback(
     .await
 }
 
-/// Same shape as `MigrationCompletionChecker`'s promotion
-/// (`migration_completion.rs`) — a direct-reactivation rollback is a
-/// pointer swap onto already-complete tables, so it skips the `migrating`
-/// phase that promotion normally follows.
 async fn reactivate_version(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -251,8 +238,6 @@ async fn run_migration(
 ) -> Result<(), MigrationError> {
     acquire_migration_lock(lock_service, metrics).await?;
 
-    // Re-read after acquiring the lock — another pod may have completed the
-    // migration while this pod was waiting.
     let current_active = read_active_version(graph).await?;
     if current_active == Some(*SCHEMA_VERSION) {
         info!(
@@ -276,9 +261,7 @@ async fn run_migration(
     .await
 }
 
-/// DDL + mark-migrating body shared by a forward migration and a
-/// rebuild-rollback. Assumes the caller already holds the migration lock and
-/// has re-read the active version; releases the lock on every exit path.
+/// Caller must hold the migration lock; released on every exit path.
 async fn run_migration_locked(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,

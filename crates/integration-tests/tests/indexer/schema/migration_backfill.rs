@@ -265,10 +265,6 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
     );
 }
 
-/// End-to-end for the rebuild-rollback path: `MigrationCompletionChecker`
-/// promotes a rebuilt version once its SDLC checkpoint covers every enabled
-/// namespace, the same as a forward migration — promotion only looks at
-/// which version is `migrating`, not whether it's above or below active.
 #[tokio::test]
 async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
     let context = TestContext::new().await;
@@ -343,9 +339,6 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
     );
 }
 
-/// A dispatcher must not promote a migrating version it does not embed — doing
-/// so would complete a migration whose schema it doesn't run and flip itself
-/// Outdated. Such a version parks until a dispatcher that embeds it runs.
 #[tokio::test]
 async fn migration_completion_checker_does_not_promote_version_it_does_not_embed() {
     let context = TestContext::new().await;

@@ -304,12 +304,8 @@ const COUNT_VERSION_TABLES: &str = "\
 SELECT count() AS cnt FROM system.tables \
 WHERE database = {db:String} AND startsWith(name, {prefix:String})";
 
-/// Returns `true` if at least one `v<version>_*` table exists. Used to tell
-/// a rollback that can re-activate a version directly (tables intact) from
-/// one that must rebuild it (tables GC'd after retirement).
-///
-/// Version 0 has no prefix and is never dropped by GC, so this always
-/// returns `true` for it.
+/// Whether at least one `v<version>_*` table exists. Version 0 tables are
+/// unprefixed and never dropped by GC, so it always counts as existing.
 pub async fn version_tables_exist(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -357,9 +353,9 @@ fn classify_readiness(
     migrating: Option<u32>,
     embedded: u32,
 ) -> SchemaReadiness {
-    // A binary whose version is active or migrating must process, even when a
-    // higher version is active — that is the rollback-rebuild case (Case 2),
-    // where the dispatcher marks this older version migrating to backfill it.
+    // Checked before the outdated guard: a rollback rebuild marks the embedded
+    // version migrating while a higher version is still active, and that
+    // binary must be Ready to backfill it.
     if active == Some(embedded) || migrating == Some(embedded) {
         return SchemaReadiness::Ready;
     }
@@ -590,9 +586,6 @@ mod tests {
         );
     }
 
-    // A rollback rebuild (Case 2) marks the embedded version migrating while a
-    // higher version is still active; the indexer must process to backfill it,
-    // so a matching migrating version wins over the higher-active outdated check.
     #[test]
     fn readiness_matching_migrating_takes_precedence_over_higher_active() {
         assert_eq!(

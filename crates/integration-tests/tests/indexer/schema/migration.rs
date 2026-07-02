@@ -571,8 +571,6 @@ async fn wait_until_ready_fails_fast_when_outdated() {
     assert!(matches!(result, Err(SchemaWaitError::Outdated { .. })));
 }
 
-// Case 2 rollback: the dispatcher marks this older version migrating while a
-// higher version stays active, so its indexer must become ready to backfill it.
 #[tokio::test]
 async fn wait_until_ready_ready_when_rebuilding_below_active() {
     let ctx = TestContext::new(&[]).await;
