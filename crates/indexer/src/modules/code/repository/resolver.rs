@@ -104,9 +104,6 @@ impl RepositoryResolver {
         self.cache.invalidate(path).await
     }
 
-    /// A guard that removes `path`'s extraction tree if the job is dropped before it explicitly
-    /// cleans up (e.g. a wall-clock timeout drops the whole future). Disarm it once the normal
-    /// `cleanup` has run so it doesn't double-remove.
     pub fn extraction_guard(&self, path: std::path::PathBuf) -> ExtractionGuard {
         ExtractionGuard {
             cache: Some(self.cache.clone()),
