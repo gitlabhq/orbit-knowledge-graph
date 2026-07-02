@@ -7,7 +7,8 @@ use thiserror::Error;
 use tracing::debug;
 
 use super::config::CodeTableNames;
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
+use crate::durability::WriteDurability;
 
 #[async_trait]
 pub trait StaleDataCleaner: Send + Sync {
@@ -189,8 +190,11 @@ impl ClickHouseStaleDataCleaner {
             return Ok(());
         }
 
+        let sql = self
+            .client
+            .build_insert_sql_with_overrides(table, insert_overrides(WriteDurability::Durable));
         self.client
-            .insert_arrow(table, &stale)
+            .insert_arrow_streaming_with_sql(table, &sql, &stale)
             .await
             .map_err(|e| query_error(e.to_string()))
     }
