@@ -22,10 +22,7 @@ impl ClusterHealthChecker {
         let health_client = health_check_url.map(InfrastructureHealthClient::new);
 
         Self {
-            version: std::env::var("GKG_VERSION")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+            version: gkg_utils::version::get().to_string(),
             health_client,
         }
     }
