@@ -1,3 +1,9 @@
+## [0.84.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.84.0...v0.84.1) (2026-07-02)
+
+### Other
+
+* **ontology:** break-glass disable table partitioning ([6c2f3d1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6c2f3d1a5e56ecf4694ee965ae80bb08d1c180c4)) by Michael Usachenko
+
 ## [0.84.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.83.1...v0.84.0) (2026-07-02)
 
 ### Features
