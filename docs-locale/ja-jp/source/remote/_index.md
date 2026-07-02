@@ -10,7 +10,7 @@ title: Orbit Remote
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
