@@ -97,20 +97,6 @@ impl RepositoryResolver {
         self.full_download(project_id, branch, ref_name).await
     }
 
-    pub async fn cleanup(
-        &self,
-        path: &std::path::Path,
-    ) -> Result<(), super::cache::RepositoryCacheError> {
-        self.cache.invalidate(path).await
-    }
-
-    pub fn extraction_guard(&self, path: std::path::PathBuf) -> ExtractionGuard {
-        ExtractionGuard {
-            cache: Some(self.cache.clone()),
-            path,
-        }
-    }
-
     async fn full_download(
         &self,
         project_id: i64,
@@ -159,32 +145,6 @@ impl RepositoryResolver {
             Err(e) => {
                 Err(HandlerError::Processing(format!("failed to extract archive: {e}")).into())
             }
-        }
-    }
-}
-
-/// Reclaims a run's extraction directory on drop unless [`ExtractionGuard::disarm`]ed, so a job
-/// dropped (e.g. on timeout) rather than returning cleanly does not leak the tree until restart.
-pub struct ExtractionGuard {
-    cache: Option<Arc<dyn RepositoryCache>>,
-    path: std::path::PathBuf,
-}
-
-impl ExtractionGuard {
-    pub fn disarm(mut self) {
-        self.cache = None;
-    }
-}
-
-impl Drop for ExtractionGuard {
-    fn drop(&mut self) {
-        if let Some(cache) = self.cache.take() {
-            let path = std::mem::take(&mut self.path);
-            tokio::spawn(async move {
-                if let Err(error) = cache.invalidate(&path).await {
-                    tracing::warn!(?path, %error, "failed to reclaim extraction dir on drop");
-                }
-            });
         }
     }
 }
@@ -357,45 +317,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_removes_downloaded_files() {
+    async fn dropping_repository_removes_downloaded_files() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(service);
 
         let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        assert!(repo.path.exists());
+        let path = repo.path().to_path_buf();
+        assert!(path.exists());
 
-        resolver.cleanup(&repo.path).await.unwrap();
-        assert!(!repo.path.exists());
-    }
-
-    #[tokio::test]
-    async fn dropped_guard_reclaims_extraction_dir() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
-
-        let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        assert!(repo.path.exists());
-
-        drop(resolver.extraction_guard(repo.path.clone()));
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(!repo.path.exists(), "an armed guard must clean up on drop");
-    }
-
-    #[tokio::test]
-    async fn disarmed_guard_leaves_extraction_dir() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
-
-        let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        resolver.extraction_guard(repo.path.clone()).disarm();
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(
-            repo.path.exists(),
-            "a disarmed guard must not touch the dir"
-        );
+        drop(repo);
+        assert!(!path.exists());
     }
 
     #[tokio::test]
@@ -412,34 +344,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_is_idempotent() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
-
-        let repo = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-
-        resolver.cleanup(&repo.path).await.unwrap();
-        resolver.cleanup(&repo.path).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn resolve_works_after_cleanup() {
+    async fn resolve_works_after_drop() {
         let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "v1")], "commit1");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
-        let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
+        let repo1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(path1.join("src/main.rs")).unwrap(),
+            std::fs::read_to_string(repo1.path().join("src/main.rs")).unwrap(),
             "v1"
         );
-
-        resolver.cleanup(&path1.path).await.unwrap();
+        drop(repo1);
 
         service.set_archive(&[("src/main.rs", "v2")], "commit2");
-        let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
+        let repo2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
         assert_eq!(
-            std::fs::read_to_string(path2.join("src/main.rs")).unwrap(),
+            std::fs::read_to_string(repo2.path().join("src/main.rs")).unwrap(),
             "v2"
         );
     }
@@ -526,32 +445,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_without_prior_download_does_not_error() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (dir, resolver) = create_resolver(service);
-
-        resolver
-            .cleanup(&dir.path().join("never-extracted"))
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
     async fn multiple_projects_are_independent() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
         let (_dir, resolver) = create_resolver(Arc::clone(&service));
 
-        let path1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let path2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
+        let repo1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let repo2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
 
-        assert_ne!(path1, path2);
-        assert!(path1.join("src/main.rs").exists());
-        assert!(path2.join("src/main.rs").exists());
+        assert_ne!(repo1.path(), repo2.path());
+        assert!(repo1.path().join("src/main.rs").exists());
+        assert!(repo2.path().join("src/main.rs").exists());
 
-        resolver.cleanup(&path1.path).await.unwrap();
-        assert!(!path1.exists());
+        let path2 = repo2.path().to_path_buf();
+        drop(repo1);
         assert!(path2.exists());
     }
 }

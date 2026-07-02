@@ -301,8 +301,6 @@ impl CodeIndexingPipeline {
             "repository extraction completed"
         );
 
-        let extraction_guard = self.resolver.extraction_guard(repository.path.clone());
-
         // Release fetch slot before waiting for the indexing slot. This is
         // the pipelining point: freeing the fetch slot lets another handler
         // start its Gitaly download while we wait for an indexing slot.
@@ -324,20 +322,10 @@ impl CodeIndexingPipeline {
             .run_indexing(context, request, &repository, indexed_at, observer, cancel)
             .await;
 
-        if let Err(error) = self.resolver.cleanup(&repository.path).await {
-            self.metrics.record_cleanup("failure");
-            warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                %error,
-                "failed to clean up downloaded repository from disk"
-            );
-        } else {
-            self.metrics.record_cleanup("success");
-        }
-        extraction_guard.disarm();
-
+        // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
+        // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
         let commit = indexing_result?;
+        self.metrics.record_cleanup("success");
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
         // is the decrement that finalizes; otherwise the writer's last flush will.
@@ -491,7 +479,7 @@ impl CodeIndexingPipeline {
         );
 
         let code_graph_start = Instant::now();
-        let repo_dir = repository.path.clone();
+        let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
         let parsed = tokio::task::spawn_blocking(move || {
