@@ -736,9 +736,11 @@ impl<'a> Validator<'a> {
                 || (max_hops > 1
                     && (graph
                         .reachable_within_types(from, max_hops as usize, Some(&type_set))
+                        .node_kinds(from)
                         .contains(to)
                         || graph
                             .reachable_within_types(to, max_hops as usize, Some(&type_set))
+                            .node_kinds(to)
                             .contains(from)));
             if connected {
                 continue;
@@ -754,7 +756,9 @@ impl<'a> Validator<'a> {
     }
 
     fn unreachable_hint(&self, graph: &ontology::OntologyGraph, from: &str, to: &str) -> String {
-        let alternatives = graph.kinds_connecting(from, to, &HashSet::new());
+        let alternatives = graph
+            .kinds_connecting(from, to, &HashSet::new())
+            .edge_kinds();
         if !alternatives.is_empty() {
             return format!(
                 "relationship types connecting \"{from}\" and \"{to}\": [{}]",
@@ -763,8 +767,13 @@ impl<'a> Validator<'a> {
         }
         let mut kinds: Vec<String> = graph
             .neighbors(from, ontology::EdgeDirection::Outgoing)
+            .adjacencies()
             .into_iter()
-            .chain(graph.neighbors(from, ontology::EdgeDirection::Incoming))
+            .chain(
+                graph
+                    .neighbors(from, ontology::EdgeDirection::Incoming)
+                    .adjacencies(),
+            )
             .map(|a| a.neighbor_kind)
             .collect();
         kinds.sort();

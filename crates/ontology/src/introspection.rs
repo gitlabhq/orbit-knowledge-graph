@@ -96,8 +96,18 @@ fn node_relationships(graph: &OntologyGraph, node_name: &str) -> (Vec<String>, V
             .collect()
     };
 
-    let outgoing = group(&graph.neighbors(node_name, EdgeDirection::Outgoing), '→');
-    let incoming = group(&graph.neighbors(node_name, EdgeDirection::Incoming), '←');
+    let outgoing = group(
+        &graph
+            .neighbors(node_name, EdgeDirection::Outgoing)
+            .adjacencies(),
+        '→',
+    );
+    let incoming = group(
+        &graph
+            .neighbors(node_name, EdgeDirection::Incoming)
+            .adjacencies(),
+        '←',
+    );
     (outgoing, incoming)
 }
 

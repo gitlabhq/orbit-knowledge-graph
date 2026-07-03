@@ -62,105 +62,156 @@ impl From<EdgeDirection> for Dir {
     }
 }
 
-/// Flow control returned by [`Visitor::enter`]: the dedup / cycle / short-circuit
-/// knob. `Prune` skips expansion past this edge's far node; `Stop` ends the walk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Flow {
-    Continue,
-    Prune,
-    Stop,
+/// One edge in a [`Subgraph`], with the path-ids it belongs to. `path_ids` is
+/// empty for frontier walks and carries the enumerated path memberships for
+/// [`OntologyGraph::paths_between`], so ordered kind-sequences are recoverable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkedEdge {
+    pub from: String,
+    pub to: String,
+    pub relationship_kind: String,
+    pub synthesized: bool,
+    pub depth: usize,
+    pub path_ids: Vec<usize>,
 }
 
-/// `enter` fires per crossed edge; `leave` fires after that edge's subtree is
-/// exhausted, so a reducer can undo per-path state on ascent. Accumulate-only
-/// reducers never override `leave`, so any `FnMut(&Hop) -> Flow` is a `Visitor`.
-pub trait Visitor {
-    fn enter(&mut self, hop: &Hop<'_>) -> Flow;
-    fn leave(&mut self, _hop: &Hop<'_>) {}
+/// The universal return type of every graph operation: the marked view a walk
+/// produced. Terminal answers are projections off it ([`Subgraph::node_kinds`],
+/// [`Subgraph::adjacencies`], [`Subgraph::edge_kinds`], [`Subgraph::paths`], …).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Subgraph {
+    pub edges: Vec<MarkedEdge>,
 }
 
-impl<F: FnMut(&Hop<'_>) -> Flow> Visitor for F {
-    fn enter(&mut self, hop: &Hop<'_>) -> Flow {
-        self(hop)
+impl Subgraph {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty()
+    }
+
+    /// Far-node kinds reached, excluding `start`.
+    #[must_use]
+    pub fn node_kinds(&self, start: &str) -> BTreeSet<String> {
+        self.edges
+            .iter()
+            .map(|e| e.to.clone())
+            .filter(|n| n != start)
+            .collect()
+    }
+
+    /// Relationship kinds present on any crossed edge.
+    #[must_use]
+    pub fn edge_kinds(&self) -> BTreeSet<String> {
+        self.edges
+            .iter()
+            .map(|e| e.relationship_kind.clone())
+            .collect()
+    }
+
+    /// `(relationship_kind, far_node)` pairs, sorted and deduplicated.
+    #[must_use]
+    pub fn adjacencies(&self) -> Vec<Adjacency> {
+        let set: BTreeSet<(String, String)> = self
+            .edges
+            .iter()
+            .map(|e| (e.relationship_kind.clone(), e.to.clone()))
+            .collect();
+        set.into_iter()
+            .map(|(relationship_kind, neighbor_kind)| Adjacency {
+                relationship_kind,
+                neighbor_kind,
+            })
+            .collect()
+    }
+
+    /// Ordered edge-kind sequences recovered from the edge coloring — one per
+    /// enumerated path. Sorted for determinism; empty when unreachable.
+    #[must_use]
+    pub fn paths(&self) -> Vec<Vec<String>> {
+        let mut by_id: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
+        for e in &self.edges {
+            for &pid in &e.path_ids {
+                by_id
+                    .entry(pid)
+                    .or_default()
+                    .push((e.depth, e.relationship_kind.clone()));
+            }
+        }
+        let mut out: Vec<Vec<String>> = by_id
+            .into_values()
+            .map(|mut seq| {
+                seq.sort_by_key(|(d, _)| *d);
+                seq.into_iter().map(|(_, k)| k).collect()
+            })
+            .collect();
+        out.sort();
+        out
     }
 }
 
 /// Composable boolean over a single [`Hop`] — the edge-filter analog of
-/// `treesitter-visit`'s `Match`. Chain with `&`, `|`, `!`.
+/// `treesitter-visit`'s `Match`. Chain the constructors with `&`, `|`, `!`.
 #[derive(Clone)]
-pub enum EdgePred {
-    Any,
-    Synthesized,
-    To(String),
-    KindsIn(HashSet<String>),
-    And(Box<EdgePred>, Box<EdgePred>),
-    Or(Box<EdgePred>, Box<EdgePred>),
-    Not(Box<EdgePred>),
-}
+pub struct EdgePred(std::rc::Rc<dyn Fn(&Hop<'_>) -> bool>);
 
 impl EdgePred {
+    fn of(f: impl Fn(&Hop<'_>) -> bool + 'static) -> Self {
+        Self(std::rc::Rc::new(f))
+    }
     fn test(&self, hop: &Hop<'_>) -> bool {
-        match self {
-            EdgePred::Any => true,
-            EdgePred::Synthesized => hop.synthesized,
-            EdgePred::To(n) => hop.to == n,
-            EdgePred::KindsIn(set) => set.contains(hop.relationship_kind),
-            EdgePred::And(a, b) => a.test(hop) && b.test(hop),
-            EdgePred::Or(a, b) => a.test(hop) || b.test(hop),
-            EdgePred::Not(p) => !p.test(hop),
-        }
+        (self.0)(hop)
     }
 }
 
 impl std::ops::BitAnd for EdgePred {
     type Output = EdgePred;
     fn bitand(self, rhs: EdgePred) -> EdgePred {
-        EdgePred::And(Box::new(self), Box::new(rhs))
+        EdgePred::of(move |h| self.test(h) && rhs.test(h))
     }
 }
-
 impl std::ops::BitOr for EdgePred {
     type Output = EdgePred;
     fn bitor(self, rhs: EdgePred) -> EdgePred {
-        EdgePred::Or(Box::new(self), Box::new(rhs))
+        EdgePred::of(move |h| self.test(h) || rhs.test(h))
     }
 }
-
 impl std::ops::Not for EdgePred {
     type Output = EdgePred;
     fn not(self) -> EdgePred {
-        EdgePred::Not(Box::new(self))
+        EdgePred::of(move |h| !self.test(h))
     }
 }
 
 /// Any edge.
 #[must_use]
 pub fn any() -> EdgePred {
-    EdgePred::Any
+    EdgePred::of(|_| true)
 }
 
 /// A synthesized FK edge.
 #[must_use]
 pub fn synthesized() -> EdgePred {
-    EdgePred::Synthesized
+    EdgePred::of(|h| h.synthesized)
 }
 
 /// A declared triple edge (not FK-synthesized).
 #[must_use]
 pub fn triple() -> EdgePred {
-    !EdgePred::Synthesized
+    EdgePred::of(|h| !h.synthesized)
 }
 
 /// The far node kind equals `node`.
 #[must_use]
 pub fn to(node: &str) -> EdgePred {
-    EdgePred::To(node.to_string())
+    let node = node.to_string();
+    EdgePred::of(move |h| h.to == node)
 }
 
 /// The relationship kind is in `types` (empty set matches nothing).
 #[must_use]
 pub fn kinds_in(types: &HashSet<&str>) -> EdgePred {
-    EdgePred::KindsIn(types.iter().map(|s| (*s).to_string()).collect())
+    let types: HashSet<String> = types.iter().map(|s| (*s).to_string()).collect();
+    EdgePred::of(move |h| types.contains(h.relationship_kind))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,21 +254,6 @@ pub struct OntologyGraph {
     node_templates: HashMap<String, NodeTemplate>,
     denorm_coverage: HashMap<(String, String, DenormDirection), BTreeSet<String>>,
 }
-
-impl PartialEq for OntologyGraph {
-    fn eq(&self, other: &Self) -> bool {
-        self.table_to_node == other.table_to_node
-            && self.anchor_fk == other.anchor_fk
-            && self.anchor_nodes == other.anchor_nodes
-            && self.global_nodes == other.global_nodes
-            && self.edge_templates == other.edge_templates
-            && self.node_templates == other.node_templates
-            && self.denorm_coverage == other.denorm_coverage
-            && self.sorted_edges() == other.sorted_edges()
-    }
-}
-
-impl Eq for OntologyGraph {}
 
 impl OntologyGraph {
     #[must_use]
@@ -353,20 +389,6 @@ impl OntologyGraph {
         }
     }
 
-    fn sorted_edges(&self) -> BTreeSet<(String, String, String, bool)> {
-        self.graph
-            .edge_references()
-            .map(|e| {
-                (
-                    self.graph[e.source()].clone(),
-                    self.graph[e.target()].clone(),
-                    e.weight().relationship_kind.clone(),
-                    e.weight().synthesized,
-                )
-            })
-            .collect()
-    }
-
     /// Whether the graph has real edge adjacency between named node kinds. False
     /// for a bare test scaffold whose edges declare no endpoint kinds.
     #[must_use]
@@ -389,99 +411,78 @@ impl OntologyGraph {
         max_hops: usize,
         dir: impl Into<Dir>,
         pred: &EdgePred,
-        visitor: &mut impl Visitor,
-    ) {
+    ) -> Subgraph {
+        let mut sub = Subgraph::default();
         if let Some(&start_ix) = self.index.get(start) {
-            self.walk_from(start_ix, 0, max_hops, dir.into(), pred, visitor);
-        }
-    }
-
-    fn walk_from(
-        &self,
-        node: NodeIndex,
-        depth: usize,
-        max_hops: usize,
-        dir: Dir,
-        pred: &EdgePred,
-        visitor: &mut impl Visitor,
-    ) -> Flow {
-        if depth == max_hops {
-            return Flow::Continue;
-        }
-        for &d in dir.petgraph_dirs() {
-            for e in self.graph.edges_directed(node, d) {
-                let far = if e.source() == node {
-                    e.target()
-                } else {
-                    e.source()
-                };
-                let hop = Hop {
-                    from: &self.graph[node],
-                    to: &self.graph[far],
-                    relationship_kind: &e.weight().relationship_kind,
-                    synthesized: e.weight().synthesized,
-                    depth: depth + 1,
-                };
-                if !pred.test(&hop) {
+            let dir = dir.into();
+            let mut seen = HashSet::from([start_ix]);
+            let mut frontier = std::collections::VecDeque::from([(start_ix, 0usize)]);
+            while let Some((node, depth)) = frontier.pop_front() {
+                if depth == max_hops {
                     continue;
                 }
-                match visitor.enter(&hop) {
-                    Flow::Stop => return Flow::Stop,
-                    Flow::Prune => {}
-                    Flow::Continue => {
-                        if self.walk_from(far, depth + 1, max_hops, dir, pred, visitor)
-                            == Flow::Stop
-                        {
-                            return Flow::Stop;
+                for &d in dir.petgraph_dirs() {
+                    for e in self.graph.edges_directed(node, d) {
+                        let far = if e.source() == node {
+                            e.target()
+                        } else {
+                            e.source()
+                        };
+                        let w = e.weight();
+                        let hop = Hop {
+                            from: &self.graph[node],
+                            to: &self.graph[far],
+                            relationship_kind: &w.relationship_kind,
+                            synthesized: w.synthesized,
+                            depth: depth + 1,
+                        };
+                        if !pred.test(&hop) {
+                            continue;
                         }
-                        visitor.leave(&hop);
+                        sub.edges.push(MarkedEdge {
+                            from: hop.from.to_string(),
+                            to: hop.to.to_string(),
+                            relationship_kind: hop.relationship_kind.to_string(),
+                            synthesized: hop.synthesized,
+                            depth: hop.depth,
+                            path_ids: Vec::new(),
+                        });
+                        if seen.insert(far) {
+                            frontier.push_back((far, depth + 1));
+                        }
                     }
                 }
             }
         }
-        Flow::Continue
+        sub
     }
 
     /// Adjacency leaving (`Outgoing`) or entering (`Incoming`) a node kind,
-    /// excluding synthesized FK edges.
+    /// excluding synthesized FK edges. Project with [`Subgraph::adjacencies`].
     #[must_use]
-    pub fn neighbors(&self, node_kind: &str, direction: impl Into<Dir>) -> Vec<Adjacency> {
-        let mut out = BTreeSet::new();
-        self.traverse(node_kind, 1, direction, &triple(), &mut |h: &Hop<'_>| {
-            out.insert((h.relationship_kind.to_string(), h.to.to_string()));
-            Flow::Prune
-        });
-        out.into_iter()
-            .map(|(relationship_kind, neighbor_kind)| Adjacency {
-                relationship_kind,
-                neighbor_kind,
-            })
-            .collect()
+    pub fn neighbors(&self, node_kind: &str, direction: impl Into<Dir>) -> Subgraph {
+        self.traverse(node_kind, 1, direction, &triple())
     }
 
-    /// Relationship kinds connecting `a` and `b` in either orientation, filtered
-    /// to `types` when non-empty. Direction is folded in because the lowerer
-    /// matches a triple regardless of the query's declared direction.
+    /// Triple edges connecting `a` and `b` in either orientation, filtered to
+    /// `types` when non-empty. Direction is folded in because the lowerer matches
+    /// a triple regardless of the query's declared direction. Project with
+    /// [`Subgraph::edge_kinds`].
     #[must_use]
-    pub fn kinds_connecting(&self, a: &str, b: &str, types: &HashSet<&str>) -> BTreeSet<String> {
+    pub fn kinds_connecting(&self, a: &str, b: &str, types: &HashSet<&str>) -> Subgraph {
         let kind_filter = if types.is_empty() {
             any()
         } else {
             kinds_in(types)
         };
-        let pred = triple() & to(b) & kind_filter;
-        let mut kinds = BTreeSet::new();
-        self.traverse(a, 1, Dir::Both, &pred, &mut |h: &Hop<'_>| {
-            kinds.insert(h.relationship_kind.to_string());
-            Flow::Prune
-        });
-        kinds
+        self.traverse(a, 1, Dir::Both, &(triple() & to(b) & kind_filter))
     }
 
-    /// Node kinds reachable from `start` within `max_hops` outgoing edges,
-    /// excluding `start`. Synthesized FK edges compose with triple hops.
+    /// Subgraph reachable from `start` within `max_hops` outgoing edges.
+    /// Synthesized FK edges compose with triple hops. Project with
+    /// [`Subgraph::node_kinds`].
     #[must_use]
-    pub fn reachable_within(&self, start: &str, max_hops: usize) -> BTreeSet<String> {
+    pub fn reachable_within(&self, start: &str, max_hops: usize) -> Subgraph {
         self.reachable_within_types(start, max_hops, None)
     }
 
@@ -493,56 +494,74 @@ impl OntologyGraph {
         start: &str,
         max_hops: usize,
         types: Option<&HashSet<&str>>,
-    ) -> BTreeSet<String> {
+    ) -> Subgraph {
         let pred = match types {
             Some(t) => synthesized() | kinds_in(t),
             None => any(),
         };
-        let mut reached = BTreeSet::new();
-        let mut seen: HashSet<String> = HashSet::new();
-        self.traverse(start, max_hops, Dir::Outgoing, &pred, &mut |h: &Hop<'_>| {
-            if h.to != start {
-                reached.insert(h.to.to_string());
-            }
-            if seen.insert(h.to.to_string()) {
-                Flow::Continue
-            } else {
-                Flow::Prune
-            }
-        });
-        reached
+        self.traverse(start, max_hops, Dir::Outgoing, &pred)
     }
 
     /// Whether `node`'s table carries an anchor FK to `anchor` (edge-triple-free synthesis).
     #[must_use]
     pub fn fk_reaches(&self, node: &str, anchor: &str) -> bool {
-        let mut found = false;
-        self.traverse(
-            node,
-            1,
-            Dir::Outgoing,
-            &(synthesized() & to(anchor)),
-            &mut |_: &Hop<'_>| {
-                found = true;
-                Flow::Stop
-            },
-        );
-        found
+        !self
+            .traverse(node, 1, Dir::Outgoing, &(synthesized() & to(anchor)))
+            .is_empty()
     }
 
-    /// Every declared edge-kind sequence from `a` to `b` within `max_hops`,
-    /// following triple and FK edges. Backs pathfinding frontier enumeration
-    /// without a SQL unroll; the empty vec means unreachable.
+    /// Subgraph of every declared path from `a` to `b` within `max_hops`, with
+    /// each edge colored by the paths it belongs to. Project the ordered
+    /// kind-sequences with [`Subgraph::paths`]; empty when unreachable.
     #[must_use]
-    pub fn paths_between(&self, a: &str, b: &str, max_hops: usize) -> Vec<Vec<String>> {
-        let mut collector = PathCollector {
+    pub fn paths_between(&self, a: &str, b: &str, max_hops: usize) -> Subgraph {
+        let mut walk = PathWalk {
             target: b,
-            stack: Vec::new(),
-            on_path: HashSet::from([a.to_string()]),
-            out: Vec::new(),
+            on_path: HashSet::new(),
+            trail: Vec::new(),
+            next_id: 0,
+            sub: Subgraph::default(),
         };
-        self.traverse(a, max_hops, Dir::Outgoing, &any(), &mut collector);
-        collector.out
+        if let Some(&start_ix) = self.index.get(a) {
+            walk.on_path.insert(start_ix);
+            self.enumerate_paths(start_ix, max_hops, &mut walk);
+        }
+        walk.sub
+    }
+
+    fn enumerate_paths(&self, node: NodeIndex, remaining: usize, walk: &mut PathWalk<'_>) {
+        if remaining == 0 {
+            return;
+        }
+        for e in self.graph.edges_directed(node, Direction::Outgoing) {
+            let far = e.target();
+            if walk.on_path.contains(&far) {
+                continue;
+            }
+            let w = e.weight();
+            let ix = walk.sub.edges.len();
+            walk.sub.edges.push(MarkedEdge {
+                from: self.graph[node].clone(),
+                to: self.graph[far].clone(),
+                relationship_kind: w.relationship_kind.clone(),
+                synthesized: w.synthesized,
+                depth: walk.trail.len() + 1,
+                path_ids: Vec::new(),
+            });
+            walk.trail.push(ix);
+            if self.graph[far] == walk.target {
+                let pid = walk.next_id;
+                walk.next_id += 1;
+                for &edge_ix in &walk.trail {
+                    walk.sub.edges[edge_ix].path_ids.push(pid);
+                }
+            } else {
+                walk.on_path.insert(far);
+                self.enumerate_paths(far, remaining - 1, walk);
+                walk.on_path.remove(&far);
+            }
+            walk.trail.pop();
+        }
     }
 
     /// Node kind backing a physical table (tolerating a `v{N}_` prefix); `None` for edge/CTE/unknown tables.
@@ -618,36 +637,15 @@ impl OntologyGraph {
     }
 }
 
-/// The one reducer needing backtracking: push the crossed kind on `enter`, pop
-/// it (and clear the far node from the current path) on `leave`, so a node on one
-/// exhausted branch stays traversable on a sibling branch.
-struct PathCollector<'a> {
+/// DFS state for [`OntologyGraph::paths_between`]: the current root-to-node
+/// trail (edge indices), on-path node set for cycle-breaking, and the running
+/// path-id counter that colors each completed path's edges.
+struct PathWalk<'a> {
     target: &'a str,
-    stack: Vec<String>,
-    on_path: HashSet<String>,
-    out: Vec<Vec<String>>,
-}
-
-impl Visitor for PathCollector<'_> {
-    fn enter(&mut self, hop: &Hop<'_>) -> Flow {
-        if self.on_path.contains(hop.to) {
-            return Flow::Prune;
-        }
-        self.stack.push(hop.relationship_kind.to_string());
-        if hop.to == self.target {
-            self.out.push(self.stack.clone());
-            self.stack.pop();
-            Flow::Prune
-        } else {
-            self.on_path.insert(hop.to.to_string());
-            Flow::Continue
-        }
-    }
-
-    fn leave(&mut self, hop: &Hop<'_>) {
-        self.on_path.remove(hop.to);
-        self.stack.pop();
-    }
+    on_path: HashSet<NodeIndex>,
+    trail: Vec<usize>,
+    next_id: usize,
+    sub: Subgraph,
 }
 
 #[cfg(test)]
@@ -690,11 +688,11 @@ mod tests {
     fn neighbors_are_directional() {
         let g = graph_of(&[("R", "A", "B"), ("R", "B", "C")]);
         assert_eq!(
-            g.neighbors("B", EdgeDirection::Outgoing)[0].neighbor_kind,
+            g.neighbors("B", EdgeDirection::Outgoing).adjacencies()[0].neighbor_kind,
             "C"
         );
         assert_eq!(
-            g.neighbors("B", EdgeDirection::Incoming)[0].neighbor_kind,
+            g.neighbors("B", EdgeDirection::Incoming).adjacencies()[0].neighbor_kind,
             "A"
         );
     }
@@ -703,10 +701,17 @@ mod tests {
     fn kinds_connecting_folds_direction_and_filters_types() {
         let g = graph_of(&[("R", "A", "B"), ("S", "A", "B")]);
         let none = HashSet::new();
-        assert_eq!(g.kinds_connecting("A", "B", &none), set(&["R", "S"]));
-        assert_eq!(g.kinds_connecting("B", "A", &none), set(&["R", "S"]));
         assert_eq!(
-            g.kinds_connecting("A", "B", &HashSet::from(["R"])),
+            g.kinds_connecting("A", "B", &none).edge_kinds(),
+            set(&["R", "S"])
+        );
+        assert_eq!(
+            g.kinds_connecting("B", "A", &none).edge_kinds(),
+            set(&["R", "S"])
+        );
+        assert_eq!(
+            g.kinds_connecting("A", "B", &HashSet::from(["R"]))
+                .edge_kinds(),
             set(&["R"])
         );
         assert!(g.kinds_connecting("A", "C", &none).is_empty());
@@ -715,20 +720,27 @@ mod tests {
     #[test]
     fn reachable_within_respects_budget_and_terminates_on_cycles() {
         let chain = graph_of(&[("R", "A", "B"), ("R", "B", "C"), ("S", "C", "D")]);
-        assert_eq!(chain.reachable_within("A", 0), set(&[]));
-        assert_eq!(chain.reachable_within("A", 1), set(&["B"]));
-        assert_eq!(chain.reachable_within("A", 3), set(&["B", "C", "D"]));
+        assert_eq!(chain.reachable_within("A", 0).node_kinds("A"), set(&[]));
+        assert_eq!(chain.reachable_within("A", 1).node_kinds("A"), set(&["B"]));
+        assert_eq!(
+            chain.reachable_within("A", 3).node_kinds("A"),
+            set(&["B", "C", "D"])
+        );
 
         let cycle = graph_of(&[("R", "X", "Y"), ("R", "Y", "X")]);
-        assert_eq!(cycle.reachable_within("X", 10), set(&["Y"]));
+        assert_eq!(cycle.reachable_within("X", 10).node_kinds("X"), set(&["Y"]));
     }
 
     #[test]
     fn reachable_within_types_follows_only_declared_kinds() {
         let g = graph_of(&[("R", "A", "B"), ("S", "B", "C")]);
         let only_r = HashSet::from(["R"]);
-        assert_eq!(g.reachable_within_types("A", 2, Some(&only_r)), set(&["B"]));
-        assert_eq!(g.reachable_within("A", 2), set(&["B", "C"]));
+        assert_eq!(
+            g.reachable_within_types("A", 2, Some(&only_r))
+                .node_kinds("A"),
+            set(&["B"])
+        );
+        assert_eq!(g.reachable_within("A", 2).node_kinds("A"), set(&["B", "C"]));
     }
 
     #[test]
@@ -753,6 +765,7 @@ mod tests {
         assert!(g.kinds_connecting("File", "Project", &none).is_empty());
         assert!(
             g.neighbors("File", EdgeDirection::Outgoing)
+                .adjacencies()
                 .iter()
                 .all(|a| !a.relationship_kind.starts_with("__fk_"))
         );
@@ -761,17 +774,17 @@ mod tests {
     #[test]
     fn reachable_composes_fk_with_triple_hops() {
         let g = embedded();
-        assert!(g.reachable_within("File", 1).contains("Project"));
+        assert!(
+            g.reachable_within("File", 1)
+                .node_kinds("File")
+                .contains("Project")
+        );
     }
 
     #[test]
     fn traverse_both_reaches_either_orientation() {
         let g = graph_of(&[("R", "A", "B"), ("S", "C", "A")]);
-        let mut reached = BTreeSet::new();
-        g.traverse("A", 1, Dir::Both, &triple(), &mut |h: &Hop<'_>| {
-            reached.insert(h.to.to_string());
-            Flow::Prune
-        });
+        let reached = g.traverse("A", 1, Dir::Both, &triple()).node_kinds("A");
         assert_eq!(reached, set(&["B", "C"]));
     }
 
@@ -780,13 +793,9 @@ mod tests {
         use std::collections::BTreeMap;
         let g = graph_of(&[("R", "A", "B"), ("R", "B", "C")]);
         let mut by_depth: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
-        g.traverse("A", 2, Dir::Outgoing, &any(), &mut |h: &Hop<'_>| {
-            by_depth
-                .entry(h.depth)
-                .or_default()
-                .insert(h.to.to_string());
-            Flow::Continue
-        });
+        for e in g.traverse("A", 2, Dir::Outgoing, &any()).edges {
+            by_depth.entry(e.depth).or_default().insert(e.to);
+        }
         assert_eq!(by_depth[&1], set(&["B"]));
         assert_eq!(by_depth[&2], set(&["C"]));
     }
@@ -821,10 +830,8 @@ mod tests {
     #[test]
     fn paths_between_enumerates_kind_sequences() {
         let g = graph_of(&[("R", "A", "B"), ("S", "B", "C"), ("T", "A", "C")]);
-        let mut paths = g.paths_between("A", "C", 3);
-        paths.sort();
         assert_eq!(
-            paths,
+            g.paths_between("A", "C", 3).paths(),
             vec![
                 vec!["R".to_string(), "S".to_string()],
                 vec!["T".to_string()],
@@ -841,10 +848,8 @@ mod tests {
             ("R", "A", "Y"),
             ("R", "Y", "X"),
         ]);
-        let mut paths = g.paths_between("A", "T", 4);
-        paths.sort();
         assert_eq!(
-            paths,
+            g.paths_between("A", "T", 4).paths(),
             vec![
                 vec!["R".to_string(), "R".to_string()],
                 vec!["R".to_string(), "R".to_string(), "R".to_string()],
@@ -855,12 +860,9 @@ mod tests {
     #[test]
     fn edge_pred_chains_like_a_boolean() {
         let g = graph_of(&[("R", "A", "B"), ("S", "A", "C")]);
-        let pred = triple() & to("B");
-        let mut hits = BTreeSet::new();
-        g.traverse("A", 1, Dir::Outgoing, &pred, &mut |h: &Hop<'_>| {
-            hits.insert(h.to.to_string());
-            Flow::Prune
-        });
+        let hits = g
+            .traverse("A", 1, Dir::Outgoing, &(triple() & to("B")))
+            .node_kinds("A");
         assert_eq!(hits, set(&["B"]));
     }
 
