@@ -1572,13 +1572,13 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "j1", "entity": "Job", "filters": {"status": "canceled"}},
-                {"id": "j2", "entity": "Job"},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
+                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
+                {"id": "p2", "entity": "Pipeline"},
+                {"id": "proj", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "j1", "to": "j2"},
-                {"type": "IN_PROJECT", "from": "j1", "to": "p"}
+                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
+                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
             ],
             "limit": 10
         }"#;
@@ -1587,27 +1587,27 @@ mod tests {
 
         assert!(
             sql.contains(
-                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"
+                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 WHERE"
             ),
             "unfiltered joined target should be narrowed by a candidate scan, got:\n{sql}"
         );
         assert!(
             !sql.contains(
-                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"
+                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 FINAL"
             ),
             "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
         );
         assert!(
-            !sql.contains("_candidate_j1"),
+            !sql.contains("_candidate_p1"),
             "center candidate CTE should not be emitted when it only repeats center filters, got:\n{sql}"
         );
         assert!(
-            !sql.contains("j1.id IN (SELECT id FROM _candidate_j1)"),
+            !sql.contains("p1.id IN (SELECT id FROM _candidate_p1)"),
             "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j1")
-                && sql.contains("AS j1 INNER JOIN (SELECT * FROM gl_job AS j2"),
+            sql.contains("FROM (SELECT * FROM gl_pipeline AS p1")
+                && sql.contains("AS p1 INNER JOIN (SELECT * FROM gl_pipeline AS p2"),
             "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
         );
     }
@@ -1648,13 +1648,13 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "j1", "entity": "Job", "filters": {"status": "canceled"}},
-                {"id": "j2", "entity": "Job"},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
+                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
+                {"id": "p2", "entity": "Pipeline"},
+                {"id": "proj", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "j1", "to": "j2"},
-                {"type": "IN_PROJECT", "from": "j1", "to": "p"}
+                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
+                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
             ],
             "limit": 10
         }"#;
@@ -1662,7 +1662,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("_narrow_j2"),
+            sql.contains("_narrow_p2"),
             "traversal FK-center join must keep its narrowing CTE, got:\n{sql}"
         );
     }

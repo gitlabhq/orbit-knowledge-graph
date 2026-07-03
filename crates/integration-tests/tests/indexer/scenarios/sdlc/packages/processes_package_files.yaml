@@ -1,4 +1,4 @@
-description: Package files index with size / file_sha256 plus transformed status enum and IN_PROJECT edges
+description: Package files index with size plus transformed status enum, bytea-decoded file_sha256, and IN_PROJECT edges
 scope: { namespace: 100 }
 
 seed:
@@ -7,15 +7,15 @@ seed:
   projects:
     - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
   siphon_packages_package_files:
-    - { id: 6001, package_id: 8001, file_name: "left-pad-1.3.0.tgz", size: 2048, file_sha256: "abc123", status: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", project_id: 1000, traversal_path: "1/100/1000/" }
-    - { id: 6002, package_id: 8001, file_name: "requests-2.31.0-py3-none-any.whl", size: 4096, file_sha256: "def456", status: 2, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", project_id: 1000, traversal_path: "1/100/1000/" }
+    - { id: 6001, package_id: 8001, file_name: "left-pad-1.3.0.tgz", size: 2048, file_sha256: '\x66386665613031373633346365353737663530313930653366653233623232396137363664643635616265643832363333336238323036353233613362343663', status: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", project_id: 1000, traversal_path: "1/100/1000/" }
+    - { id: 6002, package_id: 8001, file_name: "requests-2.31.0-py3-none-any.whl", size: 4096, file_sha256: "abc123", status: 2, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", project_id: 1000, traversal_path: "1/100/1000/" }
 
 expect:
   nodes:
     gl_package_file:
       rows:
-        - { id: 6001, file_name: "left-pad-1.3.0.tgz", size: 2048, file_sha256: "abc123", status: default }
-        - { id: 6002, file_name: "requests-2.31.0-py3-none-any.whl", size: 4096, file_sha256: "def456", status: processing }
+        - { id: 6001, file_name: "left-pad-1.3.0.tgz", size: 2048, file_sha256: "f8fea017634ce577f50190e3fe23b229a766dd65abed826333b8206523a3b46c", status: default }
+        - { id: 6002, file_name: "requests-2.31.0-py3-none-any.whl", size: 4096, file_sha256: null, status: processing }
   edges:
     - kind: IN_PROJECT
       from: PackageFile

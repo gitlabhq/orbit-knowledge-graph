@@ -78,8 +78,15 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: table
+  type: query
   source: siphon_packages_package_files
+  select: >-
+    id, package_id, file_name, size,
+    if(match(file_sha256, '^\\\\x[0-9a-fA-F]{128}$'),
+    unhex(substring(file_sha256, 3)), NULL) AS file_sha256,
+    status, created_at, updated_at, project_id, traversal_path
+  from: siphon_packages_package_files
+  traversal_path_filter: "startsWith(traversal_path, {traversal_path:String})"
   order_by: [traversal_path, id]
   edges:
     project_id:
