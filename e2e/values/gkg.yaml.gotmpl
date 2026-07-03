@@ -188,3 +188,10 @@ engine:
       concurrency_group: code
       max_attempts: 3
       retry_interval_secs: 60
+      # Fixture repos never reach the prod flush thresholds (10k rows / 120s
+      # hard cap), so code rows sat buffered ~2 min before becoming queryable
+      # and the deferred checkpoint kept every code project re-dispatching.
+      pipeline:
+        write_min_flush_rows: 1
+        write_buffer_age_secs: 2
+        write_max_flush_age_secs: 5
