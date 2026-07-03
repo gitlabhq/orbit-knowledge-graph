@@ -8,10 +8,7 @@ pub enum WriteDurability {
     Durable,
 }
 
-/// Mode inverts durability. Full: data writes are `Durable` so they coalesce server-side
-/// (`async_insert=1`, waiting for the flush) instead of one synchronous part per batch, and
-/// completion persists at the end. Incremental: each data write must persist (watermark advances,
-/// no NATS retry); a lost completion re-derives next run.
+/// Full: data writes coalesce server-side but completion must persist. Incremental inverts it: each write persists, completion can be lost and re-derived.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunDurability {
     pub data_writes: Option<WriteDurability>,
