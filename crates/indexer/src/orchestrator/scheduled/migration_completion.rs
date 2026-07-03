@@ -94,11 +94,9 @@ FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
 
-/// Single query that computes the keep-set in SQL and returns every
-/// `v<N>_*` object outside it. The keep-set is: active + newest
-/// `retired_slots` retired + every migrating version — a rebuild-rollback
-/// migrates *below* active, so position relative to active is no filter.
-/// Returns zero rows if no active version exists (safety guard).
+/// Returns every `v<N>_*` object outside the keep-set (active + newest `retired_slots`
+/// retired + every migrating version — a rebuild-rollback migrates *below* active), and
+/// zero rows if no active version exists (safety guard).
 const LIST_DEAD_VERSION_OBJECTS: &str = "\
 SELECT \
   name, engine, \

@@ -138,8 +138,7 @@ pub async fn run_if_needed(
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer
-/// active version. Re-activate vs. rebuild is decided by table-set completeness (every object
-/// `create_prefixed_tables` would create for this version is present), not lag-prone status.
+/// active version; re-activate vs. rebuild is decided by table-set completeness, not lag-prone status.
 async fn run_rollback(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,
@@ -204,10 +203,7 @@ async fn run_rollback(
         "embedded version's table set is incomplete — rolling back via rebuild"
     );
 
-    // A partial table set left surviving objects behind (e.g. GC dropped some but not all).
-    // create_prefixed_tables uses IF NOT EXISTS, so a surviving checkpoint table would make
-    // the backfill skip already-checkpointed projects while its sibling data tables sit
-    // empty. Clear the slate before rebuilding.
+    // Creation is IF NOT EXISTS: a surviving checkpoint would make the backfill skip indexed projects.
     if let Err(e) = drop_stale_version_objects(graph, *SCHEMA_VERSION).await {
         warn!(error = %e, "failed to clear stale embedded-version objects before rebuild — releasing lock");
         let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
@@ -226,9 +222,8 @@ async fn run_rollback(
     .await
 }
 
-/// The full set of object names `create_prefixed_tables` creates for `prefix` from the
-/// embedded ontology (tables, dictionaries, and materialized views all land in
-/// `system.tables`, so all three must be checked for rollback completeness).
+/// Every object name `create_prefixed_tables` creates for `prefix` — tables, dictionaries,
+/// and materialized views all land in `system.tables`, so all three count for completeness.
 fn embedded_object_names(ontology: &ontology::Ontology, prefix: &str) -> Vec<String> {
     let mut names: Vec<String> = generate_graph_tables_with_prefix(ontology, prefix)
         .into_iter()
@@ -247,8 +242,7 @@ fn embedded_object_names(ontology: &ontology::Ontology, prefix: &str) -> Vec<Str
     names
 }
 
-/// Drops every surviving `v<version>_*` object, in dependency-safe order (views and
-/// dictionaries select from tables, so they must go first).
+/// Drops every surviving `v<version>_*` object; views and dictionaries select from tables, so they go first.
 async fn drop_stale_version_objects(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -279,8 +273,7 @@ async fn reactivate_version(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
-    // Activate before retiring: a crash between the two writes then leaves a
-    // duplicate active row (the newest wins per read_active_version) instead of zero.
+    // Activate first: a crash between the two writes leaves a duplicate active row, never zero.
     mark_version_active(graph, version).await?;
     let versions = read_all_versions(graph).await?;
     for entry in &versions {

@@ -496,9 +496,6 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
         .await
         .unwrap();
 
-    // A GC failure partway through can drop some but not all of a retired
-    // version's objects. Reproduce that by dropping only the checkpoint
-    // table and leaving a stale row in a surviving one.
     let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
     ctx.execute(&format!("DROP TABLE {checkpoint_table}")).await;
 

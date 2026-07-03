@@ -321,9 +321,8 @@ pub fn drop_kind_for_engine(engine: &str) -> &'static str {
     }
 }
 
-/// Lists every `v<version>_*` object in `system.tables`. Version 0 tables are
-/// unprefixed and not GC-managed, so this always returns empty for version 0
-/// rather than matching every table in the database via an empty prefix.
+/// Lists every `v<version>_*` object in `system.tables`; returns empty for unprefixed
+/// version 0 rather than matching the whole database via an empty prefix.
 pub async fn list_version_objects(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -352,12 +351,9 @@ pub async fn list_version_objects(
     Ok(objects)
 }
 
-/// Whether every object in `expected` (the names `create_prefixed_tables` would
-/// create for `version` from the embedded ontology) is present in `system.tables`.
-/// GC drops dead-version objects one by one and only marks a version `dropped`
-/// once all succeed, so a version can be left `retired` with a partial table set
-/// if GC failed partway through — this must not be mistaken for a complete set.
-/// Version 0 tables are unprefixed and never GC'd, so it always counts as complete.
+/// Whether every object in `expected` is present in `system.tables`. GC drops objects
+/// one by one, so a `retired` version can be left with a partial set that must not be
+/// mistaken for a complete one; version 0 is never GC'd and always counts as complete.
 pub async fn version_tables_complete(
     graph: &ArrowClickHouseClient,
     version: u32,

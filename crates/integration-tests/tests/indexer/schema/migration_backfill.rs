@@ -421,8 +421,7 @@ async fn migration_completion_checker_guards_against_two_migrating_versions() {
     write_migrating_version(&graph, *SCHEMA_VERSION)
         .await
         .unwrap();
-    // created_at is second-precision, so a same-second insert could tie with the
-    // embedded row; +1s guarantees the checker resolves to this foreign version.
+    // created_at is second-precision; +1s prevents a same-second tie with the embedded row.
     context
         .clickhouse
         .execute(&format!(
