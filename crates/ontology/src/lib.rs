@@ -112,8 +112,30 @@ pub struct EdgeTableConfig {
     pub storage: EdgeTableStorage,
 }
 
+/// A lazily-built memoized [`OntologyGraph`] that is transparent to `Clone` and
+/// `Eq`: cloning yields an empty cache (rebuilt on demand), and equality ignores
+/// the cache so it never affects `Ontology` comparison. Lets `Ontology` keep its
+/// derives while carrying the memoized graph.
+#[derive(Debug, Default)]
+struct GraphCache(std::sync::OnceLock<OntologyGraph>);
+
+impl Clone for GraphCache {
+    fn clone(&self) -> Self {
+        Self(std::sync::OnceLock::new())
+    }
+}
+
+impl PartialEq for GraphCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for GraphCache {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
+    graph: GraphCache,
     schema_version: String,
     pub(crate) table_prefix: String,
     pub(crate) default_edge_table: String,
@@ -171,6 +193,7 @@ impl Ontology {
             storage: EdgeTableStorage::default(),
         };
         Self {
+            graph: GraphCache::default(),
             schema_version: String::new(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
             default_edge_table: EDGE_TABLE.to_string(),
@@ -1153,13 +1176,12 @@ impl Ontology {
         self.partition.as_ref()
     }
 
-    /// Builds a fresh materialized [`OntologyGraph`] (adjacency, table→node
-    /// index, reachability, per-triple/per-node templates). Not cached: each
-    /// call rebuilds. Cheap and pure, but a hot-path caller should build it
-    /// once and hold it rather than call this per request.
+    /// The materialized [`OntologyGraph`] (adjacency, table→node index,
+    /// reachability, per-triple/per-node templates), built once on first call
+    /// and memoized. Callers must not mutate the ontology after querying it.
     #[must_use]
-    pub fn graph(&self) -> OntologyGraph {
-        OntologyGraph::build(self)
+    pub fn graph(&self) -> &OntologyGraph {
+        self.graph.0.get_or_init(|| OntologyGraph::build(self))
     }
 
     /// Returns the partition key column for a given entity's statistics MV,

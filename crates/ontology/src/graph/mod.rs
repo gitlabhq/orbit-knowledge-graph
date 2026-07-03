@@ -294,7 +294,7 @@ mod tests {
         for &(kind, s, t) in variants {
             ont = ont.with_edge_variant(edge(kind, s, t));
         }
-        ont.graph()
+        ont.graph().clone()
     }
 
     fn set(items: &[&str]) -> BTreeSet<String> {
@@ -302,7 +302,7 @@ mod tests {
     }
 
     fn embedded() -> OntologyGraph {
-        Ontology::load_embedded().unwrap().graph()
+        Ontology::load_embedded().unwrap().graph().clone()
     }
 
     #[test]

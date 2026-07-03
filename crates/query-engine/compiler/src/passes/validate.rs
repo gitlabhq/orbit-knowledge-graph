@@ -749,7 +749,7 @@ impl<'a> Validator<'a> {
                 continue;
             }
 
-            let hint = self.unreachable_hint(&graph, from, to);
+            let hint = self.unreachable_hint(graph, from, to);
             return Err(QueryError::ReferenceError(format!(
                 "{label} type {types:?} does not connect \"{from}\" and \"{to}\"; {hint}"
             )));

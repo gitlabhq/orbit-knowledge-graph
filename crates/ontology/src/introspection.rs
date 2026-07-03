@@ -55,7 +55,7 @@ fn build_domains(ontology: &Ontology, expand_nodes: &[String]) -> Vec<SchemaDoma
 
         let node_info = if should_expand {
             let props: Vec<String> = node.fields.iter().map(format_property).collect();
-            let (outgoing, incoming) = node_relationships(&graph, &node.name);
+            let (outgoing, incoming) = node_relationships(graph, &node.name);
 
             SchemaNode::Expanded {
                 name: node.name.clone(),
