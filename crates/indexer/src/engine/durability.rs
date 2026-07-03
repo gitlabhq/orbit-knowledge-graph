@@ -8,9 +8,10 @@ pub enum WriteDurability {
     Durable,
 }
 
-/// Mode inverts durability. Full: data writes use configured settings (`None`) since a lost page
-/// re-pulls, but completion must persist or the watermark never advances. Incremental: each data
-/// write must persist (watermark advances, no NATS retry); a lost completion re-derives next run.
+/// Mode inverts durability. Full: data writes are `Durable` so they coalesce server-side
+/// (`async_insert=1`, waiting for the flush) instead of one synchronous part per batch, and
+/// completion persists at the end. Incremental: each data write must persist (watermark advances,
+/// no NATS retry); a lost completion re-derives next run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunDurability {
     pub data_writes: Option<WriteDurability>,
@@ -21,7 +22,7 @@ impl RunDurability {
     pub fn for_mode(mode: IndexingMode) -> Self {
         match mode {
             IndexingMode::Full => Self {
-                data_writes: None,
+                data_writes: Some(WriteDurability::Durable),
                 completion: WriteDurability::Durable,
             },
             IndexingMode::Incremental => Self {
@@ -39,7 +40,7 @@ mod tests {
     #[test]
     fn run_durability_inverts_page_and_completion() {
         let full = RunDurability::for_mode(IndexingMode::Full);
-        assert_eq!(full.data_writes, None);
+        assert_eq!(full.data_writes, Some(WriteDurability::Durable));
         assert_eq!(full.completion, WriteDurability::Durable);
 
         let incremental = RunDurability::for_mode(IndexingMode::Incremental);
