@@ -1,7 +1,10 @@
+use std::collections::HashSet;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::DeleteStreamErrorKind;
+use futures::TryStreamExt;
 use tracing::{debug, info, warn};
 
 use crate::dead_letter::DEAD_LETTER_STREAM;
@@ -18,23 +21,14 @@ pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(release_segment(), *SCHEMA_VERSION));
 
-/// Sanitizes the resolved server version into a NATS-safe token. The release
-/// segment is embedded in subjects (`v<release>.sdlc.…`, `v<release>.dlq.>`),
-/// and subjects are dot-delimited, so `.` and any other non-alphanumeric run is
-/// collapsed to a single `-` (e.g. `0.84.1` → `0-84-1`, `0.0.0-dev` → `0-0-0-dev`).
+static SANITIZE_RELEASE_PATTERN: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new("[^a-zA-Z0-9]+").expect("valid literal regex"));
+
 fn sanitize_release(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut prev_dash = false;
-    for c in raw.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c);
-            prev_dash = false;
-        } else if !prev_dash {
-            out.push('-');
-            prev_dash = true;
-        }
-    }
-    out.trim_matches('-').to_string()
+    SANITIZE_RELEASE_PATTERN
+        .replace_all(raw, "-")
+        .trim_matches('-')
+        .to_string()
 }
 
 fn release_segment() -> String {
@@ -70,6 +64,10 @@ impl NatsVersioner {
         format!("v{}", self.release)
     }
 
+    pub fn release(&self) -> &str {
+        &self.release
+    }
+
     pub fn resolve_stream_and_subject(&self, subscription: &Subscription) -> (String, String) {
         if subscription.manage_stream {
             (
@@ -81,6 +79,54 @@ impl NatsVersioner {
                 subscription.stream.to_string(),
                 subscription.subject.to_string(),
             )
+        }
+    }
+}
+
+pub fn release_from_stream_name(name: &str) -> Option<&str> {
+    MANAGED_STREAMS.iter().find_map(|base| {
+        name.strip_prefix(base)
+            .and_then(|rest| rest.strip_prefix("_V"))
+            .filter(|release| !release.is_empty())
+    })
+}
+
+pub async fn gc_idle_release_streams(client: &async_nats::Client, threshold: Duration) {
+    let cutoff = chrono::Utc::now()
+        .timestamp()
+        .saturating_sub(i64::try_from(threshold.as_secs()).unwrap_or(i64::MAX));
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut alive: HashSet<String> = HashSet::new();
+    let mut streams = async_nats::jetstream::new(client.clone()).streams();
+
+    loop {
+        match streams.try_next().await {
+            Ok(Some(info)) => {
+                let Some(release) = release_from_stream_name(&info.config.name) else {
+                    continue;
+                };
+                seen.insert(release.to_string());
+                if release == NATS_VERSIONER.release()
+                    || info.created.unix_timestamp() > cutoff
+                    || info.state.last_timestamp.unix_timestamp() > cutoff
+                    || info.state.consumer_count > 0
+                {
+                    alive.insert(release.to_string());
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                warn!(%error, "release GC: failed to list streams, skipping sweep");
+                return;
+            }
+        }
+    }
+
+    for release in seen.difference(&alive) {
+        info!(release, "release GC: deleting idle release streams");
+        if let Err(error) = cleanup_release_messaging(client, release).await {
+            warn!(release, %error, "release GC failed, will retry next startup");
         }
     }
 }
@@ -238,6 +284,23 @@ mod tests {
         assert!(names.contains(&"KV_indexing_locks_v62".to_string()));
         assert!(names.contains(&"KV_orbit_indexing_progress_v62".to_string()));
         assert_eq!(names.len(), MANAGED_BUCKETS.len());
+    }
+
+    #[test]
+    fn release_from_stream_name_parses_managed_streams_only() {
+        assert_eq!(
+            release_from_stream_name("GKG_INDEXER_V0-84-1"),
+            Some("0-84-1")
+        );
+        assert_eq!(
+            release_from_stream_name("GKG_DEAD_LETTERS_V0-0-0-dev"),
+            Some("0-0-0-dev")
+        );
+        assert_eq!(release_from_stream_name("GKG_INDEXER_V"), None);
+        assert_eq!(release_from_stream_name("GKG_INDEXER"), None);
+        assert_eq!(release_from_stream_name("siphon_stream_main_db"), None);
+        assert_eq!(release_from_stream_name("KV_indexing_locks_v62"), None);
+        assert_eq!(release_from_stream_name("OTHER_APP_V67"), None);
     }
 
     #[test]

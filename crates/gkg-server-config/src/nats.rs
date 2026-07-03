@@ -121,6 +121,14 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_consumer_inactive_threshold_secs")]
     #[schemars(range(min = 60))]
     pub consumer_inactive_threshold_secs: u64,
+
+    /// How long another release's streams must show no activity (creation,
+    /// publishes, attached consumers) before a starting process deletes them.
+    /// A live release's dispatcher publishes every minute, so activity doubles
+    /// as liveness. Clamped to a minimum of 600 seconds. Defaults to 3600.
+    #[serde(default = "NatsConfiguration::default_release_gc_idle_threshold_secs")]
+    #[schemars(range(min = 600))]
+    pub release_gc_idle_threshold_secs: u64,
 }
 
 impl NatsConfiguration {
@@ -170,6 +178,14 @@ impl NatsConfiguration {
 
     pub fn consumer_inactive_threshold(&self) -> Duration {
         Duration::from_secs(self.consumer_inactive_threshold_secs.max(60))
+    }
+
+    fn default_release_gc_idle_threshold_secs() -> u64 {
+        3600
+    }
+
+    pub fn release_gc_idle_threshold(&self) -> Duration {
+        Duration::from_secs(self.release_gc_idle_threshold_secs.max(600))
     }
 
     /// Returns true when TLS is configured -- either via cert paths or a `tls://` url scheme.
@@ -287,6 +303,7 @@ impl Default for NatsConfiguration {
             stream_max_messages: None,
             fetch_expires_secs: Self::default_fetch_expires_secs(),
             consumer_inactive_threshold_secs: Self::default_consumer_inactive_threshold_secs(),
+            release_gc_idle_threshold_secs: Self::default_release_gc_idle_threshold_secs(),
         }
     }
 }

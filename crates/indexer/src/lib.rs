@@ -105,6 +105,12 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
+    nats::versioning::gc_idle_release_streams(
+        broker.nats_client(),
+        config.nats.release_gc_idle_threshold(),
+    )
+    .await;
+
     let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
 
     let gitlab_client = config
@@ -253,6 +259,13 @@ pub async fn run_dispatcher(
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
+
+    nats::versioning::gc_idle_release_streams(
+        &services.nats_client,
+        config.nats.release_gc_idle_threshold(),
+    )
+    .await;
+
     let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
