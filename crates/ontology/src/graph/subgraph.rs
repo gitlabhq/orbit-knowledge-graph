@@ -1,33 +1,19 @@
-//! The universal return type of every graph operation: a [`Subgraph`] of
-//! [`MarkedEdge`]s. Terminal answers are projections off it (`node_kinds`,
-//! `edge_kinds`, `adjacencies`, `paths`); subgraphs compose under set algebra
-//! (`union`, `intersect`, `difference`) so connectivity guards and frontier
-//! reasoning are expressions rather than bespoke walks.
+//! [`Subgraph`] is the return type of every graph op: projectable ([`Subgraph::paths`])
+//! and composable under set algebra ([`Subgraph::union`]).
 
 use std::collections::{BTreeSet, HashMap};
 
-/// Per-hop facts a walk stamps onto a crossed edge. This is the classifier's
-/// per-edge output: the passes that emit SQL read these instead of re-deriving.
-/// [`Mark::merge`] defines how two overlapping walks combine an edge.
+/// Per-hop facts stamped onto a crossed edge (the classifier's per-edge output).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeMarks {
-    /// Enumerated-path memberships (colored by [`super::OntologyGraph::paths_between`]).
     pub path_ids: Vec<usize>,
-    /// Namespace prefix stamped by scope propagation (restrict A1/A2).
     pub scope_prefix: Option<String>,
-    /// The edge keeps both endpoints in one namespace (restrict A3).
     pub scope_preserving: bool,
-    /// Minimum access level required for the far node (security A8).
     pub role_floor: Option<u32>,
-    /// The far node's table is partitioned (partition C15).
     pub partitioned: bool,
 }
 
-/// How a mark payload combines when two walks cross the same edge. Each field
-/// merges under its own lattice join: sets union, an `Option<prefix>` asserts
-/// agreement (conflict = the multi-namespace bug the plan calls out), a role
-/// floor takes the max (most restrictive), booleans OR. Keeps [`Subgraph::union`]
-/// well-defined for any mark without special-casing the caller.
+/// How a mark combines when two walks cross the same edge; keeps [`Subgraph::union`] total.
 pub trait Mark {
     fn merge(&mut self, other: &Self);
 }
@@ -46,9 +32,7 @@ impl Mark for EdgeMarks {
     }
 }
 
-/// A vertex's role in a classified query graph. A traversal is the base case
-/// (`GraphNode`); aggregation adds `GroupKey`/`Collapsed`; pathfinding/neighbors
-/// mark endpoints. Collapse is the *absence* of a vertex from the projection.
+/// A vertex's role in a classified query graph (plan §3.3).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum VertexRole {
     #[default]
@@ -60,17 +44,12 @@ pub enum VertexRole {
     Dynamic,
 }
 
-/// Per-node facts the classifier stamps onto a query vertex (keyed by alias in
-/// [`Subgraph::nodes`]). The per-vertex half of the classifier's output, read by
-/// the security / hydration passes instead of re-deriving per alias.
+/// Per-vertex facts stamped by the classifier, keyed by alias in [`Subgraph::nodes`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NodeMarks {
     pub role: VertexRole,
-    /// Minimum access level for this node's table (security A8).
     pub role_floor: Option<u32>,
-    /// Tight namespace prefix substituted for the broad auth filter (security A10).
     pub scope_prefix: Option<String>,
-    /// This node's table is partitioned (partition C15).
     pub partitioned: bool,
 }
 
@@ -84,14 +63,12 @@ impl Mark for NodeMarks {
     }
 }
 
-/// A relationship kind and the node kind on the far side of the hop.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Adjacency {
     pub relationship_kind: String,
     pub neighbor_kind: String,
 }
 
-/// One edge in a [`Subgraph`], carrying its endpoint kinds, depth, and marks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkedEdge {
     pub from: String,
@@ -108,10 +85,7 @@ impl MarkedEdge {
     }
 }
 
-/// The marked view a walk produced. `edges` carry per-hop marks; `nodes` carry
-/// per-vertex marks keyed by alias — together the classifier's [`EdgeMarks`] +
-/// [`NodeMarks`] output that downstream passes project instead of re-deriving.
-/// A pure ontology walk leaves `nodes` empty; the classifier populates it.
+/// Edges carry per-hop marks; `nodes` carry per-vertex marks keyed by alias.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Subgraph {
     pub edges: Vec<MarkedEdge>,
@@ -124,13 +98,11 @@ impl Subgraph {
         self.edges.is_empty()
     }
 
-    /// Marks for the vertex aliased `alias`, if the classifier stamped it.
     #[must_use]
     pub fn node(&self, alias: &str) -> Option<&NodeMarks> {
         self.nodes.get(alias)
     }
 
-    /// Stamp (or merge into) the marks for vertex `alias`.
     pub fn mark_node(&mut self, alias: impl Into<String>, marks: NodeMarks) {
         self.nodes
             .entry(alias.into())
@@ -148,7 +120,6 @@ impl Subgraph {
             .collect()
     }
 
-    /// Relationship kinds present on any crossed edge.
     #[must_use]
     pub fn edge_kinds(&self) -> BTreeSet<String> {
         self.edges
@@ -157,7 +128,6 @@ impl Subgraph {
             .collect()
     }
 
-    /// `(relationship_kind, far_node)` pairs, sorted and deduplicated.
     #[must_use]
     pub fn adjacencies(&self) -> Vec<Adjacency> {
         let set: BTreeSet<(String, String)> = self
@@ -173,8 +143,7 @@ impl Subgraph {
             .collect()
     }
 
-    /// Ordered edge-kind sequences recovered from the path coloring — one per
-    /// enumerated path. Sorted for determinism; empty when unreachable.
+    /// Ordered edge-kind sequences recovered from the path coloring, one per path.
     #[must_use]
     pub fn paths(&self) -> Vec<Vec<String>> {
         let mut by_id: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
@@ -197,8 +166,7 @@ impl Subgraph {
         out
     }
 
-    /// Every edge and node from both, marks merged on shared identity (edges by
-    /// `(from, kind, to)`, nodes by alias).
+    /// Every edge and node from both, marks merged on shared identity.
     #[must_use]
     pub fn union(mut self, other: Subgraph) -> Subgraph {
         for edge in other.edges {
@@ -217,7 +185,6 @@ impl Subgraph {
         self
     }
 
-    /// Edges whose `(from, kind, to)` identity is present in both.
     #[must_use]
     pub fn intersect(&self, other: &Subgraph) -> Subgraph {
         let keep: BTreeSet<(String, String, String)> = other
@@ -238,7 +205,6 @@ impl Subgraph {
         }
     }
 
-    /// Edges in `self` whose identity is absent from `other`.
     #[must_use]
     pub fn difference(&self, other: &Subgraph) -> Subgraph {
         let drop: BTreeSet<(String, String, String)> = other
@@ -259,8 +225,7 @@ impl Subgraph {
         }
     }
 
-    /// Far-node kinds present in both subgraphs — the meet of a forward and a
-    /// backward walk, i.e. the kinds a bidirectional frontier spans.
+    /// Far-node kinds in both — the meet of a forward and backward frontier.
     #[must_use]
     pub fn intersect_nodes(&self, other: &Subgraph) -> BTreeSet<String> {
         let theirs: BTreeSet<&str> = other.edges.iter().map(|e| e.to.as_str()).collect();
@@ -272,8 +237,7 @@ impl Subgraph {
             .collect()
     }
 
-    /// Extend each reached node by `expand`, unioning the results into `self`.
-    /// Chains walks (neighbors-of-neighbors) without a bespoke second loop.
+    /// Extend each reached node by `expand`, unioning results in (chains walks).
     #[must_use]
     pub fn then(self, expand: impl Fn(&str) -> Subgraph) -> Subgraph {
         let reached: BTreeSet<String> = self.edges.iter().map(|e| e.to.clone()).collect();

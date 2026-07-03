@@ -1,11 +1,6 @@
-//! petgraph-backed topology plus per-triple/per-node indexes over the flat
-//! [`Ontology`]. The traversal surface is four composable pieces:
-//!
-//! - [`pred`] — the chainable edge-filter algebra ([`EdgePred`], `&`/`|`/`!`).
-//! - [`walk`] — one [`Walk`] builder over direction, filter, and strategy.
-//! - [`subgraph`] — the universal return type ([`Subgraph`]) with projections
-//!   (`node_kinds`, `paths`, …) and set algebra (`union`/`intersect`/`difference`).
-//! - this module — the materialized graph and its per-triple/per-node indexes.
+//! petgraph topology + per-triple/per-node indexes over the flat [`Ontology`].
+//! Traversal splits into [`pred`] (filter algebra), [`walk`] (the builder), and
+//! [`subgraph`] (the return type); this module holds the graph and its indexes.
 
 mod pred;
 mod subgraph;
@@ -28,7 +23,7 @@ pub(crate) struct EdgeMeta {
     pub(crate) synthesized: bool,
 }
 
-/// Query-independent facts about one `(kind, source, target)` edge triple.
+/// Static facts about one `(kind, source, target)` edge triple.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeTemplate {
     pub scope: Option<EdgeVariantScope>,
@@ -37,7 +32,7 @@ pub struct EdgeTemplate {
     pub fk_column: Option<String>,
 }
 
-/// Static, query-independent facts about one node.
+/// Static facts about one node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeTemplate {
     pub destination_table: String,
@@ -49,7 +44,6 @@ pub struct NodeTemplate {
     pub redaction_id_column: Option<String>,
 }
 
-/// Materialized topology and per-triple/per-node templates over an [`Ontology`].
 #[derive(Debug, Clone)]
 pub struct OntologyGraph {
     pub(super) graph: DiGraph<String, EdgeMeta>,
@@ -197,8 +191,7 @@ impl OntologyGraph {
         }
     }
 
-    /// Whether the graph has real edge adjacency between named node kinds. False
-    /// for a bare test scaffold whose edges declare no endpoint kinds.
+    /// True unless the graph is a bare test scaffold with no named-endpoint edges.
     #[must_use]
     pub fn has_edges(&self) -> bool {
         self.graph.edge_references().any(|e| {
@@ -208,7 +201,7 @@ impl OntologyGraph {
         })
     }
 
-    /// Node kind backing a physical table (tolerating a `v{N}_` prefix); `None` for edge/CTE/unknown tables.
+    /// Node kind backing a physical table (tolerates a `v{N}_` prefix).
     #[must_use]
     pub fn table_to_node(&self, table: &str) -> Option<&str> {
         self.table_to_node
@@ -216,8 +209,7 @@ impl OntologyGraph {
             .map(String::as_str)
     }
 
-    /// `(fk_column, anchor_entity)` pairs from `namespace_anchor` variants, deduped by column.
-    #[must_use = "returns the mapping iterator without mutating the graph"]
+    /// `(fk_column, anchor_entity)` pairs, deduped by column.
     pub fn anchor_fk_mappings(&self) -> impl Iterator<Item = (&str, &str)> {
         self.anchor_fk
             .iter()
@@ -245,30 +237,26 @@ impl OntologyGraph {
         self.node_templates.get(entity)
     }
 
-    /// Static per-node facts for the node backing a physical `table`. Resolves
-    /// `table → node → template` in one call, so the security pass reads a
-    /// table's role floor / scopability / global-ness without a per-alias scan.
+    /// `NodeTemplate` for the node backing a physical `table` (O(1), no per-alias scan).
     #[must_use]
     pub fn table_facts(&self, table: &str) -> Option<&NodeTemplate> {
         self.node_template(self.table_to_node(table)?)
     }
 
-    /// Whether the `(kind, source, target)` triple keeps both endpoints in one
-    /// namespace. Reads the per-triple template rather than rescanning edges.
+    /// Whether the triple keeps both endpoints in one namespace.
     #[must_use]
     pub fn is_scope_preserving(&self, kind: &str, source: &str, target: &str) -> bool {
         self.edge_template(kind, source, target)
             .is_some_and(|t| t.scope_preserving)
     }
 
-    /// The scope variant for the `(kind, source, target)` triple, if annotated.
     #[must_use]
     pub fn edge_scope(&self, kind: &str, source: &str, target: &str) -> Option<EdgeVariantScope> {
         self.edge_template(kind, source, target)
             .and_then(|t| t.scope)
     }
 
-    /// Relationship kinds carrying `entity`'s `prop` on their edge table in `direction`.
+    /// Relationship kinds carrying `entity`'s `prop` on their edge table.
     #[must_use]
     pub fn denorm_kinds(
         &self,

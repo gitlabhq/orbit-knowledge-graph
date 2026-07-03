@@ -1,7 +1,5 @@
-//! One traversal builder over three orthogonal axes: direction, edge selection
-//! ([`EdgePred`]), and strategy ([`Strategy::Frontier`] dedups nodes for
-//! reachability; [`Strategy::Enumerate`] keeps every distinct path and colors
-//! its edges). `neighbors` / `reachable_within` / `paths_between` are presets.
+//! One [`Walk`] builder over direction, filter, and Frontier/Enumerate strategy;
+//! `neighbors` / `reachable_within` / `paths_between` are presets.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -16,7 +14,6 @@ use crate::etl::EdgeDirection;
 
 type MarkFn = std::rc::Rc<dyn Fn(&Hop<'_>, &mut EdgeMarks)>;
 
-/// One edge crossed during a walk.
 #[derive(Debug, Clone, Copy)]
 pub struct Hop<'a> {
     pub from: &'a str,
@@ -26,9 +23,7 @@ pub struct Hop<'a> {
     pub depth: usize,
 }
 
-/// Direction to expand a walk frontier. `Both` follows edges of either
-/// orientation, which is what pathfinding frontiers, `neighbors direction: both`,
-/// and undirected connectivity all need.
+/// Frontier direction; `Both` follows either orientation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dir {
     Outgoing,
@@ -55,15 +50,13 @@ impl From<EdgeDirection> for Dir {
     }
 }
 
-/// Frontier expansion visits each node once (reachability); enumerate keeps every
-/// distinct simple path (cycles broken by on-path membership) and colors edges.
+/// Frontier dedups nodes (reachability); Enumerate keeps every path and colors edges.
 #[derive(Clone)]
 enum Strategy {
     Frontier,
     Enumerate { target: Option<String> },
 }
 
-/// A configured traversal. Build with [`OntologyGraph::walk`], then `run`.
 pub struct Walk<'g> {
     graph: &'g OntologyGraph,
     start: String,
@@ -87,9 +80,7 @@ impl<'g> Walk<'g> {
         }
     }
 
-    /// Stamp each crossed edge with per-hop facts. This is the classifier's
-    /// write-seam: one `mark` closure populates [`EdgeMarks`] as the walk runs,
-    /// so downstream passes read the marks instead of re-deriving.
+    /// Stamp each crossed edge with per-hop facts (the classifier's write-seam).
     #[must_use]
     pub fn mark(mut self, f: impl Fn(&Hop<'_>, &mut EdgeMarks) + 'static) -> Self {
         self.mark = Some(std::rc::Rc::new(f));
@@ -114,8 +105,7 @@ impl<'g> Walk<'g> {
         self
     }
 
-    /// Switch to path enumeration: keep every distinct simple path (not just the
-    /// reachable frontier) and color each completed path's edges.
+    /// Enumerate every distinct path and color its edges, instead of a frontier.
     #[must_use]
     pub fn enumerate(mut self) -> Self {
         self.strategy = Strategy::Enumerate { target: None };
@@ -257,22 +247,19 @@ struct PathState {
 }
 
 impl OntologyGraph {
-    /// Start a traversal from `start`. Configure with `hops`/`dir`/`filter`/
-    /// `enumerate`, then `run` for a [`Subgraph`].
+    /// Start a traversal from `start`; configure, then `run`.
     #[must_use]
     pub fn walk(&self, start: impl Into<String>) -> Walk<'_> {
         Walk::new(self, start)
     }
 
-    /// Adjacency leaving (`Outgoing`) or entering (`Incoming`) a node kind,
-    /// excluding synthesized FK edges. Project with [`Subgraph::adjacencies`].
+    /// Triple adjacency of `node_kind` in `direction`.
     #[must_use]
     pub fn neighbors(&self, node_kind: &str, direction: impl Into<Dir>) -> Subgraph {
         self.walk(node_kind).dir(direction).filter(triple()).run()
     }
 
-    /// Triple edges connecting `a` and `b` in either orientation, filtered to
-    /// `types` when non-empty. Project with [`Subgraph::edge_kinds`].
+    /// Triple edges connecting `a` and `b` (either orientation), filtered to `types` when set.
     #[must_use]
     pub fn kinds_connecting(&self, a: &str, b: &str, types: &HashSet<&str>) -> Subgraph {
         let kind_filter = if types.is_empty() {
@@ -286,16 +273,13 @@ impl OntologyGraph {
             .run()
     }
 
-    /// Subgraph reachable from `start` within `max_hops` outgoing edges.
-    /// Synthesized FK edges compose with triple hops. Project with
-    /// [`Subgraph::node_kinds`].
+    /// Reachable within `max_hops` outgoing edges (FK edges compose with triple hops).
     #[must_use]
     pub fn reachable_within(&self, start: &str, max_hops: usize) -> Subgraph {
         self.reachable_within_types(start, max_hops, None)
     }
 
-    /// Like [`reachable_within`], but a `Some(types)` set restricts triple edges
-    /// to `types`; synthesized FK edges are always traversable.
+    /// Like [`reachable_within`], but `Some(types)` restricts triple edges (FK always traversed).
     #[must_use]
     pub fn reachable_within_types(
         &self,
@@ -310,7 +294,7 @@ impl OntologyGraph {
         self.walk(start).hops(max_hops).filter(pred).run()
     }
 
-    /// Whether `node`'s table carries an anchor FK to `anchor` (edge-triple-free synthesis).
+    /// Whether `node`'s table carries an anchor FK to `anchor`.
     #[must_use]
     pub fn fk_reaches(&self, node: &str, anchor: &str) -> bool {
         !self
@@ -320,18 +304,13 @@ impl OntologyGraph {
             .is_empty()
     }
 
-    /// Subgraph of every declared path from `a` to `b` within `max_hops`, edges
-    /// colored by the paths they belong to. Project ordered kind-sequences with
-    /// [`Subgraph::paths`]; empty when unreachable.
+    /// Every path from `a` to `b` within `max_hops`, edges colored by path.
     #[must_use]
     pub fn paths_between(&self, a: &str, b: &str, max_hops: usize) -> Subgraph {
         self.walk(a).hops(max_hops).enumerate_to(b).run()
     }
 
-    /// Cheapest declared path from `a` to `b` under `cost`, as an ordered list of
-    /// relationship kinds. Dijkstra over the outgoing triple edges; `None` when
-    /// unreachable. Backs join/hop ordering by making "reorder by selectivity" a
-    /// shortest-path over an [`EdgeFn`] cost instead of a bespoke heuristic.
+    /// Cheapest path from `a` to `b` under `cost` (Dijkstra over triple edges).
     #[must_use]
     pub fn min_cost_path(&self, a: &str, b: &str, cost: &EdgeFn<u32>) -> Option<Vec<String>> {
         use std::cmp::Reverse;

@@ -113,8 +113,7 @@ const MAX_PATH_ANCHOR_RANGE: i64 = 500;
 /// path_finding endpoint CTE. Matches the node_ids cap (500).
 pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
 
-/// Hop budget for the unreachable-hint's multi-hop route suggestion. Matches the
-/// traversal MAX_HOPS_CAP so the hint only proposes routes a query could express.
+/// Matches MAX_HOPS_CAP so the hint only proposes routes a query could express.
 const MAX_REACHABILITY_HOPS: usize = 3;
 
 /// Whether a path_finding endpoint has bounded selectivity.

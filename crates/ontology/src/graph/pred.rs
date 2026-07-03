@@ -1,15 +1,10 @@
-//! Composable edge functions. [`EdgePred`] (the boolean case) is the edge-filter
-//! algebra, chainable with `&`, `|`, `!` — the analog of `treesitter-visit`'s
-//! `Match`. [`EdgeFn`] generalizes the codomain so the same combinator serves
-//! filtering (`bool`), weighting (`u32`), and marking (later).
+//! [`EdgeFn<T>`] over a [`Hop`]; [`EdgePred`] = `EdgeFn<bool>`, chainable with `&`/`|`/`!`.
 
 use std::collections::HashSet;
 use std::rc::Rc;
 
 use super::walk::Hop;
 
-/// A cloneable function over one [`Hop`]. `EdgeFn<bool>` is [`EdgePred`];
-/// non-boolean codomains (cost, mark) reuse the same construction.
 #[derive(Clone)]
 pub struct EdgeFn<T>(Rc<dyn Fn(&Hop<'_>) -> T>);
 
@@ -23,7 +18,6 @@ impl<T> EdgeFn<T> {
     }
 }
 
-/// A boolean edge filter. Chain with `&`, `|`, `!`.
 pub type EdgePred = EdgeFn<bool>;
 
 impl EdgePred {
@@ -51,13 +45,11 @@ impl std::ops::Not for EdgePred {
     }
 }
 
-/// Any edge.
 #[must_use]
 pub fn any() -> EdgePred {
     EdgePred::of(|_| true)
 }
 
-/// A synthesized FK edge.
 #[must_use]
 pub fn synthesized() -> EdgePred {
     EdgePred::of(|h| h.synthesized)
@@ -69,14 +61,13 @@ pub fn triple() -> EdgePred {
     EdgePred::of(|h| !h.synthesized)
 }
 
-/// The far node kind equals `node`.
 #[must_use]
 pub fn to(node: &str) -> EdgePred {
     let node = node.to_string();
     EdgePred::of(move |h| h.to == node)
 }
 
-/// The relationship kind is in `types` (empty set matches nothing).
+/// Relationship kind in `types` (empty matches nothing).
 #[must_use]
 pub fn kinds_in(types: &HashSet<&str>) -> EdgePred {
     let types: HashSet<String> = types.iter().map(|s| (*s).to_string()).collect();
