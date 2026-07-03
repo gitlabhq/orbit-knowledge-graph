@@ -8,7 +8,7 @@ pub enum WriteDurability {
     Durable,
 }
 
-/// Full: data writes coalesce server-side but completion must persist. Incremental inverts it: each write persists, completion can be lost and re-derived.
+/// Full: data writes coalesce server-side (Durable), completion must persist. Incremental: each write persists, completion can be lost and re-derived.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunDurability {
     pub data_writes: Option<WriteDurability>,
