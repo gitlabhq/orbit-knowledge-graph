@@ -38,9 +38,9 @@ use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
 use crate::schema::version::{
-    SCHEMA_VERSION, SchemaVersionError, mark_version_active, mark_version_retired,
-    read_active_version, read_all_versions, table_prefix, version_tables_exist,
-    write_migrating_version, write_schema_version,
+    SCHEMA_VERSION, SchemaVersionError, drop_kind_for_engine, list_version_objects,
+    mark_version_active, mark_version_retired, read_active_version, read_all_versions,
+    table_prefix, version_tables_complete, write_migrating_version, write_schema_version,
 };
 
 /// NATS KV key used to serialize schema migrations across pods.
@@ -138,7 +138,8 @@ pub async fn run_if_needed(
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer
-/// active version. Re-activate vs. rebuild is decided by table existence, not lag-prone status.
+/// active version. Re-activate vs. rebuild is decided by table-set completeness (every object
+/// `create_prefixed_tables` would create for this version is present), not lag-prone status.
 async fn run_rollback(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,
@@ -161,20 +162,23 @@ async fn run_rollback(
         return Ok(());
     }
 
-    let tables_exist = match version_tables_exist(graph, *SCHEMA_VERSION).await {
-        Ok(exists) => exists,
+    let prefix = table_prefix(*SCHEMA_VERSION);
+    let expected = embedded_object_names(ontology, &prefix);
+
+    let tables_complete = match version_tables_complete(graph, *SCHEMA_VERSION, &expected).await {
+        Ok(complete) => complete,
         Err(e) => {
-            warn!(error = %e, "failed to check whether embedded version's tables exist — releasing lock");
+            warn!(error = %e, "failed to check embedded version's table-set completeness — releasing lock");
             let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
             return Err(e.into());
         }
     };
 
-    if tables_exist {
+    if tables_complete {
         info!(
             active_version,
             target_version = *SCHEMA_VERSION,
-            "embedded version's tables are intact — rolling back via direct re-activation"
+            "embedded version's table set is complete — rolling back via direct re-activation"
         );
 
         let reactivate_result = reactivate_version(graph, *SCHEMA_VERSION).await;
@@ -197,8 +201,19 @@ async fn run_rollback(
     info!(
         active_version,
         target_version = *SCHEMA_VERSION,
-        "embedded version's tables were already garbage-collected — rolling back via rebuild"
+        "embedded version's table set is incomplete — rolling back via rebuild"
     );
+
+    // A partial table set left surviving objects behind (e.g. GC dropped some but not all).
+    // create_prefixed_tables uses IF NOT EXISTS, so a surviving checkpoint table would make
+    // the backfill skip already-checkpointed projects while its sibling data tables sit
+    // empty. Clear the slate before rebuilding.
+    if let Err(e) = drop_stale_version_objects(graph, *SCHEMA_VERSION).await {
+        warn!(error = %e, "failed to clear stale embedded-version objects before rebuild — releasing lock");
+        let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
+        return Err(e);
+    }
+
     run_migration_locked(
         graph,
         source,
@@ -209,6 +224,55 @@ async fn run_rollback(
         active_version,
     )
     .await
+}
+
+/// The full set of object names `create_prefixed_tables` creates for `prefix` from the
+/// embedded ontology (tables, dictionaries, and materialized views all land in
+/// `system.tables`, so all three must be checked for rollback completeness).
+fn embedded_object_names(ontology: &ontology::Ontology, prefix: &str) -> Vec<String> {
+    let mut names: Vec<String> = generate_graph_tables_with_prefix(ontology, prefix)
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    names.extend(
+        generate_graph_dictionaries_with_prefix(ontology, prefix)
+            .into_iter()
+            .map(|d| d.name),
+    );
+    names.extend(
+        generate_graph_materialized_views_with_prefix(ontology, prefix)
+            .into_iter()
+            .map(|v| v.name),
+    );
+    names
+}
+
+/// Drops every surviving `v<version>_*` object, in dependency-safe order (views and
+/// dictionaries select from tables, so they must go first).
+async fn drop_stale_version_objects(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<(), MigrationError> {
+    let mut objects = list_version_objects(graph, version).await?;
+    objects.sort_by_key(|o| match drop_kind_for_engine(&o.engine) {
+        "VIEW" => 0,
+        "DICTIONARY" => 1,
+        _ => 2,
+    });
+
+    for object in &objects {
+        let kind = drop_kind_for_engine(&object.engine);
+        info!(object = %object.name, kind, "dropping stale object before rollback rebuild");
+        graph
+            .execute(&format!("DROP {kind} IF EXISTS {}", object.name))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: object.name.clone(),
+                reason: e.to_string(),
+            })?;
+    }
+
+    Ok(())
 }
 
 async fn reactivate_version(

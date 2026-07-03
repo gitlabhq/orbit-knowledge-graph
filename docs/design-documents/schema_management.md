@@ -359,22 +359,32 @@ Cleanup logic:
 Deploying an older binary is the rollback mechanism: when the dispatcher finds `active >
 SCHEMA_VERSION`, `schema::migration::run_rollback` rolls back to the embedded version
 automatically, after taking the migration lock and re-checking that another pod hasn't already
-done it. The rollback picks between two cases based on table existence rather than
-`gkg_schema_version` status, since status rows can lag under concurrent writers while a
-`system.tables` lookup for `v<SCHEMA_VERSION>_*` reflects what actually exists:
+done it. The rollback picks between two cases based on table-set *completeness* rather than
+`gkg_schema_version` status, since status rows can lag under concurrent writers: GC
+(`reconcile_dead_versions`) drops a dead version's objects one by one and only marks it `dropped`
+once every drop succeeds, so a version can be left `retired` with some but not all of its objects
+gone. `schema::version::version_tables_complete` computes the exact object set
+`create_prefixed_tables` would create for `v<SCHEMA_VERSION>_*` from the embedded ontology
+(tables, dictionaries, and materialized views) and checks that every one of them exists in
+`system.tables`; a single missing object routes to the rebuild case, since a partially-live table
+set means silently broken queries under direct re-activation.
 
-1. **Tables retained** (the embedded version is within the retention window, so GC never dropped
-   its tables) — direct re-activation. The dispatcher marks the embedded version `active` and
-   retires whatever was active before. There is no `migrating` phase and no re-indexing: the
-   existing tables are already complete for the version this binary understands, and indexing
-   resumes on them through the normal namespace sweep.
+1. **Table set complete** (the embedded version is within the retention window, so GC never
+   touched its tables, or GC hasn't started dropping them yet) — direct re-activation. The
+   dispatcher marks the embedded version `active` and retires whatever was active before. There
+   is no `migrating` phase and no re-indexing: the existing tables are already complete for the
+   version this binary understands, and indexing resumes on them through the normal namespace
+   sweep.
 
-2. **Tables GC'd** (the embedded version was retired and a later forward migration dropped its
-   tables) — rebuild. Mechanically this is a forward migration: create the `vN_*` tables from
-   the ontology and mark the version `migrating`. The existing `MigrationCompletionChecker`
-   promotes it once re-indexing catches up; completion detection and promotion don't care
-   whether the migrating version is above or below the current active one (see "Migration
-   completion detection" below).
+2. **Table set incomplete** (GC fully or partially dropped the embedded version's objects) —
+   rebuild. Any surviving objects under the `v<SCHEMA_VERSION>_` prefix are dropped first — a
+   surviving `checkpoint` table would otherwise make the backfill treat already-checkpointed
+   projects as done while their sibling data tables sit empty, a silent data gap. Once the slate
+   is clear, this is mechanically a forward migration: create the `vN_*` tables from the ontology
+   and mark the version `migrating`. The existing `MigrationCompletionChecker` promotes it once
+   re-indexing catches up; completion detection and promotion don't care whether the migrating
+   version is above or below the current active one (see "Migration completion detection"
+   below).
 
    Because the dispatcher and indexer boot independently, the indexer can run its first readiness
    poll in the window before the dispatcher has written the `migrating` row. In that window the

@@ -35,8 +35,8 @@ use crate::locking::LockService;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::metrics::CompletionMetrics;
 use crate::schema::version::{
-    SCHEMA_VERSION, mark_version_active, mark_version_dropped, mark_version_retired,
-    read_all_versions, read_migrating_version, table_prefix,
+    SCHEMA_VERSION, drop_kind_for_engine, mark_version_active, mark_version_dropped,
+    mark_version_retired, read_all_versions, read_migrating_version, table_prefix,
 };
 
 /// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
@@ -576,11 +576,7 @@ impl MigrationCompletionChecker {
                     continue;
                 }
 
-                let kind = match engine.as_str() {
-                    "MaterializedView" | "View" | "LiveView" | "WindowView" => "VIEW",
-                    "Dictionary" => "DICTIONARY",
-                    _ => "TABLE",
-                };
+                let kind = drop_kind_for_engine(&engine);
                 drops.push((version, name, kind));
             }
         }

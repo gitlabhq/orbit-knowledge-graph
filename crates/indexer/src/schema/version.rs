@@ -2,10 +2,11 @@
 //! graph table names. Version 0 uses no prefix (backward compatible); version N
 //! uses `vN_`.
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use arrow::datatypes::{UInt32Type, UInt64Type};
+use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
 use query_engine::compiler::ast::ddl::{ColumnDef, ColumnType, CreateTable, Engine};
@@ -300,32 +301,90 @@ pub async fn mark_version_dropped(
     Ok(())
 }
 
-const COUNT_VERSION_TABLES: &str = "\
-SELECT count() AS cnt FROM system.tables \
+const LIST_VERSION_OBJECTS: &str = "\
+SELECT name, engine FROM system.tables \
 WHERE database = {db:String} AND startsWith(name, {prefix:String})";
 
-/// Whether at least one `v<version>_*` table exists. Version 0 tables are
-/// unprefixed and never dropped by GC, so it always counts as existing.
-pub async fn version_tables_exist(
+/// A `v<version>_*` object (table, dictionary, or view) found in `system.tables`.
+#[derive(Debug, Clone)]
+pub struct VersionObject {
+    pub name: String,
+    pub engine: String,
+}
+
+/// Maps a `system.tables.engine` value to the DDL keyword needed to drop it.
+pub fn drop_kind_for_engine(engine: &str) -> &'static str {
+    match engine {
+        "MaterializedView" | "View" | "LiveView" | "WindowView" => "VIEW",
+        "Dictionary" => "DICTIONARY",
+        _ => "TABLE",
+    }
+}
+
+/// Lists every `v<version>_*` object in `system.tables`. Version 0 tables are
+/// unprefixed and not GC-managed, so this always returns empty for version 0
+/// rather than matching every table in the database via an empty prefix.
+pub async fn list_version_objects(
     graph: &ArrowClickHouseClient,
     version: u32,
-) -> Result<bool, SchemaVersionError> {
+) -> Result<Vec<VersionObject>, SchemaVersionError> {
     if version == 0 {
-        return Ok(true);
+        return Ok(Vec::new());
     }
 
     let batches = graph
-        .query(COUNT_VERSION_TABLES)
+        .query(LIST_VERSION_OBJECTS)
         .param("db", graph.database())
         .param("prefix", table_prefix(version))
         .fetch_arrow()
         .await?;
 
-    let count = batches
-        .first()
-        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "cnt", 0))
-        .unwrap_or(0);
-    Ok(count > 0)
+    let mut objects = Vec::new();
+    for batch in &batches {
+        for i in 0..batch.num_rows() {
+            let name = ArrowUtils::get_column_string(batch, "name", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing name".into()))?;
+            let engine = ArrowUtils::get_column_string(batch, "engine", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing engine".into()))?;
+            objects.push(VersionObject { name, engine });
+        }
+    }
+    Ok(objects)
+}
+
+/// Whether every object in `expected` (the names `create_prefixed_tables` would
+/// create for `version` from the embedded ontology) is present in `system.tables`.
+/// GC drops dead-version objects one by one and only marks a version `dropped`
+/// once all succeed, so a version can be left `retired` with a partial table set
+/// if GC failed partway through — this must not be mistaken for a complete set.
+/// Version 0 tables are unprefixed and never GC'd, so it always counts as complete.
+pub async fn version_tables_complete(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+    expected: &[String],
+) -> Result<bool, SchemaVersionError> {
+    if version == 0 {
+        return Ok(true);
+    }
+
+    let objects = list_version_objects(graph, version).await?;
+    let actual: HashSet<&str> = objects.iter().map(|o| o.name.as_str()).collect();
+
+    let missing: Vec<&String> = expected
+        .iter()
+        .filter(|name| !actual.contains(name.as_str()))
+        .collect();
+
+    if !missing.is_empty() {
+        warn!(
+            version,
+            ?missing,
+            "embedded version's table set is incomplete"
+        );
+        return Ok(false);
+    }
+
+    Ok(true)
 }
 
 /// Ensures the `gkg_schema_version` table exists.
@@ -498,10 +557,21 @@ mod tests {
     }
 
     #[test]
-    fn count_version_tables_query_scopes_to_db_and_prefix() {
-        assert!(COUNT_VERSION_TABLES.contains("system.tables"));
-        assert!(COUNT_VERSION_TABLES.contains("database = {db:String}"));
-        assert!(COUNT_VERSION_TABLES.contains("startsWith(name, {prefix:String})"));
+    fn list_version_objects_query_scopes_to_db_and_prefix() {
+        assert!(LIST_VERSION_OBJECTS.contains("system.tables"));
+        assert!(LIST_VERSION_OBJECTS.contains("database = {db:String}"));
+        assert!(LIST_VERSION_OBJECTS.contains("startsWith(name, {prefix:String})"));
+        assert!(LIST_VERSION_OBJECTS.contains("name, engine"));
+    }
+
+    #[test]
+    fn drop_kind_for_engine_maps_views_and_dictionaries() {
+        assert_eq!(drop_kind_for_engine("MaterializedView"), "VIEW");
+        assert_eq!(drop_kind_for_engine("View"), "VIEW");
+        assert_eq!(drop_kind_for_engine("LiveView"), "VIEW");
+        assert_eq!(drop_kind_for_engine("WindowView"), "VIEW");
+        assert_eq!(drop_kind_for_engine("Dictionary"), "DICTIONARY");
+        assert_eq!(drop_kind_for_engine("ReplacingMergeTree"), "TABLE");
     }
 
     #[test]

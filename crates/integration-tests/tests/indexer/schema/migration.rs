@@ -6,8 +6,9 @@ use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
 use indexer::schema::migration;
 use indexer::schema::version::{
-    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, read_active_version, table_prefix,
-    wait_until_ready, write_migrating_version, write_schema_version,
+    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, prefixed_table_name,
+    read_active_version, table_prefix, wait_until_ready, write_migrating_version,
+    write_schema_version,
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
@@ -473,6 +474,95 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
             table.name
         );
     }
+}
+
+#[tokio::test]
+async fn rollback_rebuild_clears_stale_objects_before_recreating() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    // A GC failure partway through can drop some but not all of a retired
+    // version's objects. Reproduce that by dropping only the checkpoint
+    // table and leaving a stale row in a surviving one.
+    let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    ctx.execute(&format!("DROP TABLE {checkpoint_table}")).await;
+
+    let user_table = prefixed_table_name("gl_user", *SCHEMA_VERSION);
+    ctx.execute(&format!(
+        "INSERT INTO {user_table} (id, username) VALUES (999, 'stale-rollback-user')"
+    ))
+    .await;
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["migrating"],
+        "a partial table set must route to rebuild, not direct re-activation"
+    );
+
+    let prefix = table_prefix(*SCHEMA_VERSION);
+    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let result = ctx
+        .query(&format!(
+            "SELECT name FROM system.tables \
+             WHERE database = 'test' AND startsWith(name, '{prefix}') \
+             AND engine != 'Dictionary' \
+             ORDER BY name"
+        ))
+        .await;
+    let created_names = String::extract_column(&result, 0).unwrap();
+    for table in &expected_tables {
+        assert!(
+            created_names.contains(&table.name),
+            "rebuild must recreate '{}' — created: {created_names:?}",
+            table.name
+        );
+    }
+
+    let result = ctx
+        .query(&format!(
+            "SELECT toInt64(count()) AS cnt FROM {user_table} FINAL WHERE id = 999"
+        ))
+        .await;
+    let count = i64::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        count,
+        vec![0],
+        "rebuild must drop surviving objects first so stale rows don't leak into the rebuilt version"
+    );
 }
 
 #[tokio::test]
