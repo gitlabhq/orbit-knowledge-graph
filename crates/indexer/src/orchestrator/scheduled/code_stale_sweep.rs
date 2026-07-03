@@ -3,15 +3,21 @@
 //! Per-task stale cleanup is skipped on first-time indexing, so rows left
 //! behind by runs that died before checkpointing survive a backfill. This
 //! sweep tombstones them in one batch statement per code table, keyed on
-//! each project's checkpoint watermark, the first time a backfill sweep
-//! tick finds nothing left to dispatch. A maintenance checkpoint in the
-//! version-prefixed checkpoint table makes it run once per schema version.
+//! each project's code-indexing checkpoint watermark, the first time a
+//! backfill sweep tick finds nothing left to dispatch. A maintenance
+//! checkpoint makes it run once per schema version.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::info;
+use futures::future::try_join_all;
+use std::collections::HashMap;
+
+use query_engine::compiler::{
+    Expr, JoinType, ParamValue, Query, SelectExpr, TableRef, emit_simple_query,
+};
+use tracing::{debug, info};
 
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::ArrowClickHouseClient;
@@ -25,10 +31,26 @@ const CHECKPOINT_KEY: &str = "maintenance.code_stale_sweep";
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
+const NODE_COLUMNS: [&str; 4] = ["traversal_path", "project_id", "branch", "id"];
+const EDGE_COLUMNS: [&str; 6] = [
+    "traversal_path",
+    "source_id",
+    "source_kind",
+    "relationship_kind",
+    "target_id",
+    "target_kind",
+];
+
+struct SweepStatement {
+    table: String,
+    sql: String,
+    params: HashMap<String, ParamValue>,
+}
+
 pub struct CodeStaleSweep {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
-    statements: Vec<(String, String)>,
+    statements: Vec<SweepStatement>,
 }
 
 impl CodeStaleSweep {
@@ -38,23 +60,18 @@ impl CodeStaleSweep {
         checkpoint_store: Arc<dyn CheckpointStore>,
     ) -> Self {
         let checkpoint_table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
-        let node_tables = table_names.node_tables();
 
-        let mut statements: Vec<(String, String)> = node_tables
+        let mut statements: Vec<SweepStatement> = table_names
+            .node_tables()
             .iter()
-            .map(|table| {
-                (
-                    table.to_string(),
-                    build_node_sweep(table, &checkpoint_table),
-                )
-            })
+            .map(|table| node_sweep(table, &checkpoint_table))
             .collect();
-        statements.extend(table_names.edge_table_names().iter().map(|table| {
-            (
-                table.to_string(),
-                build_edge_sweep(table, &node_tables, &checkpoint_table),
-            )
-        }));
+        statements.extend(
+            table_names
+                .edge_table_names()
+                .iter()
+                .map(|table| edge_sweep(table, &checkpoint_table)),
+        );
 
         Self {
             graph,
@@ -65,6 +82,11 @@ impl CodeStaleSweep {
 
     pub async fn run_after_drain(&self, outcome: &DispatchOutcome) -> Result<(), TaskError> {
         if outcome.dispatched != 0 || outcome.skipped != 0 {
+            debug!(
+                dispatched = outcome.dispatched,
+                skipped = outcome.skipped,
+                "post-backfill stale sweep deferred: backfill not yet drained"
+            );
             return Ok(());
         }
         if self
@@ -78,19 +100,24 @@ impl CodeStaleSweep {
         }
 
         let started = Utc::now();
-        for (table, sql) in &self.statements {
+        try_join_all(self.statements.iter().map(|statement| async move {
             let statement_start = Instant::now();
-            self.graph
-                .query(sql)
+            let mut query = self.graph.query(&statement.sql);
+            for (key, param) in &statement.params {
+                query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
+            }
+            query
                 .execute()
                 .await
-                .map_err(|e| TaskError::new(format!("stale sweep on {table}: {e}")))?;
+                .map_err(|e| TaskError::new(format!("stale sweep on {}: {e}", statement.table)))?;
             info!(
-                table,
+                table = statement.table,
                 duration_ms = statement_start.elapsed().as_millis() as u64,
                 "post-backfill stale sweep statement complete"
             );
-        }
+            Ok::<(), TaskError>(())
+        }))
+        .await?;
 
         self.checkpoint_store
             .save_completed(CHECKPOINT_KEY, &started, WriteDurability::Durable)
@@ -101,96 +128,157 @@ impl CodeStaleSweep {
     }
 }
 
-// The scans skip FINAL: a tombstone at `indexed_at - 1µs` is outranked by any
-// surviving row versioned at or after the watermark, so reading raw parts can
-// only produce no-op tombstones for ids that are still live.
-fn build_node_sweep(table: &str, checkpoint_table: &str) -> String {
-    format!(
-        r#"
-        INSERT INTO {table} (traversal_path, project_id, branch, id, _version, _deleted)
-        SELECT
-            s.traversal_path,
-            s.project_id,
-            s.branch,
-            s.id,
-            cp.indexed_at - toIntervalMicrosecond(1) AS _version,
-            true AS _deleted
-        FROM {table} AS s
-        INNER JOIN {checkpoint_table} AS cp FINAL
-            ON cp.traversal_path = s.traversal_path
-           AND cp.project_id = s.project_id
-           AND cp.branch = s.branch
-        WHERE cp._deleted = false
-          AND s._version < cp.indexed_at
-        "#
+// Every sweep scans raw parts, never FINAL: a tombstone at `watermark - 1µs`
+// is outranked by any surviving row versioned at or after the watermark, so
+// superseded-but-live ids can only receive no-op tombstones that the next
+// merge collapses.
+fn node_sweep(table: &str, checkpoint_table: &str) -> SweepStatement {
+    let select = Query {
+        select: passthrough_columns(&NODE_COLUMNS)
+            .chain(tombstone_columns(Expr::col("cp", "indexed_at")))
+            .collect(),
+        from: TableRef::join(
+            JoinType::Inner,
+            TableRef::scan(table, "s"),
+            TableRef::scan_final(checkpoint_table, "cp"),
+            checkpoint_join_on(),
+        ),
+        where_clause: Some(Expr::and(
+            Expr::eq(Expr::col("cp", "_deleted"), Expr::lit(false)),
+            Expr::binary(
+                query_engine::compiler::Op::Lt,
+                Expr::col("s", "_version"),
+                Expr::col("cp", "indexed_at"),
+            ),
+        )),
+        ..Query::default()
+    };
+    insert_from(table, &NODE_COLUMNS, &select)
+}
+
+fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> SweepStatement {
+    // gl_code_edge carries project_id + branch, so it joins the checkpoint
+    // table exactly like a node table.
+    if edge_table.contains("code_edge") {
+        let columns: Vec<&str> = ["traversal_path", "project_id", "branch"]
+            .into_iter()
+            .chain(EDGE_COLUMNS.into_iter().skip(1))
+            .collect();
+        let select = Query {
+            select: passthrough_columns(&columns)
+                .chain(tombstone_columns(Expr::col("cp", "indexed_at")))
+                .collect(),
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(edge_table, "s"),
+                TableRef::scan_final(checkpoint_table, "cp"),
+                checkpoint_join_on(),
+            ),
+            where_clause: Some(Expr::and(
+                Expr::eq(Expr::col("cp", "_deleted"), Expr::lit(false)),
+                Expr::binary(
+                    query_engine::compiler::Op::Lt,
+                    Expr::col("s", "_version"),
+                    Expr::col("cp", "indexed_at"),
+                ),
+            )),
+            ..Query::default()
+        };
+        return insert_from(edge_table, &columns, &select);
+    }
+
+    // The shared edge table has no project_id/branch columns. Code-written
+    // rows are identified by their source kind, and the watermark comes from
+    // a per-traversal-path aggregate: min() so a second checkpointed branch
+    // under the same path can never out-version another branch's live rows.
+    let watermarks = Query {
+        select: vec![
+            SelectExpr::col("cp", "traversal_path"),
+            SelectExpr::new(
+                Expr::func("min", vec![Expr::col("cp", "indexed_at")]),
+                "watermark",
+            ),
+        ],
+        from: TableRef::scan_final(checkpoint_table, "cp"),
+        where_clause: Some(Expr::eq(Expr::col("cp", "_deleted"), Expr::lit(false))),
+        group_by: vec![Expr::col("cp", "traversal_path")],
+        ..Query::default()
+    };
+
+    let code_source_kinds = Expr::or_all(
+        CodeTableNames::NODE_KINDS
+            .iter()
+            .map(|kind| Some(Expr::eq(Expr::col("s", "source_kind"), Expr::lit(*kind)))),
+    )
+    .expect("NODE_KINDS is never empty");
+
+    let select = Query {
+        select: passthrough_columns(&EDGE_COLUMNS)
+            .chain(tombstone_columns(Expr::col("w", "watermark")))
+            .collect(),
+        from: TableRef::join(
+            JoinType::Inner,
+            TableRef::scan(edge_table, "s"),
+            TableRef::subquery(watermarks, "w"),
+            Expr::eq(
+                Expr::col("w", "traversal_path"),
+                Expr::col("s", "traversal_path"),
+            ),
+        ),
+        where_clause: Some(Expr::and(
+            code_source_kinds,
+            Expr::binary(
+                query_engine::compiler::Op::Lt,
+                Expr::col("s", "_version"),
+                Expr::col("w", "watermark"),
+            ),
+        )),
+        ..Query::default()
+    };
+    insert_from(edge_table, &EDGE_COLUMNS, &select)
+}
+
+fn passthrough_columns<'a>(columns: &'a [&'a str]) -> impl Iterator<Item = SelectExpr> + 'a {
+    columns.iter().map(|column| SelectExpr::col("s", *column))
+}
+
+fn tombstone_columns(watermark: Expr) -> impl Iterator<Item = SelectExpr> {
+    [
+        SelectExpr::new(
+            Expr::func("addMicroseconds", vec![watermark, Expr::lit(-1)]),
+            "_version",
+        ),
+        SelectExpr::new(Expr::lit(true), "_deleted"),
+    ]
+    .into_iter()
+}
+
+fn checkpoint_join_on() -> Expr {
+    Expr::and(
+        Expr::and(
+            Expr::eq(
+                Expr::col("cp", "traversal_path"),
+                Expr::col("s", "traversal_path"),
+            ),
+            Expr::eq(Expr::col("cp", "project_id"), Expr::col("s", "project_id")),
+        ),
+        Expr::eq(Expr::col("cp", "branch"), Expr::col("s", "branch")),
     )
 }
 
-fn build_edge_sweep(edge_table: &str, node_tables: &[&str], checkpoint_table: &str) -> String {
-    if edge_table.contains("code_edge") {
-        return format!(
-            r#"
-            INSERT INTO {edge_table}
-                (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
-            SELECT
-                s.traversal_path,
-                s.project_id,
-                s.branch,
-                s.source_id,
-                s.source_kind,
-                s.relationship_kind,
-                s.target_id,
-                s.target_kind,
-                cp.indexed_at - toIntervalMicrosecond(1) AS _version,
-                true AS _deleted
-            FROM {edge_table} AS s
-            INNER JOIN {checkpoint_table} AS cp FINAL
-                ON cp.traversal_path = s.traversal_path
-               AND cp.project_id = s.project_id
-               AND cp.branch = s.branch
-            WHERE cp._deleted = false
-              AND s._version < cp.indexed_at
-            "#
-        );
+fn insert_from(table: &str, columns: &[&str], select: &Query) -> SweepStatement {
+    let (sql, params) = emit_simple_query(&query_engine::compiler::Node::Query(Box::new(
+        select.clone(),
+    )))
+    .expect("sweep queries contain no unsupported nodes");
+    SweepStatement {
+        table: table.to_string(),
+        sql: format!(
+            "INSERT INTO {table} ({columns}, _version, _deleted) {sql}",
+            columns = columns.join(", ")
+        ),
+        params,
     }
-
-    let node_union = node_tables
-        .iter()
-        .map(|t| format!("SELECT traversal_path, project_id, branch, id FROM {t}"))
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ");
-
-    format!(
-        r#"
-        INSERT INTO {edge_table}
-            (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
-        SELECT
-            s.traversal_path,
-            s.source_id,
-            s.source_kind,
-            s.relationship_kind,
-            s.target_id,
-            s.target_kind,
-            w.watermark - toIntervalMicrosecond(1) AS _version,
-            true AS _deleted
-        FROM {edge_table} AS s
-        INNER JOIN (
-            SELECT DISTINCT
-                n.traversal_path,
-                n.id,
-                cp.indexed_at AS watermark
-            FROM ({node_union}) AS n
-            INNER JOIN {checkpoint_table} AS cp FINAL
-                ON cp.traversal_path = n.traversal_path
-               AND cp.project_id = n.project_id
-               AND cp.branch = n.branch
-            WHERE cp._deleted = false
-        ) AS w
-            ON w.traversal_path = s.traversal_path
-           AND w.id = s.source_id
-        WHERE s._version < w.watermark
-        "#
-    )
 }
 
 #[cfg(test)]
@@ -202,32 +290,54 @@ mod tests {
         CodeTableNames::from_ontology(&ontology).expect("code tables must resolve")
     }
 
+    fn resolved(statement: &SweepStatement) -> String {
+        let re = regex::Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex");
+        re.replace_all(&statement.sql, |caps: &regex::Captures| {
+            statement
+                .params
+                .get(&caps[1])
+                .map(|p| p.render_literal())
+                .unwrap_or_else(|| caps[0].to_string())
+        })
+        .into_owned()
+    }
+
     #[test]
     fn node_sweep_joins_checkpoint_watermark_without_final_scan() {
-        let sql = build_node_sweep("v9_gl_file", "v9_code_indexing_checkpoint");
-        assert!(sql.contains("FROM v9_gl_file AS s"), "{sql}");
-        assert!(!sql.contains("v9_gl_file FINAL"), "{sql}");
+        let sql = resolved(&node_sweep("v9_gl_file", "v9_code_indexing_checkpoint"));
+        assert!(sql.contains("v9_gl_file AS s"), "{sql}");
+        assert!(!sql.contains("s FINAL"), "{sql}");
         assert!(
             sql.contains("v9_code_indexing_checkpoint AS cp FINAL"),
             "{sql}"
         );
         assert!(sql.contains("s._version < cp.indexed_at"), "{sql}");
-        assert!(sql.contains("cp._deleted = false"), "{sql}");
+        assert!(sql.contains("cp._deleted"), "{sql}");
+        assert!(sql.contains("addMicroseconds(cp.indexed_at, -1)"), "{sql}");
     }
 
     #[test]
     fn code_edge_sweep_joins_checkpoint_directly() {
-        let sql = build_edge_sweep("v9_gl_code_edge", &["v9_gl_file"], "v9_cp");
+        let sql = resolved(&edge_sweep("v9_gl_code_edge", "v9_cp"));
         assert!(sql.contains("cp.project_id = s.project_id"), "{sql}");
-        assert!(!sql.contains("UNION ALL"), "{sql}");
+        assert!(!sql.contains("source_kind ="), "{sql}");
     }
 
     #[test]
-    fn plain_edge_sweep_maps_source_ids_through_node_tables() {
-        let sql = build_edge_sweep("v9_gl_edge", &["v9_gl_directory", "v9_gl_file"], "v9_cp");
-        assert!(sql.contains("UNION ALL"), "{sql}");
-        assert!(sql.contains("w.id = s.source_id"), "{sql}");
+    fn plain_edge_sweep_scopes_by_source_kind_and_min_watermark() {
+        let sql = resolved(&edge_sweep("v9_gl_edge", "v9_cp"));
+        for kind in CodeTableNames::NODE_KINDS {
+            assert!(sql.contains(&format!("s.source_kind = '{kind}'")), "{sql}");
+        }
+        assert!(
+            sql.contains("min(cp.indexed_at)"),
+            "a shared traversal_path must take the oldest branch watermark: {sql}"
+        );
         assert!(sql.contains("s._version < w.watermark"), "{sql}");
+        assert!(
+            !sql.contains("UNION ALL"),
+            "the shared edge sweep must not scan node tables: {sql}"
+        );
     }
 
     #[test]
@@ -245,12 +355,15 @@ mod tests {
             graph.clone(),
         )));
         let sweep = CodeStaleSweep::new(graph, &names, store);
-        let tables: Vec<&str> = sweep.statements.iter().map(|(t, _)| t.as_str()).collect();
+        let tables: Vec<&str> = sweep.statements.iter().map(|s| s.table.as_str()).collect();
         assert_eq!(
             tables.len(),
             names.node_tables().len() + names.edge_table_names().len()
         );
-        assert!(tables[0].contains("gl_"), "{tables:?}");
+        assert!(
+            tables[0].contains("gl_") && !tables[0].contains("edge"),
+            "first sweep statement must target a node table, got: {tables:?}"
+        );
         assert!(
             tables.last().unwrap().contains("edge"),
             "edge sweeps must come after node sweeps: {tables:?}"
