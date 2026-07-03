@@ -155,8 +155,10 @@ schedule:
       sweep_interval_secs: 10
     siphon:
       events_stream_name: "e2e_siphon_event_stream"
+    # 2s re-dispatched every SDLC-touched project each tick (~312 code tasks
+    # per run for ~25 projects), starving fresh pushes behind duplicate work.
     code-backfill:
-      cron: "*/2 * * * * *"
+      cron: "*/5 * * * * *"
     table-cleanup:
       cron: "0 0 3 * * *"
     namespace-deletion:
