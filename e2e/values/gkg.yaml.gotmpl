@@ -166,11 +166,13 @@ schedule:
     migration-completion:
       cron: "*/10 * * * * *"
 
+# 12 pabot suites provision fixtures simultaneously; a 3-wide sdlc pipe
+# serializes their indexing waits into a ~220s floor per suite.
 engine:
-  max_concurrent_workers: 4
+  max_concurrent_workers: 12
   concurrency_groups:
-    sdlc: 3
-    code: 1
+    sdlc: 10
+    code: 2
   handlers:
     global-handler:
       concurrency_group: sdlc

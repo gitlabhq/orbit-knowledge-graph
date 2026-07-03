@@ -11,7 +11,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 CH_POD=clickhouse-0
 ch_query() {
   printf '%s\n' "$1" | $KC exec -i -n "$NS_CH" "$CH_POD" -- \
-    sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"'
+    sh -c 'clickhouse-client -n --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
 # Default now64() matches what siphon expects ClickHouse to manage. The
@@ -21,21 +21,24 @@ ch_query() {
 # stranding rows replicated mid-run. MATERIALIZE writes a concrete value to
 # those rows so the watermark is stable, exactly as it is for rows siphon
 # inserts after the column exists.
-add_watermark() {
-  log "Adding _siphon_watermark to datalake.$1"
-  ch_query "ALTER TABLE datalake.\`$1\` \
-    ADD COLUMN IF NOT EXISTS \`_siphon_watermark\` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC')"
-  ch_query "ALTER TABLE datalake.\`$1\` MATERIALIZE COLUMN \`_siphon_watermark\`"
-}
-
-for table in $(ch_query "SELECT name FROM system.tables \
+#
+# All ALTERs go in one multiquery batch: per-table kubectl exec round-trips
+# cost ~1.3s each and this runs on the setup critical path.
+TABLES=$(ch_query "SELECT name FROM system.tables \
   WHERE database = 'datalake' AND name LIKE 'siphon\_%' \
-    AND engine NOT IN ('MaterializedView', 'View', 'Dictionary', 'Null') FORMAT TSV"); do
-  add_watermark "$table"
-done
+    AND engine NOT IN ('MaterializedView', 'View', 'Dictionary', 'Null') FORMAT TSV")
+TABLES="$TABLES
+merge_requests
+work_items"
 
-for table in merge_requests work_items; do
-  add_watermark "$table"
+BATCH=""
+for table in $TABLES; do
+  log "Queueing _siphon_watermark for datalake.$table"
+  BATCH+="ALTER TABLE datalake.\`$table\` \
+    ADD COLUMN IF NOT EXISTS \`_siphon_watermark\` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC');
+ALTER TABLE datalake.\`$table\` MATERIALIZE COLUMN \`_siphon_watermark\`;
+"
 done
+ch_query "$BATCH"
 
 log "Done seeding _siphon_watermark"
