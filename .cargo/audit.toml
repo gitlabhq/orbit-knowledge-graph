@@ -15,4 +15,9 @@ ignore = [
     # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
     # Remove when async-nats drops rustls-webpki 0.102.x (check: cargo tree -i rustls-webpki@0.102.8)
     "RUSTSEC-2026-0049",
+    # quick-xml < 0.41 DoS advisories — transitive via reqsign/opendal under lance-graph.
+    # No safe upgrade until upstream bumps quick-xml >= 0.41. See #18.
+    # Remove when upstream updates (check: cargo tree -i quick-xml)
+    "RUSTSEC-2026-0194", # quadratic attribute-name duplicate check
+    "RUSTSEC-2026-0195", # unbounded NsReader namespace-declaration allocation
 ]

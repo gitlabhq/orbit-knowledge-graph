@@ -48,9 +48,9 @@ impl IndexOutcome {
 /// Tracks one project's buffered rows across every table they span. The pipeline holds a +1
 /// sentinel and increments `remaining` per submitted batch; the writer decrements via
 /// [`FlushToken`] as each part lands. Whichever decrement reaches zero finalizes the project:
-/// stale-clean its prior version then checkpoint, unless any part failed (then the sweep and
-/// NATS redelivery retry it). This makes the checkpoint the single durable record, with no
-/// watermark to track.
+/// stale-clean its checkpointed prior version (if any) then checkpoint, unless any part failed
+/// (then the sweep and NATS redelivery retry it). This makes the checkpoint the single durable
+/// record, with no watermark to track.
 struct ProjectCommit {
     remaining: AtomicUsize,
     failed: AtomicBool,
@@ -58,6 +58,7 @@ struct ProjectCommit {
     store: Arc<dyn CodeCheckpointStore>,
     cleaner: Arc<dyn StaleDataCleaner>,
     inflight: Arc<AtomicUsize>,
+    had_prior_checkpoint: bool,
 }
 
 impl ProjectCommit {
@@ -79,10 +80,13 @@ impl ProjectCommit {
             return;
         }
         let cp = &self.checkpoint;
-        if let Err(error) = self
-            .cleaner
-            .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
-            .await
+        // A first index into this schema version (backfill or new project) has no
+        // checkpointed prior snapshot to tombstone, so skip the FINAL-scan cleanup.
+        if self.had_prior_checkpoint
+            && let Err(error) = self
+                .cleaner
+                .delete_stale_data(&cp.traversal_path, cp.project_id, &cp.branch, cp.indexed_at)
+                .await
         {
             warn!(
                 project_id = cp.project_id,
@@ -322,22 +326,9 @@ impl CodeIndexingPipeline {
             .run_indexing(context, request, &repository, indexed_at, observer, cancel)
             .await;
 
-        if let Err(error) = self
-            .resolver
-            .cleanup(request.project_id, &request.branch)
-            .await
-        {
-            self.metrics.record_cleanup("failure");
-            warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                %error,
-                "failed to clean up downloaded repository from disk"
-            );
-        } else {
-            self.metrics.record_cleanup("success");
-        }
-
+        // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
+        // whether this returns, errors, or is dropped mid-run on the wall-clock timeout.
+        self.metrics.record_cleanup("success");
         let commit = indexing_result?;
 
         // Drop the pipeline's sentinel hold. If every submitted batch has already flushed, this
@@ -464,6 +455,7 @@ impl CodeIndexingPipeline {
             store: self.checkpoint_store.clone(),
             cleaner: self.stale_data_cleaner.clone(),
             inflight: self.inflight.clone(),
+            had_prior_checkpoint: request.had_prior_checkpoint,
         });
 
         let writer = self.writer.clone();
@@ -492,7 +484,7 @@ impl CodeIndexingPipeline {
         );
 
         let code_graph_start = Instant::now();
-        let repo_dir = repository.path.clone();
+        let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
         let parsed = tokio::task::spawn_blocking(move || {
@@ -656,6 +648,16 @@ mod tests {
         inflight: Arc<AtomicUsize>,
         batches: usize,
     ) -> Arc<ProjectCommit> {
+        commit_with_prior(store, cleaner, inflight, batches, true)
+    }
+
+    fn commit_with_prior(
+        store: Arc<dyn CodeCheckpointStore>,
+        cleaner: Arc<dyn StaleDataCleaner>,
+        inflight: Arc<AtomicUsize>,
+        batches: usize,
+        had_prior_checkpoint: bool,
+    ) -> Arc<ProjectCommit> {
         inflight.fetch_add(1, Ordering::AcqRel);
         Arc::new(ProjectCommit {
             remaining: AtomicUsize::new(1 + batches),
@@ -671,6 +673,7 @@ mod tests {
             store,
             cleaner,
             inflight,
+            had_prior_checkpoint,
         })
     }
 
@@ -712,6 +715,41 @@ mod tests {
                 .is_some(),
             "sentinel release was the last decrement and must checkpoint",
         );
+    }
+
+    #[tokio::test]
+    async fn first_index_skips_the_stale_cleaner_but_still_checkpoints() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit_with_prior(store.clone(), cleaner.clone(), inflight.clone(), 1, false);
+
+        commit.clone().release();
+        commit.release();
+        settle(&inflight).await;
+
+        assert!(cleaner.calls.lock().is_empty());
+        assert!(
+            store
+                .get_checkpoint("1/7/", 7, "main")
+                .await
+                .unwrap()
+                .is_some(),
+        );
+    }
+
+    #[tokio::test]
+    async fn reindex_runs_the_stale_cleaner_before_checkpointing() {
+        let store = Arc::new(MockCodeCheckpointStore::new());
+        let cleaner = Arc::new(MockStaleDataCleaner::default());
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let commit = commit(store.clone(), cleaner.clone(), inflight.clone(), 1);
+
+        commit.clone().release();
+        commit.release();
+        settle(&inflight).await;
+
+        assert_eq!(cleaner.calls.lock().len(), 1);
     }
 
     #[tokio::test]

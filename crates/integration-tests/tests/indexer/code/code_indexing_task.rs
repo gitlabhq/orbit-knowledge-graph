@@ -389,7 +389,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 }
 
 #[tokio::test]
-async fn cleans_stale_data_on_first_index() {
+async fn first_index_skips_stale_cleanup_and_the_next_reindex_sweeps() {
     let project_id: i64 = 13;
     let traversal_path = "1/13/";
     let branch = "main";
@@ -410,7 +410,6 @@ async fn cleans_stale_data_on_first_index() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    // The canary stands in for rows a killed prior run left with no checkpoint; the first successful index must sweep them.
     insert_stale_canary_file(&clickhouse, project_id, traversal_path, branch).await;
     assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
 
@@ -424,8 +423,70 @@ async fn cleans_stale_data_on_first_index() {
     )
     .await;
 
+    assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
     assert_file_not_active(&clickhouse, project_id, "src/Canary.java").await;
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
+async fn identical_reindex_keeps_all_content_active() {
+    let project_id: i64 = 14;
+    let traversal_path = "1/14/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main { public void v1() {} }")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v1"]).await;
+    assert_eq!(
+        count_active_edges(&clickhouse, project_id, "DEFINES").await,
+        1,
+        "the re-index cleanup tombstones must not outrank the freshly written rows"
+    );
 }
 
 #[tokio::test]
@@ -1314,4 +1375,43 @@ async fn timed_out_job_writes_no_data() {
             "a timed-out job must write no rows to {table}",
         );
     }
+}
+
+#[tokio::test]
+async fn disk_is_clean_after_a_timed_out_job() {
+    let project_id: i64 = 991;
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_slow_archive(project_id, "main");
+
+    // 1s budget vs a 3s fetch: the job is dropped mid-run, so cleanup runs via the TempDir drop.
+    let deps = CodeIndexingDeps::new_with_pipeline_config(
+        &mock,
+        &clickhouse,
+        gkg_server_config::CodeIndexingPipelineConfig {
+            job_timeout_secs: 1,
+            ..Default::default()
+        },
+    );
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+    let handler = deps.code_indexing_task_handler();
+
+    let mut envelope = code_indexing_task_envelope(project_id, "abc123", 1, "991/991/");
+    envelope.attempt = 1;
+    let _ = handler.handle(handler_context(), envelope).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "a dropped job must not leak its extraction dir, found: {remaining:?}"
+    );
 }

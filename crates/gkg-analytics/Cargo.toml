@@ -22,5 +22,8 @@ serde_json = { workspace = true }
 syn = { workspace = true }
 typify = { workspace = true }
 
+[package.metadata.cargo-shear]
+ignored = ["serde"] # used by build.rs-generated code (Serialize/Deserialize derives)
+
 [lints]
 workspace = true

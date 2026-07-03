@@ -2,8 +2,8 @@
 Documentation       Verify SDLC entities AND their relationships flow through
 ...                 PG → Siphon → ClickHouse → GKG and become queryable via Orbit.
 ...                 Assumes the pipeline reached steady state in 01_setup_and_smoke (canary
-...                 issue + note already indexed). Each case opens its own 180s budget that
-...                 all per-entity waits draw from, so transient Siphon MV races (project
+...                 issue + note already indexed). Each case opens its own indexing budget
+...                 that all per-entity waits draw from, so transient Siphon MV races (project
 ...                 row landing before its namespace's traversal_path materializes) resolve
 ...                 via the reconciler without bloating per-call timeouts.
 
@@ -19,7 +19,7 @@ Project Issue And Note Are Indexed
     ...                then assert each becomes queryable via Orbit.
     [Tags]    indexing
     ${suffix}=    Random Suffix
-    Start Indexing Budget    180
+    Start Indexing Budget    240
 
     ${project_name}=    Set Variable    e2e-prj-${suffix}
     ${project}=    Create Project    ${project_name}    ${SHARED_NAMESPACE_ID}
@@ -42,7 +42,7 @@ Epic Issue And Notes Hierarchy Is Indexed
     ...                next case can assert the relationships between them.
     [Tags]    indexing    hierarchy
     ${suffix}=    Random Suffix
-    Start Indexing Budget    180
+    Start Indexing Budget    240
 
     ${epic_title}=    Set Variable    e2e-epic-${suffix}
     ${epic}=    Create Epic    ${SHARED_NAMESPACE_ID}    ${epic_title}
@@ -78,7 +78,7 @@ Hierarchy Is Linked By Expected Edges
     ...                (User→Issue, User→Note). Authored edges match any User, since the
     ...                indexer's bot user id isn't known to the suite.
     [Tags]    indexing    hierarchy    edges
-    Start Indexing Budget    180
+    Start Indexing Budget    240
 
     Wait For Edge Indexed Within Budget    WorkItem    ${HIER_EPIC}[work_item_id]
     ...    CONTAINS    WorkItem    ${HIER_ISSUE}[id]

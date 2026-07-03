@@ -2,6 +2,7 @@
 //! graph table names. Version 0 uses no prefix (backward compatible); version N
 //! uses `vN_`.
 
+use std::collections::HashSet;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -300,6 +301,88 @@ pub async fn mark_version_dropped(
     Ok(())
 }
 
+const LIST_VERSION_OBJECTS: &str = "\
+SELECT name, engine FROM system.tables \
+WHERE database = {db:String} AND startsWith(name, {prefix:String})";
+
+/// A `v<version>_*` object (table, dictionary, or view) found in `system.tables`.
+#[derive(Debug, Clone)]
+pub struct VersionObject {
+    pub name: String,
+    pub engine: String,
+}
+
+/// Maps a `system.tables.engine` value to the DDL keyword needed to drop it.
+pub fn drop_kind_for_engine(engine: &str) -> &'static str {
+    match engine {
+        "MaterializedView" | "View" | "LiveView" | "WindowView" => "VIEW",
+        "Dictionary" => "DICTIONARY",
+        _ => "TABLE",
+    }
+}
+
+/// Lists every `v<version>_*` object in `system.tables`; returns empty for unprefixed
+/// version 0 rather than matching the whole database via an empty prefix.
+pub async fn list_version_objects(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<Vec<VersionObject>, SchemaVersionError> {
+    if version == 0 {
+        return Ok(Vec::new());
+    }
+
+    let batches = graph
+        .query(LIST_VERSION_OBJECTS)
+        .param("db", graph.database())
+        .param("prefix", table_prefix(version))
+        .fetch_arrow()
+        .await?;
+
+    let mut objects = Vec::new();
+    for batch in &batches {
+        for i in 0..batch.num_rows() {
+            let name = ArrowUtils::get_column_string(batch, "name", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing name".into()))?;
+            let engine = ArrowUtils::get_column_string(batch, "engine", i)
+                .ok_or_else(|| SchemaVersionError::UnexpectedResult("missing engine".into()))?;
+            objects.push(VersionObject { name, engine });
+        }
+    }
+    Ok(objects)
+}
+
+/// Whether every object in `expected` is present in `system.tables`. GC drops objects
+/// one by one, so a `retired` version can be left with a partial set that must not be
+/// mistaken for a complete one; version 0 is never GC'd and always counts as complete.
+pub async fn version_tables_complete(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+    expected: &[String],
+) -> Result<bool, SchemaVersionError> {
+    if version == 0 {
+        return Ok(true);
+    }
+
+    let objects = list_version_objects(graph, version).await?;
+    let actual: HashSet<&str> = objects.iter().map(|o| o.name.as_str()).collect();
+
+    let missing: Vec<&String> = expected
+        .iter()
+        .filter(|name| !actual.contains(name.as_str()))
+        .collect();
+
+    if !missing.is_empty() {
+        warn!(
+            version,
+            ?missing,
+            "embedded version's table set is incomplete"
+        );
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
 /// Ensures the `gkg_schema_version` table exists.
 ///
 /// Called by all service modes (Indexer, Webserver, DispatchIndexing) at
@@ -325,14 +408,15 @@ fn classify_readiness(
     migrating: Option<u32>,
     embedded: u32,
 ) -> SchemaReadiness {
+    // Checked before the outdated guard: a rollback rebuild must be Ready while a higher version is active.
+    if active == Some(embedded) || migrating == Some(embedded) {
+        return SchemaReadiness::Ready;
+    }
+
     if let Some(active_version) = active
         && active_version > embedded
     {
         return SchemaReadiness::Outdated;
-    }
-
-    if active == Some(embedded) || migrating == Some(embedded) {
-        return SchemaReadiness::Ready;
     }
 
     SchemaReadiness::Pending
@@ -469,6 +553,24 @@ mod tests {
     }
 
     #[test]
+    fn list_version_objects_query_scopes_to_db_and_prefix() {
+        assert!(LIST_VERSION_OBJECTS.contains("system.tables"));
+        assert!(LIST_VERSION_OBJECTS.contains("database = {db:String}"));
+        assert!(LIST_VERSION_OBJECTS.contains("startsWith(name, {prefix:String})"));
+        assert!(LIST_VERSION_OBJECTS.contains("name, engine"));
+    }
+
+    #[test]
+    fn drop_kind_for_engine_maps_views_and_dictionaries() {
+        assert_eq!(drop_kind_for_engine("MaterializedView"), "VIEW");
+        assert_eq!(drop_kind_for_engine("View"), "VIEW");
+        assert_eq!(drop_kind_for_engine("LiveView"), "VIEW");
+        assert_eq!(drop_kind_for_engine("WindowView"), "VIEW");
+        assert_eq!(drop_kind_for_engine("Dictionary"), "DICTIONARY");
+        assert_eq!(drop_kind_for_engine("ReplacingMergeTree"), "TABLE");
+    }
+
+    #[test]
     fn create_table_ddl_uses_replacing_merge_tree() {
         let ddl = emit_create_table(&version_table_ddl());
         assert!(ddl.contains("ReplacingMergeTree"));
@@ -549,10 +651,10 @@ mod tests {
     }
 
     #[test]
-    fn readiness_outdated_takes_precedence_over_matching_migrating() {
+    fn readiness_matching_migrating_takes_precedence_over_higher_active() {
         assert_eq!(
             classify_readiness(Some(3), Some(2), 2),
-            SchemaReadiness::Outdated
+            SchemaReadiness::Ready
         );
     }
 }

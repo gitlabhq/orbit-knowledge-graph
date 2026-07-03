@@ -264,14 +264,6 @@ settings:
     # Use exclude to skip noisy or irrelevant columns.
     exclude:
       - {node: Note, columns: [st_diff]}
-  partition:
-    strategy:
-      hash_bucket:
-        buckets: 50
-        column: traversal_path
-    # Tables large enough to benefit from bucketing; others stay single-partition.
-    include_entities: [MergeRequest, MergeRequestDiff, MergeRequestDiffFile, Note, Pipeline, Stage, Job, Deployment, Commit, Finding, Vulnerability, VulnerabilityOccurrence, VulnerabilityIdentifier, SecurityScan, Dependency, Definition, File, Directory, ImportedSymbol]
-    include_edge_tables: [gl_edge, gl_ci_edge, gl_sec_edge, gl_diff_edge, gl_code_edge]
   internal_column_prefix: "_gkg_"
   local_db:
     entities:

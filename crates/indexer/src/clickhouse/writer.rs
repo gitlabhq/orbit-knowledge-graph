@@ -80,7 +80,9 @@ impl ClickHouseWriter {
 }
 
 /// Both variants pin `async_insert` so the many small per-page inserts coalesce into fewer parts.
-fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'static str)] {
+pub(crate) fn insert_overrides(
+    durability: WriteDurability,
+) -> &'static [(&'static str, &'static str)] {
     match durability {
         WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],
         WriteDurability::FireAndForget => &[("async_insert", "1"), ("wait_for_async_insert", "0")],

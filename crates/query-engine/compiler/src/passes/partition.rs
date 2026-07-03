@@ -273,8 +273,23 @@ mod tests {
         SecurityContext::new(1, vec!["1/".into()]).unwrap()
     }
 
+    fn partitioned_ontology() -> Ontology {
+        Ontology::load_embedded()
+            .unwrap()
+            .with_partition(PartitionConfig {
+                strategy: PartitionStrategy::HashBucket {
+                    buckets: 50,
+                    column: TRAVERSAL_PATH_COLUMN.to_string(),
+                },
+                partitioned_tables: ["gl_edge", "gl_merge_request"]
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect(),
+            })
+    }
+
     fn prune(node: &mut Node, ctx: &SecurityContext) {
-        apply_partition_pruning(node, &Ontology::load_embedded().unwrap(), ctx).unwrap();
+        apply_partition_pruning(node, &partitioned_ontology(), ctx).unwrap();
     }
 
     fn where_with(filter: Expr) -> Option<Expr> {

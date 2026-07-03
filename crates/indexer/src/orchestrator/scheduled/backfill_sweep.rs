@@ -16,18 +16,24 @@ use uuid::Uuid;
 
 use crate::orchestrator::dispatch::CodeBackfill;
 use crate::orchestrator::dispatch::code_backfill::METRIC_NAME;
-use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
+use crate::orchestrator::scheduled::{CodeStaleSweep, ScheduledTask, TaskError};
 use gkg_server_config::{CodeBackfillSweepConfig, ScheduleConfiguration};
 
 pub struct CodeBackfillSweep {
     code_backfill: Arc<CodeBackfill>,
+    stale_sweep: CodeStaleSweep,
     config: CodeBackfillSweepConfig,
 }
 
 impl CodeBackfillSweep {
-    pub fn new(code_backfill: Arc<CodeBackfill>, config: CodeBackfillSweepConfig) -> Self {
+    pub fn new(
+        code_backfill: Arc<CodeBackfill>,
+        stale_sweep: CodeStaleSweep,
+        config: CodeBackfillSweepConfig,
+    ) -> Self {
         Self {
             code_backfill,
+            stale_sweep,
             config,
         }
     }
@@ -54,8 +60,15 @@ impl ScheduledTask for CodeBackfillSweep {
             .metrics()
             .record_run(METRIC_NAME, outcome, duration);
 
-        if let Err(error) = result {
-            warn!(%error, "active code backfill sweep failed, retrying next tick");
+        match result {
+            Ok(outcome) => {
+                if let Err(error) = self.stale_sweep.run_after_drain(&outcome).await {
+                    warn!(%error, "post-backfill stale sweep failed, retrying next tick");
+                }
+            }
+            Err(error) => {
+                warn!(%error, "active code backfill sweep failed, retrying next tick");
+            }
         }
         Ok(())
     }

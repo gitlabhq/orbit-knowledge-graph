@@ -17,8 +17,5 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true }
 
-[dev-dependencies]
-pretty_assertions = "1.4"
-
 [lints]
 workspace = true

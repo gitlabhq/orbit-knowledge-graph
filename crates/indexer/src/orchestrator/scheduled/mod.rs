@@ -1,6 +1,7 @@
 mod metrics;
 
 pub mod backfill_sweep;
+pub mod code_stale_sweep;
 pub mod global;
 pub mod migration_completion;
 pub mod namespace;
@@ -9,6 +10,7 @@ pub mod stale_edge_reconciliation;
 pub mod table_cleanup;
 
 pub use backfill_sweep::CodeBackfillSweep;
+pub use code_stale_sweep::CodeStaleSweep;
 pub use global::GlobalDispatcher;
 pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;

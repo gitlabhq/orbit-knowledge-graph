@@ -79,6 +79,9 @@ impl CodeTableNames {
             &self.imported_symbol,
         ]
     }
+
+    /// Ontology node names backing [`Self::node_tables`], in the same order.
+    pub const NODE_KINDS: [&'static str; 4] = ["Directory", "File", "Definition", "ImportedSymbol"];
 }
 
 #[cfg(test)]

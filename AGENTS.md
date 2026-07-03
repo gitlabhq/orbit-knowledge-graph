@@ -31,6 +31,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - `cargo fmt` (`fmt-check`)
+- `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
 - Unit tests via nextest (`unit-test`)
 - Compiler integration tests: query compilation, ontology validation, pipeline infra (`compiler-integration-test`)

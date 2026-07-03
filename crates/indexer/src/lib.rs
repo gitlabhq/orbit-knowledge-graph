@@ -69,8 +69,9 @@ use nats::{KvBucketConfig, NatsBroker};
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::scheduled::{
-    CodeBackfillSweep, GlobalDispatcher, MigrationCompletionChecker, NamespaceDeletionScheduler,
-    NamespaceDispatcher, Scheduled, StaleEdgeReconciliation, TableCleanup,
+    CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
+    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
+    TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -336,6 +337,12 @@ pub async fn run_dispatcher(
         )),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
+            CodeStaleSweep::new(
+                config.graph.build_client(),
+                &modules::code::config::CodeTableNames::from_ontology(ontology)
+                    .expect("code tables must resolve from the embedded ontology"),
+                checkpoint_store.clone(),
+            ),
             config.schedule.tasks.code_backfill.clone(),
         )),
         Box::new(TableCleanup::new(

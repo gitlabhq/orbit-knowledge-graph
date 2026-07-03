@@ -10,7 +10,7 @@ title: Orbit
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -39,6 +39,9 @@ Orbitはお使いのGitLabインスタンスをインデックス作成し、SDL
 - このライブラリに依存しているプロジェクトはどれか？
 
 *Orbitはある時点でのSDLCインサイトを目的とした分析システムであり、リアルタイムやトランザクション処理のユースケースには対応していません。結果は最後のインデックスサイクル時点のデータの状態を反映しています。*
+
+クリックスルーデモについては、[GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/)をご覧ください。
+<!-- Demo published on 2026-06-30 -->
 
 ## Orbit Remote {#orbit-remote}
 

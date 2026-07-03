@@ -1,3 +1,60 @@
+## [0.84.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.84.0...v0.84.1) (2026-07-02)
+
+### Other
+
+* **ontology:** break-glass disable table partitioning ([6c2f3d1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6c2f3d1a5e56ecf4694ee965ae80bb08d1c180c4)) by Michael Usachenko
+
+## [0.84.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.83.1...v0.84.0) (2026-07-02)
+
+### Features
+
+* **code-graph:** add Scala Phase 2 - import resolution and cross-file references ([d4181ad](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d4181ad364cbc2af0adfd5096a5532e148d53e73)) by vivek shukla
+* **compiler:** push down partition-bucket predicate for namespace-scoped queries ([672c096](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/672c0967c96417f8143071aafb23847c6266ee09)) by Michael Usachenko
+* **ddl:** force-merge stale parts on partitioned tables ([0930f96](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0930f9607c86253c894bfebc223df95e7911b411)) by Michael Usachenko
+* **indexer:** dispatch namespace indexing on CDC update events ([c00ea99](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c00ea99f1a97c8fdfc0071501face24f781a3b7b)) by Jean-Gabriel Doyon
+* **indexer:** remove SystemNotes feature flag now that it is enabled globally ([5588fcd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5588fcde6e126dacd3f6413294dbf9193f2b8943)) by Jean-Gabriel Doyon
+* **ontology:** add Dependency node and DECLARES_DEPENDENCY edge ([54c81f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/54c81f22e1bbb761d2d67ca703205a359ff5a7fb)) by Tim Rizzi
+* **ontology:** opt-in partitioning via include list ([2c0bb41](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2c0bb41515c7d7710005a35aacea81b3e7724c77)) by Michael Usachenko
+* **ontology:** partition namespaced graph tables by hashed top-level namespace ([5f93557](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5f9355752d7ed0e94514a9117617aebaa7fc4ad4)) by Michael Usachenko
+* **ontology:** source MERGED_AT_COMMIT from merged_commit_sha FK ([b1c8188](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b1c818852b2bc67232cf12b57533bb9cf477e65b)) by Dmitry Gruzd
+
+### Fixes
+
+* **code-graph:** resolve relative re-exports in package __init__ ([cb089ae](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cb089ae4fbcd0d030e5aa6941ea2c9944eafbc6c)) by Michael Angelo Rivera
+* **code-graph:** stack-overflow hardening for code parsing ([4086295](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/408629558e89726a3886136dee3c2c834b447799)) by Michael Usachenko
+* **deps:** ignore quick-xml RUSTSEC-2026-{0194,0195} advisories ([f513f16](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f513f1678256fb2116ab6405dd86fd3c6e5c3ec8)) by Dmitry Gruzd
+* **indexer:** floor + cap code-write coalescer, gate lane on parsable files ([c003ba2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c003ba297e3df35b20ca0eb87e7e03eaef80563c)) by Michael Usachenko
+* **indexer:** isolate each run's repository extraction directory ([4bc915e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4bc915ead5aa182e6f3cb84aa9d8a8fa5d4e430d)) by Michael Usachenko
+* **server:** use git-describe for compiled-in version fallback ([804c33a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/804c33a4e08d13fb93c23c539e241314f24d1e84)) by Dmitry Gruzd
+
+### Other
+
+* add .agents/skills symlink to .claude/skills ([f6327c0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f6327c009d99b780619dbe3c5230c6af026bc53c)) by Dmitry Gruzd
+* add click-through demo link to index ([ae186d1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ae186d15f6f29d48a07a5c180789d5db4ee36170)) by Itzik Gan Baruch
+* add group and type/milestone prompts to MR template ([e4561f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e4561f200a9352ec22c0e311775aba6f0ace811e)) by Dmitry Gruzd
+* **agents:** split root AGENTS.md reference tables into docs/ and crates/code-graph ([292562f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/292562fd9f8c35ae5a8da064224b948989678629)) by Dmitry Gruzd
+* **cargo:** bump workspace resolver from "2" to "3" ([41329f8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41329f83ee1b039fe4b35fcabebfeff50ddc5eea)) by Dmitry Gruzd
+* **compiler:** make partition tests tolerate a disabled partition config ([5df63c6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5df63c67344262bd8622eff93c40467ec9f7a303)) by Michael Usachenko
+* **deps:** remove dead workspace dependencies and add unused-deps CI check ([04abe10](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/04abe10f58c4a21d841f4f55bdf701a99bdac1d1)) by Dmitry Gruzd
+* **deps:** update rust crate rustls to v0.23.41 ([68da26f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/68da26f3a096f0071f06d0e263a9034f39e8adcf)) by GitLab Renovate Bot
+* **deps:** update rust crate smallvec to v1.15.2 ([5e8da4c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5e8da4c8e3e5b30228f6bc819c66f5a30c45a087)) by GitLab Renovate Bot
+* **deps:** update rust crate syn to v2.0.118 ([c152fe4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c152fe4d51b1b0198cf107df3eb0b75519e8c54e)) by GitLab Renovate Bot
+* **deps:** update rust crate uuid to v1.23.3 ([6a38a83](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6a38a839aecc3dc8f21c88c5a88b0c8b2533ba07)) by GitLab Renovate Bot
+* **e2e:** bump gitlab pins and raise code-backfill budget ([29e43e4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/29e43e475c0767856f6b63d5a2d6b1780afca102)) by Michael Usachenko
+* **e2e:** raise Epic hierarchy indexing budget to 240s ([b5e0bde](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b5e0bdec78dd41c02fb91901e71684dd1e213e36)) by Michael Usachenko
+* **i18n:** [Translation] Update ja-jp for commit 1cb00110 ([09de302](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/09de302c6f222f825324072a7f1520d06a72b2f1)) by Lauren Barker
+* **i18n:** [Translation] Update ja-jp for commit afd66d78 ([d8d25c0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d8d25c0f88ed921a57cbe7fc8bedc3be68218e19)) by Lauren Barker
+* **i18n:** [Translation] Update ja-jp for commit cfd4cdad ([4ef5abd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4ef5abdf59268d385b0b56ebff08db843a7ae9eb)) by Lauren Barker
+* **indexer:** harden merged commit scenario ([4b755f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4b755f2ec6d6003e046a30de0f60ba40aba28dd5)) by Dmitry Gruzd
+* **indexer:** migrate remaining dispatcher tests to YAML scenarios ([1a72379](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1a72379d434b1afd2af97f8ba96315eaf7c6fb72)) by Jean-Gabriel Doyon
+* **indexer:** port dispatcher tests to declarative YAML scenarios ([b1302b5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b1302b581f38c86798e8ee546521692bb0b07415)) by Jean-Gabriel Doyon
+* **indexer:** port windowing, targeting, and stale-edge tests to YAML scenarios ([e34dfe3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e34dfe32f2ca8043ac668f851ad0d37058c9164d)) by Jean-Gabriel Doyon
+* **ja-jp:** fix ベータ status label consistency ([94b053c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/94b053cb21a0528020be1cdbc78c7d10fdcb7aae)) by Lauren Barker
+* **ontology:** cap description length ([60e8c5d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/60e8c5d4f28a289dc6eaba9b04d34ba212266018)) by Dmitry Gruzd
+* pin commitlint via lockfile to fix mr-title-check ([1978dd5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1978dd5a62f7dc4e5d837a519c03c5fb7318f1f8)) by Dmitry Gruzd
+* **test:** remove dead dependency-proxy branches from integration jobs ([5f0c047](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5f0c0478f80cba446a54bd08b4511bac03794664)) by Dmitry Gruzd
+* **test:** unify ClickHouse version to 26.2 across all CI jobs and tests ([131eaac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/131eaac2e202ed2de64dc47e873656ae62ca1385)) by Dmitry Gruzd
+
 ## [0.83.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.83.0...v0.83.1) (2026-06-30)
 
 ### Fixes

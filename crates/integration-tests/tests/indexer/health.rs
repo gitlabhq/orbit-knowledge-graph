@@ -23,7 +23,7 @@ use tokio::net::TcpListener;
 use tower::ServiceExt;
 
 const CH_IMAGE: &str = "clickhouse/clickhouse-server";
-const CH_TAG: &str = "25.12";
+const CH_TAG: &str = "26.2";
 const CH_PORT: u16 = 8123;
 const CH_USER: &str = "default";
 const CH_PASS: &str = "testpass";
