@@ -888,9 +888,6 @@ e2e-robot-image:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - e2e/Dockerfile.robot
-  # allow_failure keeps a broken image build from blocking the e2e needs edge;
-  # e2e falls back to a runtime install when the tag is missing.
-  allow_failure: true
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - TAG=$(sha256sum e2e/Dockerfile.robot | cut -c1-12)
