@@ -10,7 +10,7 @@ use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::{
-    NATS_VERSIONER, NatsVersioner, cleanup_release_messaging, cleanup_schema_state,
+    NATS_VERSIONER, NatsVersioner, cleanup_schema_state, gc_idle_release_streams,
 };
 use indexer::types::{Envelope, Event, Subscription};
 use nats_client::{KvBucketConfig, KvPutOptions};
@@ -608,7 +608,7 @@ async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
 }
 
 #[tokio::test]
-async fn cleanup_release_and_schema_delete_their_own_entities() {
+async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
     let (_container, url) = start_nats_container().await;
     let client = async_nats::connect(format!("nats://{url}"))
         .await
@@ -632,6 +632,14 @@ async fn cleanup_release_and_schema_delete_their_own_entities() {
             .await
             .unwrap_or_else(|e| panic!("failed to create stream {name}: {e}"));
     }
+    jetstream
+        .create_stream(async_nats::jetstream::stream::Config {
+            name: "OTHER_APP_V0-84-1".to_string(),
+            subjects: vec!["other-app.>".to_string()],
+            ..Default::default()
+        })
+        .await
+        .expect("failed to create foreign stream");
     for name in &bucket_names {
         jetstream
             .create_key_value(async_nats::jetstream::kv::Config {
@@ -642,9 +650,11 @@ async fn cleanup_release_and_schema_delete_their_own_entities() {
             .unwrap_or_else(|e| panic!("failed to create bucket {name}: {e}"));
     }
 
-    cleanup_release_messaging(&client, release)
+    // Zero threshold makes the just-created idle fixtures immediately eligible
+    // (`created > now` can never hold), so the sweep is deterministic.
+    gc_idle_release_streams(&client, Duration::ZERO)
         .await
-        .expect("cleanup_release_messaging failed");
+        .expect("gc_idle_release_streams failed");
     cleanup_schema_state(&client, schema_version)
         .await
         .expect("cleanup_schema_state failed");
@@ -652,9 +662,13 @@ async fn cleanup_release_and_schema_delete_their_own_entities() {
     for name in &stream_names {
         assert!(
             jetstream.get_stream(name).await.is_err(),
-            "stream {name} should have been deleted by cleanup_release_messaging",
+            "stream {name} should have been deleted by release GC",
         );
     }
+    assert!(
+        jetstream.get_stream("OTHER_APP_V0-84-1").await.is_ok(),
+        "foreign stream must survive release GC",
+    );
     for name in &bucket_names {
         assert!(
             jetstream.get_key_value(name).await.is_err(),
@@ -717,9 +731,9 @@ async fn cleanup_is_idempotent() {
         .await
         .expect("failed to connect to NATS");
 
-    cleanup_release_messaging(&client, "0-0-0-missing")
+    gc_idle_release_streams(&client, Duration::ZERO)
         .await
-        .expect("cleanup_release_messaging failed for non-existent release");
+        .expect("gc_idle_release_streams failed with no gkg streams present");
     cleanup_schema_state(&client, 888)
         .await
         .expect("cleanup_schema_state failed for non-existent schema version");

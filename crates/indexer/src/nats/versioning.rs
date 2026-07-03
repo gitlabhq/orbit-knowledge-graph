@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -91,43 +91,56 @@ pub fn release_from_stream_name(name: &str) -> Option<&str> {
     })
 }
 
-pub async fn gc_idle_release_streams(client: &async_nats::Client, threshold: Duration) {
+pub async fn gc_idle_release_streams(
+    client: &async_nats::Client,
+    threshold: Duration,
+) -> Result<(), CleanupError> {
     let cutoff = chrono::Utc::now()
         .timestamp()
         .saturating_sub(i64::try_from(threshold.as_secs()).unwrap_or(i64::MAX));
 
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut streams_by_release: HashMap<String, Vec<String>> = HashMap::new();
     let mut alive: HashSet<String> = HashSet::new();
     let mut streams = async_nats::jetstream::new(client.clone()).streams();
 
-    loop {
-        match streams.try_next().await {
-            Ok(Some(info)) => {
-                let Some(release) = release_from_stream_name(&info.config.name) else {
-                    continue;
-                };
-                seen.insert(release.to_string());
-                if release == NATS_VERSIONER.release()
-                    || info.created.unix_timestamp() > cutoff
-                    || info.state.last_timestamp.unix_timestamp() > cutoff
-                    || info.state.consumer_count > 0
-                {
-                    alive.insert(release.to_string());
-                }
-            }
-            Ok(None) => break,
-            Err(error) => {
-                warn!(%error, "release GC: failed to list streams, skipping sweep");
-                return;
-            }
+    // A listing error must abort before any deletion: sweeping on a partial
+    // survey could miss the stream carrying a live release's activity.
+    while let Some(info) = streams
+        .try_next()
+        .await
+        .map_err(|e| CleanupError(vec![format!("failed to list streams: {e}")]))?
+    {
+        let Some(release) = release_from_stream_name(&info.config.name) else {
+            continue;
+        };
+        if release == NATS_VERSIONER.release()
+            || info.created.unix_timestamp() > cutoff
+            || info.state.last_timestamp.unix_timestamp() > cutoff
+            || info.state.consumer_count > 0
+        {
+            alive.insert(release.to_string());
+        }
+        streams_by_release
+            .entry(release.to_string())
+            .or_default()
+            .push(info.config.name);
+    }
+
+    let mut errors: Vec<String> = Vec::new();
+    for (release, names) in &streams_by_release {
+        if alive.contains(release) {
+            continue;
+        }
+        info!(release, "release GC: deleting idle release streams");
+        if let Err(CleanupError(mut stream_errors)) = delete_streams(client, names, release).await {
+            errors.append(&mut stream_errors);
         }
     }
 
-    for release in seen.difference(&alive) {
-        info!(release, "release GC: deleting idle release streams");
-        if let Err(error) = cleanup_release_messaging(client, release).await {
-            warn!(release, %error, "release GC failed, will retry next startup");
-        }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(CleanupError(errors))
     }
 }
 
@@ -142,14 +155,6 @@ pub fn code_work_consumer_name(consumer_name: &str) -> String {
         "{consumer_name}-{}",
         super::broker::escape_subject_for_durable(&versioned_subject)
     )
-}
-
-fn release_stream_names(release: &str) -> Vec<String> {
-    let versioner = NatsVersioner::new(release, 0);
-    MANAGED_STREAMS
-        .iter()
-        .map(|base| versioner.stream(base))
-        .collect()
 }
 
 fn schema_bucket_stream_names(schema_version: u32) -> Vec<String> {
@@ -192,13 +197,6 @@ async fn delete_streams(
     } else {
         Err(CleanupError(errors))
     }
-}
-
-pub async fn cleanup_release_messaging(
-    nats_client: &async_nats::Client,
-    release: &str,
-) -> Result<(), CleanupError> {
-    delete_streams(nats_client, &release_stream_names(release), release).await
 }
 
 pub async fn cleanup_schema_state(
@@ -269,15 +267,6 @@ mod tests {
     }
 
     #[test]
-    fn release_stream_names_cover_messaging_entities_only() {
-        let names = release_stream_names("0-84-1");
-
-        assert!(names.contains(&"GKG_INDEXER_V0-84-1".to_string()));
-        assert!(names.contains(&"GKG_DEAD_LETTERS_V0-84-1".to_string()));
-        assert_eq!(names.len(), MANAGED_STREAMS.len());
-    }
-
-    #[test]
     fn schema_bucket_stream_names_cover_state_entities_only() {
         let names = schema_bucket_stream_names(62);
 
@@ -305,12 +294,10 @@ mod tests {
 
     #[test]
     fn cleanup_name_sets_exclude_foreign_entities() {
-        let streams = release_stream_names("54");
         let buckets = schema_bucket_stream_names(54);
 
-        assert!(!streams.contains(&"OTHER_APP_V54".to_string()));
         assert!(!buckets.contains(&"KV_someone_else_v54".to_string()));
-        assert!(!streams.contains(&"siphon_db".to_string()));
+        assert!(!buckets.contains(&"siphon_db".to_string()));
     }
 
     #[test]

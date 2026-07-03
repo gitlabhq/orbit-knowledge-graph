@@ -75,7 +75,7 @@ use orchestrator::scheduled::{
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 pub async fn run(
     config: &IndexerConfig,
@@ -105,11 +105,14 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    nats::versioning::gc_idle_release_streams(
+    if let Err(error) = nats::versioning::gc_idle_release_streams(
         broker.nats_client(),
         config.nats.release_gc_idle_threshold(),
     )
-    .await;
+    .await
+    {
+        warn!(%error, "release GC failed, will retry next startup");
+    }
 
     let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
 
@@ -260,11 +263,14 @@ pub async fn run_dispatcher(
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
-    nats::versioning::gc_idle_release_streams(
+    if let Err(error) = nats::versioning::gc_idle_release_streams(
         &services.nats_client,
         config.nats.release_gc_idle_threshold(),
     )
-    .await;
+    .await
+    {
+        warn!(%error, "release GC failed, will retry next startup");
+    }
 
     let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
