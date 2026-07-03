@@ -35,7 +35,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn run_durability_inverts_page_and_completion() {
+    fn run_durability_full_and_incremental_modes() {
         let full = RunDurability::for_mode(IndexingMode::Full);
         assert_eq!(full.data_writes, Some(WriteDurability::Durable));
         assert_eq!(full.completion, WriteDurability::Durable);
