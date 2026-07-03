@@ -8,9 +8,9 @@
 //!    active version to `retired`.
 //!
 //! 2. **Version GC** — A single SQL query computes the keep-set (active +
-//!    retained retired + in-flight migrating above active) and enumerates
-//!    all `v<N>_*` objects in `system.tables` whose version falls outside
-//!    it. Ontology-known objects are always dropped. Objects not in the
+//!    retained retired + every migrating version) and enumerates all
+//!    `v<N>_*` objects in `system.tables` whose version falls outside it.
+//!    Ontology-known objects are always dropped. Objects not in the
 //!    ontology (rename-orphans, removed entities) are also dropped unless
 //!    their base name matches a `gc_preserve_patterns` regex.
 
@@ -35,8 +35,8 @@ use crate::locking::LockService;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::metrics::CompletionMetrics;
 use crate::schema::version::{
-    SCHEMA_VERSION, mark_version_active, mark_version_dropped, mark_version_retired,
-    read_all_versions, read_migrating_version, table_prefix,
+    SCHEMA_VERSION, drop_kind_for_engine, mark_version_active, mark_version_dropped,
+    mark_version_retired, read_all_versions, read_migrating_version, table_prefix,
 };
 
 /// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
@@ -94,10 +94,9 @@ FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
 
-/// Single query that computes the keep-set in SQL and returns every
-/// `v<N>_*` object outside it. The keep-set is: active + newest
-/// `retired_slots` retired + migrating above active. Returns zero rows
-/// if no active version exists (safety guard).
+/// Returns every `v<N>_*` object outside the keep-set (active + newest `retired_slots`
+/// retired + every migrating version — a rebuild-rollback migrates *below* active), and
+/// zero rows if no active version exists (safety guard).
 const LIST_DEAD_VERSION_OBJECTS: &str = "\
 SELECT \
   name, engine, \
@@ -112,10 +111,7 @@ WHERE database = {db:String} \
           SELECT version FROM gkg_schema_version FINAL \
           WHERE status = 'retired' ORDER BY version DESC LIMIT {retired_slots:UInt32}) \
       UNION ALL \
-      SELECT version FROM gkg_schema_version FINAL \
-      WHERE status = 'migrating' \
-        AND version > (SELECT coalesce(max(version), 0) \
-                       FROM gkg_schema_version FINAL WHERE status = 'active')) \
+      SELECT version FROM gkg_schema_version FINAL WHERE status = 'migrating') \
   AND (SELECT count() FROM gkg_schema_version FINAL WHERE status = 'active') > 0";
 
 /// SQL to read the wall-clock age of the row that marked the given version
@@ -226,6 +222,11 @@ impl MigrationCompletionChecker {
         // unrecorded age this tick.
         if let Ok(age) = self.fetch_migrating_age(migrating_version).await {
             self.metrics.record_migrating_age(age);
+        }
+
+        // Only promote a version this binary embeds; promoting one we don't run would flip us Outdated.
+        if migrating_version != *SCHEMA_VERSION {
+            return Ok(());
         }
 
         info!(
@@ -573,11 +574,7 @@ impl MigrationCompletionChecker {
                     continue;
                 }
 
-                let kind = match engine.as_str() {
-                    "MaterializedView" | "View" | "LiveView" | "WindowView" => "VIEW",
-                    "Dictionary" => "DICTIONARY",
-                    _ => "TABLE",
-                };
+                let kind = drop_kind_for_engine(&engine);
                 drops.push((version, name, kind));
             }
         }
@@ -805,13 +802,14 @@ mod tests {
     }
 
     #[test]
-    fn gc_query_excludes_active_retired_and_migrating_above() {
+    fn gc_query_excludes_active_retired_and_migrating() {
         assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'active'"));
         assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'retired'"));
-        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'migrating'"));
         assert!(
-            LIST_DEAD_VERSION_OBJECTS.contains("coalesce(max(version), 0)"),
-            "migrating > active guard must handle missing active"
+            LIST_DEAD_VERSION_OBJECTS.contains("status = 'migrating'")
+                && !LIST_DEAD_VERSION_OBJECTS.contains("coalesce(max(version), 0)"),
+            "every migrating version must be kept regardless of its relationship to active — \
+             a rebuild-rollback version sits below active and must not be GC'd"
         );
     }
 

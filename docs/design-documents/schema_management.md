@@ -177,9 +177,12 @@ Non-schema ontology changes (descriptions, comments) can bypass the check by add
 ## Zero-downtime migration orchestrator
 
 The **dispatcher** owns schema migration. At boot, before its task loops start, it compares the
-embedded `SCHEMA_VERSION` with the active version in `gkg_schema_version`. If they differ,
-`schema_migration::run_if_needed()` runs the following flow. Indexers do not run DDL; they gate on
-the version becoming ready (see "Indexer readiness gate" below).
+embedded `SCHEMA_VERSION` with the active version in `gkg_schema_version`. If the embedded version
+is newer (`active < SCHEMA_VERSION`), it runs a forward migration (below). If it is older
+(`active > SCHEMA_VERSION`, meaning an older binary was deployed), it rolls back automatically
+instead of failing (see "Rolling back" below): redeploying an old binary is how operators roll
+back, not a mistake to refuse. Indexers do not run DDL; they gate on the version becoming ready
+(see "Indexer readiness gate" below).
 
 ### Migration flow
 
@@ -227,7 +230,13 @@ and decides against the embedded version:
 |---|---|
 | `N` is `active` or `migrating` | proceed — the dispatcher prepared the tables |
 | only a version `< N` is active, or no version yet | wait and retry within the budget |
-| a version `> N` is active | outdated binary — fail fast, exit non-zero |
+| a version `> N` is active, and `N` is not `migrating` | outdated binary — fail fast, exit non-zero |
+
+The `active`/`migrating` match is checked before the outdated check on purpose. During a
+rollback rebuild (case 2 under "Rolling back" below) the dispatcher marks `N` `migrating`
+while a higher version is still `active`, and `N`'s indexer must proceed to backfill it.
+If the outdated check won, the rebuild could never reach the completion checker's
+promotion gate.
 
 If the budget (`schema.indexer_schema_wait_timeout_secs`, default `300`) is exhausted, the indexer
 exits non-zero and Kubernetes restarts it (`CrashLoopBackoff`), which self-heals once the
@@ -293,6 +302,12 @@ data correctness validation is deferred to staging E2E tests.
 
 ### Status transitions on completion
 
+A dispatcher only promotes a `migrating` version it embeds (`migrating == SCHEMA_VERSION`).
+Otherwise a straggler or rolled-back dispatcher could complete a migration whose schema it does
+not run, promoting it and immediately flipping itself `Outdated`. A `migrating` version that no
+running dispatcher embeds parks (visible in `migrating_age_seconds`) until one that embeds it
+runs or an operator aborts it.
+
 When completion is detected:
 
 1. All previously `active` versions are marked `retired`.
@@ -328,12 +343,62 @@ Cleanup logic:
 ### Safety guarantees
 
 - Only tables for versions with status `retired` are dropped — never `active` or `migrating`.
+  The GC keep-set includes every `migrating` version whether it sits above or below the active
+  one. Rollbacks depend on this: a rebuild-rollback (see "Rolling back" below) marks a version
+  below active as `migrating` while it rebuilds, and its tables must survive GC for the rebuild
+  to complete.
 - `DROP TABLE IF EXISTS` is idempotent — safe to retry on partial failures.
 - The cleanup runs under the `schema_migration` NATS KV lock — no concurrent cleanup attempts.
 - `DROP TABLE` uses async drop (no `SYNC` keyword) since table names are monotonically
   versioned and will never be reused.
 - Within the retention window (default 2), the previous version's tables always exist for
   rollback.
+
+### Rolling back
+
+Deploying an older binary is the rollback mechanism: when the dispatcher finds `active >
+SCHEMA_VERSION`, `schema::migration::run_rollback` rolls back to the embedded version
+automatically, after taking the migration lock and re-checking that another pod hasn't already
+done it. The rollback picks between two cases based on table-set *completeness* rather than
+`gkg_schema_version` status, since status rows can lag under concurrent writers: GC
+(`reconcile_dead_versions`) drops a dead version's objects one by one and only marks it `dropped`
+once every drop succeeds, so a version can be left `retired` with some but not all of its objects
+gone. `schema::version::version_tables_complete` computes the exact object set
+`create_prefixed_tables` would create for `v<SCHEMA_VERSION>_*` from the embedded ontology
+(tables, dictionaries, and materialized views) and checks that every one of them exists in
+`system.tables`; a single missing object routes to the rebuild case, since a partially-live table
+set means silently broken queries under direct re-activation.
+
+1. **Table set complete** (the embedded version is within the retention window, so GC never
+   touched its tables, or GC hasn't started dropping them yet) — direct re-activation. The
+   dispatcher marks the embedded version `active` and retires whatever was active before. There
+   is no `migrating` phase and no re-indexing: the existing tables are already complete for the
+   version this binary understands, and indexing resumes on them through the normal namespace
+   sweep.
+
+2. **Table set incomplete** (GC fully or partially dropped the embedded version's objects) —
+   rebuild. Any surviving objects under the `v<SCHEMA_VERSION>_` prefix are dropped first — a
+   surviving `checkpoint` table would otherwise make the backfill treat already-checkpointed
+   projects as done while their sibling data tables sit empty, a silent data gap. Once the slate
+   is clear, this is mechanically a forward migration: create the `vN_*` tables from the ontology
+   and mark the version `migrating`. The existing `MigrationCompletionChecker` promotes it once
+   re-indexing catches up; completion detection and promotion don't care whether the migrating
+   version is above or below the current active one (see "Migration completion detection"
+   below).
+
+   Because the dispatcher and indexer boot independently, the indexer can run its first readiness
+   poll in the window before the dispatcher has written the `migrating` row. In that window the
+   active version is still higher than the embedded one with nothing migrating, so the readiness
+   gate classifies it `Outdated` and the indexer exits non-zero. This is expected: Kubernetes
+   restarts it (`CrashLoopBackoff`), and once the dispatcher's `migrating` mark is durable the next
+   boot proceeds. A case 2 rebuild therefore costs at least one indexer restart rather than
+   completing on the first boot.
+
+Operational note: any older-binary deploy triggers this, deliberate or not. There is no
+confirmation step, so a stale image rolls the schema back just as readily as an intentional
+rollback. Case 1 is cheap and reversible: the newer version's tables are only retired, not
+dropped, so rolling forward again within the retention window is another instant pointer swap.
+Case 2 re-indexes from scratch, at the same cost as a forward migration.
 
 ### Configuration
 
@@ -358,8 +423,8 @@ Table drop operations are logged at `info` level with the version and table name
 ## Campaign correlation
 
 A migration re-indexes every enabled namespace and project into the new-prefix tables. To make
-that cost attributable, all dispatches produced during a migration carry a **campaign id**: one
-id per "re-index everything" decision, `null` in steady state.
+that cost attributable, all dispatches produced during a migration carry a **campaign ID**: one
+ID per "re-index everything" decision, `null` in steady state.
 
 The campaign lives in process memory (`crates/indexer/src/campaign.rs`, `CampaignState`) — no
 ClickHouse column or external store. `run_dispatcher` runs the migration orchestrator, the
@@ -370,7 +435,7 @@ sufficient:
   campaign to `migration-v<N>` (derived from the target version). Migrations only fire at boot,
   and every dispatcher replica that boots mid-migration re-runs this flow (the re-check only
   skips once a version is `active`, not while it is `migrating`), so each replica opens the same
-  campaign. The id being a pure function of the version is what keeps it consistent without
+  campaign. The ID being a pure function of the version is what keeps it consistent without
   coordination.
 - **Attach** — each dispatcher (`GlobalDispatcher`, `NamespaceDispatcher`,
   `SiphonCodeIndexingTaskDispatcher`, `NamespaceCodeBackfillDispatcher`) reads `campaign.current()`

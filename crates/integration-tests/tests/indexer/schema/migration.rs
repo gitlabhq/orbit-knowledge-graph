@@ -6,8 +6,9 @@ use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
 use indexer::schema::migration;
 use indexer::schema::version::{
-    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, read_active_version, table_prefix,
-    wait_until_ready, write_migrating_version, write_schema_version,
+    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, prefixed_table_name,
+    read_active_version, table_prefix, wait_until_ready, write_migrating_version,
+    write_schema_version,
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
@@ -121,7 +122,9 @@ async fn matching_version_is_noop() {
 async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, 99).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
 
     migration::run_if_needed(
         &client,
@@ -178,7 +181,9 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
 async fn created_tables_have_correct_columns() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, 99).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
 
     migration::run_if_needed(
         &client,
@@ -213,7 +218,9 @@ async fn created_tables_have_correct_columns() {
 async fn idempotent_rerun_succeeds() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, 99).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
 
     let lock_svc: Arc<dyn LockService> = Arc::new(MockLockService::new());
 
@@ -244,7 +251,9 @@ async fn idempotent_rerun_succeeds() {
 async fn lock_released_after_migration() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, 99).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
 
     let mock = Arc::new(MockLockService::new());
     let lock_svc: Arc<dyn LockService> = mock.clone();
@@ -267,7 +276,9 @@ async fn lock_released_after_migration() {
 async fn held_lock_causes_timeout() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, 99).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
 
     let mock = MockLockService::new();
     mock.set_lock("schema_migration");
@@ -297,7 +308,9 @@ async fn held_lock_causes_timeout() {
 async fn mismatch_opens_campaign_steady_state_does_not() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
-    write_schema_version(&client, 99).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION - 1)
+        .await
+        .unwrap();
 
     let migrating_campaign = campaign();
     migration::run_if_needed(
@@ -334,6 +347,300 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
         matching_campaign.current(),
         None,
         "steady state should not open a campaign"
+    );
+}
+
+#[tokio::test]
+async fn rollback_reactivates_directly_when_embedded_tables_are_intact() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        read_active_version(&client).await.unwrap(),
+        Some(*SCHEMA_VERSION),
+        "rollback must re-activate the embedded version"
+    );
+
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION + 1
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["retired"],
+        "the newer version must be retired, not dropped, by a direct-reactivation rollback"
+    );
+
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["active"],
+        "direct reactivation must not pass through a migrating phase"
+    );
+}
+
+#[tokio::test]
+async fn rollback_rebuilds_when_embedded_tables_are_gone() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        read_active_version(&client).await.unwrap(),
+        Some(*SCHEMA_VERSION + 1),
+        "a rebuild rollback must not promote until the completion checker observes full coverage"
+    );
+
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["migrating"],
+        "a rebuild rollback marks the embedded version migrating, same as a forward migration"
+    );
+
+    let prefix = table_prefix(*SCHEMA_VERSION);
+    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let result = ctx
+        .query(
+            "SELECT name FROM system.tables \
+             WHERE database = 'test' AND name != 'gkg_schema_version' \
+             AND engine != 'Dictionary' \
+             ORDER BY name",
+        )
+        .await;
+    let created_names = String::extract_column(&result, 0).unwrap();
+    for table in &expected_tables {
+        assert!(
+            created_names.contains(&table.name),
+            "rebuild rollback must recreate table '{}' — created: {created_names:?}",
+            table.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn rollback_rebuild_clears_stale_objects_before_recreating() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    ctx.execute(&format!("DROP TABLE {checkpoint_table}")).await;
+
+    let user_table = prefixed_table_name("gl_user", *SCHEMA_VERSION);
+    ctx.execute(&format!(
+        "INSERT INTO {user_table} (id, username) VALUES (999, 'stale-rollback-user')"
+    ))
+    .await;
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["migrating"],
+        "a partial table set must route to rebuild, not direct re-activation"
+    );
+
+    let prefix = table_prefix(*SCHEMA_VERSION);
+    let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let result = ctx
+        .query(&format!(
+            "SELECT name FROM system.tables \
+             WHERE database = 'test' AND startsWith(name, '{prefix}') \
+             AND engine != 'Dictionary' \
+             ORDER BY name"
+        ))
+        .await;
+    let created_names = String::extract_column(&result, 0).unwrap();
+    for table in &expected_tables {
+        assert!(
+            created_names.contains(&table.name),
+            "rebuild must recreate '{}' — created: {created_names:?}",
+            table.name
+        );
+    }
+
+    let result = ctx
+        .query(&format!(
+            "SELECT toInt64(count()) AS cnt FROM {user_table} FINAL WHERE id = 999"
+        ))
+        .await;
+    let count = i64::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        count,
+        vec![0],
+        "rebuild must drop surviving objects first so stale rows don't leak into the rebuilt version"
+    );
+}
+
+#[tokio::test]
+async fn lock_released_after_rollback_reactivation() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let mock = Arc::new(MockLockService::new());
+    let lock_svc: Arc<dyn LockService> = mock.clone();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock_svc,
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    assert!(!mock.is_held("schema_migration"), "lock should be released");
+    assert_eq!(
+        read_active_version(&client).await.unwrap(),
+        Some(*SCHEMA_VERSION),
+        "must have taken the reactivation arm"
+    );
+}
+
+#[tokio::test]
+async fn lock_released_after_rollback_rebuild() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let mock = Arc::new(MockLockService::new());
+    let lock_svc: Arc<dyn LockService> = mock.clone();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock_svc,
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    assert!(!mock.is_held("schema_migration"), "lock should be released");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["migrating"],
+        "must have taken the rebuild arm"
     );
 }
 
@@ -431,4 +738,26 @@ async fn wait_until_ready_fails_fast_when_outdated() {
     .await;
 
     assert!(matches!(result, Err(SchemaWaitError::Outdated { .. })));
+}
+
+#[tokio::test]
+async fn wait_until_ready_ready_when_rebuilding_below_active() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+    write_migrating_version(&client, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    wait_until_ready(
+        &client,
+        *SCHEMA_VERSION,
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+    )
+    .await
+    .unwrap();
 }
