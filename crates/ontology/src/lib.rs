@@ -45,7 +45,7 @@ pub use etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
     ReindexSource,
 };
-pub use graph::{Adjacency, EdgeTemplate, NodeTemplate, OntologyGraph};
+pub use graph::{Adjacency, EdgeTemplate, Hop, NodeTemplate, OntologyGraph, WalkDirection};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

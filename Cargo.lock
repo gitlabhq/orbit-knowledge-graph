@@ -8358,6 +8358,7 @@ version = "0.1.0"
 dependencies = [
  "const_format",
  "indexmap 2.14.0",
+ "petgraph 0.8.3",
  "rust-embed",
  "serde",
  "serde_json",

@@ -761,11 +761,11 @@ impl<'a> Validator<'a> {
                 alternatives.into_iter().collect::<Vec<_>>().join(", ")
             );
         }
-        let mut kinds: Vec<&str> = graph
+        let mut kinds: Vec<String> = graph
             .neighbors(from, ontology::EdgeDirection::Outgoing)
-            .iter()
+            .into_iter()
             .chain(graph.neighbors(from, ontology::EdgeDirection::Incoming))
-            .map(|a| a.neighbor_kind.as_str())
+            .map(|a| a.neighbor_kind)
             .collect();
         kinds.sort();
         kinds.dedup();
