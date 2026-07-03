@@ -66,7 +66,7 @@ settings.
 
 ### Stale FK-edge reconciliation
 
-`scheduler::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
+`orchestrator::scheduled::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
 stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orphans its old row when
 the FK changes, because `target_id` is part of the `ReplacingMergeTree` identity, so the prior
 `(source, old_target)` row is never replaced. The task runs one idempotent `INSERT … SELECT` per
@@ -83,7 +83,7 @@ ready, connects to NATS and ClickHouse, registers handlers via `sdlc::register_h
 `code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
 and runs until shutdown.
 
-`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `configuration.rs` — no string-keyed lookups.
+`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs` — no string-keyed lookups.
 
 ## Development
 
@@ -145,7 +145,7 @@ below and in the root `AGENTS.md`.
 
 ### When a Rust transform is justified (ADR 015)
 
-The SDLC transform stage is pluggable (`modules/sdlc/transform.rs`): the built-in `data_fusion`
+The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `data_fusion`
 transform is a row-wise SQL projection of one extracted block and is the **default** for every
 node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity's `etl.transform`)
 is justified **only when the graph shape cannot be expressed as that SQL projection** — concretely,
@@ -166,7 +166,7 @@ If the transform is a per-row projection of one extracted batch, express it as a
 2. Define event type implementing `Event`
 3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
 4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
-5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
+5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs`
 6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
 
 ### No `#[allow(dead_code)]` in shipped code

@@ -39,7 +39,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - `rust-toolchain.toml` must match `mise.toml` (`rust-toolchain-sync-check`; regenerate with `mise toolchain:generate`)
-- Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
+- Markdown files must pass markdownlint, Vale, and lychee checks (`check_docs_markdown`)
 - Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
 - GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
 - Skill version bumped when files under `skills/<name>/` change (`skill-version-bump-check`)
