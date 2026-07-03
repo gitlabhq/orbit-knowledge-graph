@@ -183,6 +183,15 @@ impl OntologyGraph {
         }
     }
 
+    /// Whether the graph has real edge adjacency between named node kinds. False
+    /// for a bare test scaffold whose edges declare no endpoint kinds.
+    #[must_use]
+    pub fn has_edges(&self) -> bool {
+        self.outgoing.iter().any(|(source, adj)| {
+            !source.is_empty() && adj.iter().any(|a| !a.neighbor_kind.is_empty())
+        })
+    }
+
     /// Adjacency leaving (`Outgoing`) or entering (`Incoming`) a node kind.
     #[must_use]
     pub fn neighbors(&self, node_kind: &str, direction: EdgeDirection) -> &[Adjacency] {

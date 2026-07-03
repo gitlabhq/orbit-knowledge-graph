@@ -675,11 +675,12 @@ impl<'a> Validator<'a> {
 
     /// Reject a relationship whose declared types connect neither endpoint (the schema only checks edge *names* exist, so a bogus triple otherwise runs to an empty result).
     fn check_reachability(&self, input: &Input) -> Result<()> {
-        if !matches!(
-            input.query_type,
-            QueryType::Traversal | QueryType::Aggregation
-        ) || input.is_search()
-        {
+        if input.is_search() {
+            return Ok(());
+        }
+
+        let graph = self.ontology.graph();
+        if !graph.has_edges() {
             return Ok(());
         }
 
@@ -689,15 +690,40 @@ impl<'a> Validator<'a> {
             .filter_map(|n| n.entity.as_deref().map(|e| (n.id.as_str(), e)))
             .collect();
 
-        let graph = self.ontology.graph();
+        let mut hops = Vec::new();
+        match input.query_type {
+            QueryType::Traversal | QueryType::Aggregation => {
+                for (i, rel) in input.relationships.iter().enumerate() {
+                    hops.push((
+                        format!("relationship[{i}]"),
+                        &rel.types,
+                        &rel.from,
+                        &rel.to,
+                        rel.max_hops,
+                    ));
+                }
+            }
+            QueryType::PathFinding => {
+                if let Some(path) = &input.path {
+                    hops.push((
+                        "path".to_string(),
+                        &path.rel_types,
+                        &path.from,
+                        &path.to,
+                        path.max_depth,
+                    ));
+                }
+            }
+            QueryType::Neighbors | QueryType::Hydration => {}
+        }
 
-        for (i, rel) in input.relationships.iter().enumerate() {
-            if rel.types.iter().any(|t| t == "*") {
+        for (label, types, from_id, to_id, max_hops) in hops {
+            if types.is_empty() || types.iter().any(|t| t == "*") {
                 continue;
             }
             let (Some(&from), Some(&to)) = (
-                entity_of.get(rel.from.as_str()),
-                entity_of.get(rel.to.as_str()),
+                entity_of.get(from_id.as_str()),
+                entity_of.get(to_id.as_str()),
             ) else {
                 continue;
             };
@@ -705,47 +731,48 @@ impl<'a> Validator<'a> {
                 continue;
             }
 
-            let types: HashSet<&str> = rel.types.iter().map(String::as_str).collect();
-            let connecting = graph.kinds_connecting(from, to, &types);
-            let reachable = |src, dst| {
-                graph
-                    .reachable_within_types(src, rel.max_hops as usize, Some(&types))
-                    .contains(dst)
-            };
-            if !connecting.is_empty()
-                || (rel.max_hops > 1 && (reachable(from, to) || reachable(to, from)))
-            {
+            let type_set: HashSet<&str> = types.iter().map(String::as_str).collect();
+            let connected = !graph.kinds_connecting(from, to, &type_set).is_empty()
+                || (max_hops > 1
+                    && (graph
+                        .reachable_within_types(from, max_hops as usize, Some(&type_set))
+                        .contains(to)
+                        || graph
+                            .reachable_within_types(to, max_hops as usize, Some(&type_set))
+                            .contains(from)));
+            if connected {
                 continue;
             }
 
-            let alternatives = graph.kinds_connecting(from, to, &HashSet::new());
-            let hint = if alternatives.is_empty() {
-                let mut kinds: Vec<&str> = graph
-                    .neighbors(from, ontology::EdgeDirection::Outgoing)
-                    .iter()
-                    .chain(graph.neighbors(from, ontology::EdgeDirection::Incoming))
-                    .map(|a| a.neighbor_kind.as_str())
-                    .collect();
-                kinds.sort();
-                kinds.dedup();
-                match kinds.is_empty() {
-                    true => format!("\"{from}\" has no relationships in the ontology"),
-                    false => format!("\"{from}\" connects only to: [{}]", kinds.join(", ")),
-                }
-            } else {
-                format!(
-                    "relationship types connecting \"{from}\" and \"{to}\": [{}]",
-                    alternatives.into_iter().collect::<Vec<_>>().join(", ")
-                )
-            };
-
+            let hint = self.unreachable_hint(&graph, from, to);
             return Err(QueryError::ReferenceError(format!(
-                "relationship[{i}] type {:?} does not connect \"{from}\" and \"{to}\"; {hint}",
-                rel.types
+                "{label} type {types:?} does not connect \"{from}\" and \"{to}\"; {hint}"
             )));
         }
 
         Ok(())
+    }
+
+    fn unreachable_hint(&self, graph: &ontology::OntologyGraph, from: &str, to: &str) -> String {
+        let alternatives = graph.kinds_connecting(from, to, &HashSet::new());
+        if !alternatives.is_empty() {
+            return format!(
+                "relationship types connecting \"{from}\" and \"{to}\": [{}]",
+                alternatives.into_iter().collect::<Vec<_>>().join(", ")
+            );
+        }
+        let mut kinds: Vec<&str> = graph
+            .neighbors(from, ontology::EdgeDirection::Outgoing)
+            .iter()
+            .chain(graph.neighbors(from, ontology::EdgeDirection::Incoming))
+            .map(|a| a.neighbor_kind.as_str())
+            .collect();
+        kinds.sort();
+        kinds.dedup();
+        match kinds.is_empty() {
+            true => format!("\"{from}\" has no relationships in the ontology"),
+            false => format!("\"{from}\" connects only to: [{}]", kinds.join(", ")),
+        }
     }
 
     fn check_aggregations(&self, input: &Input) -> Result<()> {
@@ -1471,6 +1498,21 @@ mod tests {
     #[test]
     fn accepts_multi_hop_path_following_declared_type() {
         assert_ok(&traversal("Project", "User", "CONTAINS", 2));
+    }
+
+    #[test]
+    fn path_finding_reachability_rejects_unconnected_endpoints() {
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "path": {"type": "shortest", "from": "u", "to": "g", "max_depth": 3, "rel_types": ["AUTHORED"]}
+            }"#,
+            "does not connect \"User\" and \"Group\"",
+        );
     }
 
     #[test]
