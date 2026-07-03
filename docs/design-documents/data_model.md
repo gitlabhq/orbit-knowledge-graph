@@ -56,6 +56,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `SecurityScan`        | Represents a security scan run.                                                                         | `id`, `scan_type`, `status`, `latest`                                         |
 | `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence (`Vulnerabilities::Finding` in Rails).              | `id`, `uuid`, `report_type`, `severity`, `location`                           |
 | `Package` | Represents a package published to the package registry (npm, Maven, PyPI, NuGet, and other formats). | `id`, `name`, `version`, `package_type`, `status`, `project_id` |
+| `PackageFile` | Represents a file stored for a package in the package registry (the artifact itself, for example a .whl or .jar). | `id`, `file_name`, `size`, `file_sha256`, `status`, `project_id` |
 | `ContainerRepository` | Represents a container image repository in a project's container registry. | `id`, `name`, `status`, `project_id` |
 | `Dependency` | Represents a dependency declared by a package (npm, Maven, NuGet, Composer, and other formats). | `id`, `name`, `version_pattern`, `project_id` |
 | `VulnerabilityScanner` | Represents the scanner that produced vulnerability data.                                               | `id`, `external_id`, `name`, `vendor`                                         |
@@ -97,6 +98,9 @@ graph TD
     Package -- IN_PROJECT --> Project
     Package -- BUILT_BY --> Pipeline
     Package -- DECLARES_DEPENDENCY --> Dependency
+    Package -- HAS_PACKAGE_FILE --> PackageFile
+    PackageFile -- IN_PROJECT --> Project
+    PackageFile -- BUILT_BY --> Pipeline
     ContainerRepository -- IN_PROJECT --> Project
     Dependency -- IN_PROJECT --> Project
 ```
@@ -106,8 +110,9 @@ graph TD
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`, `User`, `Project`, `WorkItem` | `Group`, `Project`, `Branch`, `WorkItem` | A group contains a subgroup or project; a user namespace contains a project; a project contains a branch; a work item contains a child work item. |
-| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
-| `BUILT_BY`                          | `Package`      | `Pipeline`     | A package was built by a CI/CD pipeline (sourced from the `packages_build_infos` join table).           |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `PackageFile`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
+| `BUILT_BY`                          | `Package`, `PackageFile` | `Pipeline` | A package or package file was built by a CI/CD pipeline (sourced from the `packages_build_infos` and `packages_package_file_build_infos` join tables). |
+| `HAS_PACKAGE_FILE`                  | `Package`      | `PackageFile`  | A package contains a package file (FK on the package file).                                             |
 | `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
 | `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
 | `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
