@@ -142,9 +142,9 @@ analytics:
 schedule:
   tasks:
     global:
-      cron: "*/5 * * * * *"
+      cron: "*/2 * * * * *"
     namespace:
-      cron: "*/5 * * * * *"
+      cron: "*/2 * * * * *"
       # Full re-dispatch safety net. A namespace whose enable CDC event lost the race
       # with traversal_path materialization is skipped and only recovered by this sweep
       # (no later data change re-triggers it). The default is hourly, far longer than the
@@ -156,7 +156,7 @@ schedule:
     siphon:
       events_stream_name: "e2e_siphon_event_stream"
     code-backfill:
-      cron: "*/5 * * * * *"
+      cron: "*/2 * * * * *"
     table-cleanup:
       cron: "0 0 3 * * *"
     namespace-deletion:

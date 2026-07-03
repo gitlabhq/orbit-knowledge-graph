@@ -72,24 +72,26 @@ export E2E_ROOT_CA_B64=$($KC get secret root-ca-secret -n cert-manager \
 log "Syncing siphon CDC tables from SSOT"
 "$E2E_DIR/scripts/sync-cdc-tables.sh"
 
-# Deploy all components via helmfile (bootstrap → infra → pipeline)
-log "Deploying via helmfile"
-cd "$E2E_DIR"
-helmfile --file helmfile.yaml.gotmpl sync
-
-# Disjoint state (Rails license+PAT, CH dict LIFETIME, CH watermark column),
-# so the three post-sync steps run concurrently. Each script documents itself.
+# bootstrap-instance and patch-ch-dicts self-gate on their prerequisites
+# (toolbox pod, CH dictionaries), so they launch before the sync and overlap
+# the GitLab boot. Watermark must run after sync: it enumerates the siphon
+# tables the consumer creates at startup.
 "$E2E_DIR/scripts/bootstrap-instance.sh" &
 BOOTSTRAP_PID=$!
 "$E2E_DIR/scripts/patch-ch-dicts.sh" &
 DICTS_PID=$!
-"$E2E_DIR/scripts/patch-ch-siphon-watermark.sh" &
-WATERMARK_PID=$!
+trap 'kill "$BOOTSTRAP_PID" "$DICTS_PID" 2>/dev/null || true' EXIT
+
+log "Deploying via helmfile"
+cd "$E2E_DIR"
+helmfile --file helmfile.yaml.gotmpl sync
+
+"$E2E_DIR/scripts/patch-ch-siphon-watermark.sh"
 
 POST_SYNC_FAILED=0
 wait "$BOOTSTRAP_PID" || { log "bootstrap-instance.sh failed"; POST_SYNC_FAILED=1; }
 wait "$DICTS_PID" || { log "patch-ch-dicts.sh failed"; POST_SYNC_FAILED=1; }
-wait "$WATERMARK_PID" || { log "patch-ch-siphon-watermark.sh failed"; POST_SYNC_FAILED=1; }
+trap - EXIT
 [ "$POST_SYNC_FAILED" -eq 0 ]
 
 log "Setup complete (SHA: $E2E_SHA)"

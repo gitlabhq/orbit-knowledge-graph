@@ -27,7 +27,7 @@ Bootstrap E2E Credentials
     ${root_headers}=    Create Dictionary
     ...    PRIVATE-TOKEN=${GITLAB_ROOT_PAT}    Content-Type=application/json
 
-    ${user_id}=    Wait Until Keyword Succeeds    120s    5s
+    ${user_id}=    Wait Until Keyword Succeeds    120s    3s
     ...    Ensure E2E Bot User    ${root_headers}
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}
@@ -52,7 +52,7 @@ Attach To Shared Fixture
     ${username}=    Set Variable    e2e-bot-${suffix}
     ${root_headers}=    Create Dictionary
     ...    PRIVATE-TOKEN=${GITLAB_ROOT_PAT}    Content-Type=application/json
-    ${user_id}=    Wait Until Keyword Succeeds    120s    5s
+    ${user_id}=    Wait Until Keyword Succeeds    120s    3s
     ...    Ensure Bot User    ${root_headers}    ${username}    ${username}@example.com    E2E Bot ${suffix}
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}

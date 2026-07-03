@@ -5,7 +5,7 @@ JOB_NAME="e2e-robot-runner"
 RELEASE_NAME="e2e-robot-runner"
 DIAG_DIR="${E2E_DIR}/diagnostics"
 TIMEOUT_SECONDS=1800
-POLL_INTERVAL=5
+POLL_INTERVAL=3
 
 log "E2E Tests (SHA: $E2E_SHA)"
 mkdir -p "$DIAG_DIR"

@@ -98,13 +98,17 @@ other suite runs in a parallel worker pool.
    secrets, extract the cert-manager root CA.
 2. `sync-cdc-tables.sh` — regenerate Siphon CDC config from the pinned
    `gitlab-org/gitlab` ref.
-3. `helmfile sync` — deploy every release. GitLab gates `pg-cdc-setup` and
+3. Launch `bootstrap-instance.sh` (license + root PAT) and
+   `patch-ch-dicts.sh` (dictionary LIFETIME) in the background; each polls for
+   its prerequisite (toolbox pod, dictionaries) so the Rails cold boot overlaps
+   the webservice boot.
+4. `helmfile sync` — deploy every release. GitLab gates `pg-cdc-setup` and
    `siphon`; `gkg` needs only NATS and ClickHouse, so its image pulls and
    indexer schema write overlap the GitLab boot (the gkg webserver reports
    ready once Rails is reachable).
-4. Three concurrent post-sync steps: `bootstrap-instance.sh` (license + root
-   PAT), `patch-ch-dicts.sh` (dictionary LIFETIME), and
-   `patch-ch-siphon-watermark.sh` (watermark column).
+5. `patch-ch-siphon-watermark.sh` (watermark column) — after sync, because it
+   enumerates the tables the siphon consumer creates; then join the two
+   background steps.
 
 On failure, CI dumps diagnostics in `after_script` before teardown; green runs
 skip the dump.

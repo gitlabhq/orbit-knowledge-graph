@@ -1211,6 +1211,7 @@ e2e:
     - export E2E_SHA="${CI_COMMIT_SHORT_SHA}"
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - |
+      E2E_BUILD_PID=""
       if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
         # Reuse multi-arch dev image published by docker-manifest.
         export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg"
@@ -1223,11 +1224,24 @@ e2e:
         if docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1; then
           echo "Reusing existing image ${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
         else
-          # Drop DWARF: ~5x smaller image; backtraces keep function names.
-          CARGO_PROFILE_DEV_DEBUG=0 cargo build -p gkg-server --locked
-          cp target/debug/gkg-server .
-          docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
-          docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
+          # Background the build so the stack deploy absorbs it; gkg pods sit
+          # in ImagePullBackOff until the nudger respawns them post-push
+          # (avoids waiting out kubelet's exponential pull backoff).
+          (
+            set -e
+            # Drop DWARF: ~5x smaller image; backtraces keep function names.
+            CARGO_PROFILE_DEV_DEBUG=0 cargo build -p gkg-server --locked
+            cp target/debug/gkg-server .
+            docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
+            docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
+          ) > e2e-image-build.log 2>&1 &
+          E2E_BUILD_PID=$!
+          (
+            while kill -0 "$E2E_BUILD_PID" 2>/dev/null; do sleep 5; done
+            docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1 || exit 0
+            kubectl -n "e2e-${CI_COMMIT_SHORT_SHA}-gkg" delete pods \
+              --field-selector=status.phase=Pending 2>/dev/null || true
+          ) &
         fi
       fi
     - |
@@ -1237,7 +1251,16 @@ e2e:
       else
         echo "e2e-robot:${E2E_ROBOT_TAG} not in registry; robot job installs at runtime"
       fi
-    - bash e2e/scripts/setup.sh
+    - bash e2e/scripts/setup.sh || { tail -80 e2e-image-build.log 2>/dev/null; exit 1; }
+    - |
+      if [ -n "${E2E_BUILD_PID:-}" ]; then
+        if ! wait "$E2E_BUILD_PID"; then
+          echo "gkg-e2e image build failed:"
+          tail -80 e2e-image-build.log
+          exit 1
+        fi
+        tail -3 e2e-image-build.log
+      fi
     - bash e2e/scripts/test.sh
   after_script:
     - bash e2e/scripts/install-ci-tools.sh

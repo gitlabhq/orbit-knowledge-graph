@@ -57,7 +57,7 @@ Verify Node Indexed
 Wait For Node Indexed
     [Documentation]    Poll Verify Node Indexed until success or ${timeout} elapses.
     [Arguments]    ${entity}    ${node_id}    ${expected_label}=${None}
-    ...    ${label_field}=name    ${timeout}=120s    ${interval}=3s
+    ...    ${label_field}=name    ${timeout}=120s    ${interval}=2s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
@@ -71,14 +71,14 @@ Verify Node Removed
     ...    ${entity} id=${node_id} still queryable after delete
 
 Wait For Node Removed
-    [Arguments]    ${entity}    ${node_id}    ${timeout}=180s    ${interval}=5s
+    [Arguments]    ${entity}    ${node_id}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Verify Node Removed    ${entity}    ${node_id}
 
 Wait For Entity Population
     [Documentation]    Wait until at least one node of ${entity} is indexed.
-    [Arguments]    ${entity}    ${minimum}=1    ${timeout}=120s    ${interval}=3s
+    [Arguments]    ${entity}    ${minimum}=1    ${timeout}=120s    ${interval}=2s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Entity Count Is At Least    ${entity}    ${minimum}
@@ -113,14 +113,14 @@ Wait For Node Indexed Within Budget
     [Documentation]    Same as Wait For Node Indexed but pulls timeout from the shared budget.
     [Arguments]    ${entity}    ${node_id}    ${expected_label}=${None}    ${label_field}=name
     ${budget}=    Remaining Budget
-    Wait Until Keyword Succeeds    ${budget}    3s
+    Wait Until Keyword Succeeds    ${budget}    2s
     ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
 
 Wait For Edge Indexed Within Budget
     [Documentation]    Same as Wait For Edge Indexed but pulls timeout from the shared budget.
     [Arguments]    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
     ${budget}=    Remaining Budget
-    Wait Until Keyword Succeeds    ${budget}    3s
+    Wait Until Keyword Succeeds    ${budget}    2s
     ...    Verify Edge Indexed    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
 
 # --- Generic Orbit query helpers (used for code-graph assertions) -----------
@@ -193,7 +193,7 @@ Wait Until Result Node Ids Contain
     ...                Polling mirrors the Wait For * Within Budget keywords the rest of the suite uses.
     [Arguments]    ${query}    @{node_ids}
     ${budget}=    Remaining Budget
-    Wait Until Keyword Succeeds    ${budget}    3s
+    Wait Until Keyword Succeeds    ${budget}    2s
     ...    Result Must Contain Node Ids    ${query}    @{node_ids}
 
 Result Must Contain Node Ids
@@ -217,7 +217,7 @@ Wait Until Aggregation At Least
     ...                race the redaction refresh and undercount (same reason as the node-id poll above).
     [Arguments]    ${query}    ${column}    ${minimum}=1
     ${budget}=    Remaining Budget
-    Wait Until Keyword Succeeds    ${budget}    3s
+    Wait Until Keyword Succeeds    ${budget}    2s
     ...    Aggregation At Least    ${query}    ${column}    ${minimum}
 
 Aggregation At Least
@@ -265,7 +265,7 @@ Wait For Edge Indexed
     ...                when not None) is queryable. Pass ${None} on either side to match any
     ...                node of that entity (useful for e.g. "some User AUTHORED this Note").
     [Arguments]    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
-    ...            ${timeout}=120s    ${interval}=3s
+    ...            ${timeout}=120s    ${interval}=2s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Verify Edge Indexed    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
@@ -289,13 +289,13 @@ Verify Edge Indexed
 
 File Count For Project Is
     [Documentation]    Wait until File node count under ${project_id} equals ${expected}.
-    [Arguments]    ${project_id}    ${expected}    ${timeout}=180s    ${interval}=5s
+    [Arguments]    ${project_id}    ${expected}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Entity Count For Project    File    ${project_id}    ${expected}
 
 Definition Count For Project Is At Least
-    [Arguments]    ${project_id}    ${minimum}    ${timeout}=180s    ${interval}=5s
+    [Arguments]    ${project_id}    ${minimum}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Entity Count At Least For Project    Definition    ${project_id}    ${minimum}
@@ -317,7 +317,7 @@ Assert Entity Count At Least For Project
 Definition Exists In Project
     [Documentation]    Assert that a Definition with ${fqn} (and optional ${definition_type}) exists under ${project_id}.
     ...                Returns the matched node dict.
-    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}    ${timeout}=180s    ${interval}=5s
+    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     ${node}=    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Lookup Definition By Fqn    ${project_id}    ${fqn}    ${definition_type}
@@ -343,7 +343,7 @@ Lookup Definition By Fqn
 Defines Edge Exists Between Definitions
     [Documentation]    Assert a DEFINES edge from Definition fqn=${parent_fqn} to Definition fqn=${child_fqn}
     ...                under ${project_id}. Models structural containment (e.g. Class defines Method).
-    [Arguments]    ${project_id}    ${parent_fqn}    ${child_fqn}    ${timeout}=180s    ${interval}=5s
+    [Arguments]    ${project_id}    ${parent_fqn}    ${child_fqn}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Defines Edge Between Definitions    ${project_id}    ${parent_fqn}    ${child_fqn}
@@ -360,7 +360,7 @@ Assert Defines Edge Between Definitions
 Defines Edge Exists Between File And Definition
     [Documentation]    Assert a DEFINES edge from File path=${file_path} to Definition fqn=${def_fqn}
     ...                under ${project_id}. Models the file→top-level-definition relationship.
-    [Arguments]    ${project_id}    ${file_path}    ${def_fqn}    ${timeout}=180s    ${interval}=5s
+    [Arguments]    ${project_id}    ${file_path}    ${def_fqn}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Defines Edge Between File And Definition    ${project_id}    ${file_path}    ${def_fqn}
@@ -378,7 +378,7 @@ Imports Edge Exists Between File And Imported Symbol
     [Documentation]    Assert an IMPORTS edge from File path=${file_path} to ImportedSymbol matching
     ...                (import_path=${import_path}, identifier_name=${identifier_name}) under ${project_id}.
     [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
-    ...    ${timeout}=180s    ${interval}=5s
+    ...    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Imports Edge Between File And Imported Symbol

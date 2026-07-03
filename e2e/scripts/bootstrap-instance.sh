@@ -36,10 +36,18 @@ if [[ -z "$ACTIVATION_CODE" ]]; then
   exit 1
 fi
 
-TOOLBOX=$($KC get pod -n "$NS_GITLAB" -l app=toolbox \
-  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+# Poll so this script can launch before helmfile sync finishes and start the
+# Rails cold boot the moment toolbox is up, overlapping the webservice boot.
+TOOLBOX=""
+for _ in $(seq 1 120); do
+  TOOLBOX=$($KC get pod -n "$NS_GITLAB" -l app=toolbox \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  [[ -n "$TOOLBOX" ]] && break
+  sleep 5
+done
 if [[ -z "$TOOLBOX" ]]; then
-  echo "No toolbox pod found in $NS_GITLAB"
+  echo "No running toolbox pod found in $NS_GITLAB after 600s"
   exit 1
 fi
 

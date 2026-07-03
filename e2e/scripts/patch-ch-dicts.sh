@@ -48,9 +48,11 @@ ch_query() {
     sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
-# Wait for GitLab CH migrations to finish creating the dictionaries.
+# Wait for GitLab CH migrations to finish creating the dictionaries. The 600s
+# budget covers launching this script before helmfile sync completes (the
+# ClickHouse pod may not even exist yet); ch_query failures just poll again.
 log "Waiting for traversal-path dictionaries to exist"
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
   if ch_query "EXISTS DICTIONARY datalake.namespace_traversal_paths_dict" 2>/dev/null | grep -q '^1$'; then
     break
   fi
