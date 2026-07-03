@@ -10,9 +10,20 @@ set +e  # never fail the caller
 DIAG_DIR="${E2E_DIR}/diagnostics"
 mkdir -p "$DIAG_DIR"
 
-# Lines of a failing container's log echoed into the job trace. Full logs
-# still land in $DIAG_DIR artifacts; this is just the readable-in-trace tail.
+# Log lines per failing container echoed into the job trace.
 TRACE_LOG_TAIL=25
+
+# Init containers are picked by restarts (completed ones report ready=false);
+# prefer the previous (crashed) instance's logs.
+trace_failing_container_logs() {
+  local ns="$1" pod="$2" failing c
+  failing=$($KC get pod "$pod" -n "$ns" -o jsonpath='{range .status.initContainerStatuses[?(@.restartCount>0)]}{.name}{"\n"}{end}{range .status.containerStatuses[?(@.ready==false)]}{.name}{"\n"}{end}' 2>/dev/null)
+  for c in $failing; do
+    echo "  --- $pod/$c (last $TRACE_LOG_TAIL log lines) ---"
+    $KC logs "$pod" -n "$ns" -c "$c" --tail="$TRACE_LOG_TAIL" --previous 2>/dev/null \
+      || $KC logs "$pod" -n "$ns" -c "$c" --tail="$TRACE_LOG_TAIL" 2>/dev/null
+  done
+}
 
 log "Collecting diagnostics to $DIAG_DIR"
 
@@ -76,17 +87,7 @@ for ns in "$NS_NATS" "$NS_CH" "$NS_GITLAB" "$NS_SIPHON" "$NS_GKG"; do
       $KC logs "$pod" -n "$ns" --all-containers --prefix --previous 2>/dev/null \
         > "$DIAG_DIR/${ns_short}-${pod}-previous.log"
 
-      # Echo the failing containers' log tail into the trace so the crash
-      # reason is readable from the job page without downloading artifacts.
-      # Completed init containers report ready=false, so init containers are
-      # selected by restarts instead. Crashed containers keep the evidence in
-      # their previous instance; fall back to the current one otherwise.
-      failing=$($KC get pod "$pod" -n "$ns" -o jsonpath='{range .status.initContainerStatuses[?(@.restartCount>0)]}{.name}{"\n"}{end}{range .status.containerStatuses[?(@.ready==false)]}{.name}{"\n"}{end}' 2>/dev/null)
-      for c in $failing; do
-        echo "  --- $pod/$c (last $TRACE_LOG_TAIL log lines) ---"
-        $KC logs "$pod" -n "$ns" -c "$c" --tail="$TRACE_LOG_TAIL" --previous 2>/dev/null \
-          || $KC logs "$pod" -n "$ns" -c "$c" --tail="$TRACE_LOG_TAIL" 2>/dev/null
-      done
+      trace_failing_container_logs "$ns" "$pod"
     fi
   done
   echo ""
