@@ -539,6 +539,70 @@ mod tests {
     }
 
     #[test]
+    fn mark_stamps_and_merges_per_hop_facts() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "A", "B")]);
+        let sub = g
+            .walk("A")
+            .filter(triple())
+            .mark(|hop, m| {
+                m.role_floor = Some(hop.relationship_kind.len() as u32);
+                m.scope_preserving = hop.relationship_kind == "R";
+            })
+            .run();
+        let r = sub
+            .edges
+            .iter()
+            .find(|e| e.relationship_kind == "R")
+            .unwrap();
+        assert_eq!(r.marks.role_floor, Some(1));
+        assert!(r.marks.scope_preserving);
+    }
+
+    #[test]
+    fn min_cost_path_prefers_the_cheaper_route() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "B", "D"), ("T", "A", "D")]);
+        let unit = EdgeFn::of(|_: &Hop<'_>| 1u32);
+        assert_eq!(
+            g.min_cost_path("A", "D", &unit),
+            Some(vec!["T".to_string()])
+        );
+
+        let cheap_long = EdgeFn::of(|h: &Hop<'_>| if h.relationship_kind == "T" { 10 } else { 1 });
+        assert_eq!(
+            g.min_cost_path("A", "D", &cheap_long),
+            Some(vec!["R".to_string(), "S".to_string()])
+        );
+    }
+
+    #[test]
+    fn then_chains_neighbors_of_neighbors() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "B", "C")]);
+        let two = g
+            .neighbors("A", EdgeDirection::Outgoing)
+            .then(|n| g.neighbors(n, EdgeDirection::Outgoing));
+        assert_eq!(two.node_kinds("A"), set(&["B", "C"]));
+    }
+
+    #[test]
+    fn intersect_nodes_meets_forward_and_backward() {
+        let g = graph_of(&[("R", "A", "M"), ("S", "Z", "M")]);
+        let forward = g.walk("A").dir(Dir::Outgoing).run();
+        let backward = g.walk("Z").dir(Dir::Outgoing).run();
+        assert_eq!(forward.intersect_nodes(&backward), set(&["M"]));
+    }
+
+    #[test]
+    fn display_renders_marked_edges() {
+        let g = graph_of(&[("R", "A", "B")]);
+        let sub = g
+            .walk("A")
+            .filter(triple())
+            .mark(|_, m| m.role_floor = Some(30))
+            .run();
+        assert_eq!(format!("{sub}"), "A --R--> B role_floor=30\n");
+    }
+
+    #[test]
     fn templates_carry_static_facts() {
         let g = embedded();
         let contains = g.edge_template("CONTAINS", "Group", "Project").unwrap();

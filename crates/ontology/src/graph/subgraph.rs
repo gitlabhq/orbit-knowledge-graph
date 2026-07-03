@@ -6,17 +6,28 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-/// Facts a walk stamps onto a crossed edge. Grows one field per fact ≥2 passes
-/// read; [`Mark::merge`] defines how two overlapping walks combine an edge.
+/// Per-hop facts a walk stamps onto a crossed edge. This is the classifier's
+/// per-edge output: the passes that emit SQL read these instead of re-deriving.
+/// [`Mark::merge`] defines how two overlapping walks combine an edge.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeMarks {
     /// Enumerated-path memberships (colored by [`super::OntologyGraph::paths_between`]).
     pub path_ids: Vec<usize>,
+    /// Namespace prefix stamped by scope propagation (restrict A1/A2).
+    pub scope_prefix: Option<String>,
+    /// The edge keeps both endpoints in one namespace (restrict A3).
+    pub scope_preserving: bool,
+    /// Minimum access level required for the far node (security A8).
+    pub role_floor: Option<u32>,
+    /// The far node's table is partitioned (partition C15).
+    pub partitioned: bool,
 }
 
-/// How a mark payload combines when two walks cross the same edge. `path_ids`
-/// unions; a scalar mark would take min / assert-equal. Keeps [`Subgraph::union`]
-/// well-defined for any future mark without special-casing the caller.
+/// How a mark payload combines when two walks cross the same edge. Each field
+/// merges under its own lattice join: sets union, an `Option<prefix>` asserts
+/// agreement (conflict = the multi-namespace bug the plan calls out), a role
+/// floor takes the max (most restrictive), booleans OR. Keeps [`Subgraph::union`]
+/// well-defined for any mark without special-casing the caller.
 pub trait Mark {
     fn merge(&mut self, other: &Self);
 }
@@ -26,6 +37,12 @@ impl Mark for EdgeMarks {
         self.path_ids.extend(other.path_ids.iter().copied());
         self.path_ids.sort_unstable();
         self.path_ids.dedup();
+        if self.scope_prefix.is_none() {
+            self.scope_prefix = other.scope_prefix.clone();
+        }
+        self.scope_preserving |= other.scope_preserving;
+        self.role_floor = self.role_floor.max(other.role_floor);
+        self.partitioned |= other.partitioned;
     }
 }
 
@@ -178,5 +195,50 @@ impl Subgraph {
                 .cloned()
                 .collect(),
         }
+    }
+
+    /// Far-node kinds present in both subgraphs — the meet of a forward and a
+    /// backward walk, i.e. the kinds a bidirectional frontier spans.
+    #[must_use]
+    pub fn intersect_nodes(&self, other: &Subgraph) -> BTreeSet<String> {
+        let theirs: BTreeSet<&str> = other.edges.iter().map(|e| e.to.as_str()).collect();
+        self.edges
+            .iter()
+            .map(|e| e.to.as_str())
+            .filter(|n| theirs.contains(n))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Extend each reached node by `expand`, unioning the results into `self`.
+    /// Chains walks (neighbors-of-neighbors) without a bespoke second loop.
+    #[must_use]
+    pub fn then(self, expand: impl Fn(&str) -> Subgraph) -> Subgraph {
+        let reached: BTreeSet<String> = self.edges.iter().map(|e| e.to.clone()).collect();
+        reached
+            .iter()
+            .fold(self, |acc, node| acc.union(expand(node)))
+    }
+}
+
+impl std::fmt::Display for Subgraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for e in &self.edges {
+            write!(f, "{} --{}--> {}", e.from, e.relationship_kind, e.to)?;
+            if let Some(p) = &e.marks.scope_prefix {
+                write!(f, " scope={p}")?;
+            }
+            if let Some(r) = e.marks.role_floor {
+                write!(f, " role_floor={r}")?;
+            }
+            if e.marks.scope_preserving {
+                write!(f, " scope_preserving")?;
+            }
+            if e.marks.partitioned {
+                write!(f, " partitioned")?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
     }
 }

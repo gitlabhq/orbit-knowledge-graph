@@ -3,16 +3,18 @@
 //! reachability; [`Strategy::Enumerate`] keeps every distinct path and colors
 //! its edges). `neighbors` / `reachable_within` / `paths_between` are presets.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::Direction;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 
-use super::pred::{EdgePred, any, triple};
-use super::subgraph::{MarkedEdge, Subgraph};
+use super::pred::{EdgeFn, EdgePred, any, triple};
+use super::subgraph::{EdgeMarks, MarkedEdge, Subgraph};
 use super::{EdgeMeta, OntologyGraph};
 use crate::etl::EdgeDirection;
+
+type MarkFn = std::rc::Rc<dyn Fn(&Hop<'_>, &mut EdgeMarks)>;
 
 /// One edge crossed during a walk.
 #[derive(Debug, Clone, Copy)]
@@ -69,6 +71,7 @@ pub struct Walk<'g> {
     dir: Dir,
     pred: EdgePred,
     strategy: Strategy,
+    mark: Option<MarkFn>,
 }
 
 impl<'g> Walk<'g> {
@@ -80,7 +83,17 @@ impl<'g> Walk<'g> {
             dir: Dir::Outgoing,
             pred: any(),
             strategy: Strategy::Frontier,
+            mark: None,
         }
+    }
+
+    /// Stamp each crossed edge with per-hop facts. This is the classifier's
+    /// write-seam: one `mark` closure populates [`EdgeMarks`] as the walk runs,
+    /// so downstream passes read the marks instead of re-deriving.
+    #[must_use]
+    pub fn mark(mut self, f: impl Fn(&Hop<'_>, &mut EdgeMarks) + 'static) -> Self {
+        self.mark = Some(std::rc::Rc::new(f));
+        self
     }
 
     #[must_use]
@@ -218,13 +231,20 @@ impl<'g> Walk<'g> {
             synthesized: meta.synthesized,
             depth,
         };
-        self.pred.test(&hop).then(|| MarkedEdge {
+        if !self.pred.test(&hop) {
+            return None;
+        }
+        let mut marks = EdgeMarks::default();
+        if let Some(mark) = &self.mark {
+            mark(&hop, &mut marks);
+        }
+        Some(MarkedEdge {
             from: hop.from.to_string(),
             to: hop.to.to_string(),
             relationship_kind: hop.relationship_kind.to_string(),
             synthesized: hop.synthesized,
             depth: hop.depth,
-            marks: Default::default(),
+            marks,
         })
     }
 }
@@ -306,5 +326,57 @@ impl OntologyGraph {
     #[must_use]
     pub fn paths_between(&self, a: &str, b: &str, max_hops: usize) -> Subgraph {
         self.walk(a).hops(max_hops).enumerate_to(b).run()
+    }
+
+    /// Cheapest declared path from `a` to `b` under `cost`, as an ordered list of
+    /// relationship kinds. Dijkstra over the outgoing triple edges; `None` when
+    /// unreachable. Backs join/hop ordering by making "reorder by selectivity" a
+    /// shortest-path over an [`EdgeFn`] cost instead of a bespoke heuristic.
+    #[must_use]
+    pub fn min_cost_path(&self, a: &str, b: &str, cost: &EdgeFn<u32>) -> Option<Vec<String>> {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
+        let &start = self.index.get(a)?;
+        let mut best: HashMap<NodeIndex, u32> = HashMap::from([(start, 0)]);
+        let mut prev: HashMap<NodeIndex, (NodeIndex, String)> = HashMap::new();
+        let mut heap = BinaryHeap::from([(Reverse(0u32), start)]);
+
+        while let Some((Reverse(d), node)) = heap.pop() {
+            if self.graph[node] == b {
+                let mut seq = Vec::new();
+                let mut cur = node;
+                while let Some((p, kind)) = prev.get(&cur) {
+                    seq.push(kind.clone());
+                    cur = *p;
+                }
+                seq.reverse();
+                return Some(seq);
+            }
+            if d > *best.get(&node).unwrap_or(&u32::MAX) {
+                continue;
+            }
+            for e in self.graph.edges_directed(node, Direction::Outgoing) {
+                let w = e.weight();
+                if w.synthesized {
+                    continue;
+                }
+                let far = e.target();
+                let hop = Hop {
+                    from: &self.graph[node],
+                    to: &self.graph[far],
+                    relationship_kind: &w.relationship_kind,
+                    synthesized: false,
+                    depth: 0,
+                };
+                let nd = d.saturating_add(cost.eval(&hop));
+                if nd < *best.get(&far).unwrap_or(&u32::MAX) {
+                    best.insert(far, nd);
+                    prev.insert(far, (node, w.relationship_kind.clone()));
+                    heap.push((Reverse(nd), far));
+                }
+            }
+        }
+        None
     }
 }
