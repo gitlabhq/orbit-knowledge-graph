@@ -114,10 +114,13 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_fetch_expires_secs")]
     pub fetch_expires_secs: u64,
 
-    /// Inactive threshold for versioned dispatch consumers in seconds.
+    /// Inactive threshold for versioned durable consumers in seconds.
     /// After this duration with no activity, NATS auto-deletes the consumer.
-    /// Used for Siphon dispatch consumers during blue-green deployments.
-    /// Clamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).
+    /// Applied to Siphon dispatch consumers and to subscribe consumers on the
+    /// versioned work streams, so a retired release's consumers reap
+    /// themselves and stop vetoing release GC. A connected consumer's fetch
+    /// loop keeps it active. Clamped to a minimum of 60 seconds. Defaults to
+    /// 3600 (1 hour).
     #[serde(default = "NatsConfiguration::default_consumer_inactive_threshold_secs")]
     #[schemars(range(min = 60))]
     pub consumer_inactive_threshold_secs: u64,
