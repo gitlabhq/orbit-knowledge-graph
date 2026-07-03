@@ -566,6 +566,88 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
 }
 
 #[tokio::test]
+async fn lock_released_after_rollback_reactivation() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock(),
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let mock = Arc::new(MockLockService::new());
+    let lock_svc: Arc<dyn LockService> = mock.clone();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock_svc,
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    assert!(!mock.is_held("schema_migration"), "lock should be released");
+    assert_eq!(
+        read_active_version(&client).await.unwrap(),
+        Some(*SCHEMA_VERSION),
+        "must have taken the reactivation arm"
+    );
+}
+
+#[tokio::test]
+async fn lock_released_after_rollback_rebuild() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let mock = Arc::new(MockLockService::new());
+    let lock_svc: Arc<dyn LockService> = mock.clone();
+
+    migration::run_if_needed(
+        &client,
+        &dictionary_source(&ctx.config),
+        &lock_svc,
+        &ontology,
+        &metrics,
+        &campaign(),
+    )
+    .await
+    .unwrap();
+
+    assert!(!mock.is_held("schema_migration"), "lock should be released");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT CAST(status AS String) AS status \
+             FROM gkg_schema_version FINAL WHERE version = {}",
+            *SCHEMA_VERSION
+        ))
+        .await;
+    let statuses = String::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        statuses,
+        vec!["migrating"],
+        "must have taken the rebuild arm"
+    );
+}
+
+#[tokio::test]
 async fn read_active_version_returns_none_on_empty_table() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
