@@ -12,7 +12,7 @@ mod subgraph;
 mod walk;
 
 pub use pred::{EdgeFn, EdgePred, any, kinds_in, synthesized, to, triple};
-pub use subgraph::{Adjacency, EdgeMarks, Mark, MarkedEdge, Subgraph};
+pub use subgraph::{Adjacency, EdgeMarks, Mark, MarkedEdge, NodeMarks, Subgraph, VertexRole};
 pub use walk::{Dir, Hop, Walk};
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -589,6 +589,35 @@ mod tests {
         let forward = g.walk("A").dir(Dir::Outgoing).run();
         let backward = g.walk("Z").dir(Dir::Outgoing).run();
         assert_eq!(forward.intersect_nodes(&backward), set(&["M"]));
+    }
+
+    #[test]
+    fn node_marks_stamp_and_merge_by_alias() {
+        let mut sub = graph_of(&[("R", "A", "B")])
+            .walk("A")
+            .filter(triple())
+            .run();
+        sub.mark_node(
+            "a",
+            NodeMarks {
+                role: VertexRole::GroupKey,
+                role_floor: Some(20),
+                ..Default::default()
+            },
+        );
+        sub.mark_node(
+            "a",
+            NodeMarks {
+                role_floor: Some(40),
+                partitioned: true,
+                ..Default::default()
+            },
+        );
+        let a = sub.node("a").unwrap();
+        assert_eq!(a.role_floor, Some(40));
+        assert!(a.partitioned);
+        assert_eq!(a.role, VertexRole::GroupKey);
+        assert!(sub.node("missing").is_none());
     }
 
     #[test]

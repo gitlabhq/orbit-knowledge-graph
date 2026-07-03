@@ -46,6 +46,44 @@ impl Mark for EdgeMarks {
     }
 }
 
+/// A vertex's role in a classified query graph. A traversal is the base case
+/// (`GraphNode`); aggregation adds `GroupKey`/`Collapsed`; pathfinding/neighbors
+/// mark endpoints. Collapse is the *absence* of a vertex from the projection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum VertexRole {
+    #[default]
+    GraphNode,
+    GroupKey,
+    Collapsed,
+    PathEndpoint,
+    Center,
+    Dynamic,
+}
+
+/// Per-node facts the classifier stamps onto a query vertex (keyed by alias in
+/// [`Subgraph::nodes`]). The per-vertex half of the classifier's output, read by
+/// the security / hydration passes instead of re-deriving per alias.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NodeMarks {
+    pub role: VertexRole,
+    /// Minimum access level for this node's table (security A8).
+    pub role_floor: Option<u32>,
+    /// Tight namespace prefix substituted for the broad auth filter (security A10).
+    pub scope_prefix: Option<String>,
+    /// This node's table is partitioned (partition C15).
+    pub partitioned: bool,
+}
+
+impl Mark for NodeMarks {
+    fn merge(&mut self, other: &Self) {
+        if self.scope_prefix.is_none() {
+            self.scope_prefix = other.scope_prefix.clone();
+        }
+        self.role_floor = self.role_floor.max(other.role_floor);
+        self.partitioned |= other.partitioned;
+    }
+}
+
 /// A relationship kind and the node kind on the far side of the hop.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Adjacency {
@@ -70,16 +108,34 @@ impl MarkedEdge {
     }
 }
 
-/// The marked view a walk produced.
+/// The marked view a walk produced. `edges` carry per-hop marks; `nodes` carry
+/// per-vertex marks keyed by alias — together the classifier's [`EdgeMarks`] +
+/// [`NodeMarks`] output that downstream passes project instead of re-deriving.
+/// A pure ontology walk leaves `nodes` empty; the classifier populates it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Subgraph {
     pub edges: Vec<MarkedEdge>,
+    pub nodes: HashMap<String, NodeMarks>,
 }
 
 impl Subgraph {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.edges.is_empty()
+    }
+
+    /// Marks for the vertex aliased `alias`, if the classifier stamped it.
+    #[must_use]
+    pub fn node(&self, alias: &str) -> Option<&NodeMarks> {
+        self.nodes.get(alias)
+    }
+
+    /// Stamp (or merge into) the marks for vertex `alias`.
+    pub fn mark_node(&mut self, alias: impl Into<String>, marks: NodeMarks) {
+        self.nodes
+            .entry(alias.into())
+            .and_modify(|m| m.merge(&marks))
+            .or_insert(marks);
     }
 
     /// Far-node kinds reached, excluding `start`.
@@ -141,7 +197,8 @@ impl Subgraph {
         out
     }
 
-    /// Every edge from both, marks merged on shared `(from, kind, to)` identity.
+    /// Every edge and node from both, marks merged on shared identity (edges by
+    /// `(from, kind, to)`, nodes by alias).
     #[must_use]
     pub fn union(mut self, other: Subgraph) -> Subgraph {
         for edge in other.edges {
@@ -153,6 +210,9 @@ impl Subgraph {
                 Some(existing) => existing.marks.merge(&edge.marks),
                 None => self.edges.push(edge),
             }
+        }
+        for (alias, marks) in other.nodes {
+            self.mark_node(alias, marks);
         }
         self
     }
@@ -174,6 +234,7 @@ impl Subgraph {
                 })
                 .cloned()
                 .collect(),
+            nodes: HashMap::new(),
         }
     }
 
@@ -194,6 +255,7 @@ impl Subgraph {
                 })
                 .cloned()
                 .collect(),
+            nodes: HashMap::new(),
         }
     }
 

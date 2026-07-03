@@ -46,8 +46,9 @@ pub use etl::{
     ReindexSource,
 };
 pub use graph::{
-    Adjacency, Dir, EdgeFn, EdgeMarks, EdgePred, EdgeTemplate, Hop, Mark, MarkedEdge, NodeTemplate,
-    OntologyGraph, Subgraph, Walk, any, kinds_in, synthesized, to, triple,
+    Adjacency, Dir, EdgeFn, EdgeMarks, EdgePred, EdgeTemplate, Hop, Mark, MarkedEdge, NodeMarks,
+    NodeTemplate, OntologyGraph, Subgraph, VertexRole, Walk, any, kinds_in, synthesized, to,
+    triple,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
