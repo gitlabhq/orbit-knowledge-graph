@@ -215,13 +215,16 @@ async fn reactivate_version(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
+    // Activate before retiring: a crash between the two writes then leaves a
+    // duplicate active row (the newest wins per read_active_version) instead of zero.
+    mark_version_active(graph, version).await?;
     let versions = read_all_versions(graph).await?;
     for entry in &versions {
         if entry.status == "active" && entry.version != version {
             mark_version_retired(graph, entry.version).await?;
         }
     }
-    mark_version_active(graph, version).await
+    Ok(())
 }
 
 async fn run_migration(
