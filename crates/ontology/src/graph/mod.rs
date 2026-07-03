@@ -1,223 +1,31 @@
-//! petgraph-backed topology plus per-triple/per-node indexes over the flat [`Ontology`].
+//! petgraph-backed topology plus per-triple/per-node indexes over the flat
+//! [`Ontology`]. The traversal surface is four composable pieces:
 //!
-//! The whole traversal surface is three pieces, mirroring `treesitter-visit`'s
-//! `Pred`/`Extract`: a chainable [`EdgePred`] (the edge-filter algebra), a
-//! [`Visitor`] with `enter`/`leave`, and one recursive [`OntologyGraph::traverse`]
-//! interpreter. Every reduction ([`OntologyGraph::neighbors`],
-//! [`OntologyGraph::reachable_within`], [`OntologyGraph::paths_between`], …) is a
-//! thin reducer over that one primitive.
+//! - [`pred`] — the chainable edge-filter algebra ([`EdgePred`], `&`/`|`/`!`).
+//! - [`walk`] — one [`Walk`] builder over direction, filter, and strategy.
+//! - [`subgraph`] — the universal return type ([`Subgraph`]) with projections
+//!   (`node_kinds`, `paths`, …) and set algebra (`union`/`intersect`/`difference`).
+//! - this module — the materialized graph and its per-triple/per-node indexes.
+
+mod pred;
+mod subgraph;
+mod walk;
+
+pub use pred::{EdgeFn, EdgePred, any, kinds_in, synthesized, to, triple};
+pub use subgraph::{Adjacency, EdgeMarks, Mark, MarkedEdge, Subgraph};
+pub use walk::{Dir, Hop, Walk};
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 
-use crate::etl::EdgeDirection;
 use crate::{DenormDirection, EdgeVariantScope, Ontology, strip_schema_version_prefix};
 
-/// A relationship kind and the node kind on the far side of the hop.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Adjacency {
-    pub relationship_kind: String,
-    pub neighbor_kind: String,
-}
-
-/// One edge crossed during a [`OntologyGraph::traverse`].
-#[derive(Debug, Clone, Copy)]
-pub struct Hop<'a> {
-    pub from: &'a str,
-    pub to: &'a str,
-    pub relationship_kind: &'a str,
-    pub synthesized: bool,
-    pub depth: usize,
-}
-
-/// Direction to expand a traversal frontier. `Both` follows edges of either
-/// orientation, which is what pathfinding frontiers, `neighbors direction: both`,
-/// and undirected connectivity all need.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dir {
-    Outgoing,
-    Incoming,
-    Both,
-}
-
-impl Dir {
-    fn petgraph_dirs(self) -> &'static [Direction] {
-        match self {
-            Self::Outgoing => &[Direction::Outgoing],
-            Self::Incoming => &[Direction::Incoming],
-            Self::Both => &[Direction::Outgoing, Direction::Incoming],
-        }
-    }
-}
-
-impl From<EdgeDirection> for Dir {
-    fn from(d: EdgeDirection) -> Self {
-        match d {
-            EdgeDirection::Outgoing => Self::Outgoing,
-            EdgeDirection::Incoming => Self::Incoming,
-        }
-    }
-}
-
-/// One edge in a [`Subgraph`], with the path-ids it belongs to. `path_ids` is
-/// empty for frontier walks and carries the enumerated path memberships for
-/// [`OntologyGraph::paths_between`], so ordered kind-sequences are recoverable.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MarkedEdge {
-    pub from: String,
-    pub to: String,
-    pub relationship_kind: String,
-    pub synthesized: bool,
-    pub depth: usize,
-    pub path_ids: Vec<usize>,
-}
-
-/// The universal return type of every graph operation: the marked view a walk
-/// produced. Terminal answers are projections off it ([`Subgraph::node_kinds`],
-/// [`Subgraph::adjacencies`], [`Subgraph::edge_kinds`], [`Subgraph::paths`], …).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Subgraph {
-    pub edges: Vec<MarkedEdge>,
-}
-
-impl Subgraph {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.edges.is_empty()
-    }
-
-    /// Far-node kinds reached, excluding `start`.
-    #[must_use]
-    pub fn node_kinds(&self, start: &str) -> BTreeSet<String> {
-        self.edges
-            .iter()
-            .map(|e| e.to.clone())
-            .filter(|n| n != start)
-            .collect()
-    }
-
-    /// Relationship kinds present on any crossed edge.
-    #[must_use]
-    pub fn edge_kinds(&self) -> BTreeSet<String> {
-        self.edges
-            .iter()
-            .map(|e| e.relationship_kind.clone())
-            .collect()
-    }
-
-    /// `(relationship_kind, far_node)` pairs, sorted and deduplicated.
-    #[must_use]
-    pub fn adjacencies(&self) -> Vec<Adjacency> {
-        let set: BTreeSet<(String, String)> = self
-            .edges
-            .iter()
-            .map(|e| (e.relationship_kind.clone(), e.to.clone()))
-            .collect();
-        set.into_iter()
-            .map(|(relationship_kind, neighbor_kind)| Adjacency {
-                relationship_kind,
-                neighbor_kind,
-            })
-            .collect()
-    }
-
-    /// Ordered edge-kind sequences recovered from the edge coloring — one per
-    /// enumerated path. Sorted for determinism; empty when unreachable.
-    #[must_use]
-    pub fn paths(&self) -> Vec<Vec<String>> {
-        let mut by_id: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
-        for e in &self.edges {
-            for &pid in &e.path_ids {
-                by_id
-                    .entry(pid)
-                    .or_default()
-                    .push((e.depth, e.relationship_kind.clone()));
-            }
-        }
-        let mut out: Vec<Vec<String>> = by_id
-            .into_values()
-            .map(|mut seq| {
-                seq.sort_by_key(|(d, _)| *d);
-                seq.into_iter().map(|(_, k)| k).collect()
-            })
-            .collect();
-        out.sort();
-        out
-    }
-}
-
-/// Composable boolean over a single [`Hop`] — the edge-filter analog of
-/// `treesitter-visit`'s `Match`. Chain the constructors with `&`, `|`, `!`.
-#[derive(Clone)]
-pub struct EdgePred(std::rc::Rc<dyn Fn(&Hop<'_>) -> bool>);
-
-impl EdgePred {
-    fn of(f: impl Fn(&Hop<'_>) -> bool + 'static) -> Self {
-        Self(std::rc::Rc::new(f))
-    }
-    fn test(&self, hop: &Hop<'_>) -> bool {
-        (self.0)(hop)
-    }
-}
-
-impl std::ops::BitAnd for EdgePred {
-    type Output = EdgePred;
-    fn bitand(self, rhs: EdgePred) -> EdgePred {
-        EdgePred::of(move |h| self.test(h) && rhs.test(h))
-    }
-}
-impl std::ops::BitOr for EdgePred {
-    type Output = EdgePred;
-    fn bitor(self, rhs: EdgePred) -> EdgePred {
-        EdgePred::of(move |h| self.test(h) || rhs.test(h))
-    }
-}
-impl std::ops::Not for EdgePred {
-    type Output = EdgePred;
-    fn not(self) -> EdgePred {
-        EdgePred::of(move |h| !self.test(h))
-    }
-}
-
-/// Any edge.
-#[must_use]
-pub fn any() -> EdgePred {
-    EdgePred::of(|_| true)
-}
-
-/// A synthesized FK edge.
-#[must_use]
-pub fn synthesized() -> EdgePred {
-    EdgePred::of(|h| h.synthesized)
-}
-
-/// A declared triple edge (not FK-synthesized).
-#[must_use]
-pub fn triple() -> EdgePred {
-    EdgePred::of(|h| !h.synthesized)
-}
-
-/// The far node kind equals `node`.
-#[must_use]
-pub fn to(node: &str) -> EdgePred {
-    let node = node.to_string();
-    EdgePred::of(move |h| h.to == node)
-}
-
-/// The relationship kind is in `types` (empty set matches nothing).
-#[must_use]
-pub fn kinds_in(types: &HashSet<&str>) -> EdgePred {
-    let types: HashSet<String> = types.iter().map(|s| (*s).to_string()).collect();
-    EdgePred::of(move |h| types.contains(h.relationship_kind))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct EdgeMeta {
-    relationship_kind: String,
-    synthesized: bool,
+#[derive(Debug, Clone)]
+pub(crate) struct EdgeMeta {
+    pub(crate) relationship_kind: String,
+    pub(crate) synthesized: bool,
 }
 
 /// Query-independent facts about one `(kind, source, target)` edge triple.
@@ -244,8 +52,8 @@ pub struct NodeTemplate {
 /// Materialized topology and per-triple/per-node templates over an [`Ontology`].
 #[derive(Debug, Clone)]
 pub struct OntologyGraph {
-    graph: DiGraph<String, EdgeMeta>,
-    index: HashMap<String, NodeIndex>,
+    pub(super) graph: DiGraph<String, EdgeMeta>,
+    pub(super) index: HashMap<String, NodeIndex>,
     table_to_node: HashMap<String, String>,
     anchor_fk: Vec<(String, String)>,
     anchor_nodes: BTreeSet<String>,
@@ -400,170 +208,6 @@ impl OntologyGraph {
         })
     }
 
-    /// The single traversal primitive. Crosses every edge matching `pred`,
-    /// bounded to `max_hops`, expanding in `dir`. The visitor's [`Flow`] governs
-    /// dedup (`Prune`) and short-circuit (`Stop`); [`Visitor::leave`] fires on
-    /// ascent so a reducer can undo per-path state. Every adjacency, reachability,
-    /// and path query is a thin reducer over this.
-    pub fn traverse(
-        &self,
-        start: &str,
-        max_hops: usize,
-        dir: impl Into<Dir>,
-        pred: &EdgePred,
-    ) -> Subgraph {
-        let mut sub = Subgraph::default();
-        if let Some(&start_ix) = self.index.get(start) {
-            let dir = dir.into();
-            let mut seen = HashSet::from([start_ix]);
-            let mut frontier = std::collections::VecDeque::from([(start_ix, 0usize)]);
-            while let Some((node, depth)) = frontier.pop_front() {
-                if depth == max_hops {
-                    continue;
-                }
-                for &d in dir.petgraph_dirs() {
-                    for e in self.graph.edges_directed(node, d) {
-                        let far = if e.source() == node {
-                            e.target()
-                        } else {
-                            e.source()
-                        };
-                        let w = e.weight();
-                        let hop = Hop {
-                            from: &self.graph[node],
-                            to: &self.graph[far],
-                            relationship_kind: &w.relationship_kind,
-                            synthesized: w.synthesized,
-                            depth: depth + 1,
-                        };
-                        if !pred.test(&hop) {
-                            continue;
-                        }
-                        sub.edges.push(MarkedEdge {
-                            from: hop.from.to_string(),
-                            to: hop.to.to_string(),
-                            relationship_kind: hop.relationship_kind.to_string(),
-                            synthesized: hop.synthesized,
-                            depth: hop.depth,
-                            path_ids: Vec::new(),
-                        });
-                        if seen.insert(far) {
-                            frontier.push_back((far, depth + 1));
-                        }
-                    }
-                }
-            }
-        }
-        sub
-    }
-
-    /// Adjacency leaving (`Outgoing`) or entering (`Incoming`) a node kind,
-    /// excluding synthesized FK edges. Project with [`Subgraph::adjacencies`].
-    #[must_use]
-    pub fn neighbors(&self, node_kind: &str, direction: impl Into<Dir>) -> Subgraph {
-        self.traverse(node_kind, 1, direction, &triple())
-    }
-
-    /// Triple edges connecting `a` and `b` in either orientation, filtered to
-    /// `types` when non-empty. Direction is folded in because the lowerer matches
-    /// a triple regardless of the query's declared direction. Project with
-    /// [`Subgraph::edge_kinds`].
-    #[must_use]
-    pub fn kinds_connecting(&self, a: &str, b: &str, types: &HashSet<&str>) -> Subgraph {
-        let kind_filter = if types.is_empty() {
-            any()
-        } else {
-            kinds_in(types)
-        };
-        self.traverse(a, 1, Dir::Both, &(triple() & to(b) & kind_filter))
-    }
-
-    /// Subgraph reachable from `start` within `max_hops` outgoing edges.
-    /// Synthesized FK edges compose with triple hops. Project with
-    /// [`Subgraph::node_kinds`].
-    #[must_use]
-    pub fn reachable_within(&self, start: &str, max_hops: usize) -> Subgraph {
-        self.reachable_within_types(start, max_hops, None)
-    }
-
-    /// Like [`reachable_within`], but a `Some(types)` set restricts triple edges
-    /// to `types`; synthesized FK edges are always traversable.
-    #[must_use]
-    pub fn reachable_within_types(
-        &self,
-        start: &str,
-        max_hops: usize,
-        types: Option<&HashSet<&str>>,
-    ) -> Subgraph {
-        let pred = match types {
-            Some(t) => synthesized() | kinds_in(t),
-            None => any(),
-        };
-        self.traverse(start, max_hops, Dir::Outgoing, &pred)
-    }
-
-    /// Whether `node`'s table carries an anchor FK to `anchor` (edge-triple-free synthesis).
-    #[must_use]
-    pub fn fk_reaches(&self, node: &str, anchor: &str) -> bool {
-        !self
-            .traverse(node, 1, Dir::Outgoing, &(synthesized() & to(anchor)))
-            .is_empty()
-    }
-
-    /// Subgraph of every declared path from `a` to `b` within `max_hops`, with
-    /// each edge colored by the paths it belongs to. Project the ordered
-    /// kind-sequences with [`Subgraph::paths`]; empty when unreachable.
-    #[must_use]
-    pub fn paths_between(&self, a: &str, b: &str, max_hops: usize) -> Subgraph {
-        let mut walk = PathWalk {
-            target: b,
-            on_path: HashSet::new(),
-            trail: Vec::new(),
-            next_id: 0,
-            sub: Subgraph::default(),
-        };
-        if let Some(&start_ix) = self.index.get(a) {
-            walk.on_path.insert(start_ix);
-            self.enumerate_paths(start_ix, max_hops, &mut walk);
-        }
-        walk.sub
-    }
-
-    fn enumerate_paths(&self, node: NodeIndex, remaining: usize, walk: &mut PathWalk<'_>) {
-        if remaining == 0 {
-            return;
-        }
-        for e in self.graph.edges_directed(node, Direction::Outgoing) {
-            let far = e.target();
-            if walk.on_path.contains(&far) {
-                continue;
-            }
-            let w = e.weight();
-            let ix = walk.sub.edges.len();
-            walk.sub.edges.push(MarkedEdge {
-                from: self.graph[node].clone(),
-                to: self.graph[far].clone(),
-                relationship_kind: w.relationship_kind.clone(),
-                synthesized: w.synthesized,
-                depth: walk.trail.len() + 1,
-                path_ids: Vec::new(),
-            });
-            walk.trail.push(ix);
-            if self.graph[far] == walk.target {
-                let pid = walk.next_id;
-                walk.next_id += 1;
-                for &edge_ix in &walk.trail {
-                    walk.sub.edges[edge_ix].path_ids.push(pid);
-                }
-            } else {
-                walk.on_path.insert(far);
-                self.enumerate_paths(far, remaining - 1, walk);
-                walk.on_path.remove(&far);
-            }
-            walk.trail.pop();
-        }
-    }
-
     /// Node kind backing a physical table (tolerating a `v{N}_` prefix); `None` for edge/CTE/unknown tables.
     #[must_use]
     pub fn table_to_node(&self, table: &str) -> Option<&str> {
@@ -637,21 +281,10 @@ impl OntologyGraph {
     }
 }
 
-/// DFS state for [`OntologyGraph::paths_between`]: the current root-to-node
-/// trail (edge indices), on-path node set for cycle-breaking, and the running
-/// path-id counter that colors each completed path's edges.
-struct PathWalk<'a> {
-    target: &'a str,
-    on_path: HashSet<NodeIndex>,
-    trail: Vec<usize>,
-    next_id: usize,
-    sub: Subgraph,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EdgeEntity;
+    use crate::{EdgeEntity, etl::EdgeDirection};
 
     fn edge(kind: &str, source: &str, target: &str) -> EdgeEntity {
         EdgeEntity {
@@ -782,18 +415,23 @@ mod tests {
     }
 
     #[test]
-    fn traverse_both_reaches_either_orientation() {
+    fn walk_both_reaches_either_orientation() {
         let g = graph_of(&[("R", "A", "B"), ("S", "C", "A")]);
-        let reached = g.traverse("A", 1, Dir::Both, &triple()).node_kinds("A");
+        let reached = g
+            .walk("A")
+            .dir(Dir::Both)
+            .filter(triple())
+            .run()
+            .node_kinds("A");
         assert_eq!(reached, set(&["B", "C"]));
     }
 
     #[test]
-    fn traverse_exposes_per_hop_depth_for_frontier_enumeration() {
+    fn walk_exposes_per_hop_depth_for_frontier_enumeration() {
         use std::collections::BTreeMap;
         let g = graph_of(&[("R", "A", "B"), ("R", "B", "C")]);
         let mut by_depth: BTreeMap<usize, BTreeSet<String>> = BTreeMap::new();
-        for e in g.traverse("A", 2, Dir::Outgoing, &any()).edges {
+        for e in g.walk("A").hops(2).run().edges {
             by_depth.entry(e.depth).or_default().insert(e.to);
         }
         assert_eq!(by_depth[&1], set(&["B"]));
@@ -860,10 +498,44 @@ mod tests {
     #[test]
     fn edge_pred_chains_like_a_boolean() {
         let g = graph_of(&[("R", "A", "B"), ("S", "A", "C")]);
-        let hits = g
-            .traverse("A", 1, Dir::Outgoing, &(triple() & to("B")))
-            .node_kinds("A");
+        let hits = g.walk("A").filter(triple() & to("B")).run().node_kinds("A");
         assert_eq!(hits, set(&["B"]));
+    }
+
+    #[test]
+    fn walk_enumerate_colors_every_path() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "B", "C"), ("T", "A", "C")]);
+        assert_eq!(
+            g.walk("A").hops(3).enumerate_to("C").run().paths(),
+            vec![
+                vec!["R".to_string(), "S".to_string()],
+                vec!["T".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn subgraph_union_merges_marks_on_shared_edges() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "B", "C"), ("T", "A", "C")]);
+        let left = g.walk("A").hops(2).enumerate_to("C").run();
+        let right = g.walk("A").hops(1).enumerate_to("C").run();
+        let merged = left.clone().union(right);
+        assert_eq!(
+            merged.paths(),
+            left.union(g.paths_between("A", "C", 1)).paths()
+        );
+    }
+
+    #[test]
+    fn subgraph_intersect_and_difference_key_on_edge_identity() {
+        let g = graph_of(&[("R", "A", "B"), ("S", "B", "C"), ("T", "A", "C")]);
+        let two_hop = g.reachable_within("A", 2);
+        let one_hop = g.reachable_within("A", 1);
+        assert_eq!(
+            two_hop.intersect(&one_hop).node_kinds("A"),
+            set(&["B", "C"])
+        );
+        assert_eq!(two_hop.difference(&one_hop).node_kinds("A"), set(&["C"]));
     }
 
     #[test]
