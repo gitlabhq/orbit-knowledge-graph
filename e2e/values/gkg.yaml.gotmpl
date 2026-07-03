@@ -149,10 +149,10 @@ schedule:
       # with traversal_path materialization is skipped and only recovered by this sweep
       # (no later data change re-triggers it). The default is hourly, far longer than the
       # Robot suite budgets (180s), so a race-lost namespace never recovers in time.
-      # Keep it well under the budget but well above the cron so the incremental
-      # change-detection path still dominates (a too-short interval makes every tick a
-      # full sweep, starving incremental pickup of fresh data and thrashing the indexer).
-      sweep_interval_secs: 60
+      # 10s (5 cron ticks) keeps incremental pickup dominant while capping the
+      # race-loss penalty each enabling suite can pay; a full sweep over the
+      # ~dozen e2e namespaces is trivial work.
+      sweep_interval_secs: 10
     siphon:
       events_stream_name: "e2e_siphon_event_stream"
     code-backfill:
@@ -169,10 +169,10 @@ schedule:
 # 12 pabot suites provision fixtures simultaneously; a 3-wide sdlc pipe
 # serializes their indexing waits into a ~220s floor per suite.
 engine:
-  max_concurrent_workers: 12
+  max_concurrent_workers: 13
   concurrency_groups:
     sdlc: 10
-    code: 2
+    code: 3
   handlers:
     global-handler:
       concurrency_group: sdlc
