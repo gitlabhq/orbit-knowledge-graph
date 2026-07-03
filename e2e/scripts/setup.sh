@@ -77,20 +77,20 @@ log "Deploying via helmfile"
 cd "$E2E_DIR"
 helmfile --file helmfile.yaml.gotmpl sync
 
-# Activate GitLab with the cloud license from the staging customer portal and
-# create a root PAT in a single rails-runner call (each call cold-boots Rails,
-# so combining halves the boot cost). The license unlocks EE-gated features
-# (epics, work item hierarchies); the PAT replaces the ROPC flow that GitLab
-# 19.0 removed and is read by robot runner as GITLAB_ROOT_PAT.
-"$E2E_DIR/scripts/bootstrap-instance.sh"
+# Disjoint state (Rails license+PAT, CH dict LIFETIME, CH watermark column),
+# so the three post-sync steps run concurrently. Each script documents itself.
+"$E2E_DIR/scripts/bootstrap-instance.sh" &
+BOOTSTRAP_PID=$!
+"$E2E_DIR/scripts/patch-ch-dicts.sh" &
+DICTS_PID=$!
+"$E2E_DIR/scripts/patch-ch-siphon-watermark.sh" &
+WATERMARK_PID=$!
 
-# Shrink CACHE-layout LIFETIME on traversal-path dictionaries so the routes-
-# vs-namespaces race window for new namespaces is sub-second instead of the
-# upstream 60-300s. Must run after GitLab CH migrations created the dicts.
-"$E2E_DIR/scripts/patch-ch-dicts.sh"
-
-# Add the _siphon_watermark column the SDLC indexer expects until siphon emits it.
-"$E2E_DIR/scripts/patch-ch-siphon-watermark.sh"
+POST_SYNC_FAILED=0
+wait "$BOOTSTRAP_PID" || { log "bootstrap-instance.sh failed"; POST_SYNC_FAILED=1; }
+wait "$DICTS_PID" || { log "patch-ch-dicts.sh failed"; POST_SYNC_FAILED=1; }
+wait "$WATERMARK_PID" || { log "patch-ch-siphon-watermark.sh failed"; POST_SYNC_FAILED=1; }
+[ "$POST_SYNC_FAILED" -eq 0 ]
 
 log "Setup complete (SHA: $E2E_SHA)"
 log "Run: E2E_SHA=$E2E_SHA scripts/test.sh"

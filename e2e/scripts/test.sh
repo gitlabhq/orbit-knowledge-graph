@@ -33,11 +33,15 @@ $KC create configmap e2e-robot-fixtures -n "$NS_GKG" \
 
 # Install robot-runner chart
 log "Launching Robot Framework job"
-helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
-  --namespace "$NS_GKG" \
-  --kube-context "$KCTX" \
-  --set "namespaces.gitlab=$NS_GITLAB" \
-  --set "namespaces.gkg=$NS_GKG"
+HELM_ARGS=(install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner"
+  --namespace "$NS_GKG"
+  --kube-context "$KCTX"
+  --set "namespaces.gitlab=$NS_GITLAB"
+  --set "namespaces.gkg=$NS_GKG")
+if [ -n "${E2E_ROBOT_IMAGE:-}" ]; then
+  HELM_ARGS+=(--set "image=$E2E_ROBOT_IMAGE")
+fi
+helm "${HELM_ARGS[@]}"
 
 # Poll job status until terminal condition or timeout. Heartbeat keeps the
 # pipeline trace alive without the complexity (and orphaned-kubectl bugs) of
@@ -87,6 +91,9 @@ fi
 
 log "Tests $result"
 
-bash "$(dirname "${BASH_SOURCE[0]}")/dump-diagnostics.sh"
+# In CI the failure-gated after_script dumps diagnostics; don't dump twice.
+if [ -z "${CI:-}" ]; then
+  bash "$(dirname "${BASH_SOURCE[0]}")/dump-diagnostics.sh"
+fi
 
 exit 1
