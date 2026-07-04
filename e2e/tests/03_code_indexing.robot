@@ -1,9 +1,10 @@
 *** Settings ***
-Documentation       Push fixture code into ruby- and java-named projects under the shared
-...                 namespace and verify the code-graph (files, definitions, structural
-...                 DEFINES + IMPORTS edges) lands in the property graph via the Orbit
-...                 query API. Every assertion goes through /api/v4/orbit/query — the
-...                 system under test.
+Documentation       Push fixture code into ruby- and java-named projects, then enable the
+...                 dedicated namespace and verify the code-graph (files, definitions,
+...                 structural DEFINES + IMPORTS edges) lands in the property graph via the
+...                 Orbit query API. Every assertion goes through /api/v4/orbit/query — the
+...                 system under test. Enabling after the pushes makes indexing dispatch
+...                 deterministic: no code task can race the push.
 
 Resource            gitlab.resource
 Resource            orbit.resource
@@ -128,9 +129,11 @@ Java Project Has Expected Imports
 *** Keywords ***
 Push Weather Fixtures
     ${suffix}=    Random Suffix
-    ${ruby}=    Create Project    ruby-weather-${suffix}    ${SHARED_NAMESPACE_ID}
+    ${group}=    Create Group    e2e-code-${suffix}
+    ${ruby}=    Create Project    ruby-weather-${suffix}    ${group["id"]}
     Push Fixture To Project    ${ruby}    ${RUBY_FIXTURE_DIR}
-    ${java}=    Create Project    java-weather-${suffix}    ${SHARED_NAMESPACE_ID}
+    ${java}=    Create Project    java-weather-${suffix}    ${group["id"]}
     Push Fixture To Project    ${java}    ${JAVA_FIXTURE_DIR}
+    Enable Knowledge Graph    ${group["id"]}
     Set Suite Variable    ${RUBY_PROJECT}    ${ruby}
     Set Suite Variable    ${JAVA_PROJECT}    ${java}
