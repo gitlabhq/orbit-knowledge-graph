@@ -867,8 +867,7 @@ docker-build-mr:
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
-# e2e Robot runner image, content-addressed by the Dockerfile hash; the e2e
-# job resolves the same tag and falls back to a runtime install when missing.
+# Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:
   stage: build
   image: docker:29
@@ -1224,9 +1223,8 @@ e2e:
         if docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1; then
           echo "Reusing existing image ${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
         else
-          # Background the build so the stack deploy absorbs it; gkg pods sit
-          # in ImagePullBackOff until the nudger respawns them post-push
-          # (avoids waiting out kubelet's exponential pull backoff).
+          # The stack deploy absorbs the build; the nudger below respawns gkg
+          # pods stuck in pull backoff once the push lands.
           (
             set -e
             # Drop DWARF: ~5x smaller image; backtraces keep function names.

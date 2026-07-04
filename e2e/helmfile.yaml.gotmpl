@@ -139,9 +139,8 @@ releases:
     labels:
       phase: pipeline
       component: gkg
-    # No gitlab need: deploy overlaps the GitLab boot (secrets come from
-    # bootstrap). The webserver /ready probe holds until Rails answers, so
-    # this release still completes only once GitLab is reachable.
+    # Deploy overlaps the GitLab boot; the webserver /ready probe still holds
+    # this release until Rails answers.
     needs:
       - e2e-{{ $sha }}-nats/nats
       - e2e-{{ $sha }}-clickhouse/clickhouse

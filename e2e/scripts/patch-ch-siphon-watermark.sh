@@ -22,8 +22,8 @@ ch_query() {
 # those rows so the watermark is stable, exactly as it is for rows siphon
 # inserts after the column exists.
 #
-# All ALTERs go in one multiquery batch: per-table kubectl exec round-trips
-# cost ~1.3s each and this runs on the setup critical path.
+# One multiquery batch: per-table kubectl execs cost ~1.3s each on the
+# setup critical path.
 TABLES=$(ch_query "SELECT name FROM system.tables \
   WHERE database = 'datalake' AND name LIKE 'siphon\_%' \
     AND engine NOT IN ('MaterializedView', 'View', 'Dictionary', 'Null') FORMAT TSV")

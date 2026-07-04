@@ -1,11 +1,9 @@
 image: python:3.12-slim
 
-# Fallback pins for local runs on the base image; mirror e2e/Dockerfile.robot.
 robotframework:
   version: "7.4.2"
   requestsVersion: "0.9.7"
   pabotVersion: "5.2.2"
-  # One worker per downstream suite — single wave.
   processes: 12
 
 resources:

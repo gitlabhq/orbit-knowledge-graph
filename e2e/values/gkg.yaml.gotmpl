@@ -145,18 +145,14 @@ schedule:
       cron: "*/2 * * * * *"
     namespace:
       cron: "*/2 * * * * *"
-      # Full re-dispatch safety net. A namespace whose enable CDC event lost the race
-      # with traversal_path materialization is skipped and only recovered by this sweep
-      # (no later data change re-triggers it). The default is hourly, far longer than the
-      # Robot suite budgets (180s), so a race-lost namespace never recovers in time.
-      # 10s (5 cron ticks) keeps incremental pickup dominant while capping the
-      # race-loss penalty each enabling suite can pay; a full sweep over the
-      # ~dozen e2e namespaces is trivial work.
+      # Full re-dispatch safety net for race-lost namespace enables; the
+      # default is hourly, far past the suite budgets. Sweeping ~a dozen e2e
+      # namespaces is trivial work.
       sweep_interval_secs: 10
     siphon:
       events_stream_name: "e2e_siphon_event_stream"
-    # 2s re-dispatched every SDLC-touched project each tick (~312 code tasks
-    # per run for ~25 projects), starving fresh pushes behind duplicate work.
+    # Faster re-dispatches every SDLC-touched project each tick, starving
+    # fresh pushes behind duplicate work.
     code-backfill:
       cron: "*/5 * * * * *"
     table-cleanup:
@@ -168,8 +164,7 @@ schedule:
     migration-completion:
       cron: "*/10 * * * * *"
 
-# 12 pabot suites provision fixtures simultaneously; a 3-wide sdlc pipe
-# serializes their indexing waits into a ~220s floor per suite.
+# Sized for 12 pabot suites provisioning fixtures simultaneously.
 engine:
   max_concurrent_workers: 13
   concurrency_groups:
@@ -188,9 +183,8 @@ engine:
       concurrency_group: code
       max_attempts: 3
       retry_interval_secs: 60
-      # Fixture repos never reach the prod flush thresholds (10k rows / 120s
-      # hard cap), so code rows sat buffered ~2 min before becoming queryable
-      # and the deferred checkpoint kept every code project re-dispatching.
+      # Fixture repos never reach the prod flush thresholds, leaving code rows
+      # buffered ~2 min and checkpoints deferred (endless re-dispatch).
       pipeline:
         write_min_flush_rows: 1
         write_buffer_age_secs: 2

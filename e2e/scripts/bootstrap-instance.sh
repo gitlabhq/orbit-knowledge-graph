@@ -36,11 +36,8 @@ if [[ -z "$ACTIVATION_CODE" ]]; then
   exit 1
 fi
 
-# Poll so this script can launch before helmfile sync finishes and start the
-# Rails cold boot right after migrations complete, overlapping the webservice
-# boot. Gating on the migrations Job (not the toolbox pod, which goes Running
-# earlier) matters: rails-runner against an unmigrated DB crashes on
-# application_settings.
+# Gate on the migrations Job, not the toolbox pod: toolbox goes Running
+# before migrations finish and rails-runner crashes on an unmigrated DB.
 MIGRATED=""
 for _ in $(seq 1 120); do
   MIGRATED=$($KC get jobs -n "$NS_GITLAB" \

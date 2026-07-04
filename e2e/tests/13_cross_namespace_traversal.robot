@@ -174,10 +174,8 @@ Seed Cross Namespace Fixture
     Link Issues    ${project_a["id"]}    ${issue_a["iid"]}    ${project_a["id"]}    ${issue_m1["iid"]}
     Link Issues    ${project_a["id"]}    ${issue_m1["iid"]}    ${project_a["id"]}    ${issue_m2["iid"]}
     Link Issues    ${project_a["id"]}    ${issue_m2["iid"]}    ${project_b["id"]}    ${issue_c["iid"]}
-    # Open the closing MR here so the CLOSES edge (the slowest indexing path)
-    # catches up while tests 1-7 run; only its wait stays in the test setup.
-    # Merging closes issue B, which is safe: tests 1-7 assert id membership,
-    # never state.
+    # The CLOSES edge (slowest path) indexes while tests 1-7 run; merging
+    # closes issue B, which is safe — tests 1-7 assert ids, never state.
     ${mr_a}=    Open Closing Merge Request    ${project_a["id"]}
     ...    ${project_b["path_with_namespace"]}    ${issue_b["iid"]}
     Set Suite Variable    ${XNS_MR_ID_A}    ${mr_a["id"]}

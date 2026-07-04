@@ -72,10 +72,8 @@ export E2E_ROOT_CA_B64=$($KC get secret root-ca-secret -n cert-manager \
 log "Syncing siphon CDC tables from SSOT"
 "$E2E_DIR/scripts/sync-cdc-tables.sh"
 
-# bootstrap-instance and patch-ch-dicts self-gate on their prerequisites
-# (toolbox pod, CH dictionaries), so they launch before the sync and overlap
-# the GitLab boot. Watermark must run after sync: it enumerates the siphon
-# tables the consumer creates at startup.
+# Both self-gate on their prerequisites, so they overlap the sync. Watermark
+# stays after sync: it enumerates tables the siphon consumer creates.
 "$E2E_DIR/scripts/bootstrap-instance.sh" &
 BOOTSTRAP_PID=$!
 "$E2E_DIR/scripts/patch-ch-dicts.sh" &

@@ -1,35 +1,9 @@
 #!/usr/bin/env bash
-# Recreate the traversal-path dictionaries with LAYOUT(DIRECT) so no lookup
-# is ever cached: the routes-vs-namespaces race in siphon CDC can otherwise
-# cache a miss as '0/' and poison every insert for that namespace until the
-# cache entry expires (upstream LIFETIME 60-300s).
-#
-# Why we need this in e2e
-# -----------------------
-# GitLab's main.sql defines `namespace_traversal_paths_dict` (and siblings)
-# with `LAYOUT(CACHE) LIFETIME(MIN 60 MAX 300)`. The cache layout fetches per
-# key on miss and caches the result — including misses — for the whole
-# lifetime window.
-#
-# In e2e, project creation produces nearly-simultaneous CDC events for
-# `namespaces` (the new project_namespace) and `routes` (the project's URL
-# entry). Both tables go to separate NATS streams, processed in parallel by
-# the siphon consumer. If the routes worker wins by even a few milliseconds,
-# inserting siphon_routes runs the dictGet on the not-yet-known namespace_id,
-# caches '0/' as the answer, and any subsequent INSERT for the same
-# namespace_id (including the test's issue creation) inherits that '0/'.
-# Without intervention the row stays invisible to GKG until the cell expires
-# — which is past the test budget.
-#
-# Production tolerates the caching because writes are constant, the
-# reconciler eventually catches up, and individual entities being briefly
-# stale is acceptable. e2e is fast/cold and synchronous: even a ~1s LIFETIME
-# left a window that poisoned ~1 row per run under the 12-suite parallel
-# load, and the reconciler never repairs a cached '0/' (it only targets
-# empty paths). DIRECT queries the source per lookup, shrinking the race to
-# the raw CDC ordering window; the tiny e2e dataset makes the extra
-# source-query load negligible.
-#
+# Recreate the traversal-path dictionaries with LAYOUT(DIRECT). The upstream
+# CACHE layout can cache a routes-vs-namespaces CDC race miss as '0/',
+# poisoning every insert for that namespace until the entry expires, and the
+# reconciler never repairs '0/' rows (it only targets empty paths). DIRECT
+# removes the caching; the tiny e2e dataset makes per-lookup queries free.
 # Tracked in https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/483
 
 set -euo pipefail
@@ -51,9 +25,7 @@ ch_query() {
     sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
-# Wait for GitLab CH migrations to finish creating the dictionaries. The 600s
-# budget covers launching this script before helmfile sync completes (the
-# ClickHouse pod may not even exist yet); ch_query failures just poll again.
+# 600s: this may launch before the ClickHouse pod even exists.
 log "Waiting for traversal-path dictionaries to exist"
 for _ in $(seq 1 120); do
   if ch_query "EXISTS DICTIONARY datalake.namespace_traversal_paths_dict" 2>/dev/null | grep -q '^1$'; then
@@ -71,13 +43,9 @@ done
 DEFAULT_PASS=$($KC exec -n "$NS_CH" "$CH_POD" -- printenv CLICKHOUSE_PASSWORD)
 [[ -n "$DEFAULT_PASS" ]] || { log "could not read CLICKHOUSE_PASSWORD from pod"; exit 1; }
 
-# Re-create each dict with the existing definition but LAYOUT(DIRECT) and no
-# LIFETIME (DIRECT layouts reject one). `SHOW CREATE DICTIONARY` round-trip
-# preserves SOURCE / column types so we don't have to duplicate the full DDL
-# here. FORMAT TSVRaw is critical: the default TabSeparated output escapes
-# newlines inside string literals (e.g. the embedded SOURCE QUERY) as literal
-# `\n`, which makes the round-tripped DDL un-parseable. TSVRaw emits strings
-# verbatim.
+# SHOW CREATE round-trip preserves SOURCE/columns; DIRECT layouts reject
+# LIFETIME. TSVRaw is required — default TSV escapes newlines inside the
+# embedded SOURCE QUERY, breaking the DDL.
 for dict in "${DICTS[@]}"; do
   log "Patching $dict"
   ddl=$(ch_query "SHOW CREATE DICTIONARY $dict FORMAT TSVRaw" 2>/dev/null || true)

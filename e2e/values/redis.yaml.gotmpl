@@ -21,8 +21,7 @@ auth:
 master:
   persistence:
     enabled: false
-  # Bitnami defaults (initialDelay 20s) dominate this release's install time;
-  # redis on emptyDir is up in ~2s and gates the GitLab release start.
+  # Bitnami's 20s initialDelay gates the GitLab release start.
   readinessProbe:
     initialDelaySeconds: 2
     periodSeconds: 2

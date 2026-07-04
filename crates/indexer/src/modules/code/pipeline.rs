@@ -267,12 +267,9 @@ impl CodeIndexingPipeline {
                 path
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
-                // A task carrying a commit SHA was dispatched for a push, so
-                // content exists; an empty archive is Gitaly/Rails visibility
-                // lag. Checkpointing indexed-empty here is terminal (the
-                // backfill sweep skips checkpointed projects) and would leave
-                // the repository unindexed until the next push — fail so NATS
-                // redelivery retries instead.
+                // A commit SHA means content exists (push-dispatched task), so
+                // an empty archive is visibility lag; checkpointing empty here
+                // would be terminal. Fail so the task is retried.
                 if request.commit_sha.is_some() {
                     self.metrics.record_stage_error("repository_fetch");
                     return Err(HandlerError::Processing(format!(
