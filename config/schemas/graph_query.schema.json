@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v2",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v3",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -66,20 +66,18 @@
     },
     "cursor": {
       "type": "object",
-      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size.",
-      "required": ["offset", "page_size"],
+      "description": "Keyset pagination cursor. Omit 'after' for the first page; pass the previous response's pagination.next_cursor to continue. Every page is reachable regardless of dataset size; redaction may shorten a page without stalling pagination. Rows whose sort key is NULL end pagination early (filter them explicitly if needed).",
+      "required": ["page_size"],
       "properties": {
-        "offset": {
-          "type": "integer",
-          "description": "0-based offset into the authorized (post-redaction) result set.",
-          "minimum": 0,
-          "maximum": 999
-        },
         "page_size": {
           "type": "integer",
-          "description": "Number of rows to return from the offset position. offset + page_size must not exceed limit.",
+          "description": "Maximum rows per page. A page may contain fewer rows when redaction removes some; keep following next_cursor until it is absent.",
           "minimum": 1,
-          "maximum": 100
+          "maximum": 1000
+        },
+        "after": {
+          "type": "string",
+          "description": "Opaque continuation token from pagination.next_cursor. Bound to the exact query that issued it (any change to filters, order_by, or shape is rejected with HTTP 400)."
         }
       },
       "additionalProperties": false

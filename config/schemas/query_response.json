@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v2",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v3",
   "title": "GKG unified query response",
   "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
@@ -43,7 +43,7 @@
       "items": { "$ref": "#/$defs/row" }
     },
     "pagination": {
-      "description": "Present when the query included a cursor. Tells the agent whether more pages exist and how many total authorized rows are available.",
+      "description": "Always present. Tells the agent whether the result window is complete and how to fetch the next page.",
       "$ref": "#/$defs/pagination"
     }
   },
@@ -195,17 +195,25 @@
     },
     "pagination": {
       "type": "object",
-      "required": ["has_more", "total_rows"],
+      "required": ["has_more", "truncated", "total_rows"],
       "additionalProperties": false,
       "properties": {
         "has_more": {
           "type": "boolean",
-          "description": "True if more authorized rows exist beyond the current page."
+          "description": "True when more matching rows exist in the dataset beyond this window."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when this response does NOT contain the full matching dataset. Treat any aggregate computed over a truncated response as incomplete."
         },
         "total_rows": {
           "type": "integer",
-          "description": "Total authorized rows before cursor slicing.",
+          "description": "Authorized rows in this response window. NOT a dataset total; when truncated is true the dataset is strictly larger.",
           "minimum": 0
+        },
+        "next_cursor": {
+          "type": "string",
+          "description": "Opaque token for cursor.after to fetch the next page. Absent when the dataset is exhausted or the query had no cursor."
         }
       }
     }

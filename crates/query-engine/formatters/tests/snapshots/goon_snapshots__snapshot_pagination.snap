@@ -1,5 +1,6 @@
 ---
 source: crates/query-engine/formatters/tests/goon_snapshots.rs
+assertion_line: 261
 expression: run(r)
 ---
 @header
@@ -8,6 +9,7 @@ goon_version:1.0.0
 nodes:1
 edges:0
 has_more:true
+truncated:true
 total_rows:100
 @nodes
 MR(1):

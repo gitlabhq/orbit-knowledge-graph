@@ -75,13 +75,46 @@ pub struct PipelineOutput {
     pub row_count: usize,
     pub redacted_count: usize,
     pub execution_log: Vec<QueryExecution>,
-    /// Pagination metadata, present when the query included a cursor.
+    /// Pagination metadata; always present (`Option` only spares test fixtures).
     pub pagination: Option<PaginationMeta>,
 }
 
 pub struct PaginationMeta {
-    /// Whether more authorized rows exist beyond the current page.
+    /// Whether the fetched window overflowed: more matching rows exist in the dataset.
     pub has_more: bool,
-    /// Total authorized rows before cursor slicing.
+    /// Same signal as `has_more`, kept explicit so clients can detect incomplete results.
+    pub truncated: bool,
+    /// Authorized rows in this response window, not a dataset total.
     pub total_rows: usize,
+    /// Opaque keyset token for the next page; None when the dataset is exhausted.
+    pub next_cursor: Option<String>,
+}
+
+/// Trims the overfetched probe row and derives honest pagination metadata.
+/// The next-page token anchors on the last SCANNED row (authorized or not),
+/// so redaction shortens a page but never stalls pagination.
+pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> PaginationMeta {
+    let window = input.cursor.as_ref().map_or(input.limit, |c| c.page_size) as usize;
+    let has_more = query_result.len() > window;
+    if has_more {
+        query_result.truncate(window);
+    }
+    let key_count = input.compiler.cursor_key_count;
+    let next_cursor = input
+        .cursor
+        .as_ref()
+        .filter(|_| has_more && key_count > 0)
+        .and_then(|_| {
+            let last = query_result.rows().last()?;
+            (0..key_count)
+                .map(|i| last.get_column_string(&compiler::passes::cursor::cursor_column(i)))
+                .collect::<Option<Vec<String>>>()
+        })
+        .map(|keys| compiler::passes::cursor::encode(input.compiler.query_hash, &keys));
+    PaginationMeta {
+        has_more,
+        truncated: has_more,
+        total_rows: query_result.authorized_count(),
+        next_cursor,
+    }
 }

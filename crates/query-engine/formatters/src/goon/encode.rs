@@ -114,7 +114,13 @@ fn write_header(
         if p.has_more {
             out.push_str("has_more:true\n");
         }
+        if p.truncated {
+            out.push_str("truncated:true\n");
+        }
         let _ = writeln!(out, "total_rows:{}", p.total_rows);
+        if let Some(c) = &p.next_cursor {
+            let _ = writeln!(out, "next_cursor:{c}");
+        }
     }
     if response.query_type == "aggregation" {
         if let Some(rows) = &response.rows {

@@ -602,115 +602,71 @@ fn project_still_uses_id_for_redaction() {
 #[test]
 fn cursor_pagination_validation() {
     use compiler::QueryError;
+    use compiler::passes::cursor::{canonical_hash, encode};
 
     let ontology = embedded_ontology();
     let ctx = test_ctx();
 
-    let result = compile(
-        r#"{
+    let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-        "limit": 100,
-        "cursor": {"offset": 0, "page_size": 20}
-    }"#,
-        &ontology,
-        &ctx,
-    );
+        "cursor": {"page_size": 20}
+    }"#;
+    let result = compile(json, &ontology, &ctx);
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
-
-    let result = result.unwrap();
-    let rendered = result.base.render();
-    assert!(rendered.contains("LIMIT 100"));
-
+    let rendered = result.unwrap().base.render();
     assert!(
-        result.base.sql.contains("use_query_cache = 1"),
-        "cursor query should enable CH query cache: {}",
-        result.base.sql
+        rendered.contains("LIMIT 21"),
+        "cursor fetches page_size + 1 probe row: {rendered}"
+    );
+    assert!(
+        rendered.contains("_gkg_cursor_0"),
+        "cursor queries select hidden key readback columns: {rendered}"
     );
 
-    let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 10,
-        "cursor": {"offset": 5, "page_size": 10}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap_err();
+    let hash = canonical_hash(&serde_json::from_str(json).unwrap());
+    let paged: serde_json::Value = {
+        let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
+        v["cursor"]["after"] = encode(hash, &["7".into()]).into();
+        v
+    };
+    let result = compile(&paged.to_string(), &ontology, &ctx);
+    assert!(
+        result.is_ok(),
+        "after token from same query should compile: {result:?}"
+    );
+    let rendered = result.unwrap().base.render();
+    assert!(
+        rendered.contains("u.id >"),
+        "after token should lower to a seek predicate: {rendered}"
+    );
+
+    let mut foreign: serde_json::Value = serde_json::from_str(json).unwrap();
+    foreign["cursor"]["after"] = encode(hash ^ 1, &["7".into()]).into();
+    let err = compile(&foreign.to_string(), &ontology, &ctx).unwrap_err();
     assert!(
         matches!(err, QueryError::PaginationError(_)),
-        "offset + page_size > limit should be a pagination error, got: {err}"
+        "token minted for a different query should be a pagination error, got: {err}"
     );
 
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
-        "limit": 50,
-        "cursor": {"offset": 10, "page_size": 20}
-    }"#,
-        &ontology,
-        &ctx,
-    );
+    let mut garbled: serde_json::Value = serde_json::from_str(json).unwrap();
+    garbled["cursor"]["after"] = "not-base64!".into();
+    let err = compile(&garbled.to_string(), &ontology, &ctx).unwrap_err();
     assert!(
-        result.is_ok(),
-        "cursor on traversal should compile: {result:?}"
+        matches!(err, QueryError::PaginationError(_)),
+        "malformed token should be a pagination error, got: {err}"
     );
-
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 10,
-        "cursor": {"offset": 5, "page_size": 5}
-    }"#,
-        &ontology,
-        &ctx,
-    );
-    assert!(
-        result.is_ok(),
-        "offset + page_size == limit should be valid"
-    );
-
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 30,
-        "cursor": {"offset": 0, "page_size": 30}
-    }"#,
-        &ontology,
-        &ctx,
-    );
-    assert!(result.is_ok(), "page_size == limit should be valid");
 
     let err = compile(
         r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "cursor": {"offset": 0}
+        "cursor": {"offset": 0, "page_size": 10}
     }"#,
         &ontology,
         &ctx,
     );
-    assert!(err.is_err(), "cursor missing page_size should fail");
-
-    let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "cursor": {"page_size": 10}
-    }"#,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "cursor missing offset should fail");
+    assert!(err.is_err(), "offset cursors are gone in schema v3");
 
     let err = compile(
         r#"{
@@ -721,19 +677,29 @@ fn cursor_pagination_validation() {
         &ontology,
         &ctx,
     );
-    assert!(err.is_err(), "empty cursor should fail");
+    assert!(err.is_err(), "cursor missing page_size should fail");
 
     let err = compile(
         r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 10,
-        "cursor": {"offset": 0, "page_size": 0}
+        "cursor": {"page_size": 0}
     }"#,
         &ontology,
         &ctx,
     );
     assert!(err.is_err(), "page_size = 0 should fail");
+
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "cursor": {"page_size": 1001}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(err.is_err(), "page_size above 1000 should fail");
 
     let result = compile(
         r#"{
@@ -746,10 +712,13 @@ fn cursor_pagination_validation() {
     assert!(result.is_ok(), "no cursor should compile fine");
     let result = result.unwrap();
     let rendered = result.base.render();
-    assert!(rendered.contains("LIMIT 30"), "default limit should be 30");
+    assert!(
+        rendered.contains("LIMIT 31"),
+        "default limit 30 fetches one probe row: {rendered}"
+    );
     assert!(
         !result.base.sql.contains("use_query_cache"),
-        "non-cursor query should not enable query cache: {}",
+        "queries no longer force the query cache: {}",
         result.base.sql
     );
 }

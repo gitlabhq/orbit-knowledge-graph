@@ -164,6 +164,10 @@ pub struct CompilerMetadata {
     pub edge_target_kinds: HashMap<String, Vec<String>>,
     /// Namespace entity (Group/Project) → (tp-dict table, key column) for pinning a neighbors anchor arm to its centers' exact traversal_paths.
     pub tp_id_lookup: HashMap<String, (String, String)>,
+    /// FNV-1a of the canonicalized query JSON minus `cursor`; binds `after` tokens to their query.
+    pub query_hash: u64,
+    /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
+    pub cursor_key_count: usize,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -184,6 +188,8 @@ impl Default for CompilerMetadata {
             edge_source_kinds: HashMap::new(),
             edge_target_kinds: HashMap::new(),
             tp_id_lookup: HashMap::new(),
+            query_hash: 0,
+            cursor_key_count: 0,
         }
     }
 }
@@ -228,6 +234,12 @@ impl Input {
         self.query_type == QueryType::Traversal
             && self.nodes.len() == 1
             && self.relationships.is_empty()
+    }
+
+    /// Rows to fetch from ClickHouse: the page window plus one probe row that
+    /// proves `has_more` without being returned.
+    pub fn fetch_limit(&self) -> u32 {
+        self.cursor.as_ref().map_or(self.limit, |c| c.page_size) + 1
     }
 }
 
@@ -281,17 +293,15 @@ fn default_limit() -> u32 {
     30
 }
 
-/// Agent-driven pagination cursor. Slices the authorized (post-redaction)
-/// result set by `offset` and `page_size`. The server re-runs the query,
-/// authorizes all rows up to `limit`, and returns `[offset..offset+page_size]`.
-///
-/// This model avoids SQL-level keyset pagination, which only generalizes to
-/// Search queries and breaks when redaction removes rows from the LIMIT window.
-// TODO: Server-side query caching with TTL to avoid re-running the same query on page 2+
-#[derive(Debug, Clone, Copy, Deserialize)]
+/// Keyset pagination cursor: `after` is an opaque token from the previous
+/// page's `pagination.next_cursor`, anchored on the last scanned SQL row so
+/// redaction can only shorten a page, never strand it.
+#[derive(Debug, Clone, Deserialize)]
 pub struct InputCursor {
-    pub offset: u32,
     pub page_size: u32,
+    pub after: Option<String>,
+    #[serde(skip)]
+    pub seek: Option<Vec<String>>,
 }
 
 #[derive(

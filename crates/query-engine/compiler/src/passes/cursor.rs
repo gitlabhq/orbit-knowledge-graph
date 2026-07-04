@@ -1,0 +1,248 @@
+//! Keyset pagination pass. Runs after enforce/security/partition so the final
+//! ORDER BY is known: appends hidden `_gkg_cursor_N` readback columns for each
+//! sort key, lowers the decoded `after` token into a lexicographic seek
+//! predicate, and records the key count for the output stage.
+
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use serde::{Deserialize, Serialize};
+
+use crate::ast::*;
+use crate::constants::internal_column_prefix;
+use crate::error::{QueryError, Result};
+use crate::input::Input;
+use gkg_utils::clickhouse::ChType;
+
+pub fn cursor_column(i: usize) -> String {
+    format!("{}cursor_{i}", internal_column_prefix())
+}
+
+#[derive(Serialize, Deserialize)]
+struct CursorToken {
+    h: String,
+    k: Vec<String>,
+}
+
+pub fn encode(query_hash: u64, keys: &[String]) -> String {
+    let token = CursorToken {
+        h: format!("{query_hash:016x}"),
+        k: keys.to_vec(),
+    };
+    URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token).expect("token serializes"))
+}
+
+pub fn decode(after: &str, query_hash: u64) -> Result<Vec<String>> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(after)
+        .map_err(|_| QueryError::PaginationError("malformed cursor.after token".into()))?;
+    let token: CursorToken = serde_json::from_slice(&bytes)
+        .map_err(|_| QueryError::PaginationError("malformed cursor.after token".into()))?;
+    if token.h != format!("{query_hash:016x}") {
+        return Err(QueryError::PaginationError(
+            "cursor.after was issued for a different query; restart pagination".into(),
+        ));
+    }
+    Ok(token.k)
+}
+
+/// FNV-1a over the canonicalized (key-sorted) query JSON minus `cursor`, so a
+/// token binds to the exact query it was issued for.
+pub fn canonical_hash(query: &serde_json::Value) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut write = |bytes: &[u8]| {
+        for b in bytes {
+            hash ^= u64::from(*b);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    };
+    fn canonicalize(v: &serde_json::Value, skip_cursor: bool, out: &mut dyn FnMut(&[u8])) {
+        match v {
+            serde_json::Value::Object(map) => {
+                let mut keys: Vec<&String> = map
+                    .keys()
+                    .filter(|k| !(skip_cursor && *k == "cursor"))
+                    .collect();
+                keys.sort();
+                out(b"{");
+                for k in keys {
+                    out(k.as_bytes());
+                    out(b":");
+                    canonicalize(&map[k], false, out);
+                    out(b",");
+                }
+                out(b"}");
+            }
+            serde_json::Value::Array(items) => {
+                out(b"[");
+                for item in items {
+                    canonicalize(item, false, out);
+                    out(b",");
+                }
+                out(b"]");
+            }
+            other => out(other.to_string().as_bytes()),
+        }
+    }
+    canonicalize(query, true, &mut write);
+    hash
+}
+
+pub fn apply(node: &mut Node, input: &mut Input) -> Result<()> {
+    let Some(cursor) = &input.cursor else {
+        return Ok(());
+    };
+    let Node::Query(q) = node else {
+        return Ok(());
+    };
+    let order_by = q.order_by.clone();
+    input.compiler.cursor_key_count = order_by.len();
+    if order_by.is_empty() {
+        return Ok(());
+    }
+
+    for (i, o) in order_by.iter().enumerate() {
+        let hidden = SelectExpr::new(
+            Expr::func("toString", vec![o.expr.clone()]),
+            cursor_column(i),
+        );
+        for arm in &mut q.union_all {
+            arm.select.push(hidden.clone());
+        }
+        q.select.push(hidden);
+    }
+
+    let Some(values) = &cursor.seek else {
+        return Ok(());
+    };
+    if values.len() != order_by.len() {
+        return Err(QueryError::PaginationError(
+            "cursor.after was issued for a different query; restart pagination".into(),
+        ));
+    }
+    let alias_scoped = order_by
+        .iter()
+        .any(|o| matches!(o.expr, Expr::Identifier(_)));
+    if !q.group_by.is_empty() {
+        let seek = seek_predicate(&order_by, values);
+        q.having = Some(match q.having.take() {
+            Some(h) => Expr::and(h, seek),
+            None => seek,
+        });
+    } else if !q.union_all.is_empty() || alias_scoped {
+        // A WHERE that references SELECT aliases (union arms, fused-neighbors
+        // arrayJoin projections) silently fails to filter in ClickHouse, so
+        // hoist ORDER BY/LIMIT and seek above a subquery whose aliases are
+        // real columns.
+        let outer_order = inner_order_as_outer(&order_by);
+        let seek = seek_predicate(&outer_order, values);
+        let mut inner = std::mem::take(&mut **q);
+        let limit = inner.limit.take();
+        inner.order_by = vec![];
+        **q = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::subquery(inner, "_page"),
+            where_clause: Some(seek),
+            order_by: outer_order,
+            limit,
+            ..Default::default()
+        };
+    } else {
+        let seek = seek_predicate(&order_by, values);
+        q.where_clause = Some(match q.where_clause.take() {
+            Some(w) => Expr::and(w, seek),
+            None => seek,
+        });
+    }
+    Ok(())
+}
+
+/// Column refs lose their table alias once hoisted above the `_page` subquery.
+fn inner_order_as_outer(order_by: &[OrderExpr]) -> Vec<OrderExpr> {
+    order_by
+        .iter()
+        .map(|o| OrderExpr {
+            expr: match &o.expr {
+                Expr::Column { column, .. } => Expr::ident(column.clone()),
+                other => other.clone(),
+            },
+            desc: o.desc,
+        })
+        .collect()
+}
+
+/// `(k0 > v0) OR (k0 = v0 AND k1 > v1) OR ...` with `<` on DESC keys. Values
+/// travel as strings; ClickHouse coerces them to each key's native type.
+fn seek_predicate(order_by: &[OrderExpr], values: &[String]) -> Expr {
+    let param = |v: &String| Expr::param(ChType::String, v.clone());
+    (0..order_by.len())
+        .map(|j| {
+            let mut parts: Vec<Expr> = (0..j)
+                .map(|i| Expr::eq(order_by[i].expr.clone(), param(&values[i])))
+                .collect();
+            let op = if order_by[j].desc { Op::Lt } else { Op::Gt };
+            parts.push(Expr::binary(
+                op,
+                order_by[j].expr.clone(),
+                param(&values[j]),
+            ));
+            Expr::conjoin(parts).expect("seek arm is non-empty")
+        })
+        .reduce(|a, b| Expr::binary(Op::Or, a, b))
+        .expect("order_by is non-empty")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_roundtrip_and_hash_binding() {
+        let t = encode(42, &["2026-01-16 19:15:23.456".into(), "1234".into()]);
+        assert_eq!(
+            decode(&t, 42).unwrap(),
+            vec!["2026-01-16 19:15:23.456".to_string(), "1234".to_string()]
+        );
+        assert!(matches!(
+            decode(&t, 43),
+            Err(QueryError::PaginationError(_))
+        ));
+        assert!(matches!(
+            decode("not-a-token", 42),
+            Err(QueryError::PaginationError(_))
+        ));
+    }
+
+    #[test]
+    fn canonical_hash_ignores_cursor_and_key_order() {
+        let a: serde_json::Value =
+            serde_json::from_str(r#"{"limit":5,"query_type":"traversal"}"#).unwrap();
+        let b: serde_json::Value = serde_json::from_str(
+            r#"{"query_type":"traversal","cursor":{"page_size":10},"limit":5}"#,
+        )
+        .unwrap();
+        let c: serde_json::Value =
+            serde_json::from_str(r#"{"limit":6,"query_type":"traversal"}"#).unwrap();
+        assert_eq!(canonical_hash(&a), canonical_hash(&b));
+        assert_ne!(canonical_hash(&a), canonical_hash(&c));
+    }
+
+    #[test]
+    fn seek_predicate_is_lexicographic_dnf() {
+        let order = vec![
+            OrderExpr::desc(Expr::col("mr", "created_at")),
+            OrderExpr::asc(Expr::col("e0", "source_id")),
+        ];
+        let values = vec!["2026-01-16".to_string(), "7".to_string()];
+        let expr = seek_predicate(&order, &values);
+        let Expr::BinaryOp {
+            op: Op::Or,
+            left,
+            right,
+        } = expr
+        else {
+            panic!("expected OR of two arms");
+        };
+        assert!(matches!(*left, Expr::BinaryOp { op: Op::Lt, .. }));
+        assert!(matches!(*right, Expr::BinaryOp { op: Op::And, .. }));
+    }
+}

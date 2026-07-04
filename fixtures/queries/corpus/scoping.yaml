@@ -797,7 +797,7 @@ group_fullpath_wi_by_state:
     }
 
 proj_id_mr_orderby_limit_page:
-  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with limit and a first-page cursor. Verifies order_by + limit produce a stable, deterministic top-N under PK pruning. Pairs with the next case to prove paging stability."
+  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with a first-page keyset cursor. Verifies order_by + tie-breakers produce a stable, deterministic top-N under PK pruning. Pairs with the next case (larger page) for containment checks."
   category: traversal
   suite: scoping
   query: |
@@ -809,13 +809,12 @@ proj_id_mr_orderby_limit_page:
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
       "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
-      "limit": 40,
-      "cursor": {"offset": 0, "page_size": 20},
+      "cursor": {"page_size": 20},
       "options": {"include_debug_sql": true}
     }
 
 proj_id_mr_orderby_limit_page2:
-  desc: "Second page of the exact same scoped+ordered query (offset 20). Proves pagination is stable. page1 and page2 are disjoint, contiguous, and together equal the global ORDER BY created_at DESC top-40 with no gaps, duplicates, or reordering."
+  desc: "Same scoped+ordered query with a larger first page (40). The 20-row page must be a prefix of this 40-row page under the deterministic order."
   category: traversal
   suite: scoping
   query: |
@@ -827,8 +826,7 @@ proj_id_mr_orderby_limit_page2:
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
       "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
-      "limit": 40,
-      "cursor": {"offset": 20, "page_size": 20},
+      "cursor": {"page_size": 40},
       "options": {"include_debug_sql": true}
     }
 
