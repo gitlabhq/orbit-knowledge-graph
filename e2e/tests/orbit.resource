@@ -18,6 +18,22 @@ Orbit Status Is Healthy
     ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
     Should Be Equal    ${resp.json()["system"]["status"]}    healthy
 
+Orbit Query POST
+    [Documentation]    POST /orbit/query expecting 200, retrying once on 502: the webserver
+    ...                recycles gRPC connections at a fixed age, and a query in flight at the
+    ...                boundary dies with a one-off 502 (#971).
+    [Arguments]    ${headers}    ${body}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=any
+    IF    ${resp.status_code} == 502
+        Sleep    1s
+        ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+        ...    headers=${headers}    json=${body}    expected_status=any
+    END
+    Should Be Equal As Integers    ${resp.status_code}    200
+    ...    POST /orbit/query returned ${resp.status_code}: ${resp.text}
+    RETURN    ${resp}
+
 Orbit Query Node
     [Documentation]    Search for a single node by entity type and primary id.
     [Arguments]    ${entity}    ${node_id}
@@ -25,8 +41,7 @@ Orbit Query Node
     ${node}=    Create Dictionary    id=n    entity=${entity}    node_ids=${{[${node_id}]}}
     ${query}=    Create Dictionary    query_type=traversal    node=${node}
     ${body}=    Create Dictionary    query=${query}
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
-    ...    headers=${headers}    json=${body}    expected_status=200
+    ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp.json()}
 
 Orbit Count Nodes
@@ -38,8 +53,7 @@ Orbit Count Nodes
     ${query}=    Create Dictionary
     ...    query_type=aggregation    nodes=${{[${node}]}}    aggregations=${{[${agg}]}}
     ${body}=    Create Dictionary    query=${query}
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
-    ...    headers=${headers}    json=${body}    expected_status=200
+    ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp.json()["result"]["rows"][0]["count"]}
 
 Verify Node Indexed
@@ -133,8 +147,7 @@ Orbit Query
     [Arguments]    ${query}
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    query=${query}
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
-    ...    headers=${headers}    json=${body}    expected_status=200
+    ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp.json()}
 
 Orbit Query With Token
@@ -142,8 +155,7 @@ Orbit Query With Token
     [Arguments]    ${query}    ${token}
     ${headers}=    Create Dictionary    PRIVATE-TOKEN=${token}    Content-Type=application/json
     ${body}=    Create Dictionary    query=${query}
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
-    ...    headers=${headers}    json=${body}    expected_status=200
+    ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp.json()}
 
 Orbit Endpoint Smoke
@@ -172,8 +184,7 @@ Orbit Query LLM
     [Arguments]    ${query}
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    query=${query}    response_format=llm
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
-    ...    headers=${headers}    json=${body}    expected_status=200
+    ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp}
 
 Result Node Ids Contain
