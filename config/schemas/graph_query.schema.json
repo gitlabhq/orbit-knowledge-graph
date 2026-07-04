@@ -66,18 +66,18 @@
     },
     "cursor": {
       "type": "object",
-      "description": "Keyset pagination cursor. Omit 'after' for the first page; pass the previous response's pagination.next_cursor to continue. Every page is reachable regardless of dataset size; redaction may shorten a page without stalling pagination. Rows whose sort key is NULL end pagination early (filter them explicitly if needed).",
+      "description": "Keyset cursor. First page: omit 'after'. Later pages: pass the prior response's pagination.next_cursor; stop when it is absent. A NULL sort key ends pagination early; filter NULLs to page fully.",
       "required": ["page_size"],
       "properties": {
         "page_size": {
           "type": "integer",
-          "description": "Maximum rows per page. A page may contain fewer rows when redaction removes some; keep following next_cursor until it is absent.",
+          "description": "Max rows per page; a page may return fewer after redaction.",
           "minimum": 1,
           "maximum": 1000
         },
         "after": {
           "type": "string",
-          "description": "Opaque continuation token from pagination.next_cursor. Bound to the exact query that issued it (any change to filters, order_by, or shape is rejected with HTTP 400)."
+          "description": "Continuation token from pagination.next_cursor. Changing the query (filters, order_by, shape) invalidates it; restart pagination."
         }
       },
       "additionalProperties": false

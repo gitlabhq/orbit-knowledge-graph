@@ -110,7 +110,7 @@ has no matches.
 - Multi-node `traversal` (uses `nodes`) without at least 2 nodes and 1 relationship.
 - `query_type: "aggregation"` without any `aggregations` entries.
 - `max_hops` or `max_depth` > 3 (server-enforced ceiling).
-- `cursor.offset + cursor.page_size > limit`.
+- `cursor.after` reused after changing the query (the token is bound to the exact query that issued it).
 - `allowlist rejected` / `not valid under 'oneOf'` on a `columns` entry —
   the column name is not in the entity's allowlist. Run
   `glab orbit remote schema <Entity>` to get the valid column list.

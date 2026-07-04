@@ -61,7 +61,7 @@ pub struct QueryMetadata {
     /// compiled ClickHouse SQL(s) for debugging
     #[prost(string, repeated, tag = "2")]
     pub raw_query_strings: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// rows returned after redaction (and cursor slicing if applicable)
+    /// authorized rows in the returned page window
     #[prost(int32, tag = "3")]
     pub row_count: i32,
     /// semver string, e.g. "1.0.0"; empty for stub formatters

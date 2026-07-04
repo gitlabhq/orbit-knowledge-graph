@@ -100,16 +100,7 @@ pub fn apply(node: &mut Node, input: &mut Input) -> Result<()> {
         return Ok(());
     }
 
-    for (i, o) in order_by.iter().enumerate() {
-        let hidden = SelectExpr::new(
-            Expr::func("toString", vec![o.expr.clone()]),
-            cursor_column(i),
-        );
-        for arm in &mut q.union_all {
-            arm.select.push(hidden.clone());
-        }
-        q.select.push(hidden);
-    }
+    append_readback_columns(q, &order_by);
 
     let Some(values) = &cursor.seek else {
         return Ok(());
@@ -123,37 +114,61 @@ pub fn apply(node: &mut Node, input: &mut Input) -> Result<()> {
         .iter()
         .any(|o| matches!(o.expr, Expr::Identifier(_)));
     if !q.group_by.is_empty() {
-        let seek = seek_predicate(&order_by, values);
-        q.having = Some(match q.having.take() {
-            Some(h) => Expr::and(h, seek),
-            None => seek,
-        });
+        place_seek_in_having(q, &order_by, values);
     } else if !q.union_all.is_empty() || alias_scoped {
-        // A WHERE that references SELECT aliases (union arms, fused-neighbors
-        // arrayJoin projections) silently fails to filter in ClickHouse, so
-        // hoist ORDER BY/LIMIT and seek above a subquery whose aliases are
-        // real columns.
-        let outer_order = inner_order_as_outer(&order_by);
-        let seek = seek_predicate(&outer_order, values);
-        let mut inner = std::mem::take(&mut **q);
-        let limit = inner.limit.take();
-        inner.order_by = vec![];
-        **q = Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::subquery(inner, "_page"),
-            where_clause: Some(seek),
-            order_by: outer_order,
-            limit,
-            ..Default::default()
-        };
+        hoist_page_subquery(q, &order_by, values);
     } else {
-        let seek = seek_predicate(&order_by, values);
-        q.where_clause = Some(match q.where_clause.take() {
-            Some(w) => Expr::and(w, seek),
-            None => seek,
-        });
+        merge_seek_into_where(q, &order_by, values);
     }
     Ok(())
+}
+
+fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
+    for (i, o) in order_by.iter().enumerate() {
+        let hidden = SelectExpr::new(
+            Expr::func("toString", vec![o.expr.clone()]),
+            cursor_column(i),
+        );
+        for arm in &mut q.union_all {
+            arm.select.push(hidden.clone());
+        }
+        q.select.push(hidden);
+    }
+}
+
+fn place_seek_in_having(q: &mut Query, order_by: &[OrderExpr], values: &[String]) {
+    let seek = seek_predicate(order_by, values);
+    q.having = Some(match q.having.take() {
+        Some(h) => Expr::and(h, seek),
+        None => seek,
+    });
+}
+
+/// A WHERE that references SELECT aliases (union arms, fused-neighbors
+/// arrayJoin projections) silently fails to filter in ClickHouse, so hoist
+/// ORDER BY/LIMIT and the seek above a subquery whose aliases are real columns.
+fn hoist_page_subquery(q: &mut Query, order_by: &[OrderExpr], values: &[String]) {
+    let outer_order = inner_order_as_outer(order_by);
+    let seek = seek_predicate(&outer_order, values);
+    let mut inner = std::mem::take(q);
+    let limit = inner.limit.take();
+    inner.order_by = vec![];
+    *q = Query {
+        select: vec![SelectExpr::star()],
+        from: TableRef::subquery(inner, "_page"),
+        where_clause: Some(seek),
+        order_by: outer_order,
+        limit,
+        ..Default::default()
+    };
+}
+
+fn merge_seek_into_where(q: &mut Query, order_by: &[OrderExpr], values: &[String]) {
+    let seek = seek_predicate(order_by, values);
+    q.where_clause = Some(match q.where_clause.take() {
+        Some(w) => Expr::and(w, seek),
+        None => seek,
+    });
 }
 
 /// Column refs lose their table alias once hoisted above the `_page` subquery.

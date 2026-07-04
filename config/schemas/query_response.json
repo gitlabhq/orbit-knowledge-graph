@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v3",
-  "title": "GKG unified query response",
+  "title": "Orbit unified query response",
   "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
   "required": ["format_version", "query_type", "nodes", "edges"],
@@ -43,7 +43,7 @@
       "items": { "$ref": "#/$defs/row" }
     },
     "pagination": {
-      "description": "Always present. Tells the agent whether the result window is complete and how to fetch the next page.",
+      "description": "Always present: whether this window is complete and how to page forward.",
       "$ref": "#/$defs/pagination"
     }
   },
@@ -200,20 +200,20 @@
       "properties": {
         "has_more": {
           "type": "boolean",
-          "description": "True when more matching rows exist in the dataset beyond this window."
+          "description": "More matching rows exist beyond this window."
         },
         "truncated": {
           "type": "boolean",
-          "description": "True when this response does NOT contain the full matching dataset. Treat any aggregate computed over a truncated response as incomplete."
+          "description": "Response omits some matching rows; aggregates over it are incomplete."
         },
         "total_rows": {
           "type": "integer",
-          "description": "Authorized rows in this response window. NOT a dataset total; when truncated is true the dataset is strictly larger.",
+          "description": "Rows in this window, not a dataset total.",
           "minimum": 0
         },
         "next_cursor": {
           "type": "string",
-          "description": "Opaque token for cursor.after to fetch the next page. Absent when the dataset is exhausted or the query had no cursor."
+          "description": "Token for cursor.after; absent when exhausted or no cursor was sent."
         }
       }
     }
