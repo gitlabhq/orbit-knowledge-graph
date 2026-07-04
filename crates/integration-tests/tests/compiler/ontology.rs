@@ -256,7 +256,7 @@ fn full_pipeline() {
     // AUTHORED is FK-elided via author_id — no edge table scan.
     assert!(rendered.contains("gl_note"));
     assert!(rendered.contains("gl_user"));
-    assert!(rendered.contains("LIMIT 25"));
+    assert!(rendered.contains("LIMIT 26"));
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn package_built_by_pipeline_traversal() {
     assert!(rendered.contains("'BUILT_BY'"));
     assert!(rendered.contains("(e0.source_kind = 'Package')"));
     assert!(rendered.contains("(e0.target_kind = 'Pipeline')"));
-    assert!(rendered.contains("LIMIT 25"));
+    assert!(rendered.contains("LIMIT 26"));
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn basic_search_query() {
         "search should filter deleted rows"
     );
     assert!(rendered.contains("username"));
-    assert!(rendered.contains("LIMIT 10"));
+    assert!(rendered.contains("LIMIT 11"));
     assert!(
         !rendered.contains("JOIN"),
         "search queries should not have joins"
@@ -343,7 +343,7 @@ fn complex_search_query() {
     assert!(rendered.contains("created_at"));
     assert!(rendered.contains("ORDER BY"));
     assert!(rendered.contains("DESC"));
-    assert!(rendered.contains("LIMIT 50"));
+    assert!(rendered.contains("LIMIT 51"));
     assert!(
         !rendered.contains("JOIN"),
         "search queries should not have joins"
