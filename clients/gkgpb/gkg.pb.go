@@ -130,7 +130,7 @@ type QueryType int32
 
 const (
 	QueryType_QUERY_TYPE_JSON  QueryType = 0
-	QueryType_QUERY_TYPE_NAMED QueryType = 1 // `query` names a server-defined named query (config/named_queries/)
+	QueryType_QUERY_TYPE_NAMED QueryType = 1 // `query` names a server-defined named query
 )
 
 // Enum value maps for QueryType.

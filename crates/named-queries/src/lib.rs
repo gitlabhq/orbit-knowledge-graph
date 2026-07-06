@@ -37,6 +37,12 @@ pub enum NamedQueryError {
 
     #[error("named query `{name}`: {message}")]
     Invalid { name: String, message: String },
+
+    #[error("unknown named query `{name}`; available named queries: {}", available.join(", "))]
+    Unknown {
+        name: String,
+        available: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -258,6 +264,16 @@ impl NamedQueries {
         self.queries.get(name)
     }
 
+    pub fn render(&self, name: &str, values: &BindingValues) -> Result<String, NamedQueryError> {
+        let Some(query) = self.queries.get(name) else {
+            return Err(NamedQueryError::Unknown {
+                name: name.to_string(),
+                available: self.names().map(String::from).collect(),
+            });
+        };
+        query.render(values)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &NamedQuery> {
         self.queries.values()
     }
@@ -296,6 +312,36 @@ query:
         ] {
             assert!(queries.get(name).is_some(), "missing named query `{name}`");
         }
+    }
+
+    #[test]
+    fn render_by_name_substitutes_current_user_id() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let rendered = queries
+            .render(
+                "my_neighbors",
+                &BindingValues {
+                    current_user_id: 42,
+                },
+            )
+            .expect("known named query renders");
+        assert!(rendered.contains("\"node_ids\":[42]"), "{rendered}");
+        assert!(!rendered.contains("$binding"), "{rendered}");
+    }
+
+    #[test]
+    fn render_by_name_rejects_unknown_name_and_lists_available() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let err = queries
+            .render(
+                "nonexistent",
+                &BindingValues {
+                    current_user_id: 42,
+                },
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("nonexistent"), "{err}");
+        assert!(err.to_string().contains("my_neighbors"), "{err}");
     }
 
     #[test]

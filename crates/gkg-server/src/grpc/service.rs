@@ -18,8 +18,7 @@ use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{
-    QueryPipelineService, receive_query_request, resolve_query_json, send_invalid_request_error,
-    send_query_error,
+    QueryPipelineService, receive_query_request, send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
@@ -27,11 +26,11 @@ use crate::proto::{
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
     GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
     InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
-    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
-    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, QueryType,
+    ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
+    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
+    execute_query_message, get_graph_schema_response, get_query_dsl_response,
+    get_response_format_response, invoke_agent_command_response,
 };
 use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
 use gkg_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
@@ -312,13 +311,26 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     None => return,
                 };
 
-                let values = named_queries::BindingValues {
-                    current_user_id: claims.user_id,
-                };
-                let query_json = match resolve_query_json(&req, &named_queries, &values) {
-                    Ok(q) => q,
-                    Err(message) => {
-                        send_invalid_request_error(&tx, message).await;
+                let query_json = match QueryType::try_from(req.query_type) {
+                    Ok(QueryType::Json) => req.query,
+                    Ok(QueryType::Named) => {
+                        let values = named_queries::BindingValues {
+                            current_user_id: claims.user_id,
+                        };
+                        match named_queries.render(&req.query, &values) {
+                            Ok(query) => query,
+                            Err(e) => {
+                                send_invalid_request_error(&tx, e.to_string()).await;
+                                return;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        send_invalid_request_error(
+                            &tx,
+                            format!("Unknown query_type: {}", req.query_type),
+                        )
+                        .await;
                         return;
                     }
                 };
