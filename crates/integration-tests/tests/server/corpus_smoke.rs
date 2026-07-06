@@ -43,6 +43,7 @@ use query_engine::shared::{
 use serde::Deserialize;
 
 const CORPUS_DIR: &str = concat!(env!("FIXTURES_DIR"), "/queries/corpus");
+const NAMED_QUERIES_DIR: &str = env!("NAMED_QUERIES_DIR");
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const DOC_MARKDOWN_DIRS: &[&str] = &[
     "docs/source",
@@ -191,6 +192,61 @@ fn load_corpus() -> Vec<SmokeCase> {
         }
     }
     out
+}
+
+fn load_named_queries() -> Vec<SmokeCase> {
+    #[derive(Deserialize)]
+    struct NamedQuery {
+        name: String,
+        query: serde_json::Value,
+    }
+
+    let mut files: Vec<_> = std::fs::read_dir(NAMED_QUERIES_DIR)
+        .unwrap_or_else(|e| panic!("read named queries dir {NAMED_QUERIES_DIR}: {e}"))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
+        .collect();
+    files.sort();
+    assert!(
+        !files.is_empty(),
+        "no named query YAML files found in {NAMED_QUERIES_DIR}"
+    );
+
+    files
+        .iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(path).expect("read named query file");
+            let named: NamedQuery = serde_yaml::from_str(&text)
+                .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+            let mut query = named.query;
+            render_bindings(&mut query);
+            SmokeCase {
+                key: format!("named_query::{}", named.name),
+                query: serde_json::to_string(&query).expect("serialize named query"),
+                expects_error: false,
+            }
+        })
+        .collect()
+}
+
+fn render_bindings(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.contains_key("$binding") {
+                *value = serde_json::Value::from(1);
+                return;
+            }
+            for nested in map.values_mut() {
+                render_bindings(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                render_bindings(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn load_doc_queries() -> (Vec<SmokeCase>, Vec<String>) {
@@ -434,10 +490,13 @@ async fn corpus_smoke() {
 
     let corpus = load_corpus();
     let corpus_total = corpus.len();
+    let named_queries = load_named_queries();
+    let named_total = named_queries.len();
     let (doc_queries, mut failures) = load_doc_queries();
     let doc_total = doc_queries.len();
-    let total = corpus_total + doc_total;
+    let total = corpus_total + named_total + doc_total;
     let mut smoke_cases = corpus;
+    smoke_cases.extend(named_queries);
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
@@ -471,6 +530,6 @@ async fn corpus_smoke() {
         failures.join("\n  ")
     );
     eprintln!(
-        "corpus_smoke: {corpus_total} corpus queries and {doc_total} docs queries ran clean through the full pipeline"
+        "corpus_smoke: {corpus_total} corpus queries, {named_total} named queries, and {doc_total} docs queries ran clean through the full pipeline"
     );
 }
