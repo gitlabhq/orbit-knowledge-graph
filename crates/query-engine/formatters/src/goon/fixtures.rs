@@ -113,10 +113,11 @@ pub fn node_group_cell(entity_type: &str, id: i64, props: &[(&str, Value)]) -> V
     Value::Object(obj)
 }
 
-pub fn pagination(has_more: bool, total_rows: usize) -> PaginationResponse {
+pub fn pagination(has_more: bool) -> PaginationResponse {
     PaginationResponse {
         has_more,
-        total_rows,
+        truncated: has_more,
+        next_cursor: None,
     }
 }
 

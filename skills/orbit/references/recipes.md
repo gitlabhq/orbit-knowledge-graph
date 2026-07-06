@@ -415,7 +415,7 @@ structured `PropertyFilter`:
 
 ## Pagination
 
-Add a `cursor`. `offset + page_size` must not exceed `limit`. `page_size` max 100.
+Add a `cursor` with a `page_size` (max 1000). The first page needs no token.
 
 ```json orbit-query
 {
@@ -426,13 +426,15 @@ Add a `cursor`. `offset + page_size` must not exceed `limit`. `page_size` max 10
       "entity": "Project",
       "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
     },
-    "limit": 200,
-    "cursor": {"offset": 0, "page_size": 50}
+    "cursor": {"page_size": 50}
   }
 }
 ```
 
-Increment `offset` by `page_size` for subsequent pages.
+Pass `pagination.next_cursor` from each response as `cursor.after` on the next
+request until `next_cursor` is absent. The token is bound to the exact query
+that issued it. Every response carries `pagination.truncated`; when true, the
+result window is incomplete and any aggregate computed over it is too.
 
 ## More examples
 

@@ -20,8 +20,8 @@ use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::plan::QueryPlan;
 use crate::passes::{
-    check, codegen, enforce, hydrate, lower, normalize, partition, plan, restrict, security,
-    settings, validate,
+    check, codegen, cursor, enforce, hydrate, lower, normalize, partition, plan, restrict,
+    security, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -78,6 +78,9 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [ontology, security_ctx]
             mutates: [node]
         }
+        cursor {
+            mutates: [input, node]
+        }
         check {
             reads_env: [security_ctx]
             reads_state: [node]
@@ -101,7 +104,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse {
             env: [ontology, security_ctx]
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, check, hydrate_plan, settings, codegen]
+            phases: [validate, normalize, restrict, plan, lower, enforce, security, partition, cursor, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
@@ -122,7 +125,14 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
     let v = validate::Validator::new(ontology);
     let value = v.check_json(&json)?;
     v.check_ontology(&value)?;
+    let query_hash = cursor::canonical_hash(&value);
     let mut input: Input = serde_json::from_value(value)?;
+    input.compiler.query_hash = query_hash;
+    if let Some(c) = &mut input.cursor
+        && let Some(after) = &c.after
+    {
+        c.seek = Some(cursor::decode(after, query_hash)?);
+    }
     v.check_references(&input)?;
     v.annotate_filter_types(&mut input);
     ctx.set_input(input);
@@ -201,6 +211,15 @@ fn partition(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
+fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let mut input = require(ctx.take_input(), "input")?;
+    let mut node = require(ctx.take_node(), "node")?;
+    cursor::apply(&mut node, &mut input)?;
+    ctx.set_input(input);
+    ctx.set_node(node);
+    Ok(())
+}
+
 fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     check::check_ast(&node, ctx.security_ctx())
@@ -216,8 +235,7 @@ fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().clone(), "input")?;
     let query_type: &str = input.query_type.into();
-    let has_cursor = input.cursor.is_some();
-    let mut config = settings::resolve(query_type, has_cursor);
+    let mut config = settings::resolve(query_type);
 
     let node = require(ctx.node().clone(), "node")?;
     if let Node::Query(q) = &node

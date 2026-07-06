@@ -221,14 +221,10 @@ async fn run_pipeline_with_security(
         .expect("pipeline should succeed");
 
     let mut query_result = hydration_output.query_result;
-    let pagination = compiled.input.cursor.map(|cursor| {
-        let total_rows = query_result.authorized_count();
-        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-        query_engine::shared::PaginationMeta {
-            has_more,
-            total_rows,
-        }
-    });
+    let pagination = Some(query_engine::shared::paginate(
+        &mut query_result,
+        &compiled.input,
+    ));
 
     let pipeline_output = query_engine::shared::PipelineOutput {
         row_count: query_result.authorized_count(),
@@ -2209,29 +2205,28 @@ async fn pagination_present_in_response(ctx: &TestContext) {
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-            "limit": 100,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
     )
     .await;
 
-    assert!(
-        value.get("pagination").is_some(),
-        "response should include pagination when cursor is present"
-    );
     let pagination = &value["pagination"];
     assert_eq!(
         pagination["has_more"], true,
         "5 users, page_size=2 → has_more"
     );
-    assert_eq!(pagination["total_rows"], 5, "5 authorized users total");
+    assert_eq!(pagination["truncated"], true);
+    assert!(
+        pagination["next_cursor"].is_string(),
+        "mid-stream page must carry next_cursor"
+    );
 
     let nodes = value["nodes"].as_array().unwrap();
-    assert_eq!(nodes.len(), 2, "cursor should slice to 2 nodes");
+    assert_eq!(nodes.len(), 2, "page_size caps the page at 2 nodes");
 }
 
-async fn pagination_absent_without_cursor(ctx: &TestContext) {
+async fn pagination_present_without_cursor(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
@@ -2243,20 +2238,22 @@ async fn pagination_absent_without_cursor(ctx: &TestContext) {
     )
     .await;
 
-    assert!(
-        value.get("pagination").is_none(),
-        "response should not include pagination when no cursor"
+    let pagination = &value["pagination"];
+    assert_eq!(
+        pagination["has_more"], false,
+        "5 users fit within limit 10 → complete"
     );
+    assert_eq!(pagination["truncated"], false);
+    assert!(pagination.get("next_cursor").is_none());
 }
 
-async fn pagination_last_page_has_more_false(ctx: &TestContext) {
+async fn pagination_truncates_without_cursor(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "limit": 100,
-            "cursor": {"offset": 4, "page_size": 10}
+            "limit": 3
         }"#,
         &allow_all(),
     )
@@ -2264,13 +2261,43 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
 
     let pagination = &value["pagination"];
     assert_eq!(
-        pagination["has_more"], false,
-        "offset=4, 5 users → last page"
+        pagination["truncated"], true,
+        "5 users, limit 3 → the response must confess truncation"
     );
-    assert_eq!(pagination["total_rows"], 5);
+    assert_eq!(pagination["has_more"], true);
+    assert_eq!(value["nodes"].as_array().unwrap().len(), 3);
+}
 
-    let nodes = value["nodes"].as_array().unwrap();
-    assert_eq!(nodes.len(), 1, "only 1 user left on last page");
+async fn pagination_last_page_has_more_false(ctx: &TestContext) {
+    let json = r#"{
+        "query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "cursor": {"page_size": 4}
+    }"#;
+
+    let page1 = run_pipeline(ctx, json, &allow_all()).await;
+    assert_eq!(page1["pagination"]["has_more"], true);
+    let after = page1["pagination"]["next_cursor"]
+        .as_str()
+        .expect("first of two pages has a token")
+        .to_string();
+
+    let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
+    v["cursor"]["after"] = serde_json::Value::String(after);
+    let page2 = run_pipeline(ctx, &v.to_string(), &allow_all()).await;
+
+    let pagination = &page2["pagination"];
+    assert_eq!(
+        pagination["has_more"], false,
+        "5 users, second page of 4 is last"
+    );
+    assert!(pagination.get("next_cursor").is_none());
+    assert_eq!(
+        page2["nodes"].as_array().unwrap().len(),
+        1,
+        "only 1 user left on last page"
+    );
 }
 
 async fn pagination_with_redaction(ctx: &TestContext) {
@@ -2283,30 +2310,29 @@ async fn pagination_with_redaction(ctx: &TestContext) {
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-            "limit": 100,
-            "cursor": {"offset": 0, "page_size": 2}
+            "cursor": {"page_size": 2}
         }"#,
         &svc,
     )
     .await;
 
     let pagination = &value["pagination"];
-    assert_eq!(
-        pagination["total_rows"], 3,
-        "3 authorized users after redaction"
-    );
-    assert_eq!(
-        pagination["has_more"], true,
-        "3 authorized, page_size=2 → has_more"
+    assert_eq!(pagination["has_more"], true);
+    assert!(
+        pagination["next_cursor"].is_string(),
+        "redaction must not stall pagination"
     );
 
     let nodes = value["nodes"].as_array().unwrap();
-    assert_eq!(nodes.len(), 2);
     let ids: Vec<i64> = nodes
         .iter()
         .filter_map(|n| n["id"].as_str().and_then(|s| s.parse().ok()))
         .collect();
-    assert_eq!(ids, vec![1, 3], "first page of authorized users");
+    assert_eq!(
+        ids,
+        vec![1],
+        "short page instead of silently pulling user 3 forward"
+    );
 }
 
 // When the query omits `alias`, the column `name` in the response MUST equal
@@ -2507,7 +2533,8 @@ async fn graph_formatter_e2e() {
         sql_injection_string_preserved,
         empty_result_all_fields_present,
         pagination_present_in_response,
-        pagination_absent_without_cursor,
+        pagination_present_without_cursor,
+        pagination_truncates_without_cursor,
         pagination_last_page_has_more_false,
         pagination_with_redaction,
     );

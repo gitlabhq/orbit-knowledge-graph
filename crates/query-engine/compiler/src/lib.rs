@@ -707,8 +707,7 @@ mod tests {
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "cursor": {"offset": 0, "page_size": 10},
-            "limit": 10
+            "cursor": {"page_size": 10}
         }"#;
 
         let sql = compile_sql(query);
@@ -800,8 +799,7 @@ mod tests {
             "query_type": "neighbors",
             "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]},
             "neighbors": {"node": "mr", "direction": "both"},
-            "limit": 100,
-            "cursor": {"offset": 0, "page_size": 20}
+            "cursor": {"page_size": 20}
         }"#;
 
         let sql = compile_sql(query);

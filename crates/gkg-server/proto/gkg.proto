@@ -109,7 +109,7 @@ message ExecuteQueryResult {
 message QueryMetadata {
   string query_type = 1;              // e.g. "traversal", "aggregation", "search"
   repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s) for debugging
-  int32 row_count = 3;                // rows returned after redaction (and cursor slicing if applicable)
+  int32 row_count = 3;                // authorized rows in the returned page window
   string format_version = 4;          // semver string, e.g. "1.0.0"; empty for stub formatters
   FormatName format_name = 5;
 }
