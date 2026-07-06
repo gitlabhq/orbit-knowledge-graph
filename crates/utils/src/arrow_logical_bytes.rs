@@ -1,8 +1,12 @@
-use arrow::array::{
-    Array, ByteView, GenericListArray, GenericStringArray, OffsetSizeTrait, StringArray,
-    StringViewArray,
+use arrow::array::types::{
+    BinaryType, BinaryViewType, ByteArrayType, ByteViewType, LargeBinaryType, LargeUtf8Type,
+    StringViewType, Utf8Type,
 };
-use arrow::datatypes::DataType;
+use arrow::array::{
+    Array, ByteView, GenericByteArray, GenericByteViewArray, GenericListArray, OffsetSizeTrait,
+    StringArray,
+};
+use arrow::datatypes::{ArrowNativeType, DataType};
 use arrow::downcast_dictionary_array;
 use arrow::record_batch::RecordBatch;
 
@@ -19,16 +23,16 @@ pub struct UncountedType {
 
 /// Deterministic, split-invariant count of the customer-data bytes in a [`RecordBatch`], excluding serialization overhead; unknown Arrow types return [`UncountedType`] rather than counting as 0.
 ///
-/// | Arrow logical type                                 | bytes per non-null value    |
+/// | Arrow logical type                                  | bytes per non-null value     |
 /// |-----------------------------------------------------|------------------------------|
-/// | `Int64`, `UInt64`, `Timestamp` (any unit/tz)         | 8                            |
-/// | `Int32`, `UInt32`, `Date32`                          | 4                            |
+/// | fixed-width primitive (ints, floats, dates, times,  | its width in bytes           |
+/// | timestamps, durations, intervals, decimals)         |                              |
 /// | `Boolean`                                            | 1                            |
-/// | `Utf8`, `LargeUtf8`, `Utf8View`                      | UTF-8 byte length            |
-/// | `Dictionary(<int key>, Utf8)`                        | UTF-8 length of decoded value|
+/// | `Utf8`/`LargeUtf8`/`Utf8View`, `Binary` family       | byte length                  |
+/// | `Dictionary(<int key>, Utf8)`                        | byte length of decoded value |
 /// | `List`/`LargeList` of a counted type                 | sum of element counts        |
 /// | NULL (any type, incl. an all-null `Null` column)     | 0                            |
-/// | anything else                                        | [`UncountedType`] error      |
+/// | anything else (Struct, Map, Union, …)                | [`UncountedType`] error      |
 pub fn logical_byte_size(batch: &RecordBatch) -> Result<u64, UncountedType> {
     let schema = batch.schema();
     let mut total = 0u64;
@@ -39,18 +43,18 @@ pub fn logical_byte_size(batch: &RecordBatch) -> Result<u64, UncountedType> {
 }
 
 pub fn is_counted(data_type: &DataType) -> bool {
+    if data_type.primitive_width().is_some() {
+        return true;
+    }
     match data_type {
         DataType::Null
-        | DataType::Int64
-        | DataType::UInt64
-        | DataType::Timestamp(_, _)
-        | DataType::Int32
-        | DataType::UInt32
-        | DataType::Date32
         | DataType::Boolean
         | DataType::Utf8
         | DataType::LargeUtf8
-        | DataType::Utf8View => true,
+        | DataType::Utf8View
+        | DataType::Binary
+        | DataType::LargeBinary
+        | DataType::BinaryView => true,
         DataType::Dictionary(_, value_type) => value_type.as_ref() == &DataType::Utf8,
         DataType::List(field) | DataType::LargeList(field) => is_counted(field.data_type()),
         _ => false,
@@ -62,16 +66,18 @@ fn value_byte_count(
     data_type: &DataType,
     array: &dyn Array,
 ) -> Result<u64, UncountedType> {
+    if let Some(width) = data_type.primitive_width() {
+        return Ok(non_null_count(array) * width as u64);
+    }
     match data_type {
         DataType::Null => Ok(0),
-        DataType::Int64 | DataType::UInt64 | DataType::Timestamp(_, _) => {
-            Ok(non_null_count(array) * 8)
-        }
-        DataType::Int32 | DataType::UInt32 | DataType::Date32 => Ok(non_null_count(array) * 4),
         DataType::Boolean => Ok(non_null_count(array)),
-        DataType::Utf8 => Ok(utf8_payload_bytes::<i32>(array)),
-        DataType::LargeUtf8 => Ok(utf8_payload_bytes::<i64>(array)),
-        DataType::Utf8View => Ok(utf8_view_payload_bytes(array)),
+        DataType::Utf8 => Ok(byte_offsets_payload::<Utf8Type>(array)),
+        DataType::LargeUtf8 => Ok(byte_offsets_payload::<LargeUtf8Type>(array)),
+        DataType::Binary => Ok(byte_offsets_payload::<BinaryType>(array)),
+        DataType::LargeBinary => Ok(byte_offsets_payload::<LargeBinaryType>(array)),
+        DataType::Utf8View => Ok(byte_view_payload::<StringViewType>(array)),
+        DataType::BinaryView => Ok(byte_view_payload::<BinaryViewType>(array)),
         DataType::Dictionary(_, value_type) if value_type.as_ref() == &DataType::Utf8 => {
             dictionary_payload_bytes(column, array)
         }
@@ -88,22 +94,22 @@ fn non_null_count(array: &dyn Array) -> u64 {
     (array.len() - array.null_count()) as u64
 }
 
-fn utf8_payload_bytes<O: OffsetSizeTrait>(array: &dyn Array) -> u64 {
+fn byte_offsets_payload<T: ByteArrayType>(array: &dyn Array) -> u64 {
     let arr = array
         .as_any()
-        .downcast_ref::<GenericStringArray<O>>()
-        .expect("DataType::Utf8/LargeUtf8 guarantees a GenericStringArray");
+        .downcast_ref::<GenericByteArray<T>>()
+        .expect("a string/binary DataType guarantees a GenericByteArray");
     let offsets = arr.offsets();
     let start = offsets.first().expect("OffsetBuffer is never empty");
     let end = offsets.last().expect("OffsetBuffer is never empty");
     (end.as_usize() - start.as_usize()) as u64
 }
 
-fn utf8_view_payload_bytes(array: &dyn Array) -> u64 {
+fn byte_view_payload<T: ByteViewType>(array: &dyn Array) -> u64 {
     let arr = array
         .as_any()
-        .downcast_ref::<StringViewArray>()
-        .expect("DataType::Utf8View guarantees a StringViewArray");
+        .downcast_ref::<GenericByteViewArray<T>>()
+        .expect("a view DataType guarantees a GenericByteViewArray");
     let views = arr.views();
     (0..arr.len())
         .filter(|&i| !arr.is_null(i))
@@ -160,10 +166,11 @@ mod tests {
     use super::*;
     use crate::arrow::{BatchBuilder, ColumnSpec, ColumnType};
     use arrow::array::{
-        ArrayRef, Date32Array, Float64Array, Int32Array, Int64Array, LargeStringArray, ListBuilder,
-        NullArray, StringBuilder, StringViewArray, UInt32Array, UInt64Array,
+        ArrayRef, BinaryArray, BinaryViewArray, Date32Array, Float64Array, Int16Array, Int32Array,
+        Int64Array, LargeStringArray, ListBuilder, NullArray, StringBuilder, StringViewArray,
+        StructArray, UInt32Array, UInt64Array,
     };
-    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::datatypes::{DataType, Field, Fields, Schema};
     use std::sync::Arc;
 
     fn spec(name: &str, col_type: ColumnType, nullable: bool) -> ColumnSpec {
@@ -248,23 +255,41 @@ mod tests {
     }
 
     /// Counted types [`BatchBuilder`] has no [`ColumnSpec`] for; built directly to keep the
-    /// width-4, i64-offset, and view code paths under the split-invariance check.
+    /// primitive-width, i64-offset, binary, and view code paths under the split-invariance check.
     fn unbuildable_types_fixture() -> RecordBatch {
         let fields = vec![
+            Field::new("int16", DataType::Int16, false),
             Field::new("int32", DataType::Int32, false),
             Field::new("uint32", DataType::UInt32, false),
             Field::new("uint64", DataType::UInt64, false),
+            Field::new("float64", DataType::Float64, false),
             Field::new("date32", DataType::Date32, false),
             Field::new("large_str", DataType::LargeUtf8, false),
             Field::new("str_view", DataType::Utf8View, false),
+            Field::new("binary", DataType::Binary, false),
+            Field::new("binary_view", DataType::BinaryView, false),
         ];
         let columns: Vec<ArrayRef> = vec![
+            Arc::new(Int16Array::from(vec![1, 2, 3, 4])),
             Arc::new(Int32Array::from(vec![1, 2, 3, 4])),
             Arc::new(UInt32Array::from(vec![1, 2, 3, 4])),
             Arc::new(UInt64Array::from(vec![1, 2, 3, 4])),
+            Arc::new(Float64Array::from(vec![1.0, 2.0, 3.0, 4.0])),
             Arc::new(Date32Array::from(vec![1, 2, 3, 4])),
             Arc::new(LargeStringArray::from(vec!["e", "ff", "", "hhhh"])),
             Arc::new(StringViewArray::from(vec!["j", "kk", "", "mmmm"])),
+            Arc::new(BinaryArray::from_iter_values([
+                b"e".as_ref(),
+                b"ff",
+                b"",
+                b"hhhh",
+            ])),
+            Arc::new(BinaryViewArray::from_iter_values([
+                b"j".as_ref(),
+                b"kk",
+                b"",
+                b"mmmm",
+            ])),
         ];
         RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap()
     }
@@ -338,16 +363,52 @@ mod tests {
     }
 
     #[test]
-    fn unknown_arrow_type_errors_with_column_name_and_type() {
-        let batch = single_col_batch(
-            "score",
+    fn fixed_width_primitives_count_their_declared_width() {
+        let floats = single_col_batch(
+            "f",
             DataType::Float64,
-            Arc::new(Float64Array::from(vec![1.0, 2.0])),
+            Arc::new(Float64Array::from(vec![Some(1.0), None, Some(3.0)])),
         );
+        assert_eq!(logical_byte_size(&floats).unwrap(), 2 * 8);
+        assert!(is_counted(&DataType::Float64));
+
+        let shorts = single_col_batch(
+            "i",
+            DataType::Int16,
+            Arc::new(Int16Array::from(vec![1i16, 2, 3])),
+        );
+        assert_eq!(logical_byte_size(&shorts).unwrap(), 3 * 2);
+        assert!(is_counted(&DataType::Int16));
+    }
+
+    #[test]
+    fn binary_columns_count_byte_length() {
+        let batch = single_col_batch(
+            "b",
+            DataType::Binary,
+            Arc::new(BinaryArray::from_opt_vec(vec![
+                Some(b"ab"),
+                None,
+                Some(b"cccc"),
+            ])),
+        );
+        assert_eq!(logical_byte_size(&batch).unwrap(), 2 + 4);
+    }
+
+    #[test]
+    fn unknown_arrow_type_errors_with_column_name_and_type() {
+        let struct_fields = Fields::from(vec![Field::new("x", DataType::Int64, false)]);
+        let array = StructArray::new(
+            struct_fields.clone(),
+            vec![Arc::new(Int64Array::from(vec![1i64, 2]))],
+            None,
+        );
+        let data_type = DataType::Struct(struct_fields);
+        let batch = single_col_batch("nested", data_type.clone(), Arc::new(array));
         let err = logical_byte_size(&batch).unwrap_err();
-        assert_eq!(err.column, "score");
-        assert_eq!(err.data_type, DataType::Float64);
-        assert!(!is_counted(&DataType::Float64));
+        assert_eq!(err.column, "nested");
+        assert_eq!(err.data_type, data_type);
+        assert!(!is_counted(&data_type));
     }
 
     #[test]
