@@ -1,0 +1,16 @@
+name: mrs_fixing_vulnerabilities
+description: Merge requests that fix open vulnerabilities.
+query:
+  query_type: traversal
+  nodes:
+    - id: mr
+      entity: MergeRequest
+      columns: [id, title, state]
+    - id: vuln
+      entity: Vulnerability
+      filters:
+        state: detected
+      columns: [id, title, severity]
+  relationships:
+    - { type: FIXES, from: mr, to: vuln }
+  limit: 100

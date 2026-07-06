@@ -30,6 +30,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - `AGENTS.md` and `CLAUDE.md` must be identical (`agent-file-sync-check`)
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
+- Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `gkg-server`'s build script, so drift fails every build
 - `cargo fmt` (`fmt-check`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)

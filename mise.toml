@@ -357,6 +357,10 @@ description = "Verify pinned Iglu schemas exist locally and match live Iglu"
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
 
+[tasks."named-queries:validate"]
+run = "find config/named_queries -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/named_query.schema.json"
+description = "Validate named query YAML files against JSON schema"
+
 [tasks."scenarios:validate"]
 run = "find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json"
 description = "Validate indexer test scenario YAML files against JSON schema"

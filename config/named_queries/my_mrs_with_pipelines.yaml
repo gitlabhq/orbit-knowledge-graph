@@ -1,0 +1,21 @@
+name: my_mrs_with_pipelines
+description: Merge requests authored by the current user and their head pipelines.
+bindings: [current_user_id]
+query:
+  query_type: traversal
+  nodes:
+    - id: me
+      entity: User
+      node_ids:
+        - { $binding: current_user_id }
+      columns: [id, username]
+    - id: mr
+      entity: MergeRequest
+      columns: [id, title, state]
+    - id: pipeline
+      entity: Pipeline
+      columns: [id, status, duration]
+  relationships:
+    - { type: AUTHORED, from: me, to: mr }
+    - { type: HAS_HEAD_PIPELINE, from: mr, to: pipeline }
+  limit: 100

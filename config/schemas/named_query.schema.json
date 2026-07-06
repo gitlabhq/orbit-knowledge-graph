@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NamedQuery",
+  "description": "A server-defined graph query in config/named_queries/. The query DSL may reference server-side bindings via {$binding: <name>} placeholders, rendered server-side and compiled by the query compiler. Each file's name field must match its file stem.",
+  "type": "object",
+  "required": ["name", "description", "query"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Stable identifier clients invoke. Must match the YAML file stem."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "One-sentence, introspection-facing summary of what the query returns."
+    },
+    "bindings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["current_user_id"]
+      },
+      "description": "Server-side values substituted at render time via {$binding: <name>}. Never client-supplied."
+    },
+    "query": {
+      "type": "object",
+      "required": ["query_type"],
+      "description": "Graph query DSL object. {$binding: <name>} placeholders are replaced whole-value at render time."
+    }
+  }
+}

@@ -1,0 +1,22 @@
+name: top_mr_authors
+description: Users ranked by number of merged merge requests they authored.
+query:
+  query_type: aggregation
+  nodes:
+    - id: u
+      entity: User
+      columns: [id, username]
+    - id: mr
+      entity: MergeRequest
+      filters:
+        state: merged
+  relationships:
+    - { type: AUTHORED, from: u, to: mr }
+  group_by:
+    - { kind: node, node: u }
+  aggregations:
+    - { function: count, target: mr, alias: mr_count }
+  aggregation_sort:
+    column: mr_count
+    direction: DESC
+  limit: 100

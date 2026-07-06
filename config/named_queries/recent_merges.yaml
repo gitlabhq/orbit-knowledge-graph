@@ -1,0 +1,16 @@
+name: recent_merges
+description: Recently merged merge requests and the users who merged them.
+query:
+  query_type: traversal
+  nodes:
+    - id: u
+      entity: User
+      columns: [id, username]
+    - id: mr
+      entity: MergeRequest
+      filters:
+        state: merged
+      columns: [id, title, merged_at]
+  relationships:
+    - { type: MERGED, from: u, to: mr }
+  limit: 100

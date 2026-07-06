@@ -6,6 +6,7 @@ CONFIG_DIR = { value = "config", relative = true }
 FIXTURES_DIR = { value = "fixtures", relative = true }
 SCHEMA_DIR = { value = "config/schemas", relative = true }
 ONTOLOGY_DIR = { value = "config/ontology", relative = true }
+NAMED_QUERIES_DIR = { value = "config/named_queries", relative = true }
 SEEDS_DIR = { value = "config/seeds", relative = true }
 E2E_DIR = { value = "e2e", relative = true }
 HELM_DIR = { value = "helm", relative = true }

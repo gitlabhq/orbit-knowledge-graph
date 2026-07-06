@@ -108,6 +108,10 @@ _Avoid_: data lake, raw data tables, lake
 The JSON-based query language for the property graph. Supports four query types: traversal, aggregation, path_finding, and neighbors. Compiled to parameterized ClickHouse SQL. Versioned by `QUERY_DSL_VERSION`.
 _Avoid_: intermediate query language, intermediary LLM query language, JSON query language
 
+**Named Query**:
+A graph query defined in YAML under `config/named_queries/` and invoked by name, instead of the client authoring the **Query DSL** string. Compiled against the ontology at `gkg-server` build time so drift fails the build.
+_Avoid_: preset query, query template
+
 **Hop**:
 A single **Relationship** traversal in the graph. Multi-hop queries traverse multiple relationships in sequence. Hard-capped at 3 hops for security and performance.
 _Avoid_: depth (ambiguous with tree depth)
