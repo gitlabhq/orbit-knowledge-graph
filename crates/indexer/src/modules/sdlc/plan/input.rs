@@ -503,6 +503,18 @@ fn resolve_standalone_edge(
             "id".to_string()
         };
 
+        // Sort-key prune via the base scan's param; the IN (_batch) bound already guarantees correctness.
+        let tp_prune = if namespaced && etl.scope() == EtlScope::Namespaced {
+            let qualified_tp = if let Some(tbl) = etl.table_alias() {
+                format!("{tbl}.{TRAVERSAL_PATH_COLUMN}")
+            } else {
+                TRAVERSAL_PATH_COLUMN.to_string()
+            };
+            format!(" AND startsWith({qualified_tp}, {{traversal_path:String}})")
+        } else {
+            String::new()
+        };
+
         let alias = format!("_e{enrich_idx}");
         enrich_idx += 1;
 
@@ -519,7 +531,7 @@ fn resolve_standalone_edge(
         cte_defs.push(format!(
             "{alias} AS (SELECT {sub_cols} FROM {node_table} \
              WHERE {deleted_col} = false \
-             AND {qualified_id} IN (SELECT DISTINCT {fk_col} FROM _batch) \
+             AND {qualified_id} IN (SELECT DISTINCT {fk_col} FROM _batch){tp_prune} \
              GROUP BY {qualified_id})"
         ));
 

@@ -806,10 +806,16 @@ mod tests {
 
         assert!(sql.contains("WITH _batch AS ("), "sql: {sql}");
         assert!(sql.contains("_e0 AS ("), "sql: {sql}");
+        assert!(sql.contains("_e1 AS ("), "sql: {sql}");
         assert!(sql.contains("FROM _batch"), "sql: {sql}");
         assert!(sql.contains("LEFT JOIN _e0"), "sql: {sql}");
+        assert!(sql.contains("LEFT JOIN _e1"), "sql: {sql}");
         assert!(sql.contains("argMax("), "sql: {sql}");
         assert!(sql.contains("GROUP BY id"), "sql: {sql}");
+        assert!(
+            sql.contains("id IN (SELECT DISTINCT user_id FROM _batch)"),
+            "sql: {sql}"
+        );
         assert!(
             sql.contains("id IN (SELECT DISTINCT issue_id FROM _batch)"),
             "sql: {sql}"
@@ -818,16 +824,46 @@ mod tests {
         let e0_body = sql
             .split("_e0 AS (")
             .nth(1)
-            .and_then(|s| s.split(')').next())
+            .and_then(|s| s.split("), _e1 AS (").next())
             .unwrap_or("");
         assert!(
             !e0_body.contains("traversal_path"),
-            "enrichment CTE body should not filter by traversal_path: {e0_body}"
+            "User is a global node with no traversal_path column: {e0_body}"
+        );
+        assert!(
+            sql.contains("id IN (SELECT DISTINCT issue_id FROM _batch) AND startsWith(traversal_path, {traversal_path:String}) GROUP BY id"),
+            "WorkItem is namespaced, enrichment must prune by traversal_path: {sql}"
         );
 
         assert!(
             plan.transformations()[0].sql.contains("target_tags"),
             "transform should produce target_tags"
+        );
+    }
+
+    #[test]
+    fn triggers_pipeline_enrichment_prunes_both_endpoints() {
+        let ontology = test_ontology();
+        let plans = build_plans(&ontology, 1_000_000);
+
+        let plan = plans
+            .namespaced
+            .iter()
+            .find(|p| {
+                let sql = render_namespaced_extract(p, "1/2/");
+                sql.contains("siphon_ci_sources_pipelines") && sql.contains("source_job_id")
+            })
+            .expect("TRIGGERS_PIPELINE plan");
+
+        let sql = render_namespaced_extract(plan, "1/2/");
+
+        assert!(
+            sql.contains("id IN (SELECT DISTINCT source_job_id FROM _batch) AND startsWith(traversal_path, {traversal_path:String})"),
+            "Job endpoint is namespaced, enrichment must prune by traversal_path: {sql}"
+        );
+        assert!(
+            sql.contains("id IN (SELECT DISTINCT pipeline_id FROM _batch) AND startsWith(traversal_path, {traversal_path:String})"),
+            "Pipeline endpoint is namespaced, enrichment must prune by traversal_path: {sql}"
         );
     }
 
