@@ -12,6 +12,9 @@ use indexer::nats::NatsBroker;
 use indexer::nats::versioning::{
     NATS_VERSIONER, NatsVersioner, cleanup_schema_state, gc_idle_release_streams,
 };
+use indexer::orchestrator::Trigger;
+use indexer::orchestrator::max_deliveries::MaxDeliveriesReconciler;
+use indexer::topic::INDEXER_STREAM;
 use indexer::types::{Envelope, Event, Subscription};
 use nats_client::{KvBucketConfig, KvPutOptions};
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,7 @@ use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use tokio_util::sync::CancellationToken;
 
 const TEST_STREAM: &str = "test_stream";
 const TEST_SUBJECT: &str = "test.events";
@@ -208,6 +212,81 @@ async fn jetstream_client(url: &str) -> async_nats::jetstream::Context {
         .await
         .expect("failed to connect to NATS");
     async_nats::jetstream::new(client)
+}
+
+async fn versioned_stream(url: &str, stream_name: &str) -> async_nats::jetstream::stream::Stream {
+    jetstream_client(url)
+        .await
+        .get_stream(&NATS_VERSIONER.stream(stream_name))
+        .await
+        .expect("stream should exist")
+}
+
+fn simple_envelope(id: &str) -> Envelope {
+    let event = TestEvent {
+        id: id.to_string(),
+        value: 1,
+    };
+    Envelope::new(&event).expect("failed to create envelope")
+}
+
+async fn expect_delivery(
+    subscription: &mut (
+             impl StreamExt<Item = Result<indexer::nats::NatsMessage, indexer::nats::NatsError>> + Unpin
+         ),
+    timeout: Duration,
+) -> indexer::nats::NatsMessage {
+    tokio::time::timeout(timeout, subscription.next())
+        .await
+        .expect("timed out waiting for delivery")
+        .expect("subscription ended")
+        .expect("failed to receive message")
+}
+
+async fn assert_no_delivery(
+    subscription: &mut (
+             impl StreamExt<Item = Result<indexer::nats::NatsMessage, indexer::nats::NatsError>> + Unpin
+         ),
+    within: Duration,
+    context: &str,
+) {
+    let result = tokio::time::timeout(within, subscription.next()).await;
+    assert!(result.is_err(), "{context}");
+}
+
+/// Publishes one message, drives redelivery through every `max_deliver` attempt, and confirms
+/// NATS goes silent afterward without ever ack'ing, nack'ing, or term'ing it.
+async fn publish_and_exhaust_redelivery(
+    broker: &NatsBroker,
+    subscription: &Subscription,
+    id: &str,
+    ack_wait: Duration,
+    max_deliver: u32,
+) -> indexer::nats::NatsSubscription {
+    broker
+        .publish(subscription, &simple_envelope(id))
+        .await
+        .expect("initial dispatch publish failed");
+
+    let mut messages = broker
+        .subscribe(subscription, Arc::new(EngineMetrics::new()))
+        .await
+        .expect("failed to subscribe");
+
+    for expected_attempt in 1..=max_deliver {
+        let delivered = expect_delivery(&mut messages, ack_wait * 3).await;
+        assert_eq!(delivered.envelope.attempt, expected_attempt);
+        drop(delivered);
+    }
+
+    assert_no_delivery(
+        &mut messages,
+        ack_wait * 3,
+        "message must never be redelivered again once max_deliver is exhausted",
+    )
+    .await;
+
+    messages
 }
 
 #[tokio::test]
@@ -740,4 +819,156 @@ async fn cleanup_is_idempotent() {
     cleanup_schema_state(&client, 888)
         .await
         .expect("cleanup_schema_state failed for non-existent schema version");
+}
+
+/// A message that's never ack'd/nack'd/term'd across every `max_deliver` attempt leaves NATS
+/// silent afterward: no error, no dead-letter, nothing. The message stays in its stream slot
+/// forever, blocking all future dispatch to that subject.
+#[tokio::test]
+async fn exhausted_message_blocks_redispatch_until_manually_deleted() {
+    let (_container, url) = start_nats_container().await;
+
+    let ack_wait = Duration::from_secs(2);
+    let max_deliver: u32 = 3;
+    let config = NatsConfiguration {
+        url: url.clone(),
+        ack_wait_secs: ack_wait.as_secs(),
+        max_deliver: Some(max_deliver),
+        fetch_expires_secs: 1,
+        ..Default::default()
+    };
+    let broker = connect_broker(&config).await;
+
+    let stream_name = "stuck_message_stream";
+    let subject = "stuck.namespace.indexing.requested.100.abc";
+    let subscription = Subscription::new(stream_name, subject);
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("failed to create managed stream");
+
+    let mut messages = publish_and_exhaust_redelivery(
+        &broker,
+        &subscription,
+        "namespace-100",
+        ack_wait,
+        max_deliver,
+    )
+    .await;
+
+    // The workqueue's per-subject slot is still held by the stuck message, so re-dispatch to
+    // the same subject is rejected.
+    let redispatch = broker
+        .publish(&subscription, &simple_envelope("namespace-100"))
+        .await;
+    assert!(
+        matches!(redispatch, Err(indexer::nats::NatsError::PublishDuplicate)),
+        "re-dispatch to the same subject should be rejected while the stuck message occupies its \
+         slot, got {redispatch:?}"
+    );
+
+    // Manual recovery: delete the stuck message, then republish and confirm it's picked up.
+    let versioned_subject = NATS_VERSIONER.subject(subject);
+    let stuck_stream = versioned_stream(&url, stream_name).await;
+    let stuck = stuck_stream
+        .get_last_raw_message_by_subject(&versioned_subject)
+        .await
+        .expect("stuck message should still be present in the stream");
+    stuck_stream
+        .delete_message(stuck.sequence)
+        .await
+        .expect("failed to delete stuck message");
+
+    broker
+        .publish(&subscription, &simple_envelope("namespace-100"))
+        .await
+        .expect("republish should succeed once the stuck message is removed");
+
+    let recovered = expect_delivery(&mut messages, Duration::from_secs(10)).await;
+    assert_eq!(
+        recovered.envelope.attempt, 1,
+        "republished message starts a fresh delivery count"
+    );
+    recovered
+        .ack()
+        .await
+        .expect("failed to ack recovered message");
+}
+
+/// End-to-end version of the mechanism above: `MaxDeliveriesReconciler` runs as a live
+/// `Trigger` and clears the stuck message itself via JetStream's `MAX_DELIVERIES` advisory.
+#[tokio::test]
+async fn max_deliveries_reconciler_deletes_stuck_message_and_unblocks_subject() {
+    let (_container, url) = start_nats_container().await;
+
+    let ack_wait = Duration::from_secs(1);
+    let max_deliver: u32 = 2;
+    let config = NatsConfiguration {
+        url: url.clone(),
+        ack_wait_secs: ack_wait.as_secs(),
+        max_deliver: Some(max_deliver),
+        fetch_expires_secs: 1,
+        ..Default::default()
+    };
+    let broker = connect_broker(&config).await;
+
+    let subject = "reconciler.namespace.indexing.requested.200.def";
+    let subscription = Subscription::new(INDEXER_STREAM, subject);
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("failed to create managed stream");
+
+    let advisory_client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("failed to connect advisory listener");
+    let reconciler: Box<dyn Trigger> = Box::new(MaxDeliveriesReconciler::new(advisory_client));
+    let cancel = CancellationToken::new();
+    let reconciler_cancel = cancel.clone();
+    let reconciler_handle = tokio::spawn(async move { reconciler.run(reconciler_cancel).await });
+
+    // The reconciler subscribes with no replay, so it must already be listening before
+    // exhaustion fires; the redelivery loop below spans several ack_wait cycles, well past
+    // this subscribe round-trip.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let _messages = publish_and_exhaust_redelivery(
+        &broker,
+        &subscription,
+        "namespace-200",
+        ack_wait,
+        max_deliver,
+    )
+    .await;
+
+    let versioned_subject = NATS_VERSIONER.subject(subject);
+    let stuck_stream = versioned_stream(&url, INDEXER_STREAM).await;
+    let deleted = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if stuck_stream
+                .get_last_raw_message_by_subject(&versioned_subject)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        deleted.is_ok(),
+        "reconciler should have deleted the exhausted message after observing the advisory"
+    );
+
+    broker
+        .publish(&subscription, &simple_envelope("namespace-200"))
+        .await
+        .expect("republish should succeed once the reconciler frees the subject slot");
+
+    cancel.cancel();
+    reconciler_handle
+        .await
+        .expect("reconciler task panicked")
+        .expect("reconciler run returned an error");
 }

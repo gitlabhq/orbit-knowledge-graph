@@ -68,6 +68,7 @@ use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDel
 use nats::{KvBucketConfig, NatsBroker};
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
+use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
     CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
     NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
@@ -409,7 +410,12 @@ pub async fn run_dispatcher(
         campaign.clone(),
         routes,
     );
-    let triggers: Vec<Box<dyn Trigger>> = vec![Box::new(scheduled), Box::new(siphon)];
+    let max_deliveries_reconciler = MaxDeliveriesReconciler::new(services.nats_client.clone());
+    let triggers: Vec<Box<dyn Trigger>> = vec![
+        Box::new(scheduled),
+        Box::new(siphon),
+        Box::new(max_deliveries_reconciler),
+    ];
 
     let health_abort = health_task.abort_handle();
     tokio::select! {

@@ -740,6 +740,18 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.max_deliveries.exhausted",
+      "prom_name": "gkg_indexer_max_deliveries_exhausted_total",
+      "description": "Messages deleted after JetStream exhausted max_deliver, labelled by stream and consumer.",
+      "kind": "counter",
+      "labels": [
+        "stream",
+        "consumer"
+      ],
+      "stability": "stable",
+      "domain": "indexer.nats"
+    },
+    {
       "otel_name": "gkg.indexer.namespace_deletion.table.duration",
       "prom_name": "gkg_indexer_namespace_deletion_table_duration_seconds",
       "description": "Duration of a single table's soft-delete INSERT-SELECT.",
