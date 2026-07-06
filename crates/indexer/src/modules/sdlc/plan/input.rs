@@ -503,9 +503,7 @@ fn resolve_standalone_edge(
             "id".to_string()
         };
 
-        // Reuses the base scan's `{traversal_path:String}` param to prune by
-        // the node table's leading sort-key column; the IN (_batch) bound
-        // already guarantees correctness.
+        // Sort-key prune via the base scan's param; the IN (_batch) bound already guarantees correctness.
         let tp_prune = if namespaced && etl.scope() == EtlScope::Namespaced {
             let qualified_tp = if let Some(tbl) = etl.table_alias() {
                 format!("{tbl}.{TRAVERSAL_PATH_COLUMN}")
