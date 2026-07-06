@@ -1236,7 +1236,7 @@ mod tests {
     #[test]
     fn test_response_format_helpers_return_canonical_values() {
         let schema = ToolService::build_response_format_schema();
-        assert!(schema.contains("GKG unified query response"));
+        assert!(schema.contains("Orbit unified query response"));
 
         let version = ToolService::build_response_format_version();
         assert!(

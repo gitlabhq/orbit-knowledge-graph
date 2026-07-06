@@ -454,6 +454,8 @@ Unchanged — pure passthrough from `grpc_client.list_tools`.
 
 The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code — see the authoritative definition in [`gkg.proto`](../../../crates/gkg-server/proto/gkg.proto).
 
+> Historical sketch: the shipped proto carries no PaginationInfo message; pagination metadata lives in the formatted JSON/GOON body.
+
 ```protobuf
 syntax = "proto3";
 package gkg.v1;

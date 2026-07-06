@@ -92,6 +92,11 @@ fn build_aggregation(
             OrderExpr::asc(Expr::ident(alias))
         });
     }
+    if plan.cursor.is_some() {
+        // The group-key tuple is unique per result row, so it completes the
+        // sort into a total order the keyset seek can anchor on.
+        order_by.extend(group_by.iter().map(|e| OrderExpr::asc(e.clone())));
+    }
 
     (select, group_by, order_by)
 }

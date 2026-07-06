@@ -41,9 +41,7 @@
           "to": "p"
         }
       ],
-      "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -94,9 +92,7 @@
           "to": "note"
         }
       ],
-      "limit": 30,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -117,9 +113,7 @@
         "node": "mr",
         "direction": "both"
       },
-      "limit": 100,
       "cursor": {
-        "offset": 0,
         "page_size": 20
       }
     }
@@ -143,9 +137,7 @@
           "CONTAINS"
         ]
       },
-      "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -197,9 +189,7 @@
         "column": "merged_mr_count",
         "direction": "DESC"
       },
-      "limit": 20,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -252,9 +242,7 @@
         "column": "total_pipeline_seconds",
         "direction": "DESC"
       },
-      "limit": 15,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -284,9 +272,7 @@
           "to": "g"
         }
       ],
-      "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -331,9 +317,7 @@
           "to": "pipe"
         }
       ],
-      "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -372,9 +356,7 @@
           "to": "mr"
         }
       ],
-      "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -398,9 +380,7 @@
           "ref"
         ]
       },
-      "limit": 50,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -431,9 +411,7 @@
           }
         }
       },
-      "limit": 100,
       "cursor": {
-        "offset": 0,
         "page_size": 20
       }
     }
@@ -474,9 +452,7 @@
           "to": "p"
         }
       ],
-      "limit": 100,
       "cursor": {
-        "offset": 0,
         "page_size": 20
       }
     }
@@ -516,9 +492,7 @@
           "to": "pipe"
         }
       ],
-      "limit": 500,
       "cursor": {
-        "offset": 0,
         "page_size": 50
       }
     }
@@ -573,9 +547,7 @@
           "alias": "mr_count"
         }
       ],
-      "limit": 20,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -680,9 +652,7 @@
         "column": "vulnerability_count",
         "direction": "DESC"
       },
-      "limit": 20,
       "cursor": {
-        "offset": 0,
         "page_size": 5
       }
     }
@@ -736,9 +706,7 @@
         "column": "pipeline_count",
         "direction": "DESC"
       },
-      "limit": 30,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }
@@ -804,9 +772,7 @@
         "column": "pipeline_count",
         "direction": "DESC"
       },
-      "limit": 30,
       "cursor": {
-        "offset": 0,
         "page_size": 10
       }
     }

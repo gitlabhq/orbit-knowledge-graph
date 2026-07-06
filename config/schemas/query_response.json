@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v2",
-  "title": "GKG unified query response",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v3",
+  "title": "Orbit unified query response",
   "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
   "required": ["format_version", "query_type", "nodes", "edges"],
@@ -43,7 +43,7 @@
       "items": { "$ref": "#/$defs/row" }
     },
     "pagination": {
-      "description": "Present when the query included a cursor. Tells the agent whether more pages exist and how many total authorized rows are available.",
+      "description": "Always present: whether this window is complete and how to page forward.",
       "$ref": "#/$defs/pagination"
     }
   },
@@ -195,17 +195,20 @@
     },
     "pagination": {
       "type": "object",
-      "required": ["has_more", "total_rows"],
+      "required": ["has_more", "truncated"],
       "additionalProperties": false,
       "properties": {
         "has_more": {
           "type": "boolean",
-          "description": "True if more authorized rows exist beyond the current page."
+          "description": "More matching rows exist beyond this window."
         },
-        "total_rows": {
-          "type": "integer",
-          "description": "Total authorized rows before cursor slicing.",
-          "minimum": 0
+        "truncated": {
+          "type": "boolean",
+          "description": "Response omits some matching rows; aggregates over it are incomplete."
+        },
+        "next_cursor": {
+          "type": "string",
+          "description": "Token for cursor.after; absent when exhausted or no cursor was sent."
         }
       }
     }

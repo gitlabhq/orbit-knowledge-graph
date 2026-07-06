@@ -598,7 +598,7 @@ type QueryMetadata struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	QueryType       string                 `protobuf:"bytes,1,opt,name=query_type,json=queryType,proto3" json:"query_type,omitempty"`                     // e.g. "traversal", "aggregation", "search"
 	RawQueryStrings []string               `protobuf:"bytes,2,rep,name=raw_query_strings,json=rawQueryStrings,proto3" json:"raw_query_strings,omitempty"` // compiled ClickHouse SQL(s) for debugging
-	RowCount        int32                  `protobuf:"varint,3,opt,name=row_count,json=rowCount,proto3" json:"row_count,omitempty"`                       // rows returned after redaction (and cursor slicing if applicable)
+	RowCount        int32                  `protobuf:"varint,3,opt,name=row_count,json=rowCount,proto3" json:"row_count,omitempty"`                       // authorized rows in the returned page window
 	FormatVersion   string                 `protobuf:"bytes,4,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`         // semver string, e.g. "1.0.0"; empty for stub formatters
 	FormatName      FormatName             `protobuf:"varint,5,opt,name=format_name,json=formatName,proto3,enum=gkg.v1.FormatName" json:"format_name,omitempty"`
 	unknownFields   protoimpl.UnknownFields

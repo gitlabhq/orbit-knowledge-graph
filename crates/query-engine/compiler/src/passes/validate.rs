@@ -185,7 +185,6 @@ impl<'a> Validator<'a> {
     /// Validate cross-node references that JSON Schema cannot express.
     pub fn check_references(&self, input: &Input) -> Result<()> {
         self.check_duplicate_node_ids(input)?;
-        self.check_pagination(input)?;
         self.check_relationships(input)?;
         self.check_aggregations(input)?;
         self.check_order_by(input)?;
@@ -634,18 +633,6 @@ impl<'a> Validator<'a> {
                 ));
             }
             _ => {}
-        }
-        Ok(())
-    }
-
-    fn check_pagination(&self, input: &Input) -> Result<()> {
-        if let Some(ref cursor) = input.cursor
-            && cursor.offset.saturating_add(cursor.page_size) > input.limit
-        {
-            return Err(QueryError::PaginationError(format!(
-                "cursor.offset ({}) + cursor.page_size ({}) must not exceed limit ({})",
-                cursor.offset, cursor.page_size, input.limit
-            )));
         }
         Ok(())
     }

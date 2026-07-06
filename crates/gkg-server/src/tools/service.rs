@@ -861,7 +861,7 @@ mod tests {
                 .get("schema")
                 .and_then(|s| s.get("title"))
                 .and_then(Value::as_str),
-            Some("GKG unified query response")
+            Some("Orbit unified query response")
         );
         assert_eq!(
             result.get("version").and_then(Value::as_str),

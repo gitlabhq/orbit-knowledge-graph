@@ -670,7 +670,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -684,7 +684,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -824,7 +824,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -888,7 +888,7 @@ mod tests {
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2],
                          "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}},
                 "order_by": {"node": "u", "property": "id"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
