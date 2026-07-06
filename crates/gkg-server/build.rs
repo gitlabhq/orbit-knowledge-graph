@@ -86,11 +86,24 @@ impl NamedQuery {
 
     fn rendered_for_validation(&self) -> serde_json::Value {
         let mut rendered = self.query.clone();
-        self.substitute(&mut rendered);
+        let mut used = std::collections::HashSet::new();
+        self.substitute(&mut rendered, &mut used);
+        for binding in &self.bindings {
+            assert!(
+                used.contains(binding.as_str()),
+                "named query `{}` declares binding `{binding}` but never uses it; \
+                 remove it from `bindings:`",
+                self.name
+            );
+        }
         rendered
     }
 
-    fn substitute(&self, value: &mut serde_json::Value) {
+    fn substitute(
+        &self,
+        value: &mut serde_json::Value,
+        used: &mut std::collections::HashSet<String>,
+    ) {
         match value {
             serde_json::Value::Object(map) => {
                 if let Some(binding) = map.get(BINDING_KEY) {
@@ -116,16 +129,17 @@ impl NamedQuery {
                         "named query `{}` uses undeclared binding `{binding}`; declare it under `bindings:`",
                         self.name
                     );
+                    used.insert(binding.to_string());
                     *value = serde_json::Value::from(1);
                     return;
                 }
                 for nested in map.values_mut() {
-                    self.substitute(nested);
+                    self.substitute(nested, used);
                 }
             }
             serde_json::Value::Array(items) => {
                 for item in items {
-                    self.substitute(item);
+                    self.substitute(item, used);
                 }
             }
             _ => {}
