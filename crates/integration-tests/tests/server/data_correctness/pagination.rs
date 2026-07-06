@@ -135,7 +135,18 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
         resp.skip_requirement(Requirement::NodeCount);
         resp.skip_requirement(Requirement::OrderBy);
         match next_cursor(&resp) {
-            Some(after) => query = with_after(json, &after),
+            Some(after) => {
+                let hash = query_engine::compiler::passes::cursor::canonical_hash(
+                    &serde_json::from_str(&query).unwrap(),
+                );
+                let keys = query_engine::compiler::passes::cursor::decode(&after, hash).unwrap();
+                let anchor = keys[0].as_deref().unwrap();
+                assert!(
+                    ["1", "3", "5"].contains(&anchor),
+                    "next_cursor must anchor on an authorized row, got denied id {anchor}"
+                );
+                query = with_after(json, &after);
+            }
             None => break,
         }
     }

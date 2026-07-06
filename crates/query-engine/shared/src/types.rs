@@ -90,8 +90,11 @@ pub struct PaginationMeta {
 }
 
 /// Trims the overfetched probe row and derives honest pagination metadata.
-/// The next-page token anchors on the last SCANNED row (authorized or not),
-/// so redaction shortens a page but never stalls pagination.
+///
+/// The next-page token anchors on the last AUTHORIZED row, so it never encodes
+/// the sort-key values of a redaction-denied row. When an entire page is
+/// denied there is no authorized row to advance past, so it falls back to the
+/// last scanned row to keep pagination progressing rather than stall.
 pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> PaginationMeta {
     let window = input.cursor.as_ref().map_or(input.limit, |c| c.page_size) as usize;
     let has_more = query_result.len() > window;
@@ -104,14 +107,19 @@ pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> Pagi
         .as_ref()
         .filter(|_| has_more && key_count > 0)
         .and_then(|_| {
-            let last = query_result.rows().last()?;
+            let anchor = query_result
+                .rows()
+                .iter()
+                .rev()
+                .find(|r| r.is_authorized())
+                .or_else(|| query_result.rows().last())?;
             (0..key_count)
                 .map(|i| {
                     // A present-but-NULL readback is a real NULL sort key and
                     // stays paginable; an absent column means the readback was
                     // lost upstream, so withhold the token rather than seek on
                     // a wrong boundary.
-                    match last.column(&compiler::passes::cursor::cursor_column(i)) {
+                    match anchor.column(&compiler::passes::cursor::cursor_column(i)) {
                         Some(ColumnValue::Null) => Some(None),
                         Some(v) => v.as_string().cloned().map(Some),
                         None => None,
