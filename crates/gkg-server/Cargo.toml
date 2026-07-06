@@ -59,6 +59,11 @@ uuid = { workspace = true, features = ["v4"] }
 toon-format = { workspace = true }
 
 [build-dependencies]
+compiler = { path = "../query-engine/compiler" }
+ontology = { path = "../ontology" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
