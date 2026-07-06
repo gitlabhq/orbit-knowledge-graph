@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Copy-paste Orbit queries for common use cases including blast radius analysis, onboarding, dependency mapping, pipeline health, and vulnerability tracing.
+description: A library of ready-to-use prompts that turn your AI agent into an expert on your codebase, pipelines, dependencies, and security using Orbit.
 title: Cookbook
 ---
 
@@ -26,33 +26,173 @@ title: Cookbook
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Ready-to-use queries for the most common Orbit use cases. All examples use the
-REST API format. To run them via MCP, pass the JSON body to `query_graph`.
+Orbit answers questions about your entire software development lifecycle: code,
+merge requests, pipelines, dependencies, and security. You do not write graph
+queries by hand. You ask an AI agent a question in plain language, and the agent
+uses Orbit to traverse the graph and answer.
 
-## Blast radius analysis
+This page is a library of prompts that work. Each one turns your agent into an
+expert on your own projects.
 
-Answer: "What breaks if I change this?"
+## How to use this page
 
-### Find all files that import a specific module
+1. Connect an agent to Orbit. GitLab Duo Agent Platform has Orbit built in.
+   External agents such as Claude Code or Codex connect through
+   [MCP or the `glab` CLI](access/mcp.md).
+1. Pick the outcome you want and copy its prompt.
+1. Replace the values in `<angle brackets>` with your own group, project, file,
+   or time window.
+1. Paste the prompt into your agent and let it work. Ask follow-up questions in
+   the same conversation to go deeper.
 
-Replace `payments-service` with the module or library you want to trace.
+Every prompt also has a **See the Orbit queries behind this** section. You never
+need to open it, but it shows the exact graph queries the agent runs if you want
+to audit them or call the [REST API](access/api.md) directly.
+
+## Attribute your CI spend to the code that causes it
+
+CI compute is expensive, and most of the cost hides in failures that get
+retried over and over. This prompt ranks the failures across your whole
+organization, finds the ones caused by a shared CI/CD template, then follows
+each one back to the exact files and code definitions that keep breaking. That
+last step is the cost-attribution chain: it turns "CI is expensive" into "these
+files keep breaking these jobs."
+
+```plaintext
+Using Orbit, help me understand what is driving our CI compute cost.
+
+1. Find the job and pipeline failures across my organization over the last
+   60 days, covering at least 20 projects. Rank the job names by how often
+   they fail.
+2. Flag any failing job name that recurs across three or more projects. Those
+   usually point to a shared CI/CD template that is worth fixing once.
+3. For the top recurring failures, find the merge requests that generate the
+   most repeated failed pipelines.
+4. Trace those failures back through the merge request diffs to the specific
+   files, and the code definitions inside those files, that keep changing.
+5. Show me the full chain from failing job to the exact code to review, and
+   tell me where to focus a fix to cut the most CI spend.
+
+Prioritize correctness and depth over speed.
+```
+
+What you get back: a ranked list of your most expensive recurring failures, the
+shared templates behind the cross-project ones, and a short list of files and
+functions to fix, each tied to the failures it causes.
+
+Adapt it: change the time window, scope it to one group or project, or ask the
+agent to estimate the compute saved if you fixed the top three.
+
+<details>
+<summary>See the Orbit queries behind this</summary>
+
+The agent runs these in sequence. Replace the example timestamp with a date at
+the start of your window, and replace the merge request ID and file path with
+values returned by the earlier steps.
+
+Rank the most frequent job failures across your organization:
 
 ```json orbit-query
 {
-  "query_type": "traversal",
-  "node": {
-    "id": "sym",
-    "entity": "ImportedSymbol",
-    "columns": ["file_path", "import_path", "identifier_name"],
-    "filters": {
-      "import_path": {"op": "contains", "value": "payments-service"}
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "j",
+      "entity": "Job",
+      "filters": {
+        "status": "failed",
+        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+      }
     }
-  },
-  "limit": 100
+  ],
+  "group_by": [{"kind": "property", "node": "j", "property": "name", "alias": "job_name"}],
+  "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
+  "aggregation_sort": {"column": "failures", "direction": "DESC"},
+  "limit": 40
 }
 ```
 
-### Find projects that depend on a shared library
+Find failing jobs that recur across multiple projects. Orbit has no
+distinct-count function, so group by job name and project together: a job name
+that appears under three or more projects is a shared-template hot spot.
+
+```json orbit-query
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "j",
+      "entity": "Job",
+      "filters": {
+        "status": "failed",
+        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+      }
+    },
+    {"id": "p", "entity": "Project"}
+  ],
+  "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
+  "group_by": [
+    {"kind": "property", "node": "j", "property": "name", "alias": "job_name"},
+    {"kind": "property", "node": "p", "property": "full_path", "alias": "project"}
+  ],
+  "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
+  "aggregation_sort": {"column": "failures", "direction": "DESC"},
+  "limit": 200
+}
+```
+
+Find the merge requests generating the most repeated failures. Filter `source`
+to `merge_request_event` so you do not also count the downstream child
+pipelines those pipelines triggered.
+
+```json orbit-query
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "pl",
+      "entity": "Pipeline",
+      "filters": {
+        "status": "failed",
+        "source": "merge_request_event",
+        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+      }
+    }
+  ],
+  "group_by": [{"kind": "property", "node": "pl", "property": "merge_request_id", "alias": "mr_id"}],
+  "aggregations": [{"function": "count", "target": "pl", "alias": "failed_pipelines"}],
+  "aggregation_sort": {"column": "failed_pipelines", "direction": "DESC"},
+  "limit": 20
+}
+```
+
+Trace one merge request to the files that keep changing. Bound this to a single
+merge request; the same traversal across every failed pipeline at once times
+out. `HAS_FILE` edges are sparsely populated, so treat a short result as
+incomplete coverage rather than authoritative.
+
+```json orbit-query
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"op": "eq", "value": 123456789}}},
+    {"id": "d", "entity": "MergeRequestDiff"},
+    {"id": "f", "entity": "MergeRequestDiffFile"}
+  ],
+  "relationships": [
+    {"type": "HAS_DIFF", "from": "mr", "to": "d"},
+    {"type": "HAS_FILE", "from": "d", "to": "f"}
+  ],
+  "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file"}],
+  "aggregations": [{"function": "count", "target": "d", "alias": "diff_snapshots"}],
+  "aggregation_sort": {"column": "diff_snapshots", "direction": "DESC"},
+  "limit": 20
+}
+```
+
+Drill into the code definitions inside a hot-spot file. `File` and `Definition`
+nodes exist only for indexed source files, so some paths, such as test-support
+helpers, might not be indexed.
 
 ```json orbit-query
 {
@@ -61,24 +201,39 @@ Replace `payments-service` with the module or library you want to trace.
     {
       "id": "f",
       "entity": "File",
-      "filters": {"path": {"op": "contains", "value": "shared-auth-lib"}}
+      "filters": {"path": {"op": "eq", "value": "app/models/project.rb"}}
     },
-    {"id": "b", "entity": "Branch", "columns": ["name", "is_default"]},
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
+    {
+      "id": "def",
+      "entity": "Definition",
+      "columns": ["name", "fqn", "definition_type", "start_line"]
+    }
   ],
-  "relationships": [
-    {"type": "ON_BRANCH", "from": "f", "to": "b"},
-    {"type": "CONTAINS", "from": "p", "to": "b"}
-  ],
-  "limit": 100
+  "relationships": [{"type": "DEFINES", "from": "f", "to": "def"}],
+  "limit": 30
 }
 ```
 
-## Onboarding and codebase exploration
+</details>
 
-Answer: "Help me understand this codebase."
+## Understand a codebase fast
 
-### Find the most active contributors to a project
+Drop into an unfamiliar project and get oriented in minutes instead of days.
+
+```plaintext
+I'm new to the <my-org/my-project> project. Using Orbit, give me a tour:
+- The most active contributors over the last few months.
+- The core classes, modules, and how they relate.
+- The main entry points and the files I should read first.
+
+Then summarize how this codebase is structured and suggest the three files
+to read first to understand it.
+```
+
+<details>
+<summary>See the Orbit queries behind this</summary>
+
+Find the most active contributors to a project:
 
 ```json orbit-query
 {
@@ -109,11 +264,66 @@ Answer: "Help me understand this codebase."
 }
 ```
 
-## Dependency mapping
+</details>
 
-Answer: "How are our services connected?"
+## Map dependencies and blast radius
 
-### Map imported definitions
+Answer "what breaks if I change this?" before you change it.
+
+```plaintext
+Using Orbit, map the blast radius of <shared-auth-lib>.
+- Which projects and files import it?
+- Which code definitions depend on it?
+- What would break if I changed its public interface?
+
+Rank the affected areas by how many places depend on them, and tell me the
+riskiest change I could make.
+```
+
+<details>
+<summary>See the Orbit queries behind this</summary>
+
+Find all files that import a specific module. Replace `payments-service` with
+the module or library you want to trace:
+
+```json orbit-query
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "sym",
+    "entity": "ImportedSymbol",
+    "columns": ["file_path", "import_path", "identifier_name"],
+    "filters": {
+      "import_path": {"op": "contains", "value": "payments-service"}
+    }
+  },
+  "limit": 100
+}
+```
+
+Find projects that depend on a shared library:
+
+```json orbit-query
+{
+  "query_type": "traversal",
+  "nodes": [
+    {
+      "id": "f",
+      "entity": "File",
+      "filters": {"path": {"op": "contains", "value": "shared-auth-lib"}}
+    },
+    {"id": "b", "entity": "Branch", "columns": ["name", "is_default"]},
+    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
+  ],
+  "relationships": [
+    {"type": "ON_BRANCH", "from": "f", "to": "b"},
+    {"type": "CONTAINS", "from": "p", "to": "b"}
+  ],
+  "limit": 100
+}
+```
+
+Rank the definitions that the most code imports:
 
 ```json orbit-query
 {
@@ -141,11 +351,25 @@ Answer: "How are our services connected?"
 }
 ```
 
-## Pipeline health
+</details>
 
-Answer: "Where are our CI/CD problems?"
+## Keep your pipelines healthy
 
-### Find projects with the most failed pipelines
+Find your worst CI/CD offenders and the reasons they fail.
+
+```plaintext
+Using Orbit, show me where our CI/CD is unhealthy over the last 30 days:
+- The projects with the most failed pipelines.
+- The jobs that fail most often.
+- The most common failure reasons.
+
+Group the results so I can see which failures are worth fixing first.
+```
+
+<details>
+<summary>See the Orbit queries behind this</summary>
+
+Find projects with the most failed pipelines:
 
 ```json orbit-query
 {
@@ -166,7 +390,7 @@ Answer: "Where are our CI/CD problems?"
 }
 ```
 
-### Find failed jobs and their failure reasons
+Find failed jobs and their failure reasons:
 
 ```json orbit-query
 {
@@ -181,11 +405,26 @@ Answer: "Where are our CI/CD problems?"
 }
 ```
 
-## Vulnerability tracing
+</details>
 
-Answer: "Where are our security risks, and how did they get there?"
+## Trace security risk to its source
 
-### Find all critical and high vulnerabilities in a group
+See where your risk is and how it got there.
+
+```plaintext
+Using Orbit, find the critical and high severity vulnerabilities across
+<my-org> that are still detected:
+- Which projects are affected?
+- How did each one get there? Trace it back to the scan and, where possible,
+  the merge request that introduced the change.
+
+Prioritize by severity and give me a short remediation shortlist.
+```
+
+<details>
+<summary>See the Orbit queries behind this</summary>
+
+Find all critical and high vulnerabilities:
 
 ```json orbit-query
 {
@@ -210,7 +449,7 @@ Answer: "Where are our security risks, and how did they get there?"
 }
 ```
 
-### Count vulnerabilities by project
+Count vulnerabilities by project:
 
 ```json orbit-query
 {
@@ -235,7 +474,7 @@ Answer: "Where are our security risks, and how did they get there?"
 }
 ```
 
-### Count vulnerabilities by severity
+Count vulnerabilities by severity:
 
 ```json orbit-query
 {
@@ -258,19 +497,24 @@ Answer: "Where are our security risks, and how did they get there?"
 }
 ```
 
-## Fetch source code
+</details>
 
-Answer: "Show me the actual code."
+## Read the actual source
+
+Pull real code into the conversation without leaving your agent.
+
+```plaintext
+Using Orbit, show me the source of <app/models/project.rb> and the definition
+of <MyModule::my_function>, so I can review them here.
+```
 
 Virtual columns (`content` on `File` and `Definition`) trigger a Gitaly fetch
-after the graph query. Response time is higher than non-virtual queries.
-Always request them explicitly in `columns`. They are excluded from
-`dynamic_columns` in `path_finding` and `neighbors` queries.
+after the graph query, so these responses are slower than other queries.
 
-### Fetch the source text of a file
+<details>
+<summary>See the Orbit queries behind this</summary>
 
-Replace the `path` filter value with a file path that exists in an indexed project.
-Use `limit: 1` when fetching full file content to avoid large responses.
+Fetch the source text of a file. Use `limit: 1` to avoid large responses:
 
 ```json orbit-query
 {
@@ -287,10 +531,8 @@ Use `limit: 1` when fetching full file content to avoid large responses.
 }
 ```
 
-### Fetch the source text of a specific function or class definition
-
-The `content` field returns the raw source text of just that definition,
-not the full file.
+Fetch the source text of a specific function or class definition. The `content`
+field returns the raw source text of just that definition, not the full file:
 
 ```json orbit-query
 {
@@ -306,3 +548,5 @@ not the full file.
   "limit": 5
 }
 ```
+
+</details>
