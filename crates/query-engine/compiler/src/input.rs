@@ -301,7 +301,7 @@ pub struct InputCursor {
     pub page_size: u32,
     pub after: Option<String>,
     #[serde(skip)]
-    pub seek: Option<Vec<String>>,
+    pub seek: Option<Vec<Option<String>>>,
 }
 
 #[derive(

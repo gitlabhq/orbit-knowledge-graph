@@ -3640,7 +3640,6 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
 
     let (result, meta) = fetch_page(ctx, json, &ontology, &security_ctx).await;
     assert!(meta.has_more);
-    assert_eq!(meta.total_rows, 2);
     assert_eq!(page_ids(&result), vec![1, 2], "first page");
     let after = meta
         .next_cursor
@@ -3686,8 +3685,8 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
 
     assert!(meta.has_more);
     assert_eq!(
-        (page_ids(&result), meta.total_rows),
-        (vec![1], 1),
+        page_ids(&result),
+        vec![1],
         "redaction shortens the page (user 2 denied) instead of pulling user 3 forward"
     );
     let after = meta
@@ -3731,7 +3730,7 @@ async fn cursor_pagination_rejects_foreign_token(ctx: &TestContext) {
             let v: serde_json::Value = serde_json::from_str(other).unwrap();
             query_engine::compiler::passes::cursor::canonical_hash(&v)
         },
-        &["2".into(), "2".into()],
+        &[Some("2".into()), Some("2".into())],
     );
     let err = compile(&with_after(json, &token), &ontology, &security_ctx).unwrap_err();
     assert!(

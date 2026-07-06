@@ -114,7 +114,8 @@ independently resolves the latest version of every row and filters out
 soft-deleted rows, so version churn and tombstone cleanup between pages do not
 skip or duplicate results. Rows inserted after the cursor position in sort
 order appear on later pages; rows inserted or reordered behind it are not
-revisited. A row whose sort key changes between pages can appear twice or not
+revisited. Rows whose sort key is NULL sort last and paginate like any other
+row. A row whose sort key changes between pages can appear twice or not
 at all, the same as any keyset pagination without a snapshot.
 
 ## Node selectors

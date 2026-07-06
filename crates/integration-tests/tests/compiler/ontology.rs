@@ -627,7 +627,7 @@ fn cursor_pagination_validation() {
     let hash = canonical_hash(&serde_json::from_str(json).unwrap());
     let paged: serde_json::Value = {
         let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
-        v["cursor"]["after"] = encode(hash, &["7".into()]).into();
+        v["cursor"]["after"] = encode(hash, &[Some("7".into())]).into();
         v
     };
     let result = compile(&paged.to_string(), &ontology, &ctx);
@@ -642,7 +642,7 @@ fn cursor_pagination_validation() {
     );
 
     let mut foreign: serde_json::Value = serde_json::from_str(json).unwrap();
-    foreign["cursor"]["after"] = encode(hash ^ 1, &["7".into()]).into();
+    foreign["cursor"]["after"] = encode(hash ^ 1, &[Some("7".into())]).into();
     let err = compile(&foreign.to_string(), &ontology, &ctx).unwrap_err();
     assert!(
         matches!(err, QueryError::PaginationError(_)),

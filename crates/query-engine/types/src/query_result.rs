@@ -149,6 +149,10 @@ impl QueryResultRow {
         props
     }
 
+    pub fn column(&self, name: &str) -> Option<&ColumnValue> {
+        self.columns.get(name)
+    }
+
     pub fn get_column_i64(&self, column: &str) -> Option<i64> {
         self.columns.get(column)?.as_int64().copied()
     }

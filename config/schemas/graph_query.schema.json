@@ -66,7 +66,7 @@
     },
     "cursor": {
       "type": "object",
-      "description": "Keyset cursor. First page: omit 'after'. Later pages: pass the prior response's pagination.next_cursor; stop when it is absent. A NULL sort key ends pagination early; filter NULLs to page fully.",
+      "description": "Keyset cursor. First page: omit 'after'. Later pages: pass the prior response's pagination.next_cursor; stop when it is absent. NULL sort keys paginate (they sort last).",
       "required": ["page_size"],
       "properties": {
         "page_size": {

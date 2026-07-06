@@ -147,6 +147,53 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
     );
 }
 
+pub(super) async fn cursor_pages_across_null_sort_keys(ctx: &TestContext) {
+    for direction in ["ASC", "DESC"] {
+        let json = format!(
+            r#"{{
+            "query_type": "traversal",
+            "node": {{"id": "mr", "entity": "MergeRequest", "id_range": {{"start": 1, "end": 10000}}, "columns": ["title"]}},
+            "order_by": {{"node": "mr", "property": "merged_at", "direction": "{direction}"}},
+            "cursor": {{"page_size": 2}}
+        }}"#
+        );
+
+        let mut all_ids: Vec<i64> = Vec::new();
+        let mut query = json.clone();
+        loop {
+            let resp = run_query(ctx, &query, &allow_all()).await;
+            let page_ids = resp.node_ids_ordered("MergeRequest");
+            for id in &page_ids {
+                assert!(
+                    !all_ids.contains(id),
+                    "MR {id} appeared in multiple pages ({direction})"
+                );
+            }
+            all_ids.extend(page_ids);
+            resp.skip_requirement(Requirement::Cursor);
+            resp.skip_requirement(Requirement::NodeCount);
+            resp.skip_requirement(Requirement::OrderBy);
+            match next_cursor(&resp) {
+                Some(after) => query = with_after(&json, &after),
+                None => {
+                    assert!(
+                        !has_more(&resp),
+                        "a sorted cursor query must never report has_more without a token ({direction})"
+                    );
+                    break;
+                }
+            }
+        }
+
+        all_ids.sort();
+        assert_eq!(
+            all_ids,
+            vec![2000, 2001, 2002, 2003, 2004, 2005],
+            "pages must cover both NULL and non-NULL merged_at rows ({direction})"
+        );
+    }
+}
+
 pub(super) async fn cursor_neighbors_pages_cover_all_edges(ctx: &TestContext) {
     let full = run_query(
         ctx,
@@ -973,7 +1020,7 @@ pub(super) async fn cursor_after_token_with_sql_metacharacters_is_parameterized(
             let v: serde_json::Value = serde_json::from_str(json).unwrap();
             query_engine::compiler::passes::cursor::canonical_hash(&v)
         },
-        &["'); DROP TABLE gl_user; --".into(), "0".into()],
+        &[Some("'); DROP TABLE gl_user; --".into()), Some("0".into())],
     );
 
     let resp = run_query(ctx, &with_after(json, &token), &allow_all()).await;

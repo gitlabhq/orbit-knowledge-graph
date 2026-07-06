@@ -2217,10 +2217,6 @@ async fn pagination_present_in_response(ctx: &TestContext) {
         "5 users, page_size=2 → has_more"
     );
     assert_eq!(pagination["truncated"], true);
-    assert_eq!(
-        pagination["total_rows"], 2,
-        "total_rows counts this window, not the dataset"
-    );
     assert!(
         pagination["next_cursor"].is_string(),
         "mid-stream page must carry next_cursor"
@@ -2248,7 +2244,6 @@ async fn pagination_present_without_cursor(ctx: &TestContext) {
         "5 users fit within limit 10 → complete"
     );
     assert_eq!(pagination["truncated"], false);
-    assert_eq!(pagination["total_rows"], 5);
     assert!(pagination.get("next_cursor").is_none());
 }
 
@@ -2270,7 +2265,6 @@ async fn pagination_truncates_without_cursor(ctx: &TestContext) {
         "5 users, limit 3 → the response must confess truncation"
     );
     assert_eq!(pagination["has_more"], true);
-    assert_eq!(pagination["total_rows"], 3);
     assert_eq!(value["nodes"].as_array().unwrap().len(), 3);
 }
 
@@ -2323,10 +2317,6 @@ async fn pagination_with_redaction(ctx: &TestContext) {
     .await;
 
     let pagination = &value["pagination"];
-    assert_eq!(
-        pagination["total_rows"], 1,
-        "window holds users 1,2; only user 1 survives redaction"
-    );
     assert_eq!(pagination["has_more"], true);
     assert!(
         pagination["next_cursor"].is_string(),

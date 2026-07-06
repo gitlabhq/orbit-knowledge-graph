@@ -220,6 +220,7 @@ async fn data_correctness() {
         pagination::cursor_follows_next_cursor_to_exhaustion,
         pagination::cursor_with_filter,
         pagination::cursor_with_redaction,
+        pagination::cursor_pages_across_null_sort_keys,
         pagination::cursor_neighbors_pages_cover_all_edges,
         pagination::cursor_traversal,
         pagination::cursor_without_order_by_is_deterministic,

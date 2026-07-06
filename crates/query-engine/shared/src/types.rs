@@ -1,5 +1,6 @@
 use arrow::record_batch::RecordBatch;
 use compiler::{CompiledQueryContext, ResultContext};
+use gkg_utils::arrow::ColumnValue;
 use serde::Serialize;
 use std::sync::Arc;
 use types::{QueryResult, ResourceAuthorization};
@@ -84,8 +85,6 @@ pub struct PaginationMeta {
     pub has_more: bool,
     /// Same signal as `has_more`, kept explicit so clients can detect incomplete results.
     pub truncated: bool,
-    /// Authorized rows in this response window, not a dataset total.
-    pub total_rows: usize,
     /// Opaque keyset token for the next page; None when the dataset is exhausted.
     pub next_cursor: Option<String>,
 }
@@ -107,14 +106,23 @@ pub fn paginate(query_result: &mut QueryResult, input: &compiler::Input) -> Pagi
         .and_then(|_| {
             let last = query_result.rows().last()?;
             (0..key_count)
-                .map(|i| last.get_column_string(&compiler::passes::cursor::cursor_column(i)))
-                .collect::<Option<Vec<String>>>()
+                .map(|i| {
+                    // A present-but-NULL readback is a real NULL sort key and
+                    // stays paginable; an absent column means the readback was
+                    // lost upstream, so withhold the token rather than seek on
+                    // a wrong boundary.
+                    match last.column(&compiler::passes::cursor::cursor_column(i)) {
+                        Some(ColumnValue::Null) => Some(None),
+                        Some(v) => v.as_string().cloned().map(Some),
+                        None => None,
+                    }
+                })
+                .collect::<Option<Vec<Option<String>>>>()
         })
         .map(|keys| compiler::passes::cursor::encode(input.compiler.query_hash, &keys));
     PaginationMeta {
         has_more,
         truncated: has_more,
-        total_rows: query_result.authorized_count(),
         next_cursor,
     }
 }

@@ -195,7 +195,7 @@
     },
     "pagination": {
       "type": "object",
-      "required": ["has_more", "truncated", "total_rows"],
+      "required": ["has_more", "truncated"],
       "additionalProperties": false,
       "properties": {
         "has_more": {
@@ -205,11 +205,6 @@
         "truncated": {
           "type": "boolean",
           "description": "Response omits some matching rows; aggregates over it are incomplete."
-        },
-        "total_rows": {
-          "type": "integer",
-          "description": "Rows in this window, not a dataset total.",
-          "minimum": 0
         },
         "next_cursor": {
           "type": "string",

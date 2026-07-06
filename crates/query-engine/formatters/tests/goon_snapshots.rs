@@ -255,7 +255,6 @@ fn snapshot_pagination() {
     r.pagination = Some(PaginationResponse {
         has_more: true,
         truncated: true,
-        total_rows: 100,
         next_cursor: None,
     });
     insta::assert_snapshot!(run(r));
