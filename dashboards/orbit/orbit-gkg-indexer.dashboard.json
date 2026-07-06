@@ -3047,7 +3047,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Total bytes written to ClickHouse per table.",
+               "description": "Total logical bytes written to ClickHouse per table (gkg_utils::arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
                "fieldConfig": {
                   "defaults": {
                      "custom": {
