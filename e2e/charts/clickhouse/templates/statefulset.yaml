@@ -54,8 +54,8 @@ spec:
             httpGet:
               path: /ping
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 5
+            initialDelaySeconds: 2
+            periodSeconds: 2
       volumes:
         - name: initdb
           configMap:

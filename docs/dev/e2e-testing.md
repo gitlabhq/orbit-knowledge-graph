@@ -40,9 +40,9 @@ e2e/scripts/teardown.sh -y    # cleanup
 # Specific SHA
 E2E_SHA=abc1234 e2e/scripts/setup.sh
 E2E_SHA=abc1234 e2e/scripts/test.sh
-
-# CI runs automatically on MR via e2e-build + e2e jobs
 ```
+
+In CI the `e2e` job runs automatically on `main` and manually on MRs.
 
 ## Test suites
 
@@ -85,18 +85,23 @@ other suite runs in a parallel worker pool.
 - Plain `robot` runs still work for local debugging: PabotLib degrades to an
   in-process value store, so `robot tests/` executes the suites sequentially
   with identical semantics.
+- In CI the runner pod uses the prebaked `e2e-robot` image (built from
+  `e2e/Dockerfile.robot` by the `e2e-robot-image` job whenever that file
+  changes, tagged by its content hash). Local runs default to
+  `python:3.12-slim` and install Robot Framework at pod startup.
 
 ## Setup phases
 
-| Phase | Script | What it does |
+| Phase | Step | What it does |
 |---|---|---|
-| 00 | `00-namespaces.sh` | Pre-create namespaces for secrets |
-| 01 | `01-secrets.sh` | Generate passwords, create k8s secrets |
-| 02 | `02-infra.sh` | Deploy NATS, ClickHouse, GitLab via helmfile |
-| 03 | `03-wait-infra.sh` | Wait for pods + GitLab migrations (incl. ClickHouse) |
-| 04 | `04-pg-siphon.sh` | Configure PostgreSQL users, publication, alter function for Siphon |
-| 06 | `06-pipeline.sh` | Deploy Siphon + GKG via helmfile |
-| 07 | `07-seed-toolbox.sh` | Create e2e-bot user/PAT, enable feature flags |
+| 1 | orphan cleanup + secrets | Clean cluster-scoped leftovers, generate per-run secrets, extract the cert-manager root CA |
+| 2 | `sync-cdc-tables.sh` | Regenerate Siphon CDC config from the pinned `gitlab-org/gitlab` ref |
+| 3 | background pollers | `bootstrap-instance.sh` (license + root PAT, gated on the migrations Job) and `patch-ch-dicts.sh` (DIRECT-layout dictionaries) launch early and overlap the deploy |
+| 4 | `helmfile sync` | Deploy every release; GitLab gates `pg-cdc-setup` and `siphon`, while `gkg` needs only NATS and ClickHouse and overlaps the GitLab boot |
+| 5 | `patch-ch-siphon-watermark.sh` | Add the watermark column (after sync — it enumerates tables the siphon consumer creates), then join the background pollers |
+
+On failure, CI dumps diagnostics in `after_script` before teardown; green runs
+skip the dump.
 
 ## Data-driven CDC tables
 

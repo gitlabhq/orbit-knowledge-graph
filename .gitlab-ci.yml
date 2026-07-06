@@ -867,6 +867,38 @@ docker-build-mr:
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
+# Tag = Dockerfile hash; the e2e job resolves the same tag.
+e2e-robot-image:
+  stage: build
+  image: docker:29
+  tags:
+    - saas-linux-medium-amd64
+  needs: []
+  services:
+    - name: docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - e2e/Dockerfile.robot
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - TAG=$(sha256sum e2e/Dockerfile.robot | cut -c1-12)
+    - IMAGE="${CI_REGISTRY_IMAGE}/e2e-robot"
+    - |
+      if docker manifest inspect "${IMAGE}:${TAG}" >/dev/null 2>&1; then
+        echo "${IMAGE}:${TAG} already exists"
+      else
+        docker build -t "${IMAGE}:${TAG}" -f e2e/Dockerfile.robot e2e
+        docker push "${IMAGE}:${TAG}"
+      fi
+
 check-go-proto:
   needs: []
   image: golang:1.24
@@ -1146,6 +1178,7 @@ e2e:
   tags:
     - ${RUNNER_LARGE}
   timeout: 60 minutes
+  interruptible: true
   services:
     - name: docker:29-dind
       alias: docker
@@ -1158,6 +1191,8 @@ e2e:
     DOCKER_TLS_CERTDIR: ""
   needs:
     - job: docker-manifest
+      optional: true
+    - job: e2e-robot-image
       optional: true
   rules:
     - !reference [.skip-on-solo-schedule, rules]
@@ -1174,35 +1209,35 @@ e2e:
   script:
     - export E2E_SHA="${CI_COMMIT_SHORT_SHA}"
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    # Sourced: exports E2E_GKG_IMAGE/E2E_GKG_TAG and backgrounds the MR build
+    # so `wait "$E2E_BUILD_PID"` below stays in this shell.
+    - source e2e/scripts/build-gkg-image.sh
     - |
-      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
-        # Reuse multi-arch dev image published by docker-manifest.
-        export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg"
-        export E2E_GKG_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+      E2E_ROBOT_TAG=$(sha256sum e2e/Dockerfile.robot | cut -c1-12)
+      if docker manifest inspect "${CI_REGISTRY_IMAGE}/e2e-robot:${E2E_ROBOT_TAG}" >/dev/null 2>&1; then
+        export E2E_ROBOT_IMAGE="${CI_REGISTRY_IMAGE}/e2e-robot:${E2E_ROBOT_TAG}"
       else
-        # MR: build a debug image inline for faster iteration.
-        export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg-e2e"
-        export E2E_GKG_TAG="${CI_COMMIT_SHORT_SHA}"
-        # Skip rebuild on job retry if image for this SHA already exists.
-        if docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1; then
-          echo "Reusing existing image ${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
-        else
-          cargo build -p gkg-server --locked
-          cp target/debug/gkg-server .
-          docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
-          docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
-        fi
+        echo "e2e-robot:${E2E_ROBOT_TAG} not in registry; robot job installs at runtime"
       fi
-    - bash e2e/scripts/setup.sh
+    - bash e2e/scripts/setup.sh || { tail -80 e2e-image-build.log 2>/dev/null; exit 1; }
+    - |
+      if [ -n "${E2E_BUILD_PID:-}" ]; then
+        if ! wait "$E2E_BUILD_PID"; then
+          echo "gkg-e2e image build failed:"
+          tail -80 e2e-image-build.log
+          exit 1
+        fi
+        tail -3 e2e-image-build.log
+      fi
     - bash e2e/scripts/test.sh
   after_script:
     - bash e2e/scripts/install-ci-tools.sh
     - kubectl config use-context "$KCTX"
-    # Dump pod/helm/node state BEFORE teardown wipes the namespaces. When
-    # `setup.sh` (helmfile sync) fails on readiness timeout, test.sh never
-    # runs and its diagnostics block is skipped — this is the only chance
-    # to capture pod describe / events / node pressure.
-    - E2E_SHA="${CI_COMMIT_SHORT_SHA}" bash e2e/scripts/dump-diagnostics.sh || true
+    # Before teardown wipes the namespaces; failure-only (the dump costs ~3 min).
+    - |
+      if [ "$CI_JOB_STATUS" != "success" ]; then
+        E2E_SHA="${CI_COMMIT_SHORT_SHA}" bash e2e/scripts/dump-diagnostics.sh || true
+      fi
     - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
   artifacts:
     when: always

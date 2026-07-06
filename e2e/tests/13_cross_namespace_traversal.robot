@@ -174,6 +174,11 @@ Seed Cross Namespace Fixture
     Link Issues    ${project_a["id"]}    ${issue_a["iid"]}    ${project_a["id"]}    ${issue_m1["iid"]}
     Link Issues    ${project_a["id"]}    ${issue_m1["iid"]}    ${project_a["id"]}    ${issue_m2["iid"]}
     Link Issues    ${project_a["id"]}    ${issue_m2["iid"]}    ${project_b["id"]}    ${issue_c["iid"]}
+    # The CLOSES edge (slowest path) indexes while tests 1-7 run; merging
+    # closes issue B, which is safe — tests 1-7 assert ids, never state.
+    ${mr_a}=    Open Closing Merge Request    ${project_a["id"]}
+    ...    ${project_b["path_with_namespace"]}    ${issue_b["iid"]}
+    Set Suite Variable    ${XNS_MR_ID_A}    ${mr_a["id"]}
     Set Suite Variable    ${XNS_GROUP_ID_A}    ${group_a["id"]}
     Set Suite Variable    ${XNS_PROJECT_ID_A}    ${project_a["id"]}
     Set Suite Variable    ${XNS_PROJECT_ID_B}    ${project_b["id"]}
@@ -199,16 +204,9 @@ Seed Cross Namespace Fixture
     ...    WorkItem    ${XNS_ISSUE_ID_C}
 
 Seed Cross Project Closing MR
-    [Documentation]    Idempotent: opens the cross-project closing MR once and waits for the
-    ...                MergeRequest CLOSES WorkItem edge. Shared by the project- and group-scoped
-    ...                closing test cases.
-    ${existing}=    Get Variable Value    ${XNS_MR_ID_A}    ${EMPTY}
-    Return From Keyword If    "${existing}" != "${EMPTY}"
-    ${mr_a}=    Open Closing Merge Request    ${XNS_PROJECT_ID_A}
-    ...    ${XNS_PROJECT_B_FULL_PATH}    ${XNS_ISSUE_B_IID}
-    Set Suite Variable    ${XNS_MR_ID_A}    ${mr_a["id"]}
-    # The CLOSES edge is the slowest path (cache_merge_request_closes_issues! -> CDC ->
-    # namespaced re-index), so give it its own full budget rather than the setup remainder.
+    [Documentation]    The MR itself is opened by Seed Cross Namespace Fixture; this setup only
+    ...                waits for the MergeRequest CLOSES WorkItem edge, which has usually caught
+    ...                up while tests 1-7 ran. Shared by both closing test cases.
     Start Indexing Budget    400
     Wait For Edge Indexed Within Budget    MergeRequest    ${XNS_MR_ID_A}    CLOSES
     ...    WorkItem    ${XNS_ISSUE_ID_B}

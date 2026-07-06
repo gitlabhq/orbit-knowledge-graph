@@ -21,6 +21,12 @@ auth:
 master:
   persistence:
     enabled: false
+  # Bitnami's 20s initialDelay gates the GitLab release start.
+  readinessProbe:
+    initialDelaySeconds: 2
+    periodSeconds: 2
+  livenessProbe:
+    initialDelaySeconds: 5
   resources:
     requests:
       cpu: 100m

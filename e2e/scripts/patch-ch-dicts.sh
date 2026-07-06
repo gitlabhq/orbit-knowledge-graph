@@ -1,31 +1,9 @@
 #!/usr/bin/env bash
-# Recreate the traversal-path dictionaries with a near-zero LIFETIME so that
-# negative cache entries (caused by the routes-vs-namespaces race in siphon
-# CDC) expire within a couple of seconds instead of the upstream 60-300s.
-#
-# Why we need this in e2e
-# -----------------------
-# GitLab's main.sql defines `namespace_traversal_paths_dict` (and siblings)
-# with `LAYOUT(CACHE) LIFETIME(MIN 60 MAX 300)`. The cache layout fetches per
-# key on miss and caches the result — including misses — for the whole
-# lifetime window.
-#
-# In e2e, project creation produces nearly-simultaneous CDC events for
-# `namespaces` (the new project_namespace) and `routes` (the project's URL
-# entry). Both tables go to separate NATS streams, processed in parallel by
-# the siphon consumer. If the routes worker wins by even a few milliseconds,
-# inserting siphon_routes runs the dictGet on the not-yet-known namespace_id,
-# caches '0/' as the answer, and any subsequent INSERT for the same
-# namespace_id (including the test's issue creation) inherits that '0/'.
-# Without intervention the row stays invisible to GKG until the cell expires
-# — which is past the test budget.
-#
-# Production tolerates the long lifetime because writes are constant, the
-# reconciler eventually catches up, and individual entities being briefly
-# stale is acceptable. e2e is fast/cold and synchronous, so we shrink the
-# window to ~1s. The 5-namespace dataset makes the extra source-query load
-# negligible.
-#
+# Recreate the traversal-path dictionaries with LAYOUT(DIRECT). The upstream
+# CACHE layout can cache a routes-vs-namespaces CDC race miss as '0/',
+# poisoning every insert for that namespace until the entry expires, and the
+# reconciler never repairs '0/' rows (it only targets empty paths). DIRECT
+# removes the caching; the tiny e2e dataset makes per-lookup queries free.
 # Tracked in https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/483
 
 set -euo pipefail
@@ -38,9 +16,8 @@ DICTS=(
   "datalake.project_traversal_paths_dict"
   "datalake.organization_traversal_paths_dict"
 )
-NEW_LIFETIME="LIFETIME(MIN 0 MAX 1)"
 
-log "Patching CH traversal-path dictionaries to $NEW_LIFETIME"
+log "Patching CH traversal-path dictionaries to LAYOUT(DIRECT)"
 
 CH_POD=clickhouse-0
 ch_query() {
@@ -48,9 +25,9 @@ ch_query() {
     sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
-# Wait for GitLab CH migrations to finish creating the dictionaries.
+# 600s: this may launch before the ClickHouse pod even exists.
 log "Waiting for traversal-path dictionaries to exist"
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
   if ch_query "EXISTS DICTIONARY datalake.namespace_traversal_paths_dict" 2>/dev/null | grep -q '^1$'; then
     break
   fi
@@ -66,12 +43,9 @@ done
 DEFAULT_PASS=$($KC exec -n "$NS_CH" "$CH_POD" -- printenv CLICKHOUSE_PASSWORD)
 [[ -n "$DEFAULT_PASS" ]] || { log "could not read CLICKHOUSE_PASSWORD from pod"; exit 1; }
 
-# Re-create each dict with the existing definition but a shorter LIFETIME.
-# `SHOW CREATE DICTIONARY` round-trip preserves SOURCE / LAYOUT / column
-# types so we don't have to duplicate the full DDL here. FORMAT TSVRaw is
-# critical: the default TabSeparated output escapes newlines inside string
-# literals (e.g. the embedded SOURCE QUERY) as literal `\n`, which makes
-# the round-tripped DDL un-parseable. TSVRaw emits strings verbatim.
+# SHOW CREATE round-trip preserves SOURCE/columns; DIRECT layouts reject
+# LIFETIME. TSVRaw is required — default TSV escapes newlines inside the
+# embedded SOURCE QUERY, breaking the DDL.
 for dict in "${DICTS[@]}"; do
   log "Patching $dict"
   ddl=$(ch_query "SHOW CREATE DICTIONARY $dict FORMAT TSVRaw" 2>/dev/null || true)
@@ -81,9 +55,16 @@ for dict in "${DICTS[@]}"; do
   fi
   patched=$(printf '%s' "$ddl" \
     | sed -E 's/^CREATE DICTIONARY/CREATE OR REPLACE DICTIONARY/' \
-    | sed -E "s|LIFETIME\\([^)]*\\)|$NEW_LIFETIME|" \
+    | sed -E "s|LAYOUT\\(COMPLEX_KEY_CACHE\\([^()]*\\)\\)|LAYOUT(COMPLEX_KEY_DIRECT())|" \
+    | sed -E "s|LAYOUT\\(CACHE\\([^()]*\\)\\)|LAYOUT(DIRECT())|" \
+    | sed -E "s|LIFETIME\\([^)]*\\)||" \
     | sed -E "s|USER '[^']+' PASSWORD '\\[HIDDEN\\]'|USER 'default' PASSWORD '$DEFAULT_PASS'|")
   ch_query "$patched" >/dev/null
+  layout=$(ch_query "SELECT type FROM system.dictionaries WHERE database || '.' || name = '$dict'" 2>/dev/null || true)
+  case "$layout" in
+    *Direct*|*direct*) ;;
+    *) log "  WARNING: $dict layout is '$layout', not DIRECT — cache race window remains" ;;
+  esac
 done
 
 log "CH traversal-path dictionaries patched"

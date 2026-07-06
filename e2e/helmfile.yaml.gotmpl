@@ -98,7 +98,8 @@ releases:
       - e2e-{{ $sha }}-gkg/bootstrap
       - e2e-{{ $sha }}-gitlab/postgresql
       - e2e-{{ $sha }}-gitlab/redis
-    timeout: 1200
+    # Healthy installs are ready in ~3 min; 600s halves the burn on real failures.
+    timeout: 600
     values:
       - values/gitlab.yaml.gotmpl
 
@@ -138,9 +139,10 @@ releases:
     labels:
       phase: pipeline
       component: gkg
+    # Deploy overlaps the GitLab boot; the webserver /ready probe still holds
+    # this release until Rails answers.
     needs:
       - e2e-{{ $sha }}-nats/nats
       - e2e-{{ $sha }}-clickhouse/clickhouse
-      - e2e-{{ $sha }}-gitlab/gitlab
     values:
       - values/gkg.yaml.gotmpl

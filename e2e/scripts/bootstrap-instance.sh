@@ -36,10 +36,31 @@ if [[ -z "$ACTIVATION_CODE" ]]; then
   exit 1
 fi
 
-TOOLBOX=$($KC get pod -n "$NS_GITLAB" -l app=toolbox \
-  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+# Gate on the migrations Job, not the toolbox pod: toolbox goes Running
+# before migrations finish and rails-runner crashes on an unmigrated DB.
+MIGRATED=""
+for _ in $(seq 1 120); do
+  MIGRATED=$($KC get jobs -n "$NS_GITLAB" \
+    -o jsonpath='{range .items[?(@.status.succeeded>=1)]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | grep -m1 'migrations' || true)
+  [[ -n "$MIGRATED" ]] && break
+  sleep 5
+done
+if [[ -z "$MIGRATED" ]]; then
+  echo "GitLab migrations job not complete in $NS_GITLAB after 600s"
+  exit 1
+fi
+
+TOOLBOX=""
+for _ in $(seq 1 60); do
+  TOOLBOX=$($KC get pod -n "$NS_GITLAB" -l app=toolbox \
+    --field-selector=status.phase=Running \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  [[ -n "$TOOLBOX" ]] && break
+  sleep 5
+done
 if [[ -z "$TOOLBOX" ]]; then
-  echo "No toolbox pod found in $NS_GITLAB"
+  echo "No running toolbox pod found in $NS_GITLAB after 300s"
   exit 1
 fi
 

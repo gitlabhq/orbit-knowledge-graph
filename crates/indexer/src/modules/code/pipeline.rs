@@ -267,6 +267,15 @@ impl CodeIndexingPipeline {
                 path
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
+                // A commit SHA means content exists (push-dispatched task), so
+                // an empty archive is visibility lag; checkpointing empty here
+                // would be terminal. Fail so the task is retried.
+                if request.commit_sha.is_some() {
+                    self.metrics.record_stage_error("repository_fetch");
+                    return Err(HandlerError::Processing(format!(
+                        "archive empty ({reason}: {detail}) for task with commit_sha; retrying"
+                    )));
+                }
                 warn!(
                     project_id = request.project_id,
                     branch = %request.branch,
