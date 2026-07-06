@@ -34,4 +34,4 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `integration-tests` | Integration tests: compiler (query compilation, ontology validation, pipeline infra) + server (health, redaction, hydration, data correctness, graph formatting) + cli (concurrency, worktrees); depends on gkg-server, compiler, integration-testkit |
 | `integration-tests-codegraph` | Code-graph-specific integration tests (linker, lance-graph) |
 | `fuzz` | Fuzz testing harness (bolero) for the query compiler, code parsers, and indexer message handling |
-| `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management). `build.rs` is a build-time crate-map drift check: it asserts every `[workspace]` member has a row in this file and flags stale rows, `panic!`ing on drift so any workspace build/clippy fails. |
+| `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |
