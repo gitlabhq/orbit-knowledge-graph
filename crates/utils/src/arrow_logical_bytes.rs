@@ -4,24 +4,24 @@ use arrow::array::types::{
 };
 use arrow::array::{
     Array, ByteView, GenericByteArray, GenericByteViewArray, GenericListArray, OffsetSizeTrait,
-    StringArray,
+    StringArray, new_empty_array,
 };
 use arrow::datatypes::{ArrowNativeType, DataType};
 use arrow::downcast_dictionary_array;
 use arrow::record_batch::RecordBatch;
 
 /// Version of the [`logical_byte_size`] counting rules; bump on any rule change.
-pub const LOGICAL_SIZE_FORMULA_VERSION: u32 = 1;
+pub const LOGICAL_BYTE_SIZE_VERSION: u32 = 1;
 
 /// A column's Arrow type has no [`logical_byte_size`] counting rule.
 #[derive(Debug, thiserror::Error)]
-#[error("column {column} has Arrow type {data_type} with no byte-counting rule")]
-pub struct UncountedType {
+#[error("column {column} has Arrow type {data_type} with no logical-byte-size rule")]
+pub struct UnsupportedTypeError {
     pub column: String,
     pub data_type: DataType,
 }
 
-/// Deterministic, split-invariant count of the customer-data bytes in a [`RecordBatch`], excluding serialization overhead; unknown Arrow types return [`UncountedType`] rather than counting as 0.
+/// Deterministic, split-invariant count of the customer-data bytes in a [`RecordBatch`], excluding serialization overhead; unsupported Arrow types return [`UnsupportedTypeError`] rather than counting as 0.
 ///
 /// | Arrow logical type                                  | bytes per non-null value     |
 /// |-----------------------------------------------------|------------------------------|
@@ -30,60 +30,50 @@ pub struct UncountedType {
 /// | `Boolean`                                            | 1                            |
 /// | `Utf8`/`LargeUtf8`/`Utf8View`, `Binary` family       | byte length                  |
 /// | `Dictionary(<int key>, Utf8)`                        | byte length of decoded value |
-/// | `List`/`LargeList` of a counted type                 | sum of element counts        |
+/// | `List`/`LargeList` of a supported type               | sum of element counts        |
 /// | NULL (any type, incl. an all-null `Null` column)     | 0                            |
-/// | anything else (Struct, Map, Union, …)                | [`UncountedType`] error      |
-pub fn logical_byte_size(batch: &RecordBatch) -> Result<u64, UncountedType> {
+/// | anything else (Struct, Map, Union, …)                | [`UnsupportedTypeError`]     |
+pub fn logical_byte_size(batch: &RecordBatch) -> Result<u64, UnsupportedTypeError> {
     let schema = batch.schema();
     let mut total = 0u64;
     for (i, field) in schema.fields().iter().enumerate() {
-        total += value_byte_count(field.name(), field.data_type(), batch.column(i).as_ref())?;
+        total +=
+            array_logical_byte_size(field.name(), field.data_type(), batch.column(i).as_ref())?;
     }
     Ok(total)
 }
 
-pub fn is_counted(data_type: &DataType) -> bool {
-    if data_type.primitive_width().is_some() {
-        return true;
-    }
-    match data_type {
-        DataType::Null
-        | DataType::Boolean
-        | DataType::Utf8
-        | DataType::LargeUtf8
-        | DataType::Utf8View
-        | DataType::Binary
-        | DataType::LargeBinary
-        | DataType::BinaryView => true,
-        DataType::Dictionary(_, value_type) => value_type.as_ref() == &DataType::Utf8,
-        DataType::List(field) | DataType::LargeList(field) => is_counted(field.data_type()),
-        _ => false,
-    }
+/// Whether [`logical_byte_size`] has a counting rule for this Arrow type.
+///
+/// Probes the sizing dispatch with an empty array of the type, so this predicate
+/// cannot drift from what [`logical_byte_size`] actually accepts.
+pub fn has_logical_byte_size(data_type: &DataType) -> bool {
+    array_logical_byte_size("", data_type, new_empty_array(data_type).as_ref()).is_ok()
 }
 
-fn value_byte_count(
+fn array_logical_byte_size(
     column: &str,
     data_type: &DataType,
     array: &dyn Array,
-) -> Result<u64, UncountedType> {
+) -> Result<u64, UnsupportedTypeError> {
     if let Some(width) = data_type.primitive_width() {
         return Ok(non_null_count(array) * width as u64);
     }
     match data_type {
         DataType::Null => Ok(0),
         DataType::Boolean => Ok(non_null_count(array)),
-        DataType::Utf8 => Ok(byte_offsets_payload::<Utf8Type>(array)),
-        DataType::LargeUtf8 => Ok(byte_offsets_payload::<LargeUtf8Type>(array)),
-        DataType::Binary => Ok(byte_offsets_payload::<BinaryType>(array)),
-        DataType::LargeBinary => Ok(byte_offsets_payload::<LargeBinaryType>(array)),
-        DataType::Utf8View => Ok(byte_view_payload::<StringViewType>(array)),
-        DataType::BinaryView => Ok(byte_view_payload::<BinaryViewType>(array)),
+        DataType::Utf8 => Ok(byte_array_logical_bytes::<Utf8Type>(array)),
+        DataType::LargeUtf8 => Ok(byte_array_logical_bytes::<LargeUtf8Type>(array)),
+        DataType::Binary => Ok(byte_array_logical_bytes::<BinaryType>(array)),
+        DataType::LargeBinary => Ok(byte_array_logical_bytes::<LargeBinaryType>(array)),
+        DataType::Utf8View => Ok(byte_view_logical_bytes::<StringViewType>(array)),
+        DataType::BinaryView => Ok(byte_view_logical_bytes::<BinaryViewType>(array)),
         DataType::Dictionary(_, value_type) if value_type.as_ref() == &DataType::Utf8 => {
-            dictionary_payload_bytes(column, array)
+            dictionary_logical_bytes(column, array)
         }
-        DataType::List(inner) => list_payload_bytes::<i32>(column, inner.data_type(), array),
-        DataType::LargeList(inner) => list_payload_bytes::<i64>(column, inner.data_type(), array),
-        _ => Err(UncountedType {
+        DataType::List(inner) => list_logical_bytes::<i32>(column, inner.data_type(), array),
+        DataType::LargeList(inner) => list_logical_bytes::<i64>(column, inner.data_type(), array),
+        _ => Err(UnsupportedTypeError {
             column: column.to_string(),
             data_type: data_type.clone(),
         }),
@@ -94,7 +84,7 @@ fn non_null_count(array: &dyn Array) -> u64 {
     (array.len() - array.null_count()) as u64
 }
 
-fn byte_offsets_payload<T: ByteArrayType>(array: &dyn Array) -> u64 {
+fn byte_array_logical_bytes<T: ByteArrayType>(array: &dyn Array) -> u64 {
     let arr = array
         .as_any()
         .downcast_ref::<GenericByteArray<T>>()
@@ -105,7 +95,7 @@ fn byte_offsets_payload<T: ByteArrayType>(array: &dyn Array) -> u64 {
     (end.as_usize() - start.as_usize()) as u64
 }
 
-fn byte_view_payload<T: ByteViewType>(array: &dyn Array) -> u64 {
+fn byte_view_logical_bytes<T: ByteViewType>(array: &dyn Array) -> u64 {
     let arr = array
         .as_any()
         .downcast_ref::<GenericByteViewArray<T>>()
@@ -117,11 +107,11 @@ fn byte_view_payload<T: ByteViewType>(array: &dyn Array) -> u64 {
         .sum()
 }
 
-fn dictionary_payload_bytes(column: &str, array: &dyn Array) -> Result<u64, UncountedType> {
+fn dictionary_logical_bytes(column: &str, array: &dyn Array) -> Result<u64, UnsupportedTypeError> {
     downcast_dictionary_array!(
         array => {
             let Some(values) = array.values().as_any().downcast_ref::<StringArray>() else {
-                return Err(UncountedType {
+                return Err(UnsupportedTypeError {
                     column: column.to_string(),
                     data_type: array.data_type().clone(),
                 });
@@ -132,18 +122,18 @@ fn dictionary_payload_bytes(column: &str, array: &dyn Array) -> Result<u64, Unco
                 .map(|key| values.value_length(key) as u64)
                 .sum())
         },
-        other => Err(UncountedType {
+        other => Err(UnsupportedTypeError {
             column: column.to_string(),
             data_type: other.clone(),
         }),
     )
 }
 
-fn list_payload_bytes<O: OffsetSizeTrait>(
+fn list_logical_bytes<O: OffsetSizeTrait>(
     column: &str,
     element_type: &DataType,
     array: &dyn Array,
-) -> Result<u64, UncountedType> {
+) -> Result<u64, UnsupportedTypeError> {
     let list = array
         .as_any()
         .downcast_ref::<GenericListArray<O>>()
@@ -158,7 +148,7 @@ fn list_payload_bytes<O: OffsetSizeTrait>(
         .expect("OffsetBuffer is never empty")
         .as_usize();
     let values = list.values().slice(start, end - start);
-    value_byte_count(column, element_type, values.as_ref())
+    array_logical_byte_size(column, element_type, values.as_ref())
 }
 
 #[cfg(test)]
@@ -359,7 +349,7 @@ mod tests {
 
         let all_null = single_col_batch("u", DataType::Null, Arc::new(NullArray::new(3)));
         assert_eq!(logical_byte_size(&all_null).unwrap(), 0);
-        assert!(is_counted(&DataType::Null));
+        assert!(has_logical_byte_size(&DataType::Null));
     }
 
     #[test]
@@ -370,7 +360,7 @@ mod tests {
             Arc::new(Float64Array::from(vec![Some(1.0), None, Some(3.0)])),
         );
         assert_eq!(logical_byte_size(&floats).unwrap(), 2 * 8);
-        assert!(is_counted(&DataType::Float64));
+        assert!(has_logical_byte_size(&DataType::Float64));
 
         let shorts = single_col_batch(
             "i",
@@ -378,7 +368,7 @@ mod tests {
             Arc::new(Int16Array::from(vec![1i16, 2, 3])),
         );
         assert_eq!(logical_byte_size(&shorts).unwrap(), 3 * 2);
-        assert!(is_counted(&DataType::Int16));
+        assert!(has_logical_byte_size(&DataType::Int16));
     }
 
     #[test]
@@ -408,11 +398,30 @@ mod tests {
         let err = logical_byte_size(&batch).unwrap_err();
         assert_eq!(err.column, "nested");
         assert_eq!(err.data_type, data_type);
-        assert!(!is_counted(&data_type));
+        assert!(!has_logical_byte_size(&data_type));
     }
 
     #[test]
-    fn formula_version_is_pinned_at_one() {
-        assert_eq!(LOGICAL_SIZE_FORMULA_VERSION, 1);
+    fn has_logical_byte_size_recurses_into_composite_types() {
+        let utf8_list = DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)));
+        assert!(has_logical_byte_size(&utf8_list));
+
+        let struct_list = DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::Struct(Fields::empty()),
+            true,
+        )));
+        assert!(!has_logical_byte_size(&struct_list));
+
+        let utf8_dict = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+        assert!(has_logical_byte_size(&utf8_dict));
+
+        let int_dict = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Int64));
+        assert!(!has_logical_byte_size(&int_dict));
+    }
+
+    #[test]
+    fn logical_byte_size_version_is_pinned_at_one() {
+        assert_eq!(LOGICAL_BYTE_SIZE_VERSION, 1);
     }
 }

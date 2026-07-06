@@ -1,4 +1,4 @@
-//! Guards that every ontology-derived column type is counted by `logical_byte_size`.
+//! Guards that every ontology-derived column type has a `logical_byte_size` counting rule.
 
 #[cfg(test)]
 mod tests {
@@ -37,11 +37,11 @@ mod tests {
             for column in &table.columns {
                 let arrow_type = ddl_column_type_to_arrow(&column.data_type);
                 assert!(
-                    gkg_utils::arrow::is_counted(&arrow_type),
+                    gkg_utils::arrow::has_logical_byte_size(&arrow_type),
                     "table '{}' column '{}' has DDL type {:?} (arrow {arrow_type:?}) with no \
-                     gkg_utils::arrow byte-counting coverage; extend the counting rules in \
+                     logical-byte-size rule; extend the counting rules in \
                      crates/utils/src/arrow_logical_bytes.rs and bump \
-                     LOGICAL_SIZE_FORMULA_VERSION",
+                     LOGICAL_BYTE_SIZE_VERSION",
                     table.name,
                     column.name,
                     column.data_type,
