@@ -67,7 +67,7 @@ All modes share the same configuration structure.
 | `nats.stream_max_bytes` | `GKG_NATS__STREAM_MAX_BYTES` | None | Max stream size in bytes |
 | `nats.stream_max_messages` | `GKG_NATS__STREAM_MAX_MESSAGES` | None | Max messages per stream |
 | `nats.consumer_inactive_threshold_secs` | `GKG_NATS__CONSUMER_INACTIVE_THRESHOLD_SECS` | `3600` | Idle time after which NATS auto-deletes a versioned durable consumer (min 60) |
-| `nats.release_gc_idle_threshold_secs` | `GKG_NATS__RELEASE_GC_IDLE_THRESHOLD_SECS` | `3600` | Idle time after which a starting process deletes another release's streams (min 600) |
+| `nats.release_gc_idle_threshold_secs` | `GKG_NATS__RELEASE_GC_IDLE_THRESHOLD_SECS` | `3600` | Idle time after which a starting dispatcher deletes another release's streams (min 600) |
 
 The `GKG_INDEXER` stream is created with:
 

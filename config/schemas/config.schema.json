@@ -1185,7 +1185,7 @@
           "default": null
         },
         "release_gc_idle_threshold_secs": {
-          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting process deletes them.\nA live release's dispatcher publishes every minute, so activity doubles\nas liveness. Clamped to a minimum of 600 seconds. Defaults to 3600.",
+          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. Clamped to a minimum of 600 seconds. Defaults to\n3600.",
           "type": "integer",
           "format": "uint64",
           "default": 3600,

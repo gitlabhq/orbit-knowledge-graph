@@ -126,9 +126,10 @@ pub struct NatsConfiguration {
     pub consumer_inactive_threshold_secs: u64,
 
     /// How long another release's streams must show no activity (creation,
-    /// publishes, attached consumers) before a starting process deletes them.
-    /// A live release's dispatcher publishes every minute, so activity doubles
-    /// as liveness. Clamped to a minimum of 600 seconds. Defaults to 3600.
+    /// publishes, attached consumers) before a starting dispatcher deletes
+    /// them. A live release's dispatcher publishes every minute, so activity
+    /// doubles as liveness. Clamped to a minimum of 600 seconds. Defaults to
+    /// 3600.
     #[serde(default = "NatsConfiguration::default_release_gc_idle_threshold_secs")]
     #[schemars(range(min = 600))]
     pub release_gc_idle_threshold_secs: u64,

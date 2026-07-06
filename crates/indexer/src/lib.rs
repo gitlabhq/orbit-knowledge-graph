@@ -105,15 +105,6 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    if let Err(error) = nats::versioning::gc_idle_release_streams(
-        broker.nats_client(),
-        config.nats.release_gc_idle_threshold(),
-    )
-    .await
-    {
-        warn!(%error, "release GC failed, will retry next startup");
-    }
-
     let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
 
     let gitlab_client = config

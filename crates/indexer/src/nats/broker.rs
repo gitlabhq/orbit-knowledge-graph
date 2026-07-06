@@ -459,11 +459,6 @@ impl NatsBroker {
             .as_ref()
             .map(|base| format!("{base}-{}", escape_subject_for_durable(subject)));
 
-        // A connected consumer's fetch loop keeps it active indefinitely; only
-        // consumers of dead releases hit the threshold. Without it they persist
-        // forever and their consumer_count keeps release GC from ever collecting
-        // the stream. If reaped while the indexer is merely down, recreation
-        // redelivers retained WorkQueue messages, so nothing is lost.
         let consumer_config = ConsumerConfig {
             filter_subject: subject.to_string(),
             ack_wait: self.config.ack_wait(),
