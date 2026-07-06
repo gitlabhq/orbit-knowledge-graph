@@ -209,6 +209,7 @@
         "fetch_expires_secs": 5,
         "max_deliver": 5,
         "password": null,
+        "release_gc_idle_threshold_secs": 3600,
         "request_timeout_secs": 5,
         "stream_max_age_secs": 14400,
         "stream_max_bytes": null,
@@ -1144,7 +1145,7 @@
           "minimum": 0
         },
         "consumer_inactive_threshold_secs": {
-          "description": "Inactive threshold for versioned dispatch consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nUsed for Siphon dispatch consumers during blue-green deployments.\nClamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).",
+          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. Clamped to a minimum of 60 seconds. Defaults to\n3600 (1 hour).",
           "type": "integer",
           "format": "uint64",
           "default": 3600,
@@ -1182,6 +1183,13 @@
             "null"
           ],
           "default": null
+        },
+        "release_gc_idle_threshold_secs": {
+          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. Clamped to a minimum of 600 seconds. Defaults to\n3600.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 600
         },
         "request_timeout_secs": {
           "description": "Request timeout in seconds. Defaults to 5.",

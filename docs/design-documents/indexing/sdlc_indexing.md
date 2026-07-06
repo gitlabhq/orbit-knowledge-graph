@@ -193,6 +193,15 @@ The scheduler publishes indexing requests to parameterized subjects (e.g. `sdlc.
 
 This replaces the previous KV-lock-based deduplication with a simpler, infrastructure-level guarantee.
 
+**NATS entity versioning and release GC**
+
+To support blue-green deployments, every gkg-owned NATS entity name carries a version segment, resolved in one place (`crates/indexer/src/nats/versioning.rs`):
+
+- JetStream streams and their subjects are keyed by release (e.g. `GKG_INDEXER_V0-84-1` capturing `v0-84-1.sdlc. ...`), so two releases run side by side with independent work queues and dead-letter streams.
+- KV buckets (`indexing_locks`, `orbit_indexing_progress`) are keyed by graph schema version (e.g. `indexing_locks_v77`), so same-schema releases share locks and progress while different-schema releases are isolated. Retired schema versions' buckets are deleted by the migration-completion GC.
+
+Retired releases' streams are collected at startup without any coordination registry: a live release's dispatcher publishes to its work queue every minute, so stream activity doubles as liveness. At dispatcher startup, other releases' managed streams whose creation time, last publish, and attached-consumer count have all been quiet for longer than `nats.release_gc_idle_threshold_secs` are deleted. Versioned durable consumers (both subscribe-path and Siphon dispatch) carry `nats.consumer_inactive_threshold_secs`, so a dead release's consumers reap themselves instead of holding the consumer-count veto forever.
+
 **Completing an indexing job**
 
 When the handler acks the message, WorkQueue retention automatically removes it from the stream. The handler then updates the database to reflect the date of the last indexing alongside relevant metadata.
