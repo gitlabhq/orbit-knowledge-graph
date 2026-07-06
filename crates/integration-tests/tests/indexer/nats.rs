@@ -615,7 +615,7 @@ async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
         .expect("failed to connect to NATS");
     let jetstream = async_nats::jetstream::new(client.clone());
 
-    let release = "0-84-1";
+    let release = "test-fixture-release";
     let schema_version = 999;
     let v = NatsVersioner::new(release, schema_version);
 
@@ -634,7 +634,7 @@ async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
     }
     jetstream
         .create_stream(async_nats::jetstream::stream::Config {
-            name: "OTHER_APP_V0-84-1".to_string(),
+            name: format!("OTHER_APP_V{release}"),
             subjects: vec!["other-app.>".to_string()],
             ..Default::default()
         })
@@ -666,7 +666,10 @@ async fn release_gc_and_schema_cleanup_delete_their_own_entities() {
         );
     }
     assert!(
-        jetstream.get_stream("OTHER_APP_V0-84-1").await.is_ok(),
+        jetstream
+            .get_stream(&format!("OTHER_APP_V{release}"))
+            .await
+            .is_ok(),
         "foreign stream must survive release GC",
     );
     for name in &bucket_names {
