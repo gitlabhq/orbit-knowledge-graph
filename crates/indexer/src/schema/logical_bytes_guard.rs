@@ -1,6 +1,4 @@
-//! Guards that every ontology-derived column type maps to an Arrow type covered by
-//! `gkg_utils::arrow::logical_byte_size`, so a new ontology column type can't ship
-//! before the byte-counting rules learn to count it.
+//! Guards that every ontology-derived column type is counted by `logical_byte_size`.
 
 #[cfg(test)]
 mod tests {

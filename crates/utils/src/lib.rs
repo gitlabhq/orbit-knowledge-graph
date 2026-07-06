@@ -1,5 +1,6 @@
 pub mod archive;
 pub mod arrow;
+pub mod arrow_logical_bytes;
 pub mod clickhouse;
 pub mod fs;
 pub mod fs_stream;
