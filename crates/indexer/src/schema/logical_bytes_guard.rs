@@ -40,7 +40,8 @@ mod tests {
                     gkg_utils::arrow::is_counted(&arrow_type),
                     "table '{}' column '{}' has DDL type {:?} (arrow {arrow_type:?}) with no \
                      gkg_utils::arrow byte-counting coverage; extend the counting rules in \
-                     crates/utils/src/arrow.rs and bump LOGICAL_SIZE_FORMULA_VERSION",
+                     crates/utils/src/arrow_logical_bytes.rs and bump \
+                     LOGICAL_SIZE_FORMULA_VERSION",
                     table.name,
                     column.name,
                     column.data_type,
