@@ -148,6 +148,50 @@ async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
     );
 }
 
+async fn pagination_header_carries_cursor_and_pages_forward(ctx: &TestContext) {
+    let json = r#"{"query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "cursor": {"page_size": 2}}"#;
+
+    let output = run_pipeline(ctx, json, &allow_all(), test_security_context()).await;
+    let page1 = GoonFormatter.format(&output);
+    let s1 = goon_str(&page1);
+    assert!(
+        s1.contains("has_more:true"),
+        "page 1 GOON header must flag more: {s1}"
+    );
+    assert!(
+        s1.contains("truncated:true"),
+        "page 1 GOON header must flag truncation: {s1}"
+    );
+    let after = s1
+        .lines()
+        .find_map(|l| l.strip_prefix("next_cursor:"))
+        .expect("GOON header must carry next_cursor so an LLM can page forward")
+        .to_string();
+
+    let mut next: serde_json::Value = serde_json::from_str(json).unwrap();
+    next["cursor"]["after"] = serde_json::Value::String(after);
+    let output2 = run_pipeline(
+        ctx,
+        &next.to_string(),
+        &allow_all(),
+        test_security_context(),
+    )
+    .await;
+    let page2 = GoonFormatter.format(&output2);
+    let s2 = goon_str(&page2);
+    assert!(
+        s2.contains("username=unicode"),
+        "the token from the GOON header must advance to the last user: {s2}"
+    );
+    assert!(
+        !s2.contains("has_more:true"),
+        "final GOON page must not flag more: {s2}"
+    );
+}
+
 async fn traversal_emits_header_nodes_and_edges_sections(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
@@ -384,6 +428,7 @@ async fn goon_formatter_e2e() {
 
     run_subtests_shared!(
         &ctx,
+        pagination_header_carries_cursor_and_pages_forward,
         format_stamped_returns_goon_name_and_version,
         traversal_emits_header_nodes_and_edges_sections,
         empty_result_still_emits_section_markers,

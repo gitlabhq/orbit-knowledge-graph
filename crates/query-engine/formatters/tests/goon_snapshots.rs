@@ -255,7 +255,7 @@ fn snapshot_pagination() {
     r.pagination = Some(PaginationResponse {
         has_more: true,
         truncated: true,
-        next_cursor: None,
+        next_cursor: Some("eyJoIjoiYWQyMTczMWM5MTZm".into()),
     });
     insta::assert_snapshot!(run(r));
 }
