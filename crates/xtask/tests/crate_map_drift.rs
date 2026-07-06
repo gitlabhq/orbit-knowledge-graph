@@ -1,7 +1,4 @@
-//! Regression tests for the crate-map drift parsers. The logic under test is
-//! `include!`d from the same file `build.rs` uses, so these lock in the sharp
-//! edges (leaf-name collisions, `default-members`) that `build.rs` alone
-//! cannot express as `cargo test` cases.
+//! Tests the drift parsers `include!`d from the same file `build.rs` uses.
 
 include!("../build_support/crate_map_drift.rs");
 

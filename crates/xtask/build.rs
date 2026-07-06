@@ -1,18 +1,7 @@
-//! Build-time drift check for the crate map.
-//!
-//! `docs/dev/agents-crate-map.md` is hand-maintained and `AGENTS.md`
-//! requires updating it in the same MR that adds, removes, or renames a
-//! crate. Nothing enforced that, so it silently drifted. This build script
-//! parses the `[workspace].members` list from the root `Cargo.toml`, derives
-//! each crate's workspace-relative path, and asserts it appears as a row in
-//! the crate map (and that the map has no rows for crates that no longer
-//! exist). It `panic!`s with the offending entries on drift, so it fails
-//! locally and in CI (any `cargo build`/`clippy` over the workspace builds
-//! `xtask`).
-//!
-//! Name-presence only: descriptions are not validated. The parsing/diffing
-//! logic lives in `build_support/crate_map_drift.rs` so the test target can
-//! `include!` and exercise it too.
+//! Fails the build when `docs/dev/agents-crate-map.md` drifts from the
+//! `[workspace].members` in the root `Cargo.toml`. Name-presence only;
+//! descriptions are not checked. Parsing/diffing lives in
+//! `build_support/crate_map_drift.rs` so the test target can `include!` it.
 
 use std::path::{Path, PathBuf};
 
@@ -36,8 +25,7 @@ fn main() {
     }
 }
 
-/// `build.rs` runs with `CARGO_MANIFEST_DIR` pointing at `crates/xtask`; the
-/// workspace root is two levels up.
+// `CARGO_MANIFEST_DIR` points at `crates/xtask`; the workspace root is two up.
 fn workspace_root() -> PathBuf {
     let manifest_dir =
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");
