@@ -32,6 +32,7 @@ members = [
   "crates/xtask",
   "crates/integration-testkit",
   "crates/integration-tests-codegraph",
+  "crates/named-queries",
   "crates/nats-client",
   "crates/utils",
   "crates/integration-tests",

@@ -3,7 +3,9 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::{error, warn};
 
-use crate::proto::{ExecuteQueryError, ExecuteQueryMessage, execute_query_message};
+use named_queries::{BindingValues, NamedQueries};
+
+use crate::proto::{ExecuteQueryError, ExecuteQueryMessage, QueryType, execute_query_message};
 
 use query_engine::pipeline::PipelineError;
 
@@ -13,6 +15,41 @@ pub struct QueryRequest {
     pub query: String,
     pub format: i32,
     pub query_type: i32,
+}
+
+pub fn resolve_query_json(
+    req: &QueryRequest,
+    named_queries: &NamedQueries,
+    values: &BindingValues,
+) -> Result<String, String> {
+    if req.query_type != QueryType::Named as i32 {
+        return Ok(req.query.clone());
+    }
+
+    let Some(named) = named_queries.get(&req.query) else {
+        let names: Vec<&str> = named_queries.names().collect();
+        return Err(format!(
+            "Unknown named query `{}`. Available named queries: {}",
+            req.query,
+            names.join(", ")
+        ));
+    };
+    named.render(values).map_err(|e| e.to_string())
+}
+
+pub async fn send_invalid_request_error(
+    tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    message: String,
+) {
+    warn!(error = %message, "Rejecting invalid query request");
+    let _ = tx
+        .send(Ok(ExecuteQueryMessage {
+            content: Some(execute_query_message::Content::Error(ExecuteQueryError {
+                code: "invalid_request".to_string(),
+                message,
+            })),
+        }))
+        .await;
 }
 
 pub async fn receive_query_request(
@@ -177,6 +214,51 @@ fn extract_ch_error_code(error: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn named_request(query: &str) -> QueryRequest {
+        QueryRequest {
+            query: query.to_string(),
+            format: 0,
+            query_type: QueryType::Named as i32,
+        }
+    }
+
+    fn embedded() -> NamedQueries {
+        NamedQueries::load_embedded().expect("embedded named queries load")
+    }
+
+    const VALUES: BindingValues = BindingValues {
+        current_user_id: 42,
+    };
+
+    #[test]
+    fn resolve_query_json_passes_json_queries_through() {
+        let req = QueryRequest {
+            query: r#"{"query_type":"neighbors"}"#.to_string(),
+            format: 0,
+            query_type: QueryType::Json as i32,
+        };
+        assert_eq!(
+            resolve_query_json(&req, &embedded(), &VALUES).unwrap(),
+            req.query
+        );
+    }
+
+    #[test]
+    fn resolve_query_json_renders_named_query_with_claims_user_id() {
+        let rendered = resolve_query_json(&named_request("my_neighbors"), &embedded(), &VALUES)
+            .expect("known named query resolves");
+        assert!(rendered.contains("\"node_ids\":[42]"), "{rendered}");
+        assert!(!rendered.contains("$binding"), "{rendered}");
+    }
+
+    #[test]
+    fn resolve_query_json_rejects_unknown_name_and_lists_available() {
+        let err =
+            resolve_query_json(&named_request("nonexistent"), &embedded(), &VALUES).unwrap_err();
+        assert!(err.contains("nonexistent"), "{err}");
+        assert!(err.contains("my_neighbors"), "{err}");
+    }
 
     #[test]
     fn extract_ch_error_code_parses_standard_format() {

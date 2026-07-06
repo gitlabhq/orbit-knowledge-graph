@@ -17,7 +17,10 @@ use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
-use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
+use crate::pipeline::{
+    QueryPipelineService, receive_query_request, resolve_query_json, send_invalid_request_error,
+    send_query_error,
+};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
@@ -61,6 +64,7 @@ pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
+    named_queries: Arc<named_queries::NamedQueries>,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
@@ -82,10 +86,15 @@ impl KnowledgeGraphServiceImpl {
         let pipeline =
             QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), analytics_config);
         let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
+        let named_queries = Arc::new(
+            named_queries::NamedQueries::load_embedded()
+                .expect("embedded named queries are validated by the build script"),
+        );
         Self {
             validator,
             ontology,
             tool_service,
+            named_queries,
             pipeline,
             cluster_health,
             graph_status,
@@ -292,6 +301,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let named_queries = Arc::clone(&self.named_queries);
         let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
@@ -302,7 +312,18 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     None => return,
                 };
 
-                info!(query_len = req.query.len(), "Executing query");
+                let values = named_queries::BindingValues {
+                    current_user_id: claims.user_id,
+                };
+                let query_json = match resolve_query_json(&req, &named_queries, &values) {
+                    Ok(q) => q,
+                    Err(message) => {
+                        send_invalid_request_error(&tx, message).await;
+                        return;
+                    }
+                };
+
+                info!(query_len = query_json.len(), "Executing query");
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
@@ -311,7 +332,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     .run_query(
                         claims,
                         coding_agent,
-                        &req.query,
+                        &query_json,
                         tx.clone(),
                         stream,
                         timeout,

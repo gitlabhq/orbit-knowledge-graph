@@ -85,9 +85,10 @@ message ExecuteQueryMessage {
   }
 }
 
-// Query language selector. Only JSON DSL is supported today.
+// Query language selector.
 enum QueryType {
   QUERY_TYPE_JSON = 0;
+  QUERY_TYPE_NAMED = 1;  // `query` names a server-defined named query
 }
 
 // Client-sent initial message to start a query.

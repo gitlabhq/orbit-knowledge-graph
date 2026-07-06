@@ -583,11 +583,13 @@ impl FormatName {
         }
     }
 }
-/// Query language selector. Only JSON DSL is supported today.
+/// Query language selector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
     Json = 0,
+    /// `query` names a server-defined named query
+    Named = 1,
 }
 impl QueryType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -597,12 +599,14 @@ impl QueryType {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Json => "QUERY_TYPE_JSON",
+            Self::Named => "QUERY_TYPE_NAMED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "QUERY_TYPE_JSON" => Some(Self::Json),
+            "QUERY_TYPE_NAMED" => Some(Self::Named),
             _ => None,
         }
     }

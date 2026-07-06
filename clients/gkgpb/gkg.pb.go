@@ -125,20 +125,23 @@ func (FormatName) EnumDescriptor() ([]byte, []int) {
 	return file_gkg_proto_rawDescGZIP(), []int{1}
 }
 
-// Query language selector. Only JSON DSL is supported today.
+// Query language selector.
 type QueryType int32
 
 const (
-	QueryType_QUERY_TYPE_JSON QueryType = 0
+	QueryType_QUERY_TYPE_JSON  QueryType = 0
+	QueryType_QUERY_TYPE_NAMED QueryType = 1 // `query` names a server-defined named query (config/named_queries/)
 )
 
 // Enum value maps for QueryType.
 var (
 	QueryType_name = map[int32]string{
 		0: "QUERY_TYPE_JSON",
+		1: "QUERY_TYPE_NAMED",
 	}
 	QueryType_value = map[string]int32{
-		"QUERY_TYPE_JSON": 0,
+		"QUERY_TYPE_JSON":  0,
+		"QUERY_TYPE_NAMED": 1,
 	}
 )
 
@@ -3322,9 +3325,10 @@ const file_gkg_proto_rawDesc = "" +
 	"\n" +
 	"FormatName\x12\x13\n" +
 	"\x0fFORMAT_NAME_RAW\x10\x00\x12\x14\n" +
-	"\x10FORMAT_NAME_GOON\x10\x01* \n" +
+	"\x10FORMAT_NAME_GOON\x10\x01*6\n" +
 	"\tQueryType\x12\x13\n" +
-	"\x0fQUERY_TYPE_JSON\x10\x00*\x86\x01\n" +
+	"\x0fQUERY_TYPE_JSON\x10\x00\x12\x14\n" +
+	"\x10QUERY_TYPE_NAMED\x10\x01*\x86\x01\n" +
 	"\rClusterStatus\x12\x1e\n" +
 	"\x1aCLUSTER_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16CLUSTER_STATUS_HEALTHY\x10\x01\x12\x1b\n" +

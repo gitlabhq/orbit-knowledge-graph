@@ -18,131 +18,16 @@ fn validate_named_queries() {
     let ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
         .expect("static security context must be valid");
 
-    let mut paths: Vec<_> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()))
-        .map(|entry| entry.expect("failed to read directory entry").path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
-        .collect();
-    paths.sort();
-    assert!(
-        !paths.is_empty(),
-        "no named queries found in {}",
-        dir.display()
-    );
+    let queries = named_queries::NamedQueries::load_from_dir(&dir)
+        .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
 
-    let mut names = std::collections::HashSet::new();
-    for path in paths {
-        let query = NamedQuery::parse(&path);
-        assert!(
-            names.insert(query.name.clone()),
-            "duplicate named query `{}`",
-            query.name
-        );
-
-        let rendered = query.rendered_for_validation();
-        if let Err(e) = compiler::compile(&rendered.to_string(), &ontology, &ctx) {
+    let values = named_queries::BindingValues { current_user_id: 1 };
+    for query in queries.iter() {
+        let rendered = query
+            .render(&values)
+            .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
+        if let Err(e) = compiler::compile(&rendered, &ontology, &ctx) {
             panic!("named query `{}` failed to compile: {e}", query.name);
-        }
-    }
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NamedQuery {
-    name: String,
-    description: String,
-    #[serde(default)]
-    bindings: Vec<String>,
-    query: serde_json::Value,
-}
-
-const BINDING_KEY: &str = "$binding";
-const KNOWN_BINDINGS: &[&str] = &["current_user_id"];
-
-impl NamedQuery {
-    fn parse(path: &std::path::Path) -> Self {
-        let content = std::fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-        let query: NamedQuery = serde_yaml::from_str(&content)
-            .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
-
-        let stem = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        assert_eq!(
-            query.name,
-            stem,
-            "{}: `name` must match the file stem",
-            path.display()
-        );
-        assert!(
-            !query.description.trim().is_empty(),
-            "named query `{}` needs a description",
-            query.name
-        );
-        query
-    }
-
-    fn rendered_for_validation(&self) -> serde_json::Value {
-        let mut rendered = self.query.clone();
-        let mut used = std::collections::HashSet::new();
-        self.substitute(&mut rendered, &mut used);
-        for binding in &self.bindings {
-            assert!(
-                used.contains(binding.as_str()),
-                "named query `{}` declares binding `{binding}` but never uses it; \
-                 remove it from `bindings:`",
-                self.name
-            );
-        }
-        rendered
-    }
-
-    fn substitute(
-        &self,
-        value: &mut serde_json::Value,
-        used: &mut std::collections::HashSet<String>,
-    ) {
-        match value {
-            serde_json::Value::Object(map) => {
-                if let Some(binding) = map.get(BINDING_KEY) {
-                    assert_eq!(
-                        map.len(),
-                        1,
-                        "named query `{}`: a {BINDING_KEY} object must have no other keys",
-                        self.name
-                    );
-                    let binding = binding.as_str().unwrap_or_else(|| {
-                        panic!(
-                            "named query `{}`: {BINDING_KEY} value must be a string",
-                            self.name
-                        )
-                    });
-                    assert!(
-                        KNOWN_BINDINGS.contains(&binding),
-                        "named query `{}` uses unknown binding `{binding}`",
-                        self.name
-                    );
-                    assert!(
-                        self.bindings.iter().any(|b| b == binding),
-                        "named query `{}` uses undeclared binding `{binding}`; declare it under `bindings:`",
-                        self.name
-                    );
-                    used.insert(binding.to_string());
-                    *value = serde_json::Value::from(1);
-                    return;
-                }
-                for nested in map.values_mut() {
-                    self.substitute(nested, used);
-                }
-            }
-            serde_json::Value::Array(items) => {
-                for item in items {
-                    self.substitute(item, used);
-                }
-            }
-            _ => {}
         }
     }
 }
