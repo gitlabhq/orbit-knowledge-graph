@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
@@ -353,7 +353,7 @@ impl CodeIndexingPipeline {
     ) -> Result<Arc<ProjectCommit>, HandlerError> {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context, cancel);
-        let (result, commit) = self
+        let (result, commit, metered_bytes) = self
             .build_code_graph(request, repository, indexed_at, config)
             .await?;
 
@@ -361,7 +361,13 @@ impl CodeIndexingPipeline {
         self.metrics
             .record_indexing_duration(indexing_start.elapsed());
 
-        self.record_indexing_results(&result, observer, request, indexing_start);
+        self.record_indexing_results(
+            &result,
+            observer,
+            request,
+            indexing_start,
+            metered_bytes.load(Ordering::Relaxed),
+        );
 
         if let Some(error) = result.errors.iter().find(|error| error.fatal) {
             // Some batches may already have flushed; mark the commit failed and drop the
@@ -422,7 +428,14 @@ impl CodeIndexingPipeline {
         repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
         config: PipelineConfig,
-    ) -> Result<(code_graph::v2::PipelineResult, Arc<ProjectCommit>), HandlerError> {
+    ) -> Result<
+        (
+            code_graph::v2::PipelineResult,
+            Arc<ProjectCommit>,
+            Arc<AtomicU64>,
+        ),
+        HandlerError,
+    > {
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -461,13 +474,21 @@ impl CodeIndexingPipeline {
         let writer = self.writer.clone();
         let max_rows = self.pipeline_config.write_slice_rows.max(1);
         let token = commit.clone();
-        let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new(
+        let metered_bytes = Arc::new(AtomicU64::new(0));
+        let on_batch: Arc<code_graph::v2::OnBatch> = Arc::new({
+            let metered_bytes = metered_bytes.clone();
             move |table: &str, batch: arrow::record_batch::RecordBatch| {
                 // The converter emits zero-row node tables for ParsedOnly graphs; skip them so we
                 // never buffer an empty part or add a phantom commit token.
                 if batch.num_rows() == 0 {
                     return Ok(());
                 }
+                // Metered once over the whole batch: logical_byte_size is slice-invariant, so
+                // this equals summing the slices below at a fraction of the cost.
+                let batch_bytes = gkg_utils::arrow::logical_byte_size(&batch)
+                    .map_err(|e| code_graph::v2::SinkError(e.to_string()))?;
+                metered_bytes.fetch_add(batch_bytes, Ordering::Relaxed);
+
                 let table = table.to_string();
                 let mut offset = 0;
                 while offset < batch.num_rows() {
@@ -480,8 +501,8 @@ impl CodeIndexingPipeline {
                     offset += len;
                 }
                 Ok(())
-            },
-        );
+            }
+        });
 
         let code_graph_start = Instant::now();
         let repo_dir = repository.path().to_path_buf();
@@ -516,7 +537,7 @@ impl CodeIndexingPipeline {
             "code-graph building completed"
         );
 
-        Ok((result, commit))
+        Ok((result, commit, metered_bytes))
     }
 
     fn record_indexing_results(
@@ -525,6 +546,7 @@ impl CodeIndexingPipeline {
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,
+        written_bytes: u64,
     ) {
         let parsed_count = result
             .stats
@@ -580,7 +602,7 @@ impl CodeIndexingPipeline {
             + result.stats.definitions_count
             + result.stats.imports_count
             + result.stats.edges_count) as u64;
-        observer.record_graph_write("code_graph", rows_written, 0);
+        observer.record_graph_write("code_graph", rows_written, written_bytes);
         observer.record_duration(indexing_start.elapsed().as_millis() as u64);
 
         for skipped in &result.skipped {

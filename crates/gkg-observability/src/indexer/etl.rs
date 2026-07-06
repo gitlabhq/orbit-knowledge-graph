@@ -87,7 +87,7 @@ pub const DESTINATION_ROWS_WRITTEN: MetricSpec = MetricSpec::counter(
 // in the current Prometheus exposure.
 pub const DESTINATION_BYTES_WRITTEN: MetricSpec = MetricSpec::counter(
     "gkg.etl.destination.written",
-    "Total bytes written to ClickHouse per table.",
+    "Total logical bytes written to ClickHouse per table (gkg_utils::arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
     Some("By"),
     &[labels::TABLE],
     DOMAIN,

@@ -4,6 +4,7 @@ mod common;
 mod dispatcher;
 mod engine;
 mod health;
+mod logical_bytes;
 mod namespace_deletion;
 mod nats;
 mod nats_tls;
