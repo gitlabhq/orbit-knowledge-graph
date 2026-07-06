@@ -76,7 +76,7 @@ use orchestrator::scheduled::{
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 pub async fn run(
     config: &IndexerConfig,
@@ -254,6 +254,16 @@ pub async fn run_dispatcher(
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
+
+    if let Err(error) = nats::versioning::gc_idle_release_streams(
+        &services.nats_client,
+        config.nats.release_gc_idle_threshold(),
+    )
+    .await
+    {
+        warn!(%error, "release GC failed, will retry next startup");
+    }
+
     let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();

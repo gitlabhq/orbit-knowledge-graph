@@ -114,13 +114,25 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_fetch_expires_secs")]
     pub fetch_expires_secs: u64,
 
-    /// Inactive threshold for versioned dispatch consumers in seconds.
+    /// Inactive threshold for versioned durable consumers in seconds.
     /// After this duration with no activity, NATS auto-deletes the consumer.
-    /// Used for Siphon dispatch consumers during blue-green deployments.
-    /// Clamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).
+    /// Applied to Siphon dispatch consumers and to subscribe consumers on the
+    /// versioned work streams, so a retired release's consumers reap
+    /// themselves and stop vetoing release GC. A connected consumer's fetch
+    /// loop keeps it active. Clamped to a minimum of 60 seconds. Defaults to
+    /// 3600 (1 hour).
     #[serde(default = "NatsConfiguration::default_consumer_inactive_threshold_secs")]
     #[schemars(range(min = 60))]
     pub consumer_inactive_threshold_secs: u64,
+
+    /// How long another release's streams must show no activity (creation,
+    /// publishes, attached consumers) before a starting dispatcher deletes
+    /// them. A live release's dispatcher publishes every minute, so activity
+    /// doubles as liveness. Clamped to a minimum of 600 seconds. Defaults to
+    /// 3600.
+    #[serde(default = "NatsConfiguration::default_release_gc_idle_threshold_secs")]
+    #[schemars(range(min = 600))]
+    pub release_gc_idle_threshold_secs: u64,
 }
 
 impl NatsConfiguration {
@@ -170,6 +182,14 @@ impl NatsConfiguration {
 
     pub fn consumer_inactive_threshold(&self) -> Duration {
         Duration::from_secs(self.consumer_inactive_threshold_secs.max(60))
+    }
+
+    fn default_release_gc_idle_threshold_secs() -> u64 {
+        3600
+    }
+
+    pub fn release_gc_idle_threshold(&self) -> Duration {
+        Duration::from_secs(self.release_gc_idle_threshold_secs.max(600))
     }
 
     /// Returns true when TLS is configured -- either via cert paths or a `tls://` url scheme.
@@ -287,6 +307,7 @@ impl Default for NatsConfiguration {
             stream_max_messages: None,
             fetch_expires_secs: Self::default_fetch_expires_secs(),
             consumer_inactive_threshold_secs: Self::default_consumer_inactive_threshold_secs(),
+            release_gc_idle_threshold_secs: Self::default_release_gc_idle_threshold_secs(),
         }
     }
 }

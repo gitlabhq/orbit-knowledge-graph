@@ -618,7 +618,7 @@ impl MigrationCompletionChecker {
                 continue;
             }
             if let Err(e) =
-                crate::nats::versioning::cleanup_version(&self.nats_client, *version).await
+                crate::nats::versioning::cleanup_schema_state(&self.nats_client, *version).await
             {
                 warn!(version, error = %e, "GC: NATS cleanup failed, skipping mark_version_dropped");
                 self.metrics.record_cleanup(*version, current, "failure");
