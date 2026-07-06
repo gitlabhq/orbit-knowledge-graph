@@ -10,9 +10,6 @@ use arrow::datatypes::{ArrowNativeType, DataType};
 use arrow::downcast_dictionary_array;
 use arrow::record_batch::RecordBatch;
 
-/// Version of the [`logical_byte_size`] counting rules; bump on any rule change.
-pub const LOGICAL_BYTE_SIZE_VERSION: u32 = 1;
-
 /// A column's Arrow type has no [`logical_byte_size`] counting rule.
 #[derive(Debug, thiserror::Error)]
 #[error("column {column} has Arrow type {data_type} with no logical-byte-size rule")]
@@ -418,10 +415,5 @@ mod tests {
 
         let int_dict = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Int64));
         assert!(!has_logical_byte_size(&int_dict));
-    }
-
-    #[test]
-    fn logical_byte_size_version_is_pinned_at_one() {
-        assert_eq!(LOGICAL_BYTE_SIZE_VERSION, 1);
     }
 }

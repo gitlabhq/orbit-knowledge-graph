@@ -40,8 +40,7 @@ mod tests {
                     gkg_utils::arrow::has_logical_byte_size(&arrow_type),
                     "table '{}' column '{}' has DDL type {:?} (arrow {arrow_type:?}) with no \
                      logical-byte-size rule; extend the counting rules in \
-                     crates/utils/src/arrow_logical_bytes.rs and bump \
-                     LOGICAL_BYTE_SIZE_VERSION",
+                     crates/utils/src/arrow_logical_bytes.rs",
                     table.name,
                     column.name,
                     column.data_type,
