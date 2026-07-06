@@ -1,3 +1,21 @@
+## [0.85.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.85.0...v0.85.1) (2026-07-06)
+
+### Fixes
+
+* **e2e:** re-bump gitlab pins with puma bindIp6 pinned off ([4b8519a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4b8519a49ee114c6bbc4f9991039c2eb2a1150b6)) by Michael Angelo Rivera
+* **indexer:** coalesce full-index data writes via async_insert ([7eb1b95](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7eb1b9504e1989c5d203a948767b0bce31b3999b)) by Michael Usachenko
+* **indexer:** prune edge enrichment CTEs by traversal_path ([8881a5a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8881a5aafe2a15853c5c624de2a4bb602e62709f)) by Jean-Gabriel Doyon
+* **ontology:** declare missing edge variants and enforce them at load time ([fc90a1c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fc90a1cadeec22451f5a3655cd88481c9f7ca6a6)) by Michael Angelo Rivera
+
+### Performance
+
+* **e2e:** parallelize deploy, gate diagnostics, prebake robot image ([022acf5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/022acf52a2011e14765a516dc5d461a6e47f4810)) by Michael Angelo Rivera
+
+### Other
+
+* add agent playbook for adding data to the knowledge graph ([444db65](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/444db653aa18281993cbe26425f94a3c239e36d4)) by Tim Rizzi
+* **agents:** fix drift in agent docs and crate map ([9b67d4f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9b67d4fbad78bcb184ec9e402049cab8126fb7e7)) by Dmitry Gruzd
+
 ## [0.85.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.84.1...v0.85.0) (2026-07-03)
 
 ### Features
