@@ -17,11 +17,7 @@ pub struct UncountedType {
     pub data_type: DataType,
 }
 
-/// Deterministic count of the logical bytes in a [`RecordBatch`]: a pure function of the row
-/// values, invariant under batch splitting, buffer capacity, and dictionary vs. plain encoding.
-/// Counts only customer data, excluding serialization overhead (offset arrays, null maps) that
-/// ClickHouse's own `byteSize()` includes. An unknown Arrow type returns [`UncountedType`]
-/// rather than counting as 0, so a new column type can't ship unmetered.
+/// Deterministic, split-invariant count of the customer-data bytes in a [`RecordBatch`], excluding serialization overhead; unknown Arrow types return [`UncountedType`] rather than counting as 0.
 ///
 /// | Arrow logical type                                 | bytes per non-null value    |
 /// |-----------------------------------------------------|------------------------------|
@@ -274,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn split_invariant_across_counted_types() {
+    fn concatenated_slices_count_the_same_as_the_whole_batch() {
         for batch in [builder_fixture(), unbuildable_types_fixture()] {
             let total = logical_byte_size(&batch).unwrap();
             for split in 1..batch.num_rows() {
@@ -291,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn dictionary_counts_same_as_plain_utf8() {
+    fn dictionary_encoding_counts_identical_to_plain_utf8() {
         let values: &[&str] = &["alpha", "beta", "alpha", "gamma"];
         let build = |col_type| {
             BatchBuilder::new(&[spec("s", col_type, false)], values.len())
@@ -306,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn slice_counts_only_its_own_rows() {
+    fn sliced_batch_counts_only_rows_inside_the_slice() {
         let batch = builder_fixture().project(&[3]).unwrap();
         let sliced = batch.slice(2, 2);
         assert_eq!(
@@ -316,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn nulls_charge_zero() {
+    fn null_values_count_zero_for_string_int_and_list_columns() {
         let null_string = builder_fixture().project(&[3]).unwrap().slice(1, 1);
         assert_eq!(logical_byte_size(&null_string).unwrap(), 0);
 
@@ -342,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn uncounted_type_names_column_and_type() {
+    fn unknown_arrow_type_errors_with_column_name_and_type() {
         let batch = single_col_batch(
             "score",
             DataType::Float64,
@@ -355,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn formula_version_is_one() {
+    fn formula_version_is_pinned_at_one() {
         assert_eq!(LOGICAL_SIZE_FORMULA_VERSION, 1);
     }
 }

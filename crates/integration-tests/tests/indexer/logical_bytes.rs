@@ -32,7 +32,7 @@ const CREATE_TABLE: &str = "CREATE TABLE logical_bytes_parity (
 #[tokio::test]
 async fn logical_byte_size_matches_chart_derived_sql() {
     let ctx = TestContext::new(&[CREATE_TABLE]).await;
-    let batch = parity_batch();
+    let batch = batch_with_nonempty_empty_and_null_rows();
 
     ctx.create_client()
         .insert_arrow(TABLE, std::slice::from_ref(&batch))
@@ -76,9 +76,7 @@ async fn scalar_u64(ctx: &TestContext, sql: &str) -> u64 {
         .value(0)
 }
 
-/// One row per edge case the formulas must handle: a non-empty value, an empty/zero value,
-/// and (for the nullable column) a NULL.
-fn parity_batch() -> RecordBatch {
+fn batch_with_nonempty_empty_and_null_rows() -> RecordBatch {
     let plain_string = StringArray::from(vec!["hello", "", "gitlab"]);
 
     let mut lc_builder = StringDictionaryBuilder::<Int32Type>::new();
