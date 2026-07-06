@@ -43,6 +43,9 @@ pub enum NamedQueryError {
         name: String,
         available: Vec<String>,
     },
+
+    #[error("no named query YAML files found in {location}")]
+    Empty { location: String },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -209,7 +212,7 @@ impl NamedQueries {
                 })?;
             files.push((path.to_string(), content));
         }
-        Self::from_files(files)
+        Self::from_files(env!("NAMED_QUERIES_DIR"), files)
     }
 
     pub fn load_from_dir(dir: &Path) -> Result<Self, NamedQueryError> {
@@ -234,10 +237,11 @@ impl NamedQueries {
             })?;
             files.push((path.display().to_string(), content));
         }
-        Self::from_files(files)
+        Self::from_files(&dir.display().to_string(), files)
     }
 
     fn from_files(
+        location: &str,
         files: impl IntoIterator<Item = (String, String)>,
     ) -> Result<Self, NamedQueryError> {
         let mut queries = BTreeMap::new();
@@ -252,9 +256,8 @@ impl NamedQueries {
             }
         }
         if queries.is_empty() {
-            return Err(NamedQueryError::Read {
-                path: "config/named_queries".to_string(),
-                message: "no named query YAML files found".to_string(),
+            return Err(NamedQueryError::Empty {
+                location: location.to_string(),
             });
         }
         Ok(Self { queries })
@@ -429,17 +432,21 @@ query:
 
     #[test]
     fn duplicate_names_are_rejected() {
-        let err = NamedQueries::from_files([
-            ("a/q.yaml".to_string(), VALID.to_string()),
-            ("b/q.yaml".to_string(), VALID.to_string()),
-        ])
+        let err = NamedQueries::from_files(
+            "test",
+            [
+                ("a/q.yaml".to_string(), VALID.to_string()),
+                ("b/q.yaml".to_string(), VALID.to_string()),
+            ],
+        )
         .unwrap_err();
         assert!(err.to_string().contains("duplicate"), "{err}");
     }
 
     #[test]
-    fn empty_set_is_rejected() {
-        let err = NamedQueries::from_files([]).unwrap_err();
-        assert!(err.to_string().contains("no named query"), "{err}");
+    fn empty_set_error_names_the_actual_location() {
+        let err = NamedQueries::from_files("/tmp/my_queries", []).unwrap_err();
+        assert!(matches!(err, NamedQueryError::Empty { .. }), "{err}");
+        assert!(err.to_string().contains("/tmp/my_queries"), "{err}");
     }
 }

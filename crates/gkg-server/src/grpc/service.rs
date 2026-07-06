@@ -311,26 +311,22 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     None => return,
                 };
 
-                let query_json = match QueryType::try_from(req.query_type) {
-                    Ok(QueryType::Json) => req.query,
+                let resolved = match QueryType::try_from(req.query_type) {
+                    Ok(QueryType::Json) => Ok(req.query),
                     Ok(QueryType::Named) => {
                         let values = named_queries::BindingValues {
                             current_user_id: claims.user_id,
                         };
-                        match named_queries.render(&req.query, &values) {
-                            Ok(query) => query,
-                            Err(e) => {
-                                send_invalid_request_error(&tx, e.to_string()).await;
-                                return;
-                            }
-                        }
+                        named_queries
+                            .render(&req.query, &values)
+                            .map_err(|e| e.to_string())
                     }
-                    Err(_) => {
-                        send_invalid_request_error(
-                            &tx,
-                            format!("Unknown query_type: {}", req.query_type),
-                        )
-                        .await;
+                    Err(_) => Err(format!("Unknown query_type: {}", req.query_type)),
+                };
+                let query_json = match resolved {
+                    Ok(query) => query,
+                    Err(message) => {
+                        send_invalid_request_error(&tx, message).await;
                         return;
                     }
                 };
