@@ -33,9 +33,8 @@ If you must introspect, call `glab orbit remote schema <Entity…>` with explici
 entity names — always pass the entity names you need rather than the unscoped
 form, which returns ~17 KB+ of output. Call schema at most once per session;
 schemas don't change mid-session. Use `glab orbit remote dsl` for the full DSL
-JSON Schema. Note that
-per-node `outgoing_edges`/`incoming_edges` are arrays of **strings** (edge type
-names), not objects — use `--jq` accordingly (e.g.
+JSON Schema. Note that per-node `outgoing_edges`/`incoming_edges` are arrays
+of **strings** (edge type names), not objects — use `--jq` accordingly (e.g.
 `schema Project --jq '.nodes[] | select(.name=="Project") | .properties'`).
 
 Each `glab orbit remote query` has fixed per-call overhead. Prefer one
