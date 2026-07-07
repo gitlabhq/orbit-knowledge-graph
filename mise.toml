@@ -377,6 +377,14 @@ description = "Regenerate rust-toolchain.toml from mise.toml"
 run = "bash ./scripts/check-rust-toolchain.sh --check"
 description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
+[tasks."schema:bump"]
+run = "cargo xtask migration-ledger bump"
+description = "Bump SCHEMA_VERSION, append a migration ledger entry, and re-snapshot fingerprints"
+
+[tasks."schema:ledger:check"]
+run = "cargo xtask migration-ledger check"
+description = "Fail if the migration ledger or fingerprint snapshot drifted from the ontology"
+
 [tasks."metrics:catalog"]
 run = "cargo xtask metrics-catalog"
 description = "Regenerate crates/gkg-observability/orbit-dashboards/gkg-metrics.json"

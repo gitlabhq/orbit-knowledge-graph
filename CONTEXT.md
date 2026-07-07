@@ -94,6 +94,10 @@ _Avoid_: request ID, trace ID (`dispatch_id` groups many requests, not a single 
 The parent correlation above **Dispatch ID**: one campaign per "re-index everything" decision, `null` in steady state. Today a campaign is a schema migration — opened (`migration-v<N>`) when the dispatcher marks a version `migrating`, attached to every dispatch while the migration runs, and closed when the migration completes (promotion to `active`). Held in process memory (`CampaignState`), not persisted. Lets analysts aggregate the cost of one re-index across pipelines without time-based joins.
 _Avoid_: batch, job (a campaign spans many dispatches and both pipelines)
 
+**Migration ledger**:
+`config/schema-migrations.yaml`, one entry per `SCHEMA_VERSION` bump declaring how much of the graph that version invalidates (`scope: "*" | sdlc | code`, optional `entities`). A clone-based **schema migration** reads it to decide what to clone versus rebuild. Entries are auto-derived from a fingerprint snapshot by `mise schema:bump`; humans may only widen them.
+_Avoid_: changelog, migration script (there is no per-version SQL)
+
 **Siphon**:
 The GitLab CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.
 _Avoid_: CDC bridge, producer
