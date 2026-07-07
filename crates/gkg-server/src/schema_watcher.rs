@@ -144,7 +144,7 @@ fn classify(active: Option<u32>, migrating: Option<u32>, embedded: u32) -> Schem
     }
 
     // Outdated must beat Migrating: a below-active migrating row is anomalous data
-    // and must not suppress the safety shutdown (consistent with the #957 downgrade guard).
+    // and must not suppress the safety shutdown.
     if active.is_some_and(|active| active > embedded) {
         return SchemaState::Outdated;
     }
