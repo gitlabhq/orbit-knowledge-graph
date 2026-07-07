@@ -121,5 +121,47 @@ class MapDescendantConcernsTest(unittest.TestCase):
         self.assertEqual(d2c, {"issue": set(), "mr": set()})
 
 
+class ResolveNameTest(unittest.TestCase):
+    def test_bare_name_uses_name_filter(self):
+        self.assertEqual(rrm._resolve_name("Issue"), ("name", "Issue"))
+
+    def test_namespaced_uses_fqn_filter(self):
+        self.assertEqual(rrm._resolve_name("Ci::Build"), ("fqn", "Ci::Build"))
+
+    def test_deeply_nested_uses_fqn_filter(self):
+        self.assertEqual(
+            rrm._resolve_name("Gitlab::Ci::Pipeline::Chain::Base"),
+            ("fqn", "Gitlab::Ci::Pipeline::Chain::Base"),
+        )
+
+
+class ParseCallersFqnTest(unittest.TestCase):
+    def test_bare_method_name(self):
+        self.assertEqual(rrm._parse_callers_fqn("execute"), ("execute", None))
+
+    def test_hash_separator_normalized(self):
+        self.assertEqual(
+            rrm._parse_callers_fqn("MergeRequests::RefreshService#execute"),
+            ("execute", "MergeRequests::RefreshService::execute"),
+        )
+
+    def test_double_colon_fqn(self):
+        self.assertEqual(
+            rrm._parse_callers_fqn("Ns::ClassName::method"),
+            ("method", "Ns::ClassName::method"),
+        )
+
+    def test_single_namespace_treated_as_bare(self):
+        # "Foo::bar" has only one "::" — count < 2, not enough to distinguish
+        # namespace from method, so the whole string is the method name.
+        self.assertEqual(rrm._parse_callers_fqn("Foo::bar"), ("Foo::bar", None))
+
+    def test_hash_at_end(self):
+        self.assertEqual(
+            rrm._parse_callers_fqn("ClassName#"),
+            ("", "ClassName::"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -117,16 +117,23 @@ def sql_lit(s: str) -> str:
     return "'" + s.replace("'", "''") + "'"
 
 
+QUERY_TIMEOUT_SECONDS = 120
+
+
 def run_sql(sql: str, fmt: str = "table") -> str:
     """Invoke `glab orbit local sql -F <fmt> --file -` with sql on stdin."""
     if not shutil.which("glab"):
         sys.exit("error: `glab` not on PATH — install glab and the orbit extension")
-    cp = subprocess.run(
-        ["glab", "orbit", "local", "sql", "-F", fmt, "-"],
-        input=sql,
-        text=True,
-        capture_output=True,
-    )
+    try:
+        cp = subprocess.run(
+            ["glab", "orbit", "local", "sql", "-F", fmt, "-"],
+            input=sql,
+            text=True,
+            capture_output=True,
+            timeout=QUERY_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        sys.exit(f"error: local query timed out after {QUERY_TIMEOUT_SECONDS} seconds")
     if cp.returncode != 0:
         sys.stderr.write(cp.stderr)
         sys.exit(cp.returncode)
@@ -183,7 +190,11 @@ def preflight(sha: str) -> None:
         f"SELECT COUNT(*) AS n FROM gl_file WHERE commit_sha={sql_lit(sha)}",
         fmt="ndjson",
     ).strip()
-    if not out or '"n":0' in out:
+    try:
+        count = json.loads(out).get("n", 0) if out else 0
+    except json.JSONDecodeError:
+        count = 0
+    if count == 0:
         sys.exit(
             f"error: current commit {sha} is not indexed in ~/.orbit/graph.duckdb\n"
             f"       run:  glab orbit local index ."
