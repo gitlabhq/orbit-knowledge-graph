@@ -23,30 +23,56 @@ the issue accordingly. -->
 
 ### Actual behavior
 
-<!-- What actually happens? Include exact errors shown in UI/CLI. -->
+<!-- What actually happens? Include the exact error shown in the UI/CLI. -->
 
 ### Steps to reproduce
 
-<!-- Provide a minimal, reliable reproduction. Be precise. Include information how
-you started the gkg (IDE integration, standalone etc).
-Attach screenshots or video if possible -->
+<!-- A minimal, reliable reproduction. Be precise: the exact command or
+action, and how you invoked Orbit (see Environment below). Attach a
+screenshot or short video if it helps. -->
 1.
 2.
 3.
 
 ### Environment
 
-- OS distribution and version:
-- CPU architecture:
-- Gkg version (`gkg -V`):
+Which Orbit are you using?
+
+- [ ] **Orbit Remote** — the hosted graph on GitLab.com (`glab orbit remote`, MCP, GitLab Duo, or the REST API)
+- [ ] **Orbit Local** — runs on your machine (the `orbit` binary or `glab orbit local`)
+
+<!-- Fill in the block for the surface you selected; delete the other. -->
+
+**Orbit Remote**
+
+- GitLab.com group or project path (e.g. `gitlab-org/gitlab`):
+- Access method: <!-- glab orbit remote / MCP client / GitLab Duo / REST API -->
+- Approximate time of the failure (include timezone, or use UTC):
+
+**Orbit Local**
+
+- Orbit version (`orbit --version`, or `glab orbit local --version`):
+- Access method: <!-- orbit CLI / glab orbit local / MCP client -->
+- OS and version:
+- CPU architecture (`uname -m`):
 
 ### Logs
 
 <details><summary>Expand logs</summary>
 
-<!-- Paste relevant logs. Prefer full stack traces and surrounding context. Sanitize secrets. -->
+<!--
+Sanitize secrets (tokens, private file paths) before pasting. Prefer full
+error output over a trimmed snippet.
 
-<!-- See [Viewing logs](https://gitlab-org.gitlab.io/orbit/knowledge-graph/getting-started/troubleshooting/#viewing-logs) for how to view logs. -->
+Orbit Local: re-run the failing command with `--verbose` and paste the
+stderr output (e.g. `glab orbit local <command> --verbose`).
+
+Orbit Remote: paste the exact command and its full output. Include
+`glab orbit remote status` and note the exit code — 2 (feature flag off),
+3 (not authenticated), 4 (access denied), or 5 (rate limited).
+
+Common errors and fixes: https://docs.gitlab.com/orbit/troubleshooting/
+-->
 
 </details>
 
@@ -61,7 +87,7 @@ to a few lines — full analysis goes in the Agent context block below. -->
 
 ### Checklist
 
-- [ ] Used latest available version of gkg
+- [ ] Reproduced on the latest available version
 - [ ] Searched existing issues for duplicates
 - [ ] Included minimal, reliable reproduction steps
 - [ ] Attached relevant logs and environment details
@@ -79,5 +105,5 @@ sections above belongs in this block.
 </details>
 
 <!-- Don't edit below -->
-/label ~"devops::analytics" ~"section::analytics" ~"knowledge graph"
+/label ~"group::context-systems" ~"Category:Orbit" ~"knowledge graph"
 /label ~"type::bug"
