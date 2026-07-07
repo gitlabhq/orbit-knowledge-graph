@@ -41,10 +41,10 @@ MEMBER_KINDS = TYPE_KINDS + CALLABLE_KINDS + ["Field", "Attribute", "Property"]
 # ── Query helpers ─────────────────────────────────────────────────────────────
 
 def _query(body: dict) -> dict:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        tmp = f.name
-        json.dump(body, f)
+    fd, tmp = tempfile.mkstemp(suffix=".json")
     try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(body, f)
         cp = subprocess.run(
             ["glab", "orbit", "remote", "query", "--format", "raw", tmp],
             capture_output=True, text=True,
