@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.17.1
+version: 0.17.2
 license: MIT
 metadata:
   audience: developers
@@ -98,7 +98,7 @@ text-indexed properties — see [`query_language.md`](references/query_language.
 
 Read [`references/recipes.md`](references/recipes.md) before constructing a
 query — the same question often has one canonical paste-ready shape and several
-wrong-looking-correct ones. Three traps recur:
+wrong-looking-correct ones. Four traps recur:
 
 - **"Pipelines for a merge request" requires `Pipeline.source =
   "merge_request_event"`.** Both `Pipeline.merge_request_id` and the
@@ -117,6 +117,13 @@ wrong-looking-correct ones. Three traps recur:
   touched this file" needs `HAS_DIFF` (all snapshots) — `HAS_LATEST_DIFF` here
   can substantially undercount long-lived files. See
   [recipe](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
+- **GitLab issues, epics, tasks, and incidents are the `WorkItem` entity, not
+  `Issue`.** Modern GitLab unifies these under work items, and Orbit follows the
+  same model: there is no `Issue` node. Querying `entity: "Issue"` fails with
+  `HTTP 400 allowlist rejected: "Issue" is not an allowed value` — the error
+  hides `WorkItem` behind its "*(and 22 more)*" truncation, so the fix is not
+  obvious from the message alone. Use `WorkItem` (see
+  [recipe](references/recipes.md#work-items-authored-by-a-user)).
 
 ## Iteration budget
 

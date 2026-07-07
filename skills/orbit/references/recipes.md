@@ -307,6 +307,35 @@ and `direction` (`ASC` or `DESC`):
 }
 ```
 
+## Work items authored by a user
+
+GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity — there
+is no `Issue` node. Count a user's authored work items per project with the
+`AUTHORED` (User → WorkItem) and `IN_PROJECT` (WorkItem → Project) edges:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "u",  "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+      {"id": "wi", "entity": "WorkItem"},
+      {"id": "p",  "entity": "Project"}
+    ],
+    "relationships": [
+      {"type": "AUTHORED",   "from": "u",  "to": "wi"},
+      {"type": "IN_PROJECT", "from": "wi", "to": "p"}
+    ],
+    "group_by": [{"kind": "node", "node": "p"}],
+    "aggregations": [
+      {"function": "count", "target": "wi", "alias": "work_items"}
+    ],
+    "aggregation_sort": {"column": "work_items", "direction": "DESC"},
+    "limit": 20
+  }
+}
+```
+
 ## `neighbors` — nodes directly connected to a starting node
 
 Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
