@@ -307,6 +307,35 @@ and `direction` (`ASC` or `DESC`):
 }
 ```
 
+## Work items in a project
+
+GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity — there
+is no `Issue` node. List the work items in a project via the `IN_PROJECT`
+(WorkItem → Project) edge. Filter `state` (`opened`/`closed`) or `work_item_type`
+(`issue`, `epic`, `task`, `incident`) as needed:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p",  "entity": "Project", "filters": {"id": {"op": "eq", "value": 278964}}},
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"},
+       "columns": ["iid", "title", "state", "work_item_type", "created_at"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "wi", "to": "p"}
+    ],
+    "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"},
+    "limit": 50
+  }
+}
+```
+
+Swap the `IN_PROJECT` edge for `AUTHORED` (User → WorkItem) to list one user's
+work items, or feed the same nodes into an `aggregation` to count them — see the
+[group-and-count recipe](#aggregation--group-and-count).
+
 ## `neighbors` — nodes directly connected to a starting node
 
 Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
