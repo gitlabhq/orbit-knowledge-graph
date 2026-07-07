@@ -242,6 +242,17 @@
       "domain": "indexer.etl"
     },
     {
+      "otel_name": "gkg.etl.destination.unmeterable.batches",
+      "prom_name": "gkg_etl_destination_unmeterable_batches_total",
+      "description": "Batches whose Arrow type had no logical-byte-size rule; counted as 0 bytes and written anyway. Nonzero means the counting rules drifted from a shipped column type.",
+      "kind": "counter",
+      "labels": [
+        "table"
+      ],
+      "stability": "stable",
+      "domain": "indexer.etl"
+    },
+    {
       "otel_name": "gkg.etl.destination.write.duration",
       "prom_name": "gkg_etl_destination_write_duration_seconds",
       "description": "Time to write a batch to ClickHouse per table.",

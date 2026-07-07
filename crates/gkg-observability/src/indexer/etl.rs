@@ -101,6 +101,14 @@ pub const DESTINATION_WRITE_ERRORS: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const DESTINATION_UNMETERABLE_BATCHES: MetricSpec = MetricSpec::counter(
+    "gkg.etl.destination.unmeterable.batches",
+    "Batches whose Arrow type had no logical-byte-size rule; counted as 0 bytes and written anyway. Nonzero means the counting rules drifted from a shipped column type.",
+    None,
+    &[labels::TABLE],
+    DOMAIN,
+);
+
 pub const HANDLER_ERRORS: MetricSpec = MetricSpec::counter(
     "gkg.etl.handler.errors",
     "Total handler errors at the engine dispatch level.",
@@ -120,5 +128,6 @@ pub const CATALOG: &[&MetricSpec] = &[
     &DESTINATION_ROWS_WRITTEN,
     &DESTINATION_BYTES_WRITTEN,
     &DESTINATION_WRITE_ERRORS,
+    &DESTINATION_UNMETERABLE_BATCHES,
     &HANDLER_ERRORS,
 ];

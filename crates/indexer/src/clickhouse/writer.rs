@@ -10,7 +10,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
 use crate::engine::retry::{Backoff, RetryExhausted, RetryMode, RetryPolicy, Step, drive};
@@ -26,9 +26,6 @@ pub enum WriteError {
 
     #[error("invalid configuration: {0}")]
     InvalidConfiguration(String),
-
-    #[error("batch for table {0} cannot be byte-counted: {1}")]
-    Unmeterable(String, String),
 }
 
 impl From<RetryExhausted> for WriteError {
@@ -100,11 +97,21 @@ impl ClickHouseWriter {
         durability: Option<WriteDurability>,
     ) -> Result<WriteReport, WriteError> {
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-        let bytes: u64 = batches.iter().try_fold(0u64, |total, batch| {
-            gkg_utils::arrow::logical_byte_size(batch)
-                .map(|n| total + n)
-                .map_err(|e| WriteError::Unmeterable(table.to_string(), e.to_string()))
-        })?;
+        let bytes: u64 = batches
+            .iter()
+            .map(|batch| match gkg_utils::arrow::logical_byte_size(batch) {
+                Ok(n) => n,
+                Err(e) => {
+                    self.metrics.record_unmeterable_batch(table);
+                    error!(
+                        table,
+                        error = %e,
+                        "batch has no logical-byte-size rule; counting 0 bytes and writing anyway"
+                    );
+                    0
+                }
+            })
+            .sum();
 
         if batches.is_empty() || self.noop {
             return Ok(WriteReport {
