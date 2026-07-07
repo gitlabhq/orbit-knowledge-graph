@@ -11,7 +11,7 @@ pub const LEDGER_FILE: &str = "schema-migrations.yaml";
 const LEDGER_HEADER: &str = "\
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 #
-# One entry per SCHEMA_VERSION bump, appended by `mise schema:bump`.
+# One entry per SCHEMA_VERSION bump, newest first (prepended by `mise schema:bump`).
 # Each entry declares how much of the graph a given version invalidates:
 #   scope: \"*\"    full rebuild (fail-safe; the default for anything unmapped)
 #   scope: sdlc   SDLC-sourced tables; optional `entities:` narrows to a subset
@@ -42,9 +42,10 @@ impl MigrationLedger {
         format!("{LEDGER_HEADER}{body}")
     }
 
+    /// The current entry: newest first, so the top of the list.
     #[must_use]
-    pub fn last(&self) -> Option<&MigrationEntry> {
-        self.migrations.last()
+    pub fn latest(&self) -> Option<&MigrationEntry> {
+        self.migrations.first()
     }
 
     pub fn validate(&self, ontology: &Ontology, schema_version: u32) -> Result<(), String> {
@@ -55,10 +56,10 @@ impl MigrationLedger {
         let mut prev: Option<u32> = None;
         for entry in &self.migrations {
             if let Some(prev) = prev
-                && entry.version <= prev
+                && entry.version >= prev
             {
                 return Err(format!(
-                    "ledger versions must strictly increase: {prev} is followed by {}",
+                    "ledger versions must strictly decrease (newest first): {prev} is followed by {}",
                     entry.version
                 ));
             }
@@ -72,11 +73,11 @@ impl MigrationLedger {
             }
         }
 
-        let last = self.last().expect("non-empty checked above");
-        if last.version != schema_version {
+        let latest = self.latest().expect("non-empty checked above");
+        if latest.version != schema_version {
             return Err(format!(
-                "last ledger version {} must equal SCHEMA_VERSION {schema_version}",
-                last.version
+                "top ledger version {} must equal SCHEMA_VERSION {schema_version}",
+                latest.version
             ));
         }
 
@@ -127,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn versions_must_strictly_increase() {
+    fn versions_must_strictly_decrease() {
         let ledger = MigrationLedger {
             migrations: vec![
                 MigrationEntry {
@@ -146,11 +147,33 @@ mod tests {
         };
         let ontology = Ontology::new();
         let err = ledger.validate(&ontology, 5).unwrap_err();
-        assert!(err.contains("strictly increase"), "{err}");
+        assert!(err.contains("strictly decrease"), "{err}");
     }
 
     #[test]
-    fn last_version_must_equal_schema_version() {
+    fn newest_first_ordering_validates() {
+        let ledger = MigrationLedger {
+            migrations: vec![
+                MigrationEntry {
+                    version: 82,
+                    scope: Scope::Code,
+                    entities: BTreeSet::new(),
+                    note: None,
+                },
+                MigrationEntry {
+                    version: 81,
+                    scope: Scope::All,
+                    entities: BTreeSet::new(),
+                    note: None,
+                },
+            ],
+        };
+        let ontology = Ontology::new();
+        ledger.validate(&ontology, 82).unwrap();
+    }
+
+    #[test]
+    fn top_version_must_equal_schema_version() {
         let ledger = MigrationLedger {
             migrations: vec![MigrationEntry {
                 version: 5,

@@ -278,25 +278,28 @@ pub fn bump(
         if ledger.migrations.iter().any(|e| e.version == new_version) {
             bail!("ledger already has an entry for version {new_version}");
         }
-        ledger.migrations.push(MigrationEntry {
-            version: new_version,
-            scope: entry_declaration.scope,
-            entities: entry_declaration.entities,
-            note,
-        });
+        ledger.migrations.insert(
+            0,
+            MigrationEntry {
+                version: new_version,
+                scope: entry_declaration.scope,
+                entities: entry_declaration.entities,
+                note,
+            },
+        );
         new_version
     } else {
-        let last = ledger
+        let latest = ledger
             .migrations
-            .last_mut()
+            .first_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
-        let widened = last.declaration().widened_with(&entry_declaration);
-        last.scope = widened.scope;
-        last.entities = widened.entities;
+        let widened = latest.declaration().widened_with(&entry_declaration);
+        latest.scope = widened.scope;
+        latest.entities = widened.entities;
         if note.is_some() {
-            last.note = note;
+            latest.note = note;
         }
-        last.version
+        latest.version
     };
 
     ledger
@@ -309,7 +312,7 @@ pub fn bump(
     fs::write(ledger_path(), ledger.render()).context("writing ledger")?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
 
-    let entry = ledger.last().expect("just validated non-empty");
+    let entry = ledger.latest().expect("just validated non-empty");
     println!(
         "{} version {final_version}: {}",
         if is_new { "bumped to" } else { "amended" },
