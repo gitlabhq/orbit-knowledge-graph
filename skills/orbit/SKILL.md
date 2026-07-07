@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.17.2
+version: 0.17.3
 license: MIT
 metadata:
   audience: developers
@@ -121,8 +121,8 @@ wrong-looking-correct ones. Four traps recur:
   `Issue`.** Modern GitLab unifies these under work items, and Orbit follows the
   same model: there is no `Issue` node. Querying `entity: "Issue"` fails with
   `HTTP 400 allowlist rejected: "Issue" is not an allowed value` — the error
-  hides `WorkItem` behind its "*(and 22 more)*" truncation, so the fix is not
-  obvious from the message alone. Use `WorkItem` (see
+  truncates the list of valid entities, so `WorkItem` may not appear in it and
+  the fix is not obvious from the message alone. Use `WorkItem` (see
   [recipe](references/recipes.md#work-items-in-a-project)).
 
 ## Iteration budget
