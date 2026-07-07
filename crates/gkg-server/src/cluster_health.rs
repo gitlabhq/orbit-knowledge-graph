@@ -67,18 +67,26 @@ impl ClusterHealthChecker {
         let migration_eligible = is_migration_status_eligible(&health_status);
         let mut structured = self.convert_health_status(health_status);
 
-        if migration_eligible && let Some(graph) = &self.graph_client {
-            match read_migrating_version(graph).await {
-                Ok(Some(version)) => apply_migration_status(&mut structured, version),
-                Ok(None) => {}
-                Err(error) => warn!(
-                    %error,
-                    "failed to read migrating schema version; leaving cluster health unhealthy"
-                ),
-            }
+        if migration_eligible {
+            self.overlay_active_migration(&mut structured).await;
         }
 
         structured
+    }
+
+    async fn overlay_active_migration(&self, structured: &mut StructuredClusterHealth) {
+        let Some(graph) = &self.graph_client else {
+            return;
+        };
+
+        match read_migrating_version(graph).await {
+            Ok(Some(version)) => apply_migration_status(structured, version),
+            Ok(None) => {}
+            Err(error) => warn!(
+                %error,
+                "failed to read migrating schema version; leaving cluster health unhealthy"
+            ),
+        }
     }
 
     fn convert_health_status(&self, status: HealthStatus) -> StructuredClusterHealth {
