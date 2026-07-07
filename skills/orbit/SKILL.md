@@ -123,7 +123,7 @@ wrong-looking-correct ones. Four traps recur:
   `HTTP 400 allowlist rejected: "Issue" is not an allowed value` — the error
   hides `WorkItem` behind its "*(and 22 more)*" truncation, so the fix is not
   obvious from the message alone. Use `WorkItem` (see
-  [recipe](references/recipes.md#work-items-authored-by-a-user)).
+  [recipe](references/recipes.md#work-items-in-a-project)).
 
 ## Iteration budget
 

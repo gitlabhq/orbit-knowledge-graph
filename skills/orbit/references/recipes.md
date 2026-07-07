@@ -307,11 +307,34 @@ and `direction` (`ASC` or `DESC`):
 }
 ```
 
-## Work items authored by a user
+## Work items in a project
 
 GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity — there
-is no `Issue` node. Count a user's authored work items per project with the
-`AUTHORED` (User → WorkItem) and `IN_PROJECT` (WorkItem → Project) edges:
+is no `Issue` node. List the work items in a project via the `IN_PROJECT`
+(WorkItem → Project) edge. Filter `state` (`opened`/`closed`) or `work_item_type`
+(`issue`, `epic`, `task`, `incident`) as needed:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p",  "entity": "Project", "filters": {"id": {"op": "eq", "value": 278964}}},
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"},
+       "columns": ["iid", "title", "state", "work_item_type", "created_at"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "wi", "to": "p"}
+    ],
+    "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"},
+    "limit": 50
+  }
+}
+```
+
+To count a user's authored work items per project instead, add the `AUTHORED`
+(User → WorkItem) edge and aggregate — the same shape as the open-MRs-per-project
+[aggregation recipe](#aggregation--group-and-count):
 
 ```json orbit-query
 {
