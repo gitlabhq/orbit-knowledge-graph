@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
-use indexer::schema::version::read_active_version;
+use indexer::schema::version::{read_active_version, read_migrating_version};
 use opentelemetry::KeyValue;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -15,6 +15,7 @@ pub enum SchemaState {
     Pending = 0,
     Ready = 1,
     Outdated = 2,
+    Migrating = 3,
 }
 
 impl SchemaState {
@@ -23,6 +24,7 @@ impl SchemaState {
             Self::Pending => "pending",
             Self::Ready => "ready",
             Self::Outdated => "outdated",
+            Self::Migrating => "migrating",
         }
     }
 
@@ -30,6 +32,7 @@ impl SchemaState {
         match raw {
             1 => Self::Ready,
             2 => Self::Outdated,
+            3 => Self::Migrating,
             _ => Self::Pending,
         }
     }
@@ -112,23 +115,45 @@ async fn poll_once(
     embedded_version: u32,
     state: &Arc<AtomicU8>,
 ) -> (SchemaState, Option<u32>) {
-    match read_active_version(graph).await {
-        Ok(Some(active)) => (classify(active, embedded_version), Some(active)),
-        Ok(None) => (SchemaState::Pending, None),
+    let active = match read_active_version(graph).await {
+        Ok(active) => active,
         Err(e) => {
             warn!(error = %e, "failed to read active schema version — keeping previous state");
-            (SchemaState::from_raw(state.load(Ordering::Relaxed)), None)
+            return (SchemaState::from_raw(state.load(Ordering::Relaxed)), None);
         }
+    };
+
+    if active == Some(embedded_version) {
+        return (SchemaState::Ready, active);
     }
+
+    let migrating = match read_migrating_version(graph).await {
+        Ok(migrating) => migrating,
+        Err(e) => {
+            warn!(error = %e, "failed to read migrating schema version — keeping previous state");
+            return (SchemaState::from_raw(state.load(Ordering::Relaxed)), active);
+        }
+    };
+
+    (classify(active, migrating, embedded_version), active)
 }
 
-fn classify(active: u32, embedded: u32) -> SchemaState {
-    use std::cmp::Ordering::*;
-    match active.cmp(&embedded) {
-        Equal => SchemaState::Ready,
-        Less => SchemaState::Pending,
-        Greater => SchemaState::Outdated,
+fn classify(active: Option<u32>, migrating: Option<u32>, embedded: u32) -> SchemaState {
+    if active == Some(embedded) {
+        return SchemaState::Ready;
     }
+
+    // Outdated must beat Migrating: a below-active migrating row is anomalous data
+    // and must not suppress the safety shutdown (consistent with the #957 downgrade guard).
+    if active.is_some_and(|active| active > embedded) {
+        return SchemaState::Outdated;
+    }
+
+    if migrating == Some(embedded) {
+        return SchemaState::Migrating;
+    }
+
+    SchemaState::Pending
 }
 
 fn transition(state: &Arc<AtomicU8>, next: SchemaState) {
@@ -151,6 +176,7 @@ fn register_state_gauge(state: Arc<AtomicU8>) {
             SchemaState::Pending,
             SchemaState::Ready,
             SchemaState::Outdated,
+            SchemaState::Migrating,
         ] {
             let value = i64::from(s as u8 == raw);
             observer.observe(value, &[KeyValue::new(spec::labels::STATE, s.as_label())]);
@@ -163,18 +189,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classify_equal_is_ready() {
-        assert_eq!(classify(2, 2), SchemaState::Ready);
+    fn classify_active_equal_is_ready() {
+        assert_eq!(classify(Some(2), None, 2), SchemaState::Ready);
+        assert_eq!(classify(Some(2), Some(3), 2), SchemaState::Ready);
     }
 
     #[test]
-    fn classify_active_lower_is_pending() {
-        assert_eq!(classify(1, 2), SchemaState::Pending);
+    fn classify_migrating_equal_is_migrating() {
+        assert_eq!(classify(Some(1), Some(2), 2), SchemaState::Migrating);
+        assert_eq!(classify(None, Some(2), 2), SchemaState::Migrating);
+    }
+
+    #[test]
+    fn classify_outdated_beats_migrating() {
+        assert_eq!(classify(Some(5), Some(1), 1), SchemaState::Outdated);
     }
 
     #[test]
     fn classify_active_higher_is_outdated() {
-        assert_eq!(classify(3, 2), SchemaState::Outdated);
+        assert_eq!(classify(Some(3), None, 2), SchemaState::Outdated);
+    }
+
+    #[test]
+    fn classify_none_is_pending() {
+        assert_eq!(classify(None, None, 2), SchemaState::Pending);
+    }
+
+    #[test]
+    fn classify_active_lower_is_pending() {
+        assert_eq!(classify(Some(1), None, 2), SchemaState::Pending);
     }
 
     #[test]
@@ -183,6 +226,7 @@ mod tests {
             SchemaState::Pending,
             SchemaState::Ready,
             SchemaState::Outdated,
+            SchemaState::Migrating,
         ] {
             assert_eq!(SchemaState::from_raw(s as u8), s);
         }

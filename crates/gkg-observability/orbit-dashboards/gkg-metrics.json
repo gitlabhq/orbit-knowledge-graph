@@ -1352,7 +1352,7 @@
     {
       "otel_name": "gkg.webserver.schema.state",
       "prom_name": "gkg_webserver_schema_state",
-      "description": "Webserver readiness gate state; 1 indicates the active state per `state` label.",
+      "description": "Webserver readiness gate state (pending|ready|outdated|migrating); 1 indicates the active state per `state` label.",
       "kind": "observable_gauge",
       "labels": [
         "state"

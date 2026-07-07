@@ -49,6 +49,7 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         SchemaState::Ready => {}
         SchemaState::Pending => unhealthy_components.push("schema_pending"),
         SchemaState::Outdated => unhealthy_components.push("schema_outdated"),
+        SchemaState::Migrating => unhealthy_components.push("schema_migrating"),
     }
 
     let graph_healthy = timeout(HEALTH_CHECK_TIMEOUT, state.graph_client.execute("SELECT 1"))
@@ -83,7 +84,13 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
-    let label = if healthy { "ok" } else { "unhealthy" };
+    let label = if healthy {
+        "ok"
+    } else if unhealthy_components == ["schema_migrating"] {
+        "migrating"
+    } else {
+        "unhealthy"
+    };
 
     (
         status_code,
