@@ -533,7 +533,7 @@ Path finding queries use `path`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `string` | `shortest`, `all_shortest`, or `any`. |
+| `type` | `string` | `shortest`. |
 | `from` | `string` | Alias of the start node selector. |
 | `to` | `string` | Alias of the end node selector. |
 | `max_depth` | `integer` | Maximum path length. Maximum 3. |
@@ -620,10 +620,3 @@ a filter, provide IDs, or use a narrow `id_range`.
 |--------|-------------|
 | `dynamic_columns` | For `path_finding` and `neighbors` hydration. Use `default` for each entity's default columns, or `"*"` for all non-restricted ClickHouse-backed columns. Default `default`. |
 | `include_debug_sql` | Include compiled ClickHouse SQL in response metadata when the caller is allowed to see it. |
-| `skip_dedup` | Skip the ReplacingMergeTree deduplication pass for traversal, neighbors, and path finding queries. Not allowed for aggregation. |
-| `materialize_ctes` | Mark reused CTEs as materialized. |
-| `use_semi_join` | Rewrite eligible `IN` subqueries into semi joins. |
-| `auth_scope_cascade` | Force auth-scoped cascade seeding. |
-| `cascade_distinct` | Emit `SELECT DISTINCT` in cascade and hop frontier CTEs. |
-
-Most callers should leave performance options unset.

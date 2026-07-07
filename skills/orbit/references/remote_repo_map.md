@@ -37,16 +37,9 @@ entity lookup or a cross-domain SDLC query.
 
 ## Invocation
 
-From the Orbit skill root (the directory containing `SKILL.md`), the script is
-at:
-
-```text
-./scripts/remote_repo_map.py
-```
-
-Resolve that path relative to the skill root, not the user's current repository.
-When running from another directory, either `cd` to the skill root first or use
-the absolute path to the loaded skill directory.
+The script is at `./scripts/remote_repo_map.py` relative to the Orbit skill
+root. Path resolution rules are the same as for the local helper — see
+[Invocation in `local_repo_map.md`](local_repo_map.md#invocation).
 
 The default target is `gitlab-org/gitlab` (`project_id = 278964`) on `master`:
 

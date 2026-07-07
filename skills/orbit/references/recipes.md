@@ -412,6 +412,33 @@ structured `PropertyFilter`:
 | `in`                                       | array (1–100 items)          | membership                        |
 | `contains`, `starts_with`, `ends_with`     | string (≤ 1024 chars)        | string ops                        |
 | `is_null`, `is_not_null`                   | *(omit `value`)*             | null checks                       |
+| `token_match`, `all_tokens`, `any_tokens`  | string                       | text-indexed properties only — see [`query_language.md`](query_language.md) |
+
+### Text-token search
+
+Use `all_tokens` to find entities whose text-indexed property contains every
+specified token. Tokens are matched against the pre-built text index, so
+only properties listed in the text-indexed properties table in
+[`query_language.md`](query_language.md) support these operators.
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": {
+        "project_id": {"op": "eq", "value": 278964},
+        "title": {"op": "all_tokens", "value": "database migration"}
+      },
+      "columns": ["iid", "title", "state"]
+    },
+    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "limit": 10
+  }
+}
+```
 
 ## Pagination
 
