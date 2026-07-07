@@ -1824,7 +1824,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_field_truncates_long_field_lists() {
+    fn validate_field_lists_long_field_lists_untrimmed() {
         let fields: Vec<(String, DataType)> = (0..20)
             .map(|i| (format!("field_{i}"), DataType::Int))
             .collect();
@@ -1836,9 +1836,12 @@ mod tests {
             .validate_field("Wide", "missing")
             .unwrap_err()
             .to_string();
-        assert!(msg.contains("Valid fields include:"), "got: {msg}");
-        assert!(msg.contains("more"), "got: {msg}");
-        assert!(msg.contains("get_graph_schema"), "got: {msg}");
+        assert!(msg.contains("Valid fields:"), "got: {msg}");
+        for i in 0..20 {
+            assert!(msg.contains(&format!("field_{i}")), "got: {msg}");
+        }
+        assert!(!msg.contains("more"), "got: {msg}");
+        assert!(!msg.contains("get_graph_schema"), "got: {msg}");
         // Reserved "id" must not be duplicated even when a field is also named differently.
         assert_eq!(msg.matches("field_0").count(), 1, "got: {msg}");
     }
