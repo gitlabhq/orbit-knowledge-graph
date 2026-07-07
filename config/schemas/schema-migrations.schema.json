@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SchemaMigrationLedger",
+  "description": "config/schema-migrations.yaml. One entry per SCHEMA_VERSION bump, declaring how much of the graph that version invalidates for clone-based migrations. Appended by `mise schema:bump`; humans may only widen an entry, never narrow it below the detected drift.",
+  "type": "object",
+  "required": ["migrations"],
+  "additionalProperties": false,
+  "properties": {
+    "migrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["version", "scope"],
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The SCHEMA_VERSION this entry describes."
+          },
+          "scope": {
+            "enum": ["*", "sdlc", "code"],
+            "description": "'*' = full rebuild; 'sdlc' = SDLC-sourced tables (optionally narrowed by entities); 'code' = code-graph tables."
+          },
+          "entities": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string" },
+            "description": "SDLC entity names or relationship kinds narrowing a 'sdlc' scope. Only valid with scope 'sdlc'."
+          },
+          "note": {
+            "type": "string",
+            "description": "Human-facing rationale for the bump."
+          }
+        },
+        "if": { "properties": { "scope": { "const": "sdlc" } }, "required": ["scope"] },
+        "then": true,
+        "else": { "not": { "required": ["entities"] } }
+      }
+    }
+  }
+}

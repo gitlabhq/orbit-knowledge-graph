@@ -21,6 +21,19 @@ pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
     generate_graph_tables_with_prefix(ontology, "")
 }
 
+/// Per-table hash of the emitted (unprefixed) `CREATE TABLE` DDL, keyed by table name.
+pub fn ddl_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
+    generate_graph_tables(ontology)
+        .iter()
+        .map(|table| {
+            (
+                table.name.clone(),
+                ontology::migrations::sha256_hex(&clickhouse::emit_create_table(table)),
+            )
+        })
+        .collect()
+}
+
 pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> Vec<CreateTable> {
     let mut tables: Vec<CreateTable> = Vec::new();
 
