@@ -37,6 +37,7 @@ pub mod constants;
 pub mod error;
 pub mod input;
 pub mod metrics;
+pub(crate) mod schema_limits;
 pub mod scope;
 pub mod types;
 
