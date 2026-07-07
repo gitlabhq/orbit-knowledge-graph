@@ -6,7 +6,8 @@
 //! deletes the exhausted message so the existing sweep/backfill dispatchers
 //! can retry it.
 
-use async_nats::jetstream::stream::RawMessageErrorKind;
+use async_nats::jetstream::ErrorCode;
+use async_nats::jetstream::stream::{DeleteMessageErrorKind, RawMessageErrorKind};
 use async_trait::async_trait;
 use futures::StreamExt;
 use opentelemetry::KeyValue;
@@ -115,7 +116,7 @@ impl MaxDeliveriesReconciler {
         };
 
         let subject = match stream.get_raw_message(advisory.stream_seq).await {
-            Ok(raw) => raw.subject.to_string(),
+            Ok(raw) => Some(raw.subject.to_string()),
             Err(error) if error.kind() == RawMessageErrorKind::NoMessageFound => {
                 // Already gone (e.g. a duplicate advisory, or someone else in the
                 // queue group already deleted it): nothing left to reconcile.
@@ -126,9 +127,9 @@ impl MaxDeliveriesReconciler {
                     stream = %advisory.stream,
                     stream_seq = advisory.stream_seq,
                     %error,
-                    "failed to fetch exhausted message"
+                    "failed to fetch exhausted message for logging; proceeding with deletion"
                 );
-                return;
+                None
             }
         };
 
@@ -139,19 +140,26 @@ impl MaxDeliveriesReconciler {
                 warn!(
                     stream = %advisory.stream,
                     consumer = %advisory.consumer,
-                    subject = %subject,
+                    subject = ?subject,
                     deliveries = advisory.deliveries,
                     "deleted permanently stuck message after max_deliver exhaustion"
                 );
             }
-            Err(error) => {
-                warn!(
-                    stream = %advisory.stream,
-                    stream_seq = advisory.stream_seq,
-                    %error,
-                    "failed to delete exhausted message"
-                );
-            }
+            Err(error) => match error.kind() {
+                DeleteMessageErrorKind::JetStream(inner)
+                    if inner.error_code() == ErrorCode::NO_MESSAGE_FOUND =>
+                {
+                    // Deleted between the fetch and the delete (e.g. manual intervention).
+                }
+                _ => {
+                    warn!(
+                        stream = %advisory.stream,
+                        stream_seq = advisory.stream_seq,
+                        %error,
+                        "failed to delete exhausted message"
+                    );
+                }
+            },
         }
     }
 }
