@@ -332,32 +332,9 @@ is no `Issue` node. List the work items in a project via the `IN_PROJECT`
 }
 ```
 
-To count a user's authored work items per project instead, add the `AUTHORED`
-(User → WorkItem) edge and aggregate — the same shape as the open-MRs-per-project
-[aggregation recipe](#aggregation--group-and-count):
-
-```json orbit-query
-{
-  "query": {
-    "query_type": "aggregation",
-    "nodes": [
-      {"id": "u",  "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
-      {"id": "wi", "entity": "WorkItem"},
-      {"id": "p",  "entity": "Project"}
-    ],
-    "relationships": [
-      {"type": "AUTHORED",   "from": "u",  "to": "wi"},
-      {"type": "IN_PROJECT", "from": "wi", "to": "p"}
-    ],
-    "group_by": [{"kind": "node", "node": "p"}],
-    "aggregations": [
-      {"function": "count", "target": "wi", "alias": "work_items"}
-    ],
-    "aggregation_sort": {"column": "work_items", "direction": "DESC"},
-    "limit": 20
-  }
-}
-```
+Swap the `IN_PROJECT` edge for `AUTHORED` (User → WorkItem) to list one user's
+work items, or feed the same nodes into an `aggregation` to count them — see the
+[group-and-count recipe](#aggregation--group-and-count).
 
 ## `neighbors` — nodes directly connected to a starting node
 
