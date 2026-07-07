@@ -61,9 +61,7 @@ impl ReadOntologyFile for EmbeddedReader {
     }
 }
 
-/// Every embedded ontology source file as `(relative_path, contents)`,
-/// sorted by path. In debug builds rust-embed reads the live folder, so
-/// tooling (xtask, build scripts) always fingerprints the working tree.
+/// Every embedded ontology source file as `(relative_path, contents)`, sorted by path.
 pub(crate) fn embedded_files() -> Vec<(String, String)> {
     let mut files: Vec<(String, String)> = EmbeddedOntology::iter()
         .filter_map(|path| {

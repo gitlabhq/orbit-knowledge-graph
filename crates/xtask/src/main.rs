@@ -93,8 +93,7 @@ enum Command {
 enum MigrationLedgerCommand {
     /// Recompute fingerprints, derive the scope, and append or amend an entry.
     Bump {
-        /// Widen the derived scope: `*`, `sdlc`, or `code`. Required only when
-        /// there is no ontology drift (a lowering-code-only change).
+        /// Widen the derived scope: `*`, `sdlc`, or `code`.
         #[arg(long)]
         scope: Option<String>,
         /// Comma-separated SDLC entities (with `--scope sdlc`) to widen the entry.

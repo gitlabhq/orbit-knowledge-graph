@@ -34,12 +34,8 @@ const VERSION_TABLE: &str = "gkg_schema_version";
 /// The ETL pipeline is fully ontology-driven (`PlanInput` is built from
 /// `&Ontology`), so all data-affecting changes are ontology YAML changes.
 ///
-/// Bump via `mise schema:bump`, which increments this file, appends a
-/// `config/schema-migrations.yaml` entry recording what the version
-/// invalidates, and re-snapshots `config/schema-migrations.fingerprint.yaml`.
-/// Drift between the ontology and that snapshot fails the build, and the CI
-/// `migration-ledger-check` job enforces the bump (exactly base + 1) and a
-/// scope-covering ledger entry.
+/// Bump via `mise schema:bump`; the build and the CI `migration-ledger-check`
+/// job enforce a scope-covering ledger entry.
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
     include_str!("../../../../config/SCHEMA_VERSION")
         .trim()

@@ -1,15 +1,5 @@
-//! `cargo xtask migration-ledger {bump,check}`.
-//!
-//! `bump` recomputes the fingerprint snapshot, derives the minimal invalidation
-//! scope from the drift, appends (or amends) a ledger entry, and increments
-//! `config/SCHEMA_VERSION`. `check` recomputes and compares against the
-//! committed snapshot, validates the ledger, and (with `--base`) enforces that
-//! the entry for the bumped version covers the derived drift.
-//!
-//! Amend-awareness keeps one MR from burning several versions: `bump` compares
-//! the working `SCHEMA_VERSION` against `git show <base>:config/SCHEMA_VERSION`.
-//! Equal means a fresh bump (+1, new entry); already ahead means the last entry
-//! is amended (scope/entities widened, version unchanged).
+//! `cargo xtask migration-ledger {bump,check}`: maintain and verify the schema
+//! migration ledger and its fingerprint snapshot.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -142,20 +132,10 @@ pub fn check(base: Option<String>) -> Result<()> {
         )
     })?;
 
-    if current != committed {
-        let (sources, ddl) = current.diff(&committed);
-        bail!(
-            "ontology drift not reflected in {}.\n  changed sources: {}\n  changed tables: {}\n{REMEDIATION}",
-            fingerprint_path().display(),
-            format_set(&sources),
-            format_set(&ddl),
-        );
-    }
-
     let schema_version = read_schema_version()?;
     let ledger = read_ledger()?;
-    ledger
-        .validate(&ontology, schema_version)
+
+    migrations::verify_snapshot(&ontology, &current, &committed, &ledger, schema_version)
         .map_err(|e| anyhow!(e))?;
 
     if let Some(base) = base {
@@ -169,10 +149,8 @@ pub fn check(base: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// With a base ref: if the fingerprint snapshot changed in this MR, require a
-/// SCHEMA_VERSION bump, a ledger entry for the new version, and that the entry
-/// covers the drift derived from the base-vs-current snapshot diff. A base with
-/// no snapshot file (pre-feature history) skips this guard.
+/// Enforce that a fingerprint change in this MR carries a `base + 1` bump and a
+/// ledger entry covering the derived drift.
 fn check_under_declaration(
     ontology: &Ontology,
     committed: &Fingerprints,
@@ -338,8 +316,7 @@ pub fn bump(
     Ok(())
 }
 
-/// First-time snapshot: the ledger is seeded by hand for the current version
-/// but no fingerprint file exists yet. Write it without bumping.
+/// First-time snapshot: write the fingerprint file without bumping.
 fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result<()> {
     let version = read_schema_version()?;
     let ledger = read_ledger()?;
@@ -347,12 +324,4 @@ fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!("wrote initial fingerprint snapshot for version {version}");
     Ok(())
-}
-
-fn format_set(set: &BTreeSet<String>) -> String {
-    if set.is_empty() {
-        "(none)".to_string()
-    } else {
-        set.iter().cloned().collect::<Vec<_>>().join(", ")
-    }
 }

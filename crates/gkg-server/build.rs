@@ -6,10 +6,8 @@ fn main() {
     regenerate_protos();
 }
 
-/// Fails the build when the ontology + generated DDL drift from the committed
-/// fingerprint snapshot, or when the migration ledger is malformed. Mirrors
-/// `cargo xtask migration-ledger check` so the same guarantee holds locally and
-/// in CI even without network access.
+/// Fails the build on ontology/DDL drift from the fingerprint snapshot or a
+/// malformed ledger. Mirrors `cargo xtask migration-ledger check`.
 fn validate_migration_ledger() {
     let config_dir = std::path::PathBuf::from(env!("CONFIG_DIR"));
     let ledger_path = config_dir.join(ontology::migrations::LEDGER_FILE);
@@ -37,15 +35,6 @@ fn validate_migration_ledger() {
     let committed = ontology::migrations::Fingerprints::parse(&committed_text)
         .unwrap_or_else(|e| panic!("{e}"));
 
-    if current != committed {
-        let (sources, ddl) = current.diff(&committed);
-        panic!(
-            "ontology drift not reflected in {}.\n  changed sources: {sources:?}\n  \
-             changed tables: {ddl:?}\nRun `mise schema:bump` to record the change.",
-            fingerprint_path.display()
-        );
-    }
-
     let version: u32 = std::fs::read_to_string(&version_path)
         .unwrap_or_else(|e| panic!("reading {}: {e}", version_path.display()))
         .trim()
@@ -56,9 +45,9 @@ fn validate_migration_ledger() {
         .unwrap_or_else(|e| panic!("reading {}: {e}", ledger_path.display()));
     let ledger = ontology::migrations::MigrationLedger::parse(&ledger_text)
         .unwrap_or_else(|e| panic!("{e}"));
-    ledger
-        .validate(&ontology, version)
-        .unwrap_or_else(|e| panic!("migration ledger invalid: {e}"));
+
+    ontology::migrations::verify_snapshot(&ontology, &current, &committed, &ledger, version)
+        .unwrap_or_else(|e| panic!("{e}"));
 }
 
 fn validate_named_queries() {
