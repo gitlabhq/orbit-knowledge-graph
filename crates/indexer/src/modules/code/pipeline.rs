@@ -483,14 +483,12 @@ impl CodeIndexingPipeline {
                 if batch.num_rows() == 0 {
                     return Ok(());
                 }
-                // Metered once over the whole batch: logical_byte_size is slice-invariant, so
-                // this equals summing the slices below at a fraction of the cost.
+                // logical_byte_size is slice-invariant, so metering the whole batch once equals
+                // summing the slices below.
                 let batch_bytes = match gkg_utils::arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
-                        // The writer meters and increments the unmeterable metric for each
-                        // submitted slice downstream; here we only keep the run-total from
-                        // aborting the sink.
+                        // No metric here: the writer bumps it per submitted slice downstream.
                         tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
                         0
                     }
