@@ -67,7 +67,7 @@ const FILTER_OPS: &[&str] = &[
 ];
 const DIRECTIONS: &[&str] = &["outgoing", "incoming", "both"];
 const AGG_FUNCTIONS: &[&str] = &["count", "sum", "avg", "min", "max", "collect"];
-const PATH_TYPES: &[&str] = &["shortest", "all_shortest", "any"];
+const PATH_TYPES: &[&str] = &["shortest"];
 
 fn gen_filter(driver: &mut impl Driver) -> Option<Value> {
     let use_op: bool = driver.produce()?;

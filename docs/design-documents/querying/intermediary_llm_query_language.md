@@ -268,8 +268,6 @@ Find paths between nodes using recursive CTEs.
 | Path Type | Description |
 |-----------|-------------|
 | `shortest` | Find the single shortest path |
-| `all_shortest` | Find all paths of minimum length |
-| `any` | Find any valid path |
 
 ### Single-entity Traversal (lookup)
 

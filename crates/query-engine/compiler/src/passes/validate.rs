@@ -203,17 +203,12 @@ impl<'a> Validator<'a> {
     /// The JSON schema already enforces these limits via maxItems / maximum /
     /// maxProperties, so this only fires if schema validation was somehow bypassed.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
-        const MAX_HOPS_CAP: u32 = 3;
-        const MAX_DEPTH_CAP: u32 = 3;
-        const MAX_NODES_CAP: usize = 5;
-        const MAX_RELS_CAP: usize = 5;
+        use crate::schema_limits::{
+            MAX_COLUMNS, MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTERS_PER_NODE,
+            MAX_FILTERS_PER_REL, MAX_HOPS_CAP, MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP,
+            MAX_REL_TYPES, MAX_RELS_CAP,
+        };
         const MAX_AGGS_CAP: usize = 10;
-        const MAX_NODE_IDS: usize = 500;
-        const MAX_IN_VALUES: usize = 100;
-        const MAX_FILTERS_PER_NODE: usize = 20;
-        const MAX_FILTERS_PER_REL: usize = 10;
-        const MAX_COLUMNS: usize = 50;
-        const MAX_REL_TYPES: usize = 10;
         const MAX_GROUP_BY_KEYS: usize = 4;
 
         if input.nodes.len() > MAX_NODES_CAP {
@@ -276,11 +271,19 @@ impl<'a> Validator<'a> {
                     rel.types.len()
                 )));
             }
-            let rel_filter_count: usize = rel.filters.values().map(|v| v.len()).sum();
+            let rel_filter_count = rel.filters.len();
             if rel_filter_count > MAX_FILTERS_PER_REL {
                 return Err(QueryError::LimitExceeded(format!(
-                    "relationship filter count ({rel_filter_count}) must not exceed {MAX_FILTERS_PER_REL}",
+                    "relationship filter property count ({rel_filter_count}) must not exceed {MAX_FILTERS_PER_REL}",
                 )));
+            }
+            for (prop, filters) in &rel.filters {
+                if filters.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
+                    return Err(QueryError::LimitExceeded(format!(
+                        "filter entry count ({}) on relationship property \"{prop}\" must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}",
+                        filters.len()
+                    )));
+                }
             }
         }
         if let Some(ref path) = input.path {
@@ -305,10 +308,10 @@ impl<'a> Validator<'a> {
                     node.id
                 )));
             }
-            let node_filter_count: usize = node.filters.values().map(|v| v.len()).sum();
+            let node_filter_count = node.filters.len();
             if node_filter_count > MAX_FILTERS_PER_NODE {
                 return Err(QueryError::LimitExceeded(format!(
-                    "filter count ({node_filter_count}) for node \"{}\" must not exceed {MAX_FILTERS_PER_NODE}",
+                    "filter property count ({node_filter_count}) for node \"{}\" must not exceed {MAX_FILTERS_PER_NODE}",
                     node.id
                 )));
             }
@@ -322,6 +325,13 @@ impl<'a> Validator<'a> {
                 )));
             }
             for (prop, filters) in &node.filters {
+                if filters.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
+                    return Err(QueryError::LimitExceeded(format!(
+                        "filter entry count ({}) on property \"{prop}\" for node \"{}\" must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}",
+                        filters.len(),
+                        node.id
+                    )));
+                }
                 for filter in filters {
                     if let Some(FilterOp::In) = filter.op {
                         let len = filter
@@ -1080,6 +1090,75 @@ mod tests {
         assert!(
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_filter_cap_counts_property_keys_not_entries() {
+        let ontology = test_ontology();
+        let validator = Validator::new(&ontology);
+
+        let two_props_many_entries = parse_input(
+            r#"{
+                "query_type": "traversal",
+                "node": {
+                    "id": "u", "entity": "User",
+                    "filters": {
+                        "created_at": [
+                            {"op": "gte", "value": "2020-01-01"}, {"op": "lt", "value": "2020-02-01"},
+                            {"op": "gte", "value": "2020-03-01"}, {"op": "lt", "value": "2020-04-01"},
+                            {"op": "gte", "value": "2020-05-01"}, {"op": "lt", "value": "2020-06-01"}
+                        ],
+                        "username": [
+                            {"op": "contains", "value": "a"}, {"op": "contains", "value": "b"},
+                            {"op": "contains", "value": "c"}, {"op": "contains", "value": "d"},
+                            {"op": "contains", "value": "e"}, {"op": "contains", "value": "f"}
+                        ]
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        assert!(validator.check_depth(&two_props_many_entries).is_ok());
+
+        let eleven_props: String = (0..=10)
+            .map(|i| format!("\"p{i}\": true"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let over_key_cap = parse_input(&format!(
+            r#"{{
+                "query_type": "traversal",
+                "node": {{"id": "u", "entity": "User", "filters": {{{eleven_props}}}}}
+            }}"#
+        ))
+        .unwrap();
+        let err = validator.check_depth(&over_key_cap).unwrap_err();
+        assert!(
+            err.to_string().contains("filter property count (11)"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn per_property_filter_entry_cap_rejects_overlong_and_chains() {
+        let ontology = test_ontology();
+        let validator = Validator::new(&ontology);
+
+        let eleven_conditions: String = (0..11)
+            .map(|_| r#"{"op": "gte", "value": "2020-01-01"}"#)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let over_cap = parse_input(&format!(
+            r#"{{
+                "query_type": "traversal",
+                "node": {{"id": "u", "entity": "User", "filters": {{"created_at": [{eleven_conditions}]}}}}
+            }}"#
+        ))
+        .unwrap();
+        let err = validator.check_depth(&over_cap).unwrap_err();
+        assert!(
+            err.to_string().contains("filter entry count (11)"),
+            "got: {err}"
         );
     }
 

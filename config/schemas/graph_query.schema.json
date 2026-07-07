@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v3",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v4",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -719,7 +719,7 @@
     "PathType": {
       "type": "string",
       "description": "Path finding algorithm type",
-      "enum": ["shortest", "all_shortest", "any"]
+      "enum": ["shortest"]
     },
     "NeighborsConfig": {
       "type": "object",
