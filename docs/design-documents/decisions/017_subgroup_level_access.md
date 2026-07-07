@@ -100,6 +100,31 @@ tests exercise subgroup paths (`1/22/`, `1/33/`). Partition pruning keys on
 ClickHouse already holds subgroup data because indexing dispatches per enabled root
 namespace and stores the full traversal hierarchy.
 
+### Validation
+
+The diagnosis was reproduced empirically in a local development environment
+against the `gitlab-org/gitlab` default branch. Two users were created under a
+single top-level group: one holding Reporter only on a subgroup, the other
+holding Reporter on the top-level group itself.
+
+- The subgroup-only user's `authorized_groups.top_level` was **empty**, while
+  the top-level member's contained the root group. This is the exact set that
+  the SaaS branch of `OrbitLicense.available_for?` iterates, so the entitlement
+  check fails for the subgroup-only user.
+- For the same subgroup-only user, resolving the root via each authorized path's
+  `traversal_ids.first` **did** yield the root namespace — confirming that the
+  root is reachable and that broadening the entitlement predicate along this path
+  would recognize it.
+- `AuthorizationContext#has_enabled_namespaces?` returned **true** for the
+  subgroup-only user (it resolves the root via `traversal_ids.first`, not via
+  `authorized_groups.top_level`), confirming that enablement (touchpoint 2) is
+  not the blocker.
+
+This isolates the limitation to the single entitlement predicate and confirms it
+is neither a permission-model nor an enablement limitation. GitLab Self-Managed is
+unaffected: its branch delegates to the instance license and does not inspect
+group membership.
+
 ## Decision
 
 **Broaden the SaaS entitlement check (`OrbitLicense.available_for?`) so entitlement is
