@@ -70,7 +70,7 @@ pub fn embedded_sources() -> BTreeMap<String, String> {
 /// SHA-256 of the YAML with keys sorted, so comment- and key-order-only edits
 /// hash identically. Non-YAML content is hashed raw.
 #[must_use]
-pub fn stable_yaml_hash(content: &str) -> String {
+fn stable_yaml_hash(content: &str) -> String {
     match serde_yaml::from_str::<serde_yaml::Value>(content) {
         Ok(mut value) => {
             sort_yaml_keys(&mut value);

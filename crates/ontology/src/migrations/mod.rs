@@ -9,10 +9,7 @@ mod verify;
 
 pub use fingerprint::{
     FINGERPRINT_FILE, Fingerprints, embedded_sources, sha256_hex, source_fingerprints,
-    stable_yaml_hash,
 };
 pub use ledger::{LEDGER_FILE, MigrationEntry, MigrationLedger};
-pub use scope::{
-    InvalidationScope, Scope, ScopeDeclaration, SdlcScope, derive_scope, sdlc_entity_names,
-};
+pub use scope::{Scope, ScopeDeclaration, derive_scope};
 pub use verify::verify_snapshot;

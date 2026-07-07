@@ -100,60 +100,6 @@ impl std::fmt::Display for ScopeDeclaration {
     }
 }
 
-/// The resolved set of tables a migration must invalidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvalidationScope {
-    pub sdlc: SdlcScope,
-    pub code: bool,
-}
-
-impl InvalidationScope {
-    #[must_use]
-    pub fn none() -> Self {
-        Self {
-            sdlc: SdlcScope::None,
-            code: false,
-        }
-    }
-
-    #[must_use]
-    pub fn full() -> Self {
-        Self {
-            sdlc: SdlcScope::All,
-            code: true,
-        }
-    }
-
-    #[must_use]
-    pub fn union(&self, other: &Self) -> Self {
-        Self {
-            sdlc: self.sdlc.union(&other.sdlc),
-            code: self.code || other.code,
-        }
-    }
-}
-
-/// SDLC side of an [`InvalidationScope`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SdlcScope {
-    None,
-    All,
-    Entities(BTreeSet<String>),
-}
-
-impl SdlcScope {
-    #[must_use]
-    fn union(&self, other: &Self) -> Self {
-        match (self, other) {
-            (SdlcScope::All, _) | (_, SdlcScope::All) => SdlcScope::All,
-            (SdlcScope::None, s) | (s, SdlcScope::None) => s.clone(),
-            (SdlcScope::Entities(a), SdlcScope::Entities(b)) => {
-                SdlcScope::Entities(a.union(b).cloned().collect())
-            }
-        }
-    }
-}
-
 /// The minimal [`ScopeDeclaration`] a fingerprint diff justifies, or `None` if
 /// nothing changed. Fail-safe: anything unmapped widens to [`Scope::All`].
 #[must_use]

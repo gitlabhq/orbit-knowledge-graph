@@ -1,14 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::scope::{InvalidationScope, Scope, ScopeDeclaration, SdlcScope, sdlc_entity_names};
+use super::scope::{Scope, ScopeDeclaration, sdlc_entity_names};
 use crate::Ontology;
 
 /// Ledger path relative to `CONFIG_DIR`.
 pub const LEDGER_FILE: &str = "schema-migrations.yaml";
-
-const LEDGER_EMBEDDED: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
 
 const LEDGER_HEADER: &str = "\
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
@@ -33,10 +31,6 @@ pub struct MigrationLedger {
 }
 
 impl MigrationLedger {
-    pub fn load_embedded() -> Result<Self, String> {
-        Self::parse(LEDGER_EMBEDDED)
-    }
-
     pub fn parse(content: &str) -> Result<Self, String> {
         serde_yaml::from_str(content).map_err(|e| format!("parsing migration ledger: {e}"))
     }
@@ -100,31 +94,6 @@ impl MigrationLedger {
 
         Ok(())
     }
-
-    /// Union of entry scopes over `(active_version, embedded_version]`; a version
-    /// with no entry invalidates the whole graph.
-    #[must_use]
-    pub fn invalidation_between(
-        &self,
-        active_version: u32,
-        embedded_version: u32,
-    ) -> InvalidationScope {
-        if embedded_version <= active_version {
-            return InvalidationScope::none();
-        }
-
-        let entries_by_version: BTreeMap<u32, &MigrationEntry> =
-            self.migrations.iter().map(|e| (e.version, e)).collect();
-
-        let mut scope = InvalidationScope::none();
-        for version in (active_version + 1)..=embedded_version {
-            match entries_by_version.get(&version) {
-                Some(entry) => scope = scope.union(&entry.invalidation_scope()),
-                None => return InvalidationScope::full(),
-            }
-        }
-        scope
-    }
 }
 
 /// One `SCHEMA_VERSION` bump.
@@ -147,25 +116,6 @@ impl MigrationEntry {
             entities: self.entities.clone(),
         }
     }
-
-    #[must_use]
-    fn invalidation_scope(&self) -> InvalidationScope {
-        match self.scope {
-            Scope::All => InvalidationScope::full(),
-            Scope::Code => InvalidationScope {
-                sdlc: SdlcScope::None,
-                code: true,
-            },
-            Scope::Sdlc if self.entities.is_empty() => InvalidationScope {
-                sdlc: SdlcScope::All,
-                code: false,
-            },
-            Scope::Sdlc => InvalidationScope {
-                sdlc: SdlcScope::Entities(self.entities.clone()),
-                code: false,
-            },
-        }
-    }
 }
 
 #[cfg(test)]
@@ -174,16 +124,6 @@ mod tests {
 
     fn entities(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn embedded_ledger_parses_and_validates() {
-        let ledger = MigrationLedger::load_embedded().expect("ledger parses");
-        let ontology = Ontology::load_embedded().expect("ontology loads");
-        let last_version = ledger.last().expect("ledger has entries").version;
-        ledger
-            .validate(&ontology, last_version)
-            .expect("embedded ledger is well-formed and its entities resolve");
     }
 
     #[test]
@@ -252,94 +192,5 @@ mod tests {
         let ontology = Ontology::new();
         let err = ledger.validate(&ontology, 1).unwrap_err();
         assert!(err.contains("is not an SDLC entity"), "{err}");
-    }
-
-    #[test]
-    fn invalidated_missing_version_is_full() {
-        let ledger = MigrationLedger {
-            migrations: vec![MigrationEntry {
-                version: 3,
-                scope: Scope::Sdlc,
-                entities: entities(&["Note"]),
-                note: None,
-            }],
-        };
-        assert_eq!(ledger.invalidation_between(2, 5), InvalidationScope::full());
-    }
-
-    #[test]
-    fn invalidated_unions_entities_across_range() {
-        let ledger = MigrationLedger {
-            migrations: vec![
-                MigrationEntry {
-                    version: 3,
-                    scope: Scope::Sdlc,
-                    entities: entities(&["Note"]),
-                    note: None,
-                },
-                MigrationEntry {
-                    version: 4,
-                    scope: Scope::Sdlc,
-                    entities: entities(&["Issue"]),
-                    note: None,
-                },
-            ],
-        };
-        let scope = ledger.invalidation_between(2, 4);
-        assert_eq!(
-            scope.sdlc,
-            SdlcScope::Entities(entities(&["Issue", "Note"]))
-        );
-        assert!(!scope.code);
-    }
-
-    #[test]
-    fn invalidated_code_and_sdlc_compose() {
-        let ledger = MigrationLedger {
-            migrations: vec![
-                MigrationEntry {
-                    version: 3,
-                    scope: Scope::Code,
-                    entities: BTreeSet::new(),
-                    note: None,
-                },
-                MigrationEntry {
-                    version: 4,
-                    scope: Scope::Sdlc,
-                    entities: entities(&["Note"]),
-                    note: None,
-                },
-            ],
-        };
-        let scope = ledger.invalidation_between(2, 4);
-        assert!(scope.code);
-        assert_eq!(scope.sdlc, SdlcScope::Entities(entities(&["Note"])));
-    }
-
-    #[test]
-    fn invalidated_all_absorbs_entities() {
-        let ledger = MigrationLedger {
-            migrations: vec![
-                MigrationEntry {
-                    version: 3,
-                    scope: Scope::Sdlc,
-                    entities: entities(&["Note"]),
-                    note: None,
-                },
-                MigrationEntry {
-                    version: 4,
-                    scope: Scope::All,
-                    entities: BTreeSet::new(),
-                    note: None,
-                },
-            ],
-        };
-        assert_eq!(ledger.invalidation_between(2, 4), InvalidationScope::full());
-    }
-
-    #[test]
-    fn invalidated_empty_range_is_none() {
-        let ledger = MigrationLedger::default();
-        assert_eq!(ledger.invalidation_between(5, 5), InvalidationScope::none());
     }
 }
