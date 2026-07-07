@@ -116,14 +116,23 @@ is injected top-down from the embedded version and flows through without further
 
 A background task (`SchemaWatcher`) polls `gkg_schema_version` every
 `schema.version_poll_interval_secs` seconds (default `5`) and classifies the result against the
-binary's embedded version:
+binary's embedded version. It reads the `active` status first and, only when that does not match
+the binary, also reads the `migrating` status:
 
-| Database active version vs. binary | State | `/ready` response | Action |
+| Database vs. binary | State | `/ready` response | Action |
 |---|---|---|---|
-| missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
-| `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
-| `==` binary | `Ready` | existing checks (`200` if all healthy) | serve traffic |
-| `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
+| active missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
+| active `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
+| active `==` binary | `Ready` | existing checks (`200` if all healthy) | serve traffic |
+| active `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
+| migrating `==` binary (active `<` binary) | `Migrating` | `503` with `schema_migrating`, `status:"migrating"` | keep polling |
+
+`Migrating` means the dispatcher has created this binary's table-set and marked it `migrating`, but
+has not yet promoted it to `active`. The pod correctly stays out of Kubernetes rotation (still
+`503`), but the distinct `status:"migrating"` label and `schema_migrating` component distinguish an
+in-progress migration from a genuinely broken deployment. `Outdated` always wins over `Migrating`:
+an active version above the binary triggers the safety shutdown even if a below-active `migrating`
+row matches, consistent with the downgrade guard (issue #957).
 
 `/live` is never gated on the watcher — Kubernetes keeps the pod alive while it waits for the
 indexer to promote the matching version. When the binary detects a newer active version than it
@@ -141,7 +150,7 @@ Implemented in `crates/gkg-server/src/schema_watcher.rs`.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready` \| `outdated`) | Value `1` for the active state, `0` otherwise |
+| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready` \| `outdated` \| `migrating`) | Value `1` for the active state, `0` otherwise |
 
 ### Configuration
 
@@ -203,8 +212,11 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    `namespace_deletion_schedule`). Control tables (`gkg_schema_version`) are not prefixed.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
-   This signals indexers that the new-prefix tables exist. The Webserver cutover (tracked in
-   issue #441) switches reads to the new table-set.
+   This signals indexers that the new-prefix tables exist. A newly deployed webserver whose
+   embedded version matches this `migrating` row reports readiness state `Migrating`
+   (`503` with `status:"migrating"`), distinguishing the migration window from a broken deployment
+   (see "Webserver readiness gate" above). The Webserver read cutover (tracked in issue #441)
+   switches reads to the new table-set.
 
 6. **Release lock** — Allow other pods to proceed.
 

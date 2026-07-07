@@ -6,7 +6,9 @@ use axum::http::{Request, StatusCode};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server::schema_watcher::{SchemaState, SchemaWatcher};
 use gkg_server::webserver::create_router;
-use indexer::schema::version::{ensure_version_table, write_schema_version};
+use indexer::schema::version::{
+    ensure_version_table, write_migrating_version, write_schema_version,
+};
 use integration_testkit::TestContext;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::CancellationToken;
@@ -79,6 +81,42 @@ async fn ready_returns_503_when_schema_outdated() {
 
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(unhealthy_components(&json).contains(&"schema_outdated".to_string()));
+}
+
+#[tokio::test]
+async fn ready_returns_503_with_migrating_status_when_schema_migrating() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+
+    let watcher = SchemaWatcher::for_state(SchemaState::Migrating);
+    let router = create_router(client, None, watcher);
+
+    let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(json["status"], "migrating");
+    assert_eq!(
+        unhealthy_components(&json),
+        vec!["schema_migrating".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn watcher_transitions_to_migrating_then_ready() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+    write_schema_version(&client, 1).await.unwrap();
+    write_migrating_version(&client, 2).await.unwrap();
+
+    let shutdown = CancellationToken::new();
+    let watcher = SchemaWatcher::spawn(client.clone(), 2, POLL, shutdown.clone());
+    await_state(&watcher, SchemaState::Migrating).await;
+
+    write_schema_version(&client, 2).await.unwrap();
+    await_state(&watcher, SchemaState::Ready).await;
+
+    shutdown.cancel();
 }
 
 #[tokio::test]
