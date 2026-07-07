@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "NamedQuery",
-  "description": "A server-defined graph query in config/named_queries/. The query DSL may reference server-side bindings via {$binding: <name>} placeholders, rendered server-side and compiled by the query compiler. Each file's name field must match its file stem.",
+  "description": "A server-defined graph query in config/named_queries/. The query DSL may reference server-side bindings via {$binding: <name>} placeholders and client-supplied parameters via {$param: <name>} placeholders, rendered server-side and compiled by the query compiler. Each file's name field must match its file stem.",
   "type": "object",
   "required": ["name", "description", "query"],
   "additionalProperties": false,
@@ -24,6 +24,27 @@
         "enum": ["current_user_id"]
       },
       "description": "Server-side values substituted at render time via {$binding: <name>}. Never client-supplied."
+    },
+    "parameters": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["schema", "example"],
+        "additionalProperties": false,
+        "properties": {
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema the client-supplied value must satisfy at render time."
+          },
+          "example": {
+            "description": "Representative value substituted for build-time compilation against the ontology. Must satisfy schema."
+          }
+        }
+      },
+      "description": "Client-supplied values substituted at render time via {$param: <name>}, validated against each parameter's JSON Schema."
     },
     "query": {
       "type": "object",

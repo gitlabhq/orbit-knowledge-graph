@@ -7948,6 +7948,7 @@ checksum = "2195bf6aa996a481483b29d62a7663eed3fe39600c460e323f8ff41e90bdd89b"
 name = "named-queries"
 version = "0.1.0"
 dependencies = [
+ "jsonschema",
  "rust-embed",
  "serde",
  "serde_json",

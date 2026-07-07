@@ -318,7 +318,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                             current_user_id: claims.user_id,
                         };
                         named_queries
-                            .render(&req.query, &values)
+                            .render_request(&req.query, &values)
                             .map_err(|e| e.to_string())
                     }
                     Err(_) => Err(format!("Unknown query_type: {}", req.query_type)),

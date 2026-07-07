@@ -24,7 +24,7 @@ fn validate_named_queries() {
     let values = named_queries::BindingValues { current_user_id: 1 };
     for query in queries.iter() {
         let rendered = query
-            .render(&values)
+            .render(&values, &query.example_parameters())
             .unwrap_or_else(|e| panic!("named query failed to render: {e}"));
         if let Err(e) = compiler::compile(&rendered, &ontology, &ctx) {
             panic!("named query `{}` failed to compile: {e}", query.name);

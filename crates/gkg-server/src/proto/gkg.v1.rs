@@ -588,7 +588,7 @@ impl FormatName {
 #[repr(i32)]
 pub enum QueryType {
     Json = 0,
-    /// `query` names a server-defined named query
+    /// `query` is a named-query envelope: {"name": ..., "parameters": {...}}
     Named = 1,
 }
 impl QueryType {

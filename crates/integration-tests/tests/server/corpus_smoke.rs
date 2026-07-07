@@ -205,7 +205,7 @@ fn load_named_queries() -> Vec<SmokeCase> {
         .map(|query| SmokeCase {
             key: format!("named_query::{}", query.name),
             query: query
-                .render(&values)
+                .render(&values, &query.example_parameters())
                 .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
             expects_error: false,
         })
