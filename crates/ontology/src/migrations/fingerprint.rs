@@ -39,8 +39,8 @@ impl Fingerprints {
     #[must_use]
     pub fn diff(&self, base: &Fingerprints) -> (BTreeSet<String>, BTreeSet<String>) {
         (
-            changed_keys(&self.sources, &base.sources),
-            changed_keys(&self.ddl, &base.ddl),
+            diff_changed_keys(&self.sources, &base.sources),
+            diff_changed_keys(&self.ddl, &base.ddl),
         )
     }
 }
@@ -123,7 +123,7 @@ fn serialized_key(key: &serde_yaml::Value) -> String {
     serde_yaml::to_string(key).unwrap_or_default()
 }
 
-fn changed_keys(
+fn diff_changed_keys(
     current: &BTreeMap<String, String>,
     base: &BTreeMap<String, String>,
 ) -> BTreeSet<String> {

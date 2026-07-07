@@ -28,7 +28,7 @@ pub struct ScopeDeclaration {
 
 impl ScopeDeclaration {
     #[must_use]
-    pub fn covers(&self, required: &Self) -> bool {
+    pub fn covers_scope_of(&self, required: &Self) -> bool {
         match (self.scope, required.scope) {
             (Scope::All, _) => true,
             (_, Scope::All) => false,
@@ -46,7 +46,7 @@ impl ScopeDeclaration {
 
     /// The widest of the two declarations; mixing `code` and `sdlc` widens to `"*"`.
     #[must_use]
-    pub fn widen(&self, other: &Self) -> Self {
+    pub fn widened_with(&self, other: &Self) -> Self {
         match (self.scope, other.scope) {
             (Scope::All, _) | (_, Scope::All) => Self::all(),
             (Scope::Code, Scope::Code) => Self::code(),
@@ -266,42 +266,49 @@ mod tests {
 
     #[test]
     fn scope_covers_star_covers_all() {
-        assert!(ScopeDeclaration::all().covers(&ScopeDeclaration::sdlc(entities(&["Note"]))));
-        assert!(ScopeDeclaration::all().covers(&ScopeDeclaration::code()));
+        assert!(
+            ScopeDeclaration::all().covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"])))
+        );
+        assert!(ScopeDeclaration::all().covers_scope_of(&ScopeDeclaration::code()));
     }
 
     #[test]
     fn scope_covers_sdlc_subset_rules() {
         let any_sdlc = ScopeDeclaration::sdlc(BTreeSet::new());
-        assert!(any_sdlc.covers(&ScopeDeclaration::sdlc(entities(&["Note"]))));
+        assert!(any_sdlc.covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"]))));
         assert!(
             ScopeDeclaration::sdlc(entities(&["Note", "Issue"]))
-                .covers(&ScopeDeclaration::sdlc(entities(&["Note"])))
+                .covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"])))
         );
         assert!(
             !ScopeDeclaration::sdlc(entities(&["Note"]))
-                .covers(&ScopeDeclaration::sdlc(entities(&["Issue"])))
+                .covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Issue"])))
         );
-        assert!(!ScopeDeclaration::sdlc(entities(&["Note"])).covers(&any_sdlc));
+        assert!(!ScopeDeclaration::sdlc(entities(&["Note"])).covers_scope_of(&any_sdlc));
     }
 
     #[test]
     fn scope_covers_code_and_sdlc_are_disjoint() {
-        assert!(!ScopeDeclaration::code().covers(&ScopeDeclaration::sdlc(entities(&["Note"]))));
-        assert!(!ScopeDeclaration::sdlc(BTreeSet::new()).covers(&ScopeDeclaration::code()));
-        assert!(ScopeDeclaration::code().covers(&ScopeDeclaration::code()));
+        assert!(
+            !ScopeDeclaration::code().covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"])))
+        );
+        assert!(
+            !ScopeDeclaration::sdlc(BTreeSet::new()).covers_scope_of(&ScopeDeclaration::code())
+        );
+        assert!(ScopeDeclaration::code().covers_scope_of(&ScopeDeclaration::code()));
     }
 
     #[test]
     fn widen_mixes_code_and_sdlc_to_all() {
-        let widened = ScopeDeclaration::sdlc(entities(&["Note"])).widen(&ScopeDeclaration::code());
+        let widened =
+            ScopeDeclaration::sdlc(entities(&["Note"])).widened_with(&ScopeDeclaration::code());
         assert_eq!(widened, ScopeDeclaration::all());
     }
 
     #[test]
     fn widen_unions_sdlc_entities() {
         let widened = ScopeDeclaration::sdlc(entities(&["Note"]))
-            .widen(&ScopeDeclaration::sdlc(entities(&["Issue"])));
+            .widened_with(&ScopeDeclaration::sdlc(entities(&["Issue"])));
         assert_eq!(
             widened,
             ScopeDeclaration::sdlc(entities(&["Issue", "Note"]))
@@ -311,7 +318,7 @@ mod tests {
     #[test]
     fn widen_empty_entities_absorbs() {
         let widened = ScopeDeclaration::sdlc(entities(&["Note"]))
-            .widen(&ScopeDeclaration::sdlc(BTreeSet::new()));
+            .widened_with(&ScopeDeclaration::sdlc(BTreeSet::new()));
         assert_eq!(widened, ScopeDeclaration::sdlc(BTreeSet::new()));
     }
 

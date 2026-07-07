@@ -194,7 +194,7 @@ fn check_under_declaration(
         &source_contents,
         &changed_sources,
         &changed_tables,
-    ) && !entry.declaration().covers(&required)
+    ) && !entry.declaration().covers_scope_of(&required)
     {
         bail!(
             "ledger entry for version {schema_version} under-declares the change: \
@@ -242,12 +242,12 @@ pub fn bump(
         (None, Some(explicit)) => explicit,
         (Some(derived), None) => derived,
         (Some(derived), Some(explicit)) => {
-            if !explicit.covers(&derived) {
+            if !explicit.covers_scope_of(&derived) {
                 bail!(
                     "--scope narrows below the detected drift ({derived}); flags may only widen it"
                 );
             }
-            derived.widen(&explicit)
+            derived.widened_with(&explicit)
         }
     };
 
@@ -291,7 +291,7 @@ pub fn bump(
             .migrations
             .last_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
-        let widened = last.declaration().widen(&entry_declaration);
+        let widened = last.declaration().widened_with(&entry_declaration);
         last.scope = widened.scope;
         last.entities = widened.entities;
         if note.is_some() {
