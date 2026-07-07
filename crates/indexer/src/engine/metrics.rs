@@ -25,6 +25,7 @@ pub struct EngineMetrics {
     pub(crate) destination_rows_written: Counter<u64>,
     pub(crate) destination_bytes_written: Counter<u64>,
     pub(crate) destination_write_errors: Counter<u64>,
+    pub(crate) destination_unmeterable_batches: Counter<u64>,
     pub(crate) handler_errors: Counter<u64>,
 }
 
@@ -46,6 +47,8 @@ impl EngineMetrics {
             destination_rows_written: etl::DESTINATION_ROWS_WRITTEN.build_counter_u64(meter),
             destination_bytes_written: etl::DESTINATION_BYTES_WRITTEN.build_counter_u64(meter),
             destination_write_errors: etl::DESTINATION_WRITE_ERRORS.build_counter_u64(meter),
+            destination_unmeterable_batches: etl::DESTINATION_UNMETERABLE_BATCHES
+                .build_counter_u64(meter),
             handler_errors: etl::HANDLER_ERRORS.build_counter_u64(meter),
         }
     }
@@ -98,6 +101,11 @@ impl EngineMetrics {
 
     pub(crate) fn record_write_error(&self, table: &str) {
         self.destination_write_errors
+            .add(1, &[KeyValue::new(etl::labels::TABLE, table.to_owned())]);
+    }
+
+    pub(crate) fn record_unmeterable_batch(&self, table: &str) {
+        self.destination_unmeterable_batches
             .add(1, &[KeyValue::new(etl::labels::TABLE, table.to_owned())]);
     }
 }
