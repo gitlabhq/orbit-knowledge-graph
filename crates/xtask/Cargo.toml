@@ -19,12 +19,11 @@ all = { level = "warn", priority = -1 }
 serde = { workspace = true }
 toml = { workspace = true }
 
-# `toml` (build + dev dep) and the build-time `serde` are used only from
-# `build_support/crate_map_drift.rs`, which is pulled in via `include!` from
-# `build.rs` and `tests/`; cargo-shear does not follow `include!`, so it
-# reports them as unused.
+# `toml` is used only from `build_support/crate_map_drift.rs`, which is pulled
+# in via `include!` from `build.rs` and `tests/`; cargo-shear does not follow
+# `include!`, so it reports `toml` as unused.
 [package.metadata.cargo-shear]
-ignored = ["toml", "serde"]
+ignored = ["toml"]
 
 [dependencies]
 clap = { workspace = true }
