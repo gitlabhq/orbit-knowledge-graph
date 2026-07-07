@@ -250,8 +250,11 @@ async fn assert_no_delivery(
     within: Duration,
     context: &str,
 ) {
-    let result = tokio::time::timeout(within, subscription.next()).await;
-    assert!(result.is_err(), "{context}");
+    match tokio::time::timeout(within, subscription.next()).await {
+        Err(_elapsed) => {}
+        Ok(Some(_)) => panic!("unexpected delivery: {context}"),
+        Ok(None) => panic!("subscription ended before timeout: {context}"),
+    }
 }
 
 /// Publishes one message, drives redelivery through every `max_deliver` attempt, and confirms
