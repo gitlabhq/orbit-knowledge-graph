@@ -64,10 +64,10 @@ impl ClusterHealthChecker {
         client: &InfrastructureHealthClient,
     ) -> StructuredClusterHealth {
         let health_status = client.check_or_unavailable().await;
-        let migration_eligible = is_migration_status_eligible(&health_status);
+        let services_only_failure = only_services_unhealthy(&health_status);
         let mut structured = self.convert_health_status(health_status);
 
-        if migration_eligible {
+        if services_only_failure {
             self.overlay_active_migration(&mut structured).await;
         }
 
@@ -243,7 +243,7 @@ impl ClusterHealthChecker {
     }
 }
 
-fn is_migration_status_eligible(status: &HealthStatus) -> bool {
+fn only_services_unhealthy(status: &HealthStatus) -> bool {
     matches!(status.status, health_check::Status::Unhealthy)
         && !status.clickhouse.is_empty()
         && status
@@ -576,12 +576,12 @@ mod tests {
 
     #[test]
     fn unhealthy_clickhouse_is_never_migrating() {
-        assert!(is_migration_status_eligible(&degraded_sidecar_response()));
+        assert!(only_services_unhealthy(&degraded_sidecar_response()));
 
         let mut broken_clickhouse = degraded_sidecar_response();
         broken_clickhouse.clickhouse[0].status = Status::Unhealthy;
-        assert!(!is_migration_status_eligible(&broken_clickhouse));
+        assert!(!only_services_unhealthy(&broken_clickhouse));
 
-        assert!(!is_migration_status_eligible(&healthy_sidecar_response()));
+        assert!(!only_services_unhealthy(&healthy_sidecar_response()));
     }
 }
