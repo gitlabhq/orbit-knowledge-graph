@@ -484,8 +484,9 @@ check_docs_markdown:
   script:
     # Lint prose
     - vale --minAlertLevel error docs/source
-    # Lint Markdown
-    - markdownlint-cli2 'docs/source/**/*.md'
+    # Lint Markdown. docs/source is user-facing; root and docs/dev are contributor
+    # docs that previously reached CI unlinted (design-documents deferred: #981).
+    - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
     # Check links
     - lychee --offline --include-fragments docs/source/**/*.md
 

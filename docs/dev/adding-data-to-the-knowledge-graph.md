@@ -14,12 +14,12 @@ Two repositories are involved. Know which one you're in at every step.
 
 | Repo | Path (typical GDK) | Role |
 |------|--------------------|------|
-| **gitlab monolith** | `…/gitlab-development-kit/gitlab` | Owns the Postgres source tables, the **Siphon CDC** config that replicates them to ClickHouse, and the **redaction** authorization layer. |
+| **GitLab monolith** | `…/gitlab-development-kit/gitlab` | Owns the Postgres source tables, the **Siphon CDC** config that replicates them to ClickHouse, and the **redaction** authorization layer. |
 | **knowledge-graph** (`gitlab-org/orbit/knowledge-graph`) | `…/gitlab-development-kit/knowledge-graph` | The `gkg` engine: the **ontology** (YAML) that tells `gkg-indexer` how to turn `siphon_*` ClickHouse tables into graph nodes/edges, plus the indexer, query compiler, and gRPC server. |
 
 **Data flow (one direction):**
 
-```
+```text
 Postgres table (monolith)
    └─ Siphon CDC (db/siphon/tables/*.yml + ClickHouse migration)
         └─ siphon_<table> ClickHouse table  ── replicated to prod CH ──┐
@@ -84,8 +84,9 @@ bundle exec rails generate gitlab:click_house:siphon <table> --with-traversal-pa
 ```
 
 This emits three files:
+
 - `db/click_house/migrate/main/<TS>_create_siphon_<table>.rb` — main `ReplacingMergeTree`.
-- `db/click_house/migrate/main/<TS>_create_siphon_<table>_pg_pkey_ordered.rb` — companion id-ordered table + materialized view (for reconciliation).
+- `db/click_house/migrate/main/<TS>_create_siphon_<table>_pg_pkey_ordered.rb` — companion ID-ordered table + materialized view (for reconciliation).
 - `db/siphon/tables/<table>.yml` — CDC config (`dedup_by`, `dedup_by_columns_lookup_table`, `reconcile`).
 
 > If `bundle exec rails …` fails with a missing gem (e.g. a `gdk-toogle` version
@@ -127,12 +128,14 @@ docker rm -f gl-ch-dump && gdk start clickhouse
 ### 3.4 What to commit (and what NOT to)
 
 Stage **only**:
+
 - the two migration `.rb` files,
 - `db/siphon/tables/<table>.yml`,
 - `db/click_house/main.sql`,
 - `db/click_house/schema_cache/main/siphon_<table>.yml` **and** `…_pg_pkey_ordered.yml`.
 
 Do **not** commit / explicitly discard:
+
 - `db/click_house/schema_migrations/main/<TS>` markers — these land in a **separate batch commit**, not the feature MR.
 - Drift in unrelated `schema_cache/main/*.yml` (e.g. `siphon_ci_pipeline_metadata.yml` flipping the dict-name qualification). `git checkout --` those. The dump regenerates *all* tables; only your table's files are in scope.
 
@@ -202,6 +205,7 @@ YAML-driven; the indexer and query compiler are Rust.
 ### 5.1 Node YAML — `config/ontology/nodes/<domain>/<node>.yaml`
 
 Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Required pieces:
+
 - `node_type`, `domain`, `description`, `label`, `destination_table: gl_<node>`, `default_columns`.
 - `redaction: { resource_type: <type>, id_column: id, ability: <ability> }` — **must match the monolith registration** (Section 4).
 - `properties:` — **every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**: don't mark a `NOT NULL` source nullable, and don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
@@ -262,6 +266,7 @@ mise run schema:generate:ddl
 
 This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql`
 (local/DuckDB). Expect:
+
 - `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block + the version stamp.
 - **Edges have no per-edge table** — they're rows in the shared `gl_edge` table, so a new edge produces *no* new `CREATE TABLE`. That's correct.
 - `config/graph_local.sql`: only the version-stamp line changes for SDLC nodes — the local/DuckDB graph doesn't contain the namespace-graph `gl_*` node tables (so `gl_<node>` being absent there is expected, same as `gl_package`).
@@ -326,18 +331,21 @@ cargo +<pinned> test -p integration-tests scenario_indexing   # end-to-end sipho
 ## 7. End-to-end checklist
 
 Monolith, per Siphon table:
+
 - [ ] Branch off fresh `master`; generator run with correct `--with-traversal-path`.
 - [ ] `project_id Int64`, explicit `ORDER BY`, CODECs untouched.
 - [ ] `main.sql` regenerated via pinned-CH Docker; diff is only your blocks.
-- [ ] Committed: migrations + siphon yaml + main.sql + schema_cache yml. Markers excluded; unrelated drift reverted.
+- [ ] Committed: migrations + siphon YAML + main.sql + schema_cache yml. Markers excluded; unrelated drift reverted.
 - [ ] RuboCop + siphon spec green. Commit body ≤72 cols, full URLs (no `#123`/`!123`).
 
 Monolith, per new node:
+
 - [ ] Policy added (reuse an existing ability if possible).
 - [ ] Registered in `EE_RESOURCE_CLASSES` + `EE_PRELOAD_ASSOCIATIONS`; key matches ontology `resource_type`.
 - [ ] Redaction spec context + `supported_types` updated; green.
 
 knowledge-graph:
+
 - [ ] Node YAML (every property has `description`; nullable matches source).
 - [ ] Edge YAML (join FKs handled).
 - [ ] **Registered in `schema.yaml`** (nodes map + edges map).
