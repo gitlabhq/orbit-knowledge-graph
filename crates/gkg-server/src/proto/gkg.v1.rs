@@ -618,6 +618,7 @@ pub enum ClusterStatus {
     Healthy = 1,
     Degraded = 2,
     Unhealthy = 3,
+    Migrating = 4,
 }
 impl ClusterStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -630,6 +631,7 @@ impl ClusterStatus {
             Self::Healthy => "CLUSTER_STATUS_HEALTHY",
             Self::Degraded => "CLUSTER_STATUS_DEGRADED",
             Self::Unhealthy => "CLUSTER_STATUS_UNHEALTHY",
+            Self::Migrating => "CLUSTER_STATUS_MIGRATING",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -639,6 +641,7 @@ impl ClusterStatus {
             "CLUSTER_STATUS_HEALTHY" => Some(Self::Healthy),
             "CLUSTER_STATUS_DEGRADED" => Some(Self::Degraded),
             "CLUSTER_STATUS_UNHEALTHY" => Some(Self::Unhealthy),
+            "CLUSTER_STATUS_MIGRATING" => Some(Self::Migrating),
             _ => None,
         }
     }

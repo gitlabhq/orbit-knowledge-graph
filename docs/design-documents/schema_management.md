@@ -144,6 +144,11 @@ serving the wrong schema.
 Transient ClickHouse errors during a poll keep the previous state — the watcher does not
 flap to `Pending` on a single failed read.
 
+The unready webserver pods also make the cluster-health sidecar report Unhealthy for the whole
+migration window. `ClusterHealthChecker` reads the same `migrating` row to report that aggregate
+as `Migrating` (with a `schema_migration` component) instead of Unhealthy, gated on ClickHouse
+being healthy. See [`health_check.md`](health_check.md#migration-awareness).
+
 Implemented in `crates/gkg-server/src/schema_watcher.rs`.
 
 #### Observability
