@@ -46,7 +46,7 @@ Attach screenshots or video if possible -->
 
 <!-- Paste relevant logs. Prefer full stack traces and surrounding context. Sanitize secrets. -->
 
-<!-- See [Viewing logs](https://gitlab-org.gitlab.io/rust/knowledge-graph/getting-started/troubleshooting/#viewing-logs) for how to view logs. -->
+<!-- See [Viewing logs](https://gitlab-org.gitlab.io/orbit/knowledge-graph/getting-started/troubleshooting/#viewing-logs) for how to view logs. -->
 
 </details>
 
