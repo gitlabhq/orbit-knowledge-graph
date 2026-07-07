@@ -15,84 +15,6 @@ const FINGERPRINT_HEADER: &str = "\
 # lives in git.
 ";
 
-#[must_use]
-pub fn sha256_hex(input: &str) -> String {
-    use std::fmt::Write as _;
-
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
-}
-
-/// SHA-256 of the YAML with keys sorted, so comment- and key-order-only edits
-/// hash identically. Non-YAML content is hashed raw.
-#[must_use]
-pub fn stable_yaml_hash(content: &str) -> String {
-    match serde_yaml::from_str::<serde_yaml::Value>(content) {
-        Ok(mut value) => {
-            sort_yaml_keys(&mut value);
-            match serde_yaml::to_string(&value) {
-                Ok(rendered) => sha256_hex(&rendered),
-                Err(_) => sha256_hex(content),
-            }
-        }
-        Err(_) => sha256_hex(content),
-    }
-}
-
-fn sort_yaml_keys(value: &mut serde_yaml::Value) {
-    match value {
-        serde_yaml::Value::Mapping(map) => {
-            let mut entries: Vec<(serde_yaml::Value, serde_yaml::Value)> =
-                std::mem::take(map).into_iter().collect();
-            for (_, v) in &mut entries {
-                sort_yaml_keys(v);
-            }
-            entries.sort_by_key(|(key, _)| serialized_key(key));
-            for (k, v) in entries {
-                map.insert(k, v);
-            }
-        }
-        serde_yaml::Value::Sequence(seq) => {
-            for v in seq {
-                sort_yaml_keys(v);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn serialized_key(key: &serde_yaml::Value) -> String {
-    serde_yaml::to_string(key).unwrap_or_default()
-}
-
-/// Per-file hash of every embedded ontology source, keyed by relative path.
-#[must_use]
-pub fn source_fingerprints() -> BTreeMap<String, String> {
-    crate::loading::embedded_files()
-        .into_iter()
-        .map(|(path, content)| {
-            let hash = if path.ends_with(".yaml") || path.ends_with(".yml") {
-                stable_yaml_hash(&content)
-            } else {
-                sha256_hex(&content)
-            };
-            (path, hash)
-        })
-        .collect()
-}
-
-/// Every embedded ontology source file as path → contents.
-#[must_use]
-pub fn embedded_sources() -> BTreeMap<String, String> {
-    crate::loading::embedded_files().into_iter().collect()
-}
-
 /// The committed drift snapshot: source hashes plus generated-DDL hashes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -121,6 +43,84 @@ impl Fingerprints {
             changed_keys(&self.ddl, &base.ddl),
         )
     }
+}
+
+/// Per-file hash of every embedded ontology source, keyed by relative path.
+#[must_use]
+pub fn source_fingerprints() -> BTreeMap<String, String> {
+    crate::loading::embedded_files()
+        .into_iter()
+        .map(|(path, content)| {
+            let hash = if path.ends_with(".yaml") || path.ends_with(".yml") {
+                stable_yaml_hash(&content)
+            } else {
+                sha256_hex(&content)
+            };
+            (path, hash)
+        })
+        .collect()
+}
+
+/// Every embedded ontology source file as path → contents.
+#[must_use]
+pub fn embedded_sources() -> BTreeMap<String, String> {
+    crate::loading::embedded_files().into_iter().collect()
+}
+
+/// SHA-256 of the YAML with keys sorted, so comment- and key-order-only edits
+/// hash identically. Non-YAML content is hashed raw.
+#[must_use]
+pub fn stable_yaml_hash(content: &str) -> String {
+    match serde_yaml::from_str::<serde_yaml::Value>(content) {
+        Ok(mut value) => {
+            sort_yaml_keys(&mut value);
+            match serde_yaml::to_string(&value) {
+                Ok(rendered) => sha256_hex(&rendered),
+                Err(_) => sha256_hex(content),
+            }
+        }
+        Err(_) => sha256_hex(content),
+    }
+}
+
+#[must_use]
+pub fn sha256_hex(input: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+fn sort_yaml_keys(value: &mut serde_yaml::Value) {
+    match value {
+        serde_yaml::Value::Mapping(map) => {
+            let mut entries: Vec<(serde_yaml::Value, serde_yaml::Value)> =
+                std::mem::take(map).into_iter().collect();
+            for (_, v) in &mut entries {
+                sort_yaml_keys(v);
+            }
+            entries.sort_by_key(|(key, _)| serialized_key(key));
+            for (k, v) in entries {
+                map.insert(k, v);
+            }
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for v in seq {
+                sort_yaml_keys(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn serialized_key(key: &serde_yaml::Value) -> String {
+    serde_yaml::to_string(key).unwrap_or_default()
 }
 
 fn changed_keys(

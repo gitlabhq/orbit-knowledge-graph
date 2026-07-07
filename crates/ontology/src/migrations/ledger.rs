@@ -8,6 +8,8 @@ use crate::Ontology;
 /// Ledger path relative to `CONFIG_DIR`.
 pub const LEDGER_FILE: &str = "schema-migrations.yaml";
 
+const LEDGER_EMBEDDED: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
+
 const LEDGER_HEADER: &str = "\
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 #
@@ -22,20 +24,6 @@ const LEDGER_HEADER: &str = "\
 # drift detected from the fingerprint snapshot — CI enforces this. A version
 # with no entry is treated as \"*\", which also makes pruning old entries safe.
 ";
-
-const LEDGER_EMBEDDED: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
-
-/// One `SCHEMA_VERSION` bump.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MigrationEntry {
-    pub version: u32,
-    pub scope: Scope,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub entities: BTreeSet<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -137,6 +125,18 @@ impl MigrationLedger {
         }
         scope
     }
+}
+
+/// One `SCHEMA_VERSION` bump.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MigrationEntry {
+    pub version: u32,
+    pub scope: Scope,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub entities: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl MigrationEntry {

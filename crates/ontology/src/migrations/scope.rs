@@ -18,79 +18,6 @@ pub enum Scope {
     Code,
 }
 
-/// The resolved set of tables a migration must invalidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InvalidationScope {
-    pub sdlc: SdlcScope,
-    pub code: bool,
-}
-
-/// SDLC side of an [`InvalidationScope`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SdlcScope {
-    None,
-    All,
-    Entities(BTreeSet<String>),
-}
-
-impl InvalidationScope {
-    #[must_use]
-    pub fn none() -> Self {
-        Self {
-            sdlc: SdlcScope::None,
-            code: false,
-        }
-    }
-
-    #[must_use]
-    pub fn full() -> Self {
-        Self {
-            sdlc: SdlcScope::All,
-            code: true,
-        }
-    }
-
-    #[must_use]
-    pub fn union(&self, other: &Self) -> Self {
-        Self {
-            sdlc: self.sdlc.union(&other.sdlc),
-            code: self.code || other.code,
-        }
-    }
-}
-
-impl SdlcScope {
-    #[must_use]
-    fn union(&self, other: &Self) -> Self {
-        match (self, other) {
-            (SdlcScope::All, _) | (_, SdlcScope::All) => SdlcScope::All,
-            (SdlcScope::None, s) | (s, SdlcScope::None) => s.clone(),
-            (SdlcScope::Entities(a), SdlcScope::Entities(b)) => {
-                SdlcScope::Entities(a.union(b).cloned().collect())
-            }
-        }
-    }
-}
-
-/// Names accepted in an entry's `entities:` list: etl-bearing nodes, derived
-/// entities, and relationship kinds.
-#[must_use]
-pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for node in ontology.nodes() {
-        if node.etl.is_some() {
-            names.insert(node.name.clone());
-        }
-    }
-    for derived in ontology.derived_entities() {
-        names.insert(derived.name.clone());
-    }
-    for kind in ontology.edge_names() {
-        names.insert(kind.to_string());
-    }
-    names
-}
-
 /// A scope paired with the SDLC entities that narrow it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopeDeclaration {
@@ -100,30 +27,6 @@ pub struct ScopeDeclaration {
 }
 
 impl ScopeDeclaration {
-    #[must_use]
-    fn all() -> Self {
-        Self {
-            scope: Scope::All,
-            entities: BTreeSet::new(),
-        }
-    }
-
-    #[must_use]
-    fn code() -> Self {
-        Self {
-            scope: Scope::Code,
-            entities: BTreeSet::new(),
-        }
-    }
-
-    #[must_use]
-    fn sdlc(entities: BTreeSet<String>) -> Self {
-        Self {
-            scope: Scope::Sdlc,
-            entities,
-        }
-    }
-
     #[must_use]
     pub fn covers(&self, required: &Self) -> bool {
         match (self.scope, required.scope) {
@@ -157,6 +60,30 @@ impl ScopeDeclaration {
             }
         }
     }
+
+    #[must_use]
+    fn all() -> Self {
+        Self {
+            scope: Scope::All,
+            entities: BTreeSet::new(),
+        }
+    }
+
+    #[must_use]
+    fn code() -> Self {
+        Self {
+            scope: Scope::Code,
+            entities: BTreeSet::new(),
+        }
+    }
+
+    #[must_use]
+    fn sdlc(entities: BTreeSet<String>) -> Self {
+        Self {
+            scope: Scope::Sdlc,
+            entities,
+        }
+    }
 }
 
 impl std::fmt::Display for ScopeDeclaration {
@@ -168,6 +95,60 @@ impl std::fmt::Display for ScopeDeclaration {
             Scope::Sdlc => {
                 let list = self.entities.iter().cloned().collect::<Vec<_>>().join(", ");
                 write!(f, "scope sdlc, entities [{list}]")
+            }
+        }
+    }
+}
+
+/// The resolved set of tables a migration must invalidate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidationScope {
+    pub sdlc: SdlcScope,
+    pub code: bool,
+}
+
+impl InvalidationScope {
+    #[must_use]
+    pub fn none() -> Self {
+        Self {
+            sdlc: SdlcScope::None,
+            code: false,
+        }
+    }
+
+    #[must_use]
+    pub fn full() -> Self {
+        Self {
+            sdlc: SdlcScope::All,
+            code: true,
+        }
+    }
+
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Self {
+        Self {
+            sdlc: self.sdlc.union(&other.sdlc),
+            code: self.code || other.code,
+        }
+    }
+}
+
+/// SDLC side of an [`InvalidationScope`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SdlcScope {
+    None,
+    All,
+    Entities(BTreeSet<String>),
+}
+
+impl SdlcScope {
+    #[must_use]
+    fn union(&self, other: &Self) -> Self {
+        match (self, other) {
+            (SdlcScope::All, _) | (_, SdlcScope::All) => SdlcScope::All,
+            (SdlcScope::None, s) | (s, SdlcScope::None) => s.clone(),
+            (SdlcScope::Entities(a), SdlcScope::Entities(b)) => {
+                SdlcScope::Entities(a.union(b).cloned().collect())
             }
         }
     }
@@ -241,6 +222,25 @@ pub fn derive_scope(
         return Some(ScopeDeclaration::code());
     }
     Some(ScopeDeclaration::sdlc(sdlc_entities))
+}
+
+/// Names accepted in an entry's `entities:` list: etl-bearing nodes, derived
+/// entities, and relationship kinds.
+#[must_use]
+pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for node in ontology.nodes() {
+        if node.etl.is_some() {
+            names.insert(node.name.clone());
+        }
+    }
+    for derived in ontology.derived_entities() {
+        names.insert(derived.name.clone());
+    }
+    for kind in ontology.edge_names() {
+        names.insert(kind.to_string());
+    }
+    names
 }
 
 enum NodeScope {
