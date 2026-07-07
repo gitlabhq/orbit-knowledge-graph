@@ -245,6 +245,10 @@ impl ClusterHealthChecker {
 
 fn only_services_unhealthy(status: &HealthStatus) -> bool {
     matches!(status.status, health_check::Status::Unhealthy)
+        && status
+            .services
+            .iter()
+            .any(|s| matches!(s.status, health_check::Status::Unhealthy))
         && !status.clickhouse.is_empty()
         && status
             .clickhouse
@@ -575,13 +579,23 @@ mod tests {
     }
 
     #[test]
-    fn unhealthy_clickhouse_is_never_migrating() {
+    fn service_only_failure_is_only_services_unhealthy() {
         assert!(only_services_unhealthy(&degraded_sidecar_response()));
+    }
 
+    #[test]
+    fn unhealthy_clickhouse_is_not_only_services() {
         let mut broken_clickhouse = degraded_sidecar_response();
         broken_clickhouse.clickhouse[0].status = Status::Unhealthy;
         assert!(!only_services_unhealthy(&broken_clickhouse));
 
         assert!(!only_services_unhealthy(&healthy_sidecar_response()));
+    }
+
+    #[test]
+    fn payload_without_unhealthy_service_is_not_only_services() {
+        let mut no_failing_service = degraded_sidecar_response();
+        no_failing_service.services.clear();
+        assert!(!only_services_unhealthy(&no_failing_service));
     }
 }
