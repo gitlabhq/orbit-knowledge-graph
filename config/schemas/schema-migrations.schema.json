@@ -32,7 +32,10 @@
             "type": "string",
             "description": "Human-facing rationale for the bump."
           }
-        }
+        },
+        "if": { "properties": { "scope": { "const": "sdlc" } }, "required": ["scope"] },
+        "then": true,
+        "else": { "not": { "required": ["entities"] } }
       }
     }
   }

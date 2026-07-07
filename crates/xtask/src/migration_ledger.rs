@@ -284,7 +284,6 @@ pub fn bump(
             entities: entry_declaration.entities,
             note,
         });
-        write_schema_version(new_version)?;
         new_version
     } else {
         let last = ledger
@@ -304,6 +303,9 @@ pub fn bump(
         .validate(&ontology, final_version)
         .map_err(|e| anyhow!(e))?;
 
+    if is_new {
+        write_schema_version(final_version)?;
+    }
     fs::write(ledger_path(), ledger.render()).context("writing ledger")?;
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
 
