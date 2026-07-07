@@ -488,7 +488,6 @@ impl CodeIndexingPipeline {
                 let batch_bytes = match gkg_utils::arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
-                        // No metric here: the writer bumps it per submitted slice downstream.
                         tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
                         0
                     }
