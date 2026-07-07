@@ -285,19 +285,6 @@ ddl-freshness-check:
   script:
     - bash ./scripts/check-ddl-freshness.sh
 
-schema-version-check:
-  stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  script:
-    - apk add --no-cache git bash
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-schema-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-
 migration-ledger-check:
   stage: lint
   extends:

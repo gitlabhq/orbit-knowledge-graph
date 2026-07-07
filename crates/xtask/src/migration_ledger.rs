@@ -191,10 +191,13 @@ fn check_under_declaration(
     let base_version: u32 = git_show(base, SCHEMA_VERSION_REPO_PATH)
         .and_then(|s| s.trim().parse().ok())
         .ok_or_else(|| anyhow!("could not read {base}:{SCHEMA_VERSION_REPO_PATH}"))?;
-    if schema_version <= base_version {
+    // A gap would leave an entry-less version, which the migration path treats
+    // as a full rebuild; one MR bumps exactly one version.
+    if schema_version != base_version + 1 {
         bail!(
-            "fingerprint snapshot changed but SCHEMA_VERSION ({schema_version}) is not ahead of \
-             base ({base_version}). {REMEDIATION}"
+            "fingerprint snapshot changed, so SCHEMA_VERSION must be exactly base + 1 \
+             (base {base_version}, expected {}, got {schema_version}). {REMEDIATION}",
+            base_version + 1
         );
     }
 
