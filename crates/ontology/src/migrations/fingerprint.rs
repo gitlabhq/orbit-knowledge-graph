@@ -29,13 +29,13 @@ pub fn sha256_hex(input: &str) -> String {
     out
 }
 
-/// SHA-256 of the canonicalized YAML, so comment- and key-order-only edits hash
-/// identically. Non-YAML content is hashed raw.
+/// SHA-256 of the YAML with keys sorted, so comment- and key-order-only edits
+/// hash identically. Non-YAML content is hashed raw.
 #[must_use]
-pub fn canonical_yaml_hash(content: &str) -> String {
+pub fn stable_yaml_hash(content: &str) -> String {
     match serde_yaml::from_str::<serde_yaml::Value>(content) {
         Ok(mut value) => {
-            canonicalize(&mut value);
+            sort_yaml_keys(&mut value);
             match serde_yaml::to_string(&value) {
                 Ok(rendered) => sha256_hex(&rendered),
                 Err(_) => sha256_hex(content),
@@ -45,13 +45,13 @@ pub fn canonical_yaml_hash(content: &str) -> String {
     }
 }
 
-fn canonicalize(value: &mut serde_yaml::Value) {
+fn sort_yaml_keys(value: &mut serde_yaml::Value) {
     match value {
         serde_yaml::Value::Mapping(map) => {
             let mut entries: Vec<(serde_yaml::Value, serde_yaml::Value)> =
                 std::mem::take(map).into_iter().collect();
             for (_, v) in &mut entries {
-                canonicalize(v);
+                sort_yaml_keys(v);
             }
             entries.sort_by_key(|(key, _)| serialized_key(key));
             for (k, v) in entries {
@@ -60,7 +60,7 @@ fn canonicalize(value: &mut serde_yaml::Value) {
         }
         serde_yaml::Value::Sequence(seq) => {
             for v in seq {
-                canonicalize(v);
+                sort_yaml_keys(v);
             }
         }
         _ => {}
@@ -78,7 +78,7 @@ pub fn source_fingerprints() -> BTreeMap<String, String> {
         .into_iter()
         .map(|(path, content)| {
             let hash = if path.ends_with(".yaml") || path.ends_with(".yml") {
-                canonical_yaml_hash(&content)
+                stable_yaml_hash(&content)
             } else {
                 sha256_hex(&content)
             };
@@ -150,22 +150,22 @@ mod tests {
     }
 
     #[test]
-    fn canonical_hash_ignores_comments_and_key_order() {
+    fn stable_hash_ignores_comments_and_key_order() {
         let a = "b: 2\na: 1\n";
         let b = "# a leading comment\na: 1\nb: 2 # trailing\n";
-        assert_eq!(canonical_yaml_hash(a), canonical_yaml_hash(b));
+        assert_eq!(stable_yaml_hash(a), stable_yaml_hash(b));
     }
 
     #[test]
-    fn canonical_hash_differs_on_value_change() {
-        assert_ne!(canonical_yaml_hash("a: 1\n"), canonical_yaml_hash("a: 2\n"));
+    fn stable_hash_differs_on_value_change() {
+        assert_ne!(stable_yaml_hash("a: 1\n"), stable_yaml_hash("a: 2\n"));
     }
 
     #[test]
-    fn canonical_hash_recurses_into_nested_maps() {
+    fn stable_hash_recurses_into_nested_maps() {
         let a = "outer:\n  y: 2\n  x: 1\n";
         let b = "outer:\n  x: 1\n  y: 2\n";
-        assert_eq!(canonical_yaml_hash(a), canonical_yaml_hash(b));
+        assert_eq!(stable_yaml_hash(a), stable_yaml_hash(b));
     }
 
     #[test]
