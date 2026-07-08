@@ -7,11 +7,9 @@ mod pipeline;
 mod plan;
 mod transform;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use ontology::EtlScope;
-use ontology::migrations::{ScopeDeclaration, sdlc_entity_names};
 
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
@@ -27,44 +25,7 @@ use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use pipeline::Pipeline;
-use tracing::{info, warn};
-
-#[derive(Debug)]
-pub struct DispatchPlanNames {
-    pub namespaced: Vec<String>,
-    pub global: Vec<String>,
-}
-
-pub fn invalidated_dispatch_plans(
-    ontology: &ontology::Ontology,
-    scope: &ScopeDeclaration,
-) -> DispatchPlanNames {
-    let requested = if scope.entities.is_empty() {
-        sdlc_entity_names(ontology)
-    } else {
-        scope.entities.clone()
-    };
-    let dispatchable = expand_targets_to_emitting_entities(ontology, &requested);
-    plan_names_for_targets(ontology, &dispatchable)
-}
-
-pub fn plan_names_for_targets(
-    ontology: &ontology::Ontology,
-    targets: &BTreeSet<String>,
-) -> DispatchPlanNames {
-    let plans = plan::build_plans(ontology, 1, 1, &Default::default());
-    let matching = |scoped: Vec<plan::Plan>| -> Vec<String> {
-        scoped
-            .into_iter()
-            .filter(|plan| targets.contains(&plan.target))
-            .map(|plan| plan.name)
-            .collect()
-    };
-    DispatchPlanNames {
-        namespaced: matching(plans.namespaced),
-        global: matching(plans.global),
-    }
-}
+use tracing::info;
 
 pub async fn register_handlers(
     registry: &HandlerRegistry,
@@ -180,63 +141,6 @@ pub async fn register_handlers(
     Ok(())
 }
 
-fn expand_targets_to_emitting_entities(
-    ontology: &ontology::Ontology,
-    targets: &BTreeSet<String>,
-) -> BTreeSet<String> {
-    let plan_targets = dispatch_plan_targets(ontology);
-    let mut dispatchable = BTreeSet::new();
-    for target in targets {
-        if plan_targets.contains(target) {
-            dispatchable.insert(target.clone());
-            continue;
-        }
-        let emitters = emitting_entities_with_plan(ontology, target, &plan_targets);
-        if emitters.is_empty() {
-            warn!(
-                entity = %target,
-                "invalidated target has no dispatch plan and no emitter — excluded from \
-                 seeding and gating as an orphan (produces no rows). A build-time test pins \
-                 the orphan set; a new orphan here means a real emitter mapping was missed"
-            );
-        }
-        dispatchable.extend(emitters);
-    }
-    dispatchable
-}
-
-fn dispatch_plan_targets(ontology: &ontology::Ontology) -> BTreeSet<String> {
-    let plans = plan::build_plans(ontology, 1, 1, &Default::default());
-    plans
-        .namespaced
-        .into_iter()
-        .chain(plans.global)
-        .map(|plan| plan.target)
-        .collect()
-}
-
-fn emitting_entities_with_plan(
-    ontology: &ontology::Ontology,
-    kind: &str,
-    plan_targets: &BTreeSet<String>,
-) -> BTreeSet<String> {
-    ontology
-        .nodes()
-        .map(|node| node.name.clone())
-        .chain(
-            ontology
-                .derived_entities()
-                .map(|derived| derived.name.clone()),
-        )
-        .filter(|entity| {
-            plan_targets.contains(entity)
-                && ontology
-                    .relationship_kinds_emitted_by(entity)
-                    .contains(kind)
-        })
-        .collect()
-}
-
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
@@ -245,70 +149,26 @@ mod tests {
     use super::*;
     use ontology::Ontology;
 
+    // Pipeline identity drift would seed or gate on unwritten checkpoint keys.
     #[test]
-    fn plan_names_for_targets_splits_by_scope() {
+    fn build_plans_match_ontology_pipeline_descriptors() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = plan::build_plans(&ontology, 1, 1, &Default::default());
 
-        let note = plan_names_for_targets(&ontology, &BTreeSet::from(["Note".to_string()]));
-        assert!(note.namespaced.contains(&"Note".to_string()));
-        assert!(note.global.is_empty());
-
-        let user = plan_names_for_targets(&ontology, &BTreeSet::from(["User".to_string()]));
-        assert!(user.global.contains(&"User".to_string()));
-        assert!(user.namespaced.is_empty());
-    }
-
-    #[test]
-    fn plan_names_for_targets_ignores_unknown_targets() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let names = plan_names_for_targets(&ontology, &BTreeSet::from(["Ghost".to_string()]));
-        assert!(names.namespaced.is_empty());
-        assert!(names.global.is_empty());
-    }
-
-    fn sdlc_scope(entities: &[&str]) -> ScopeDeclaration {
-        ScopeDeclaration {
-            scope: ontology::migrations::Scope::Sdlc,
-            entities: entities.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-
-    #[test]
-    fn invalidated_dispatch_plans_expands_fk_edge_kind_to_emitting_node() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = invalidated_dispatch_plans(&ontology, &sdlc_scope(&["HAS_NOTE"]));
-        assert!(
-            plans.namespaced.contains(&"Note".to_string()),
-            "HAS_NOTE must expand to the Note plan: {:?}",
-            plans.namespaced
-        );
-    }
-
-    #[test]
-    fn invalidated_dispatch_plans_whole_sdlc_covers_every_plan() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let whole = invalidated_dispatch_plans(&ontology, &sdlc_scope(&[]));
-        let all = plan::build_plans(&ontology, 1, 1, &Default::default());
-        assert_eq!(whole.namespaced.len(), all.namespaced.len());
-        assert_eq!(whole.global.len(), all.global.len());
-    }
-
-    #[test]
-    fn orphan_sdlc_entities_are_exactly_the_known_set() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let orphans: BTreeSet<String> = sdlc_entity_names(&ontology)
-            .into_iter()
-            .filter(|entity| {
-                expand_targets_to_emitting_entities(&ontology, &BTreeSet::from([entity.clone()]))
-                    .is_empty()
-            })
+        let mut plan_ids: Vec<(String, bool)> = plans
+            .namespaced
+            .iter()
+            .map(|p| (p.name.clone(), true))
+            .chain(plans.global.iter().map(|p| (p.name.clone(), false)))
             .collect();
-        assert_eq!(
-            orphans,
-            BTreeSet::new(),
-            "declared edge kinds that no ETL produces; if this set changes, confirm the new \
-             entry is a genuine orphan and not a missed emitter mapping"
-        );
+        let mut descriptor_ids: Vec<(String, bool)> = ontology
+            .pipeline_descriptors()
+            .into_iter()
+            .map(|d| (d.name, d.scope == EtlScope::Namespaced))
+            .collect();
+        plan_ids.sort();
+        descriptor_ids.sort();
+        assert_eq!(plan_ids, descriptor_ids);
     }
 
     #[test]

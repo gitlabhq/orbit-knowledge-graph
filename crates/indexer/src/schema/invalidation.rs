@@ -1,11 +1,12 @@
-//! Table cloning decisions for narrowed schema migrations. Entity edge-key
-//! changes must be in the ledger, or cloned shared edge tables can retain old-key rows.
+//! Narrowed schema migration invalidation. Entity edge-key changes must be in
+//! the ledger, or cloned shared edge tables can retain old-key rows.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ontology::Ontology;
 use ontology::migrations::{Scope, ScopeDeclaration, code_entity_names, sdlc_entity_names};
+use ontology::{EtlScope, Ontology};
 use query_engine::compiler::generate_graph_tables_with_prefix;
+use tracing::warn;
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
@@ -13,6 +14,12 @@ const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 pub enum TableMigrationAction {
     RebuildEmpty,
     CloneFromActive,
+}
+
+#[derive(Debug)]
+pub struct InvalidatedPipelines {
+    pub namespaced: Vec<String>,
+    pub global: Vec<String>,
 }
 
 #[must_use]
@@ -28,6 +35,37 @@ pub fn classify_tables_for_scope(
             (table.name, action)
         })
         .collect()
+}
+
+/// FK-derived edge kinds invalidate the pipelines that emit them.
+#[must_use]
+pub fn find_invalidated_pipelines(
+    ontology: &Ontology,
+    scope: &ScopeDeclaration,
+) -> InvalidatedPipelines {
+    let invalidated = invalidated_entities(ontology, scope);
+    let descriptors = ontology.pipeline_descriptors();
+    for entity in &invalidated {
+        if !descriptors
+            .iter()
+            .any(|d| d.reindex_targets.contains(entity))
+        {
+            warn!(entity = %entity, "invalidated entity is emitted by no pipeline — orphan, excluded from seeding and gating");
+        }
+    }
+
+    let mut namespaced = Vec::new();
+    let mut global = Vec::new();
+    for descriptor in descriptors {
+        if descriptor.reindex_targets.is_disjoint(&invalidated) {
+            continue;
+        }
+        match descriptor.scope {
+            EtlScope::Namespaced => namespaced.push(descriptor.name),
+            EtlScope::Global => global.push(descriptor.name),
+        }
+    }
+    InvalidatedPipelines { namespaced, global }
 }
 
 fn invalidated_entities(ontology: &Ontology, scope: &ScopeDeclaration) -> BTreeSet<String> {
@@ -109,6 +147,75 @@ mod tests {
     fn action(map: &BTreeMap<String, TableMigrationAction>, table: &str) -> TableMigrationAction {
         *map.get(table)
             .unwrap_or_else(|| panic!("table '{table}' missing from classification: {map:?}"))
+    }
+
+    fn sdlc_scope(names: &[&str]) -> ScopeDeclaration {
+        ScopeDeclaration {
+            scope: Scope::Sdlc,
+            entities: entities(names),
+        }
+    }
+
+    #[test]
+    fn invalidated_pipelines_split_by_scope() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let note = find_invalidated_pipelines(&ontology, &sdlc_scope(&["Note"]));
+        assert!(note.namespaced.contains(&"Note".to_string()));
+        assert!(note.global.is_empty());
+
+        let user = find_invalidated_pipelines(&ontology, &sdlc_scope(&["User"]));
+        assert!(user.global.contains(&"User".to_string()));
+        assert!(user.namespaced.is_empty());
+    }
+
+    #[test]
+    fn invalidated_pipelines_ignore_unknown_entities() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let pipelines = find_invalidated_pipelines(&ontology, &sdlc_scope(&["Ghost"]));
+        assert!(pipelines.namespaced.is_empty());
+        assert!(pipelines.global.is_empty());
+    }
+
+    #[test]
+    fn invalidated_pipelines_expand_fk_edge_kind_to_emitting_node() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let pipelines = find_invalidated_pipelines(&ontology, &sdlc_scope(&["HAS_NOTE"]));
+        assert!(
+            pipelines.namespaced.contains(&"Note".to_string()),
+            "HAS_NOTE must match the Note pipeline: {:?}",
+            pipelines.namespaced
+        );
+    }
+
+    #[test]
+    fn whole_sdlc_scope_invalidates_every_pipeline() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let whole = find_invalidated_pipelines(&ontology, &sdlc_scope(&[]));
+        assert_eq!(
+            whole.namespaced.len() + whole.global.len(),
+            ontology.pipeline_descriptors().len()
+        );
+    }
+
+    #[test]
+    fn orphan_sdlc_entities_are_exactly_the_known_set() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let descriptors = ontology.pipeline_descriptors();
+        let orphans: BTreeSet<String> = sdlc_entity_names(&ontology)
+            .into_iter()
+            .filter(|entity| {
+                !descriptors
+                    .iter()
+                    .any(|d| d.reindex_targets.contains(entity))
+            })
+            .collect();
+        assert_eq!(
+            orphans,
+            BTreeSet::new(),
+            "declared entities that no pipeline emits; if this set changes, confirm the new \
+             entry is a genuine orphan and not a missed emitter mapping"
+        );
     }
 
     #[test]

@@ -73,13 +73,6 @@ pub(in crate::modules::sdlc) fn lower(
         }
     }
 
-    // A plan name is both the handler name (`entity.{name}`) and the checkpoint
-    // key (`{scope}.{name}`), so a collision silently clobbers a handler and
-    // makes two plans share one cursor. `plan_name` disambiguates standalone
-    // edges that share a source table only when the target kind is a literal;
-    // a `Column` target yields no suffix, so two such ETLs would collide. This
-    // is a build-from-ontology invariant checked once at boot (not on the data
-    // path), so panicking on a duplicate is the right failure mode.
     assert_unique_plan_names(&global, &namespaced);
 
     Plans { global, namespaced }
@@ -231,11 +224,7 @@ fn lower_standalone_edge_plan(
 ) -> Plan {
     let destination_table = input.extract.destination_table.clone();
     let target = input.relationship_kind.clone();
-    let name = plan_name(
-        &input.relationship_kind,
-        &input.extract.source,
-        &input.target_kind,
-    );
+    let name = input.pipeline_name;
     let mut plan = lower_extract_plan(input.extract, batch_size);
     let meta = edge_table_metadata(&input.relationship_kind, ontology);
     let sql = build_edge_transform_sql(
@@ -257,22 +246,6 @@ fn lower_standalone_edge_plan(
         dict_encode_columns: meta.dict_columns,
     }]);
     plan
-}
-
-fn plan_name(relationship_kind: &str, source: &ExtractSource, target_kind: &EdgeKind) -> String {
-    // A relationship kind can have several ETLs over the same source table that
-    // differ only by their target (REOPENED: one MR-targeted, one WorkItem-
-    // targeted, both filtered on `siphon_resource_state_events`). The plan name
-    // is the handler name and checkpoint key, so it must be unique per ETL; a
-    // literal target kind disambiguates them.
-    let target_suffix = match target_kind {
-        EdgeKind::Literal(t) => format!("_{t}"),
-        EdgeKind::Column { .. } => String::new(),
-    };
-    match source {
-        ExtractSource::Table(table) => format!("{relationship_kind}_{table}{target_suffix}"),
-        ExtractSource::Raw(_) => format!("{relationship_kind}{target_suffix}"),
-    }
 }
 
 fn lower_edge_id(id: &EdgeId) -> String {

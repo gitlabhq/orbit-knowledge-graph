@@ -80,6 +80,7 @@ pub(in crate::modules::sdlc) struct FkEdgeTransform {
 
 /// A standalone edge has its own dedicated source table and extraction.
 pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
+    pub pipeline_name: String,
     pub relationship_kind: String,
     pub scope: EtlScope,
     pub source_id: EdgeId,
@@ -589,6 +590,10 @@ fn resolve_standalone_edge(
     let traversal_path_filter = None;
 
     StandaloneEdgePlan {
+        pipeline_name: ontology::pipelines::standalone_edge_pipeline_name(
+            relationship_kind,
+            config,
+        ),
         relationship_kind: relationship_kind.to_string(),
         scope,
         source_id,

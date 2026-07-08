@@ -24,6 +24,7 @@ pub mod introspection;
 mod json_schema;
 mod loading;
 pub mod migrations;
+pub mod pipelines;
 pub mod query_dsl;
 
 pub use constants::{

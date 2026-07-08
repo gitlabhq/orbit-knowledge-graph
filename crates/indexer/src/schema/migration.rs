@@ -41,7 +41,7 @@ use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
-use crate::modules::sdlc::invalidated_dispatch_plans;
+use crate::schema::invalidation::find_invalidated_pipelines;
 use crate::schema::invalidation::{TableMigrationAction, classify_tables_for_scope};
 use crate::schema::version::{
     SCHEMA_VERSION, SchemaVersionError, drop_kind_for_engine, list_version_objects,
@@ -519,14 +519,14 @@ async fn seed_sdlc_checkpoint(
             reason: e.to_string(),
         })?;
 
-    let plans = invalidated_dispatch_plans(ontology, scope);
+    let pipelines = find_invalidated_pipelines(ontology, scope);
 
     let old_table = format!("{old_prefix}{CHECKPOINT_TABLE}");
     info!(from = %old_table, to = %new_table.name, "seeding checkpoint from active version");
     graph
         .query(&seed_checkpoint_sql(&new_table.name, &old_table))
-        .param("ns_plans", &plans.namespaced)
-        .param("global_plans", &plans.global)
+        .param("ns_plans", &pipelines.namespaced)
+        .param("global_plans", &pipelines.global)
         .execute()
         .await
         .map_err(|e| MigrationError::Ddl {

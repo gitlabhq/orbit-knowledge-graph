@@ -31,8 +31,8 @@ use tracing::{info, warn};
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
-use crate::modules::sdlc::invalidated_dispatch_plans;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::schema::invalidation::find_invalidated_pipelines;
 use crate::schema::metrics::CompletionMetrics;
 use crate::schema::version::{
     SCHEMA_VERSION, drop_kind_for_engine, mark_version_active, mark_version_dropped,
@@ -227,15 +227,15 @@ pub async fn sdlc_narrowing_complete(
     checkpoint_table: &str,
     enabled_count: u64,
 ) -> Result<(u64, bool), String> {
-    let plans = invalidated_dispatch_plans(ontology, scope);
+    let pipelines = find_invalidated_pipelines(ontology, scope);
 
     let completed_namespaces =
-        count_completed_namespaces(graph, checkpoint_table, &plans.namespaced).await?;
-    let namespaced_ready = plans.namespaced.is_empty() || completed_namespaces >= enabled_count;
+        count_completed_namespaces(graph, checkpoint_table, &pipelines.namespaced).await?;
+    let namespaced_ready = pipelines.namespaced.is_empty() || completed_namespaces >= enabled_count;
 
     let completed_global =
-        count_completed_global_plans(graph, checkpoint_table, &plans.global).await?;
-    let global_ready = completed_global as usize == plans.global.len();
+        count_completed_global_plans(graph, checkpoint_table, &pipelines.global).await?;
+    let global_ready = completed_global as usize == pipelines.global.len();
 
     Ok((completed_namespaces, namespaced_ready && global_ready))
 }
