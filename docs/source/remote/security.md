@@ -76,12 +76,8 @@ environment, and stores no permission data of its own.
 
 ### Deterministic query engine
 
-Orbit is a deterministic data API.
-There is no language model or model inference running behind Orbit queries.
-When you send a query, Orbit compiles the JSON DSL to ClickHouse SQL, executes it, and returns
-typed results.
-The graph contains only the data GitLab has indexed from your instance.
-Orbit does not generate, infer, or hallucinate results.
+Orbit does not use LLMs to generate or infer data.
+Queries compile to ClickHouse SQL and return only what GitLab has indexed.
 
 ### No model training on your data
 
@@ -96,11 +92,8 @@ the Orbit beta.
 
 Orbit graph data is stored in ClickHouse on GitLab-managed infrastructure in `us-east1`
 (South Carolina, United States).
-Orbit follows the same data compliance requirements as other GitLab SaaS features that use
+Orbit follows the same data compliance requirements as other GitLab.com features that use
 ClickHouse, such as Advanced Search and CI/CD analytics.
-
-Contractual data residency guarantees and customer-selectable region controls are available
-on [GitLab Dedicated](https://docs.gitlab.com/dedicated/), not on GitLab.com.
 
 ## Programmatic access
 
