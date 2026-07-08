@@ -18,11 +18,14 @@ Accepted
 Before this change, the SDLC indexer's transform stage was SQL-only. Every entity
 flows through one generic `EntityHandler`
 (`crates/indexer/src/modules/sdlc/handler/entity.rs`) that owns a `Plan` and drives
-a shared `Pipeline` (`crates/indexer/src/modules/sdlc/pipeline.rs`). The pipeline
-ran `Extractor → Transformer → Loader`, and the transform was a list of SQL strings
-(`Transformation { sql, destination_table, dict_encode_columns }`, `plan/mod.rs`)
-executed against an in-memory DataFusion `MemTable` named `source_data`. The
-transform set is generated from ontology YAML in `plan/lower.rs`.
+a shared `Pipeline` (`crates/indexer/src/modules/sdlc/pipeline.rs`). The runtime
+pipeline still owns extraction, transformation, writing, and checkpointing, but the
+ontology input has been unified: nodes, edges, and derived entities all declare
+top-level `pipelines:` entries with `extract` and `transform` sections. The loader
+resolves those YAML entries into `ontology::etl::Pipeline { extract, transform }`;
+the indexer lowers them into a `Plan` whose `extract_template` is the pipeline's
+resolved SQL template and whose `TransformSpec` decides how rows become graph
+outputs.
 
 This is right for entities whose graph shape is a row-wise projection of one
 extracted batch. It is wrong for entities whose transform is **derived at runtime
@@ -124,12 +127,14 @@ batching can buffer internally.
 
 ### Extraction and writing are not duplicated — they are reused as-is
 
-SystemNote needs no bespoke extractor: its source is `siphon_notes ⋈
-siphon_system_note_metadata`, which is an ordinary `query`-type ETL plan (a JOIN in
-`extract_template`). It rides the same keyset pagination, watermark window, retry,
-read-ahead, checkpoint, and streaming-write path as every other entity. The only
-Rust-specific code is the transform body. This is the whole point: a new
-hand-written entity contributes a `BlockTransform`, nothing else.
+SystemNote needs no bespoke extractor: its source is the `SystemNote` pipeline in
+`config/ontology/derived/core/system_note.yaml`, whose extract is an authored
+`system_note.sql` — a `_batch` scan of `siphon_notes` plus a page-bounded join over
+`siphon_system_note_metadata` for the note action. It rides the same keyset
+pagination, watermark window, retry, read-ahead, checkpoint, and streaming-write
+path as every other entity. The only Rust-specific code is the transform body. This
+is the whole point: a new hand-written entity contributes a `BlockTransform` and an
+ontology pipeline, nothing else.
 
 ### Output routing
 
@@ -152,8 +157,56 @@ pub(in crate::modules::sdlc) enum TransformSpec {
 }
 ```
 
-`lower.rs` sets it when it lowers each ontology plan: node and standalone-edge
-plans get `DataFusion(..)`; a derived entity gets `Rust(<etl.transform>)`.
+`transform.rs` sets it when the plan builder walks each ontology pipeline: node and
+standalone-edge pipelines with `transform.type: datafusion` get `DataFusion(..)`; a
+derived entity pipeline gets `Rust(<transform.type>)`.
+
+### Ontology is a declarative model; the indexer owns all SQL
+
+The ontology crate (`crates/ontology`) is a dumb YAML → declarative model: it holds
+no ClickHouse SQL and no knowledge of runtime markers. `ExtractQuery` is either
+`Generated { filter }` (the indexer builds the SQL from the declaration) or
+`Sql(String)` (the raw content of a co-located `.sql` escape-hatch file, carried
+verbatim — markers unresolved). Derived-entity pipelines are always `Sql`: their rows
+are neither node properties nor edge endpoints, so the indexer has nothing to generate
+a projection from. Seven `.sql` files exist — the six genuinely complex nodes (Group,
+Project, MergeRequest, Commit, MergeRequestDiffFile, Finding) and the SystemNote
+derived entity; every other node and edge is `generated`.
+
+The indexer's `plan` module is the one entry point that turns that model into runs.
+`plan/build.rs::build_plans` is the **only** place that reads `pipeline.transform`; it
+walks nodes, edge ETL configs, and derived entities, decomposes each pipeline once,
+and hands each stage exactly its inputs so data flows top-down:
+
+- `plan/enrichment.rs` is the single `_eN` join convention. Two constructors produce
+  the same `EnrichmentJoin` core with different key semantics: `node_ref_joins`
+  (edges — side table keyed by its own `id`, matched against an endpoint field) and
+  `declared_joins` (nodes/derived — side table keyed by the declared `key`, matched
+  against the page `id` and scoped by traversal_path). `build.rs` calls the right one
+  per plan and passes the joins to the extract renderer (and, for edges, to the
+  transform's denorm mapping).
+- `plan/extract/` produces one `ExtractSpec` (validated `ExtractTemplate` +
+  effective watermark/deleted + sort key) from `&ontology::Extract` plus
+  transform-neutral inputs (typed source columns, `_batch` column lists, enrichment
+  joins) computed by `build.rs`. It imports **nothing** from the transform stage.
+  Its shape-specific entry points (`extract::node`, `extract::flat`,
+  `extract::enriched`, `extract::authored_sql`) are selected by the exhaustive
+  `match` on `ExtractQuery` in `build.rs`; `extract/generated.rs` renders SQL,
+  `extract/sql.rs` handles the authored escape hatch.
+- `plan/transform.rs` builds the `TransformSpec` (node column projection + FK edge
+  rows, or a standalone edge row, or a named Rust transform). For an enriching edge
+  `build.rs` calls `transform::enriched_denormalized(joins, …)` to map join output
+  columns to the transform's private denorm projections. Net dependency direction:
+  `build → {enrichment, extract, transform}`, `extract → enrichment`,
+  `transform → enrichment`; there is no extract↔transform edge.
+
+`ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
+unvalidated template cannot reach the runtime. A unit test in the `ontology` crate
+(`authored_sql_uses_lifecycle_markers_and_aliases`) enforces that every authored
+`.sql` file projects `AS _version`/`AS _deleted` and uses
+`{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
+names; projection completeness (order_by and enrich columns) is exercised end-to-end
+by the indexer's Docker integration scenarios.
 
 One shared `Pipeline` is built once in `register_handlers` and Arc-cloned to every
 handler. It is an Arc-bundle of stateless collaborators (`datalake`,
@@ -164,7 +217,7 @@ At the start of each run, `Pipeline::run` calls `registry.build(plan)`:
 - `TransformSpec::DataFusion(transforms)` builds a `DataFusionTransform` inline.
 - `TransformSpec::Rust(name)` resolves a registered factory by name.
 
-`data_fusion` is therefore *not* a registry entry; it is the default arm. The
+`datafusion` is therefore *not* a registry entry; it is the default arm. The
 registry holds only Rust transforms, which self-register from their own module
 (the same composition pattern as `*::register_handlers`):
 
@@ -240,10 +293,11 @@ unaffected.
 - **Exposing DataFusion in the trait.** Stays internal to `DataFusionTransform`.
 - **Bespoke extractors/writers for Rust entities.** They reuse the shared pipeline;
   a different source shape is a different extract plan, not new machinery.
-- **A transform-type taxonomy in the ontology.** The ontology names a transform per
-  extract (`etl.transform`, defaulting to `data_fusion`), but it does not model
-  transform types or behavior; whether a named transform resolves is a Rust
-  registration concern. Edge/node kinds remain ontology-declared.
+- **A transform-type taxonomy in the ontology.** The ontology names the transform in
+  each pipeline's `transform.type` (`datafusion` for the built-in path, or a
+  registered Rust transform name), but it does not model transform behavior; whether
+  a named Rust transform resolves is a registration concern. Edge/node kinds remain
+  ontology-declared.
 - **Code and namespace-deletion modules.** Out of scope; they sit outside the SQL
   plan path already.
 
@@ -256,8 +310,14 @@ unaffected.
   (`Pipeline::run`, `Producer`, `Loader`, `Extractor`) and
   `crates/indexer/src/modules/sdlc/transform.rs` (`BlockTransform`,
   `DataFusionTransform`, `TransformRegistry`)
+- Ontology pipeline model: `crates/ontology/src/etl.rs` (`Pipeline`, `Extract`,
+  `ExtractQuery`, `Transform`, `EdgeMapping`); YAML loading in
+  `crates/ontology/src/loading/node.rs`; authored `.sql` marker/alias check in
+  `crates/ontology/src/lib.rs` (`authored_sql_uses_lifecycle_markers_and_aliases`)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
-  `Transformation`, `Cursor`, filters); ontology → SQL in `plan/lower.rs`
+  `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; enrichment
+  joins in `plan/enrichment.rs`; extract stage in `plan/extract/` (`ExtractSpec`,
+  `ExtractTemplate`, `SourceColumn`); transform building in `plan/transform.rs`
 - Generic handler: `crates/indexer/src/modules/sdlc/handler/entity.rs`
 - Datalake query capability: `crates/indexer/src/modules/sdlc/datalake.rs` (`DatalakeQuery`)
 - Reuse-infra checklist: `crates/indexer/AGENTS.md`

@@ -3,7 +3,6 @@
 use std::collections::BTreeSet;
 
 use crate::Ontology;
-use crate::entities::{EdgeEndpointType, EdgeSourceEtlConfig};
 use crate::etl::EtlScope;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,37 +12,29 @@ pub struct PipelineDescriptor {
     pub reindex_targets: BTreeSet<String>,
 }
 
-pub fn standalone_edge_pipeline_name(
-    relationship_kind: &str,
-    config: &EdgeSourceEtlConfig,
-) -> String {
-    let target_suffix = match &config.to.node_type {
-        EdgeEndpointType::Literal(target) => format!("_{target}"),
-        EdgeEndpointType::Column { .. } => String::new(),
-    };
-    format!("{relationship_kind}_{}{target_suffix}", config.source)
-}
-
 impl Ontology {
     pub fn pipeline_descriptors(&self) -> Vec<PipelineDescriptor> {
         let mut descriptors = Vec::new();
         for node in self.nodes() {
-            let Some(etl) = &node.etl else { continue };
-            descriptors.push(self.pipeline_descriptor(node.name.clone(), etl.scope(), &node.name));
+            for pipeline in &node.pipelines {
+                descriptors.push(self.pipeline_descriptor(
+                    pipeline.name.clone(),
+                    pipeline.scope,
+                    &node.name,
+                ));
+            }
         }
-        for (kind, config) in self.edge_etl_configs() {
-            descriptors.push(self.pipeline_descriptor(
-                standalone_edge_pipeline_name(kind, config),
-                config.scope,
-                kind,
-            ));
+        for (kind, pipeline) in self.edge_etl_configs() {
+            descriptors.push(self.pipeline_descriptor(pipeline.name.clone(), pipeline.scope, kind));
         }
         for derived in self.derived_entities() {
-            descriptors.push(self.pipeline_descriptor(
-                derived.name.clone(),
-                derived.etl.scope(),
-                &derived.name,
-            ));
+            for pipeline in &derived.pipelines {
+                descriptors.push(self.pipeline_descriptor(
+                    pipeline.name.clone(),
+                    pipeline.scope,
+                    &derived.name,
+                ));
+            }
         }
         descriptors
     }
@@ -138,7 +129,7 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let composed: BTreeSet<String> = ontology
             .edge_etl_configs()
-            .map(|(kind, config)| standalone_edge_pipeline_name(kind, config))
+            .map(|(_, pipeline)| pipeline.name.clone())
             .collect();
         assert_eq!(
             composed,

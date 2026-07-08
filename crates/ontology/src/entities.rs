@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::etl::EtlConfig;
+use crate::etl::{Pipeline, ReindexSource};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +10,8 @@ pub struct EdgeColumn {
     pub data_type: DataType,
 }
 
+/// Fully explicit `CREATE TABLE` column: the YAML gives the exact ClickHouse
+/// type, codec, and default — no auto-derivation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageColumn {
     pub name: String,
@@ -45,6 +47,7 @@ pub struct NodeStorage {
 pub struct StorageIndex {
     pub name: String,
     pub column: String,
+    /// e.g. `"minmax"`, `"set(10)"`, `"bloom_filter(0.01)"`
     pub index_type: String,
     pub granularity: u32,
 }
@@ -333,7 +336,11 @@ pub struct NodeEntity {
     pub default_columns: Vec<String>,
     /// ClickHouse ORDER BY columns; used as the deduplication key for ReplacingMergeTree.
     pub sort_key: Vec<String>,
-    pub etl: Option<EtlConfig>,
+    pub pipelines: Vec<Pipeline>,
+    /// Datalake tables whose Siphon changes trigger a re-index of this entity's
+    /// root namespace, resolved from the `indexer` block. Empty for entities that
+    /// do not participate in namespace-change reindexing (e.g. global hubs).
+    pub reindex_on: Vec<ReindexSource>,
     /// If `None`, this entity does not require redaction validation.
     pub redaction: Option<RedactionConfig>,
     pub style: NodeStyle,
@@ -356,7 +363,8 @@ impl Default for NodeEntity {
             default_columns: vec![],
             sort_key: vec![],
             destination_table: String::new(),
-            etl: None,
+            pipelines: vec![],
+            reindex_on: vec![],
             redaction: None,
             style: NodeStyle::default(),
             has_traversal_path: false,
@@ -410,52 +418,16 @@ pub struct EdgeEntity {
     pub scope: Option<EdgeVariantScope>,
 }
 
-/// ETL configuration for edges sourced from join tables.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EdgeSourceEtlConfig {
-    pub scope: crate::etl::EtlScope,
-    pub source: String,
-    pub watermark: String,
-    pub deleted: String,
-    /// Columns for ORDER BY in extract queries and cursor-based pagination.
-    pub order_by: Vec<String>,
-    /// Optional extra `WHERE` predicate pushed into the extraction SQL, ANDed
-    /// with the watermark/deleted/IsNotNull filters. Lets a standalone edge
-    /// select a row subset of a shared source table (e.g. one Rails enum value)
-    /// without a dedicated source table or a Rust transform.
-    pub filter: Option<String>,
-    pub reindex_on: Vec<crate::etl::ReindexSource>,
-    pub from: EdgeEndpoint,
-    pub to: EdgeEndpoint,
-}
-
 /// An entity extracted from the datalake and turned into edges by a named
 /// transform, with no node table of its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DerivedEntity {
     pub name: String,
     pub emits: Vec<String>,
-    pub transform: String,
-    pub etl: EtlConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EdgeEndpoint {
-    pub id_column: String,
-    pub node_type: EdgeEndpointType,
-    /// Columns to enrich from this endpoint's node datalake table via LEFT
-    /// JOIN at extract time. Makes node properties available in the MemTable
-    /// for the denormalization system to project onto edge rows.
-    pub enrich: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EdgeEndpointType {
-    Literal(String),
-    Column {
-        column: String,
-        type_mapping: std::collections::BTreeMap<String, String>,
-    },
+    pub pipelines: Vec<Pipeline>,
+    /// Datalake tables whose Siphon changes trigger a re-index, resolved from the
+    /// `indexer` block. See [`NodeEntity::reindex_on`].
+    pub reindex_on: Vec<ReindexSource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

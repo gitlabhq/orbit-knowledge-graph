@@ -19,6 +19,9 @@ pub(crate) const ONTOLOGY_SCHEMA_FILE: &str = "schema.yaml";
 
 #[derive(Embed)]
 #[folder = "$ONTOLOGY_DIR"]
+#[include = "**/*.yaml"]
+#[include = "**/*.sql"]
+#[include = "**/*.sql.j2"]
 struct EmbeddedOntology;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,9 +222,11 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
             let entity = node_def.into_entity(
                 node_name.clone(),
+                node_path,
                 &ontology.default_entity_sort_key,
                 &etl_settings,
                 &ontology.internal_column_prefix,
+                reader,
             )?;
 
             if !entity.destination_table.starts_with(&ontology.table_prefix) {
@@ -245,7 +250,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
             let content = reader.read(derived_path)?;
             let derived_def: DerivedYaml = parse_yaml(&content, derived_path)?;
-            let derived = derived_def.into_derived(derived_name.clone(), &etl_settings)?;
+            let derived = derived_def.into_derived(
+                derived_name.clone(),
+                derived_path,
+                &etl_settings,
+                reader,
+            )?;
             ontology
                 .derived_entities
                 .insert(derived_name.clone(), derived);
@@ -305,11 +315,15 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
-        let etl_configs = edge_def.into_etl_configs(edge_name, &etl_settings)?;
-        if !etl_configs.is_empty() {
+        let (pipelines, reindex_sources) =
+            edge_def.into_pipelines(edge_name, edge_path, &etl_settings, reader)?;
+        if !pipelines.is_empty() {
+            ontology.edge_pipelines.insert(edge_name.clone(), pipelines);
+        }
+        if !reindex_sources.is_empty() {
             ontology
-                .edge_etl_configs
-                .insert(edge_name.clone(), etl_configs);
+                .edge_reindex_sources
+                .insert(edge_name.clone(), reindex_sources);
         }
     }
 
@@ -744,8 +758,32 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_edge_scope_annotations(&ontology)?;
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
+    validate_unique_pipeline_names(&ontology)?;
 
     Ok(ontology)
+}
+
+fn validate_unique_pipeline_names(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    let mut seen = std::collections::HashSet::new();
+    let names = ontology
+        .nodes()
+        .flat_map(|node| node.pipelines.iter())
+        .chain(ontology.edge_etl_configs().map(|(_, pipeline)| pipeline))
+        .chain(
+            ontology
+                .derived_entities()
+                .flat_map(|derived| derived.pipelines.iter()),
+        )
+        .map(|pipeline| pipeline.name.as_str());
+    for name in names {
+        if !seen.insert(name) {
+            return Err(OntologyError::Validation(format!(
+                "duplicate pipeline name '{name}': pipeline names are indexer handler names \
+                 and checkpoint keys and must be globally unique"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validate_derived_emits_registered(ontology: &crate::Ontology) -> Result<(), OntologyError> {
@@ -782,48 +820,33 @@ fn validate_etl_edges_match_variants(ontology: &crate::Ontology) -> Result<(), O
         }
     };
 
-    for node in ontology.nodes() {
-        let Some(etl) = &node.etl else { continue };
-        for (column, mapping) in etl.edge_mappings() {
-            let kind = &mapping.relationship_kind;
-            let targets: Vec<&str> = match &mapping.target {
-                crate::etl::EdgeTarget::Literal(target) => vec![target.as_str()],
-                crate::etl::EdgeTarget::Column { type_mapping, .. } => {
-                    type_mapping.values().map(String::as_str).collect()
-                }
-            };
-            for target in targets {
-                let (from, to) = match mapping.direction {
-                    crate::etl::EdgeDirection::Outgoing => (node.name.as_str(), target),
-                    crate::etl::EdgeDirection::Incoming => (target, node.name.as_str()),
-                };
-                check(
-                    kind,
-                    from,
-                    to,
-                    &format!("node '{}': etl edge on column '{column}'", node.name),
-                )?;
-            }
-        }
-    }
-
-    let endpoint_types = |endpoint: &crate::entities::EdgeEndpoint| -> Vec<String> {
-        match &endpoint.node_type {
-            crate::entities::EdgeEndpointType::Literal(t) => vec![t.clone()],
-            crate::entities::EdgeEndpointType::Column { type_mapping, .. } => {
-                type_mapping.values().cloned().collect()
-            }
+    let ref_kinds = |r: &crate::etl::NodeRef| -> Vec<String> {
+        match &r.kind {
+            crate::etl::NodeRefKind::Literal(t) => vec![t.clone()],
+            crate::etl::NodeRefKind::Derived { mapping, .. } => mapping.values().cloned().collect(),
         }
     };
-    for (kind, configs) in &ontology.edge_etl_configs {
-        for config in configs {
-            for from in endpoint_types(&config.from) {
-                for to in endpoint_types(&config.to) {
+
+    let pipelines = ontology
+        .nodes()
+        .flat_map(|node| node.pipelines.iter().map(move |p| (node.name.as_str(), p)))
+        .chain(ontology.edge_etl_configs())
+        .chain(ontology.derived_entities().flat_map(|derived| {
+            derived
+                .pipelines
+                .iter()
+                .map(move |p| (derived.name.as_str(), p))
+        }));
+
+    for (owner, pipeline) in pipelines {
+        for mapping in pipeline.transform.edges() {
+            for from in ref_kinds(&mapping.source) {
+                for to in ref_kinds(&mapping.target) {
                     check(
-                        kind,
+                        &mapping.label,
                         &from,
                         &to,
-                        &format!("edge '{kind}': etl from source '{}'", config.source),
+                        &format!("pipeline '{}' on '{owner}'", pipeline.name),
                     )?;
                 }
             }
@@ -901,7 +924,8 @@ fn validate_auxiliary_dictionaries(ontology: &crate::Ontology) -> Result<(), Ont
     Ok(())
 }
 
-/// Every node's storage columns must correspond 1:1 with its non-virtual properties.
+/// Every node's storage columns must correspond 1:1 with its non-virtual
+/// properties, catching drift between the logical and physical schema.
 fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyError> {
     for node in ontology.nodes() {
         if node.storage.columns.is_empty() {
@@ -1019,28 +1043,28 @@ fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), Ont
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
-    use crate::entities::{
-        DerivedEntity, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig,
-    };
-    use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+    use crate::entities::{DerivedEntity, EdgeEntity};
+    use crate::etl::{EdgeMapping, EtlScope, Extract, NodeRef, NodeRefKind, Pipeline, Transform};
+    use std::collections::BTreeMap;
 
     fn system_note(emits: &[&str]) -> DerivedEntity {
         DerivedEntity {
             name: "SystemNote".to_string(),
             emits: emits.iter().map(|s| s.to_string()).collect(),
-            transform: "system_notes".to_string(),
-            etl: EtlConfig::Table {
+            pipelines: vec![Pipeline {
+                name: "SystemNote".to_string(),
                 scope: EtlScope::Namespaced,
-                source: "siphon_notes".to_string(),
-                watermark: "w".to_string(),
-                deleted: "d".to_string(),
-                order_by: vec![],
-                reindex_on: Vec::new(),
-                edges: BTreeMap::new(),
-            },
+                extract: Extract::ClickHouse(crate::etl::ClickHouseExtract {
+                    tables: vec!["siphon_notes".to_string()],
+                    order_by: vec![],
+                    watermark: "w".to_string(),
+                    deleted: "d".to_string(),
+                    query: crate::etl::ExtractQuery::Generated { filter: None },
+                }),
+                transform: Transform::Rust("system_notes".to_string()),
+            }],
+            reindex_on: Vec::new(),
         }
     }
 
@@ -1057,6 +1081,20 @@ mod tests {
             err.to_string().contains("GHOST_EDGE") && err.to_string().contains("SystemNote"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn duplicate_pipeline_name_across_entities_is_rejected() {
+        let mut ontology = crate::Ontology::new();
+        ontology
+            .derived_entities
+            .insert("SystemNote".to_string(), system_note(&[]));
+        ontology
+            .derived_entities
+            .insert("SystemNoteCopy".to_string(), system_note(&[]));
+
+        let err = validate_unique_pipeline_names(&ontology).unwrap_err();
+        assert!(err.to_string().contains("SystemNote"), "got: {err}");
     }
 
     #[test]
@@ -1078,69 +1116,62 @@ mod tests {
         }
     }
 
-    fn fk_mapping(kind: &str, target: EdgeTarget, direction: EdgeDirection) -> EdgeMapping {
+    fn literal_ref(field: &str, kind: &str) -> NodeRef {
+        NodeRef {
+            field: field.to_string(),
+            kind: NodeRefKind::Literal(kind.to_string()),
+            enrich: vec![],
+        }
+    }
+
+    fn edge_mapping(label: &str, source: NodeRef, target: NodeRef) -> EdgeMapping {
         EdgeMapping {
+            label: label.to_string(),
+            source,
             target,
-            relationship_kind: kind.to_string(),
-            direction,
-            delimiter: None,
             array_field: None,
-            array: false,
             mutable: false,
         }
     }
 
-    fn ontology_with_node_edge(
+    fn pipeline_with_edges(name: &str, edges: Vec<EdgeMapping>) -> Pipeline {
+        Pipeline {
+            name: name.to_string(),
+            scope: EtlScope::Namespaced,
+            extract: Extract::ClickHouse(crate::etl::ClickHouseExtract {
+                tables: vec!["siphon_x".to_string()],
+                order_by: vec![],
+                watermark: "w".to_string(),
+                deleted: "d".to_string(),
+                query: crate::etl::ExtractQuery::Generated { filter: None },
+            }),
+            transform: Transform::DataFusion { edges },
+        }
+    }
+
+    fn node_with_edges(
         node: &str,
-        fk_column: &str,
-        mapping: EdgeMapping,
+        edges: Vec<EdgeMapping>,
         edge_variants: (&str, Vec<EdgeEntity>),
     ) -> crate::Ontology {
         let mut ontology = crate::Ontology::new().with_nodes([node]);
         ontology
             .edges
             .insert(edge_variants.0.to_string(), edge_variants.1);
-        ontology.nodes.get_mut(node).unwrap().etl = Some(EtlConfig::Table {
-            scope: EtlScope::Namespaced,
-            source: format!("siphon_{}", node.to_lowercase()),
-            watermark: "w".to_string(),
-            deleted: "d".to_string(),
-            order_by: vec![],
-            reindex_on: vec![],
-            edges: BTreeMap::from([(fk_column.to_string(), vec![mapping])]),
-        });
+        ontology.nodes.get_mut(node).unwrap().pipelines =
+            vec![pipeline_with_edges(&format!("{node}_pipeline"), edges)];
         ontology
     }
 
-    fn edge_etl_config(source: &str, from: (&str, &str), to: (&str, &str)) -> EdgeSourceEtlConfig {
-        let endpoint = |(id, node_type): (&str, &str)| EdgeEndpoint {
-            id_column: id.to_string(),
-            node_type: EdgeEndpointType::Literal(node_type.to_string()),
-            enrich: vec![],
-        };
-        EdgeSourceEtlConfig {
-            scope: EtlScope::Namespaced,
-            source: source.to_string(),
-            watermark: "w".to_string(),
-            deleted: "d".to_string(),
-            order_by: vec![],
-            filter: None,
-            reindex_on: vec![],
-            from: endpoint(from),
-            to: endpoint(to),
-        }
-    }
-
     #[test]
-    fn node_etl_edge_without_variant_is_rejected() {
-        let ontology = ontology_with_node_edge(
+    fn node_edge_without_variant_is_rejected() {
+        let ontology = node_with_edges(
             "Dependency",
-            "project_id",
-            fk_mapping(
+            vec![edge_mapping(
                 "IN_PROJECT",
-                EdgeTarget::Literal("Project".to_string()),
-                EdgeDirection::Outgoing,
-            ),
+                literal_ref("id", "Dependency"),
+                literal_ref("project_id", "Project"),
+            )],
             ("IN_PROJECT", vec![variant("Project", "Dependency")]),
         );
 
@@ -1148,25 +1179,20 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            msg.contains("node 'Dependency'")
-                && msg.contains("column 'project_id'")
-                && msg.contains("Dependency -[IN_PROJECT]-> Project"),
+            msg.contains("on 'Dependency'") && msg.contains("Dependency -[IN_PROJECT]-> Project"),
             "got: {msg}"
         );
     }
 
     #[test]
-    fn incoming_node_etl_edge_requires_flipped_variant() {
-        // `direction: incoming` materializes Pipeline -> Job, so the un-flipped
-        // Job -> Pipeline variant must not satisfy the validation.
-        let ontology = ontology_with_node_edge(
+    fn node_edge_requires_variant_in_declared_direction() {
+        let ontology = node_with_edges(
             "Job",
-            "auto_canceled_by_id",
-            fk_mapping(
+            vec![edge_mapping(
                 "AUTO_CANCELED_BY",
-                EdgeTarget::Literal("Pipeline".to_string()),
-                EdgeDirection::Incoming,
-            ),
+                literal_ref("auto_canceled_by_id", "Pipeline"),
+                literal_ref("id", "Job"),
+            )],
             ("AUTO_CANCELED_BY", vec![variant("Job", "Pipeline")]),
         );
 
@@ -1180,25 +1206,28 @@ mod tests {
     }
 
     #[test]
-    fn type_mapped_etl_edge_requires_variant_per_target() {
+    fn polymorphic_edge_requires_variant_per_target() {
         let mapped = || {
-            fk_mapping(
+            edge_mapping(
                 "BELONGS_TO",
-                EdgeTarget::Column {
-                    column: "noteable_type".to_string(),
-                    type_mapping: BTreeMap::from([
-                        ("Issue".to_string(), "Issue".to_string()),
-                        ("MergeRequest".to_string(), "MergeRequest".to_string()),
-                    ]),
+                literal_ref("id", "Note"),
+                NodeRef {
+                    field: "noteable_id".to_string(),
+                    kind: NodeRefKind::Derived {
+                        column: "noteable_type".to_string(),
+                        mapping: BTreeMap::from([
+                            ("Issue".to_string(), "Issue".to_string()),
+                            ("MergeRequest".to_string(), "MergeRequest".to_string()),
+                        ]),
+                    },
+                    enrich: vec![],
                 },
-                EdgeDirection::Outgoing,
             )
         };
 
-        let ontology = ontology_with_node_edge(
+        let ontology = node_with_edges(
             "Note",
-            "noteable_id",
-            mapped(),
+            vec![mapped()],
             ("BELONGS_TO", vec![variant("Note", "Issue")]),
         );
         let msg = validate_etl_edges_match_variants(&ontology)
@@ -1209,10 +1238,9 @@ mod tests {
             "got: {msg}"
         );
 
-        let ontology = ontology_with_node_edge(
+        let ontology = node_with_edges(
             "Note",
-            "noteable_id",
-            mapped(),
+            vec![mapped()],
             (
                 "BELONGS_TO",
                 vec![variant("Note", "Issue"), variant("Note", "MergeRequest")],
@@ -1222,17 +1250,20 @@ mod tests {
     }
 
     #[test]
-    fn edge_etl_endpoints_without_variant_are_rejected() {
+    fn edge_pipeline_endpoints_without_variant_are_rejected() {
         let mut ontology = crate::Ontology::new();
         ontology
             .edges
             .insert("CONTAINS".to_string(), vec![variant("Project", "Issue")]);
-        ontology.edge_etl_configs.insert(
+        ontology.edge_pipelines.insert(
             "CONTAINS".to_string(),
-            vec![edge_etl_config(
-                "siphon_project_links",
-                ("project_id", "Project"),
-                ("target_id", "MergeRequest"),
+            vec![pipeline_with_edges(
+                "CONTAINS_siphon_project_links",
+                vec![edge_mapping(
+                    "CONTAINS",
+                    literal_ref("project_id", "Project"),
+                    literal_ref("target_id", "MergeRequest"),
+                )],
             )],
         );
 
@@ -1240,8 +1271,7 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            msg.contains("edge 'CONTAINS'")
-                && msg.contains("siphon_project_links")
+            msg.contains("CONTAINS_siphon_project_links")
                 && msg.contains("Project -[CONTAINS]-> MergeRequest"),
             "got: {msg}"
         );
@@ -1249,26 +1279,28 @@ mod tests {
 
     #[test]
     fn etl_edges_with_matching_variants_pass() {
-        let mut ontology = ontology_with_node_edge(
+        let mut ontology = node_with_edges(
             "Job",
-            "auto_canceled_by_id",
-            fk_mapping(
+            vec![edge_mapping(
                 "AUTO_CANCELED_BY",
-                EdgeTarget::Literal("Pipeline".to_string()),
-                EdgeDirection::Incoming,
-            ),
+                literal_ref("auto_canceled_by_id", "Pipeline"),
+                literal_ref("id", "Job"),
+            )],
             ("AUTO_CANCELED_BY", vec![variant("Pipeline", "Job")]),
         );
         ontology.edges.insert(
             "IN_PROJECT".to_string(),
             vec![variant("Dependency", "Project")],
         );
-        ontology.edge_etl_configs.insert(
+        ontology.edge_pipelines.insert(
             "IN_PROJECT".to_string(),
-            vec![edge_etl_config(
-                "siphon_project_dependencies",
-                ("dependency_id", "Dependency"),
-                ("project_id", "Project"),
+            vec![pipeline_with_edges(
+                "IN_PROJECT_siphon_project_dependencies",
+                vec![edge_mapping(
+                    "IN_PROJECT",
+                    literal_ref("dependency_id", "Dependency"),
+                    literal_ref("project_id", "Project"),
+                )],
             )],
         );
 

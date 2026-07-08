@@ -7,15 +7,24 @@ variants:
     to_node: { type: Vulnerability, id: id }
     description: "Merge request fixes vulnerability."
 
-etl:
-  - scope: namespaced
-    source: siphon_vulnerability_merge_request_links
-    order_by: [traversal_path, id]
-    from:
-      id: merge_request_id
-      type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
-    to:
-      id: vulnerability_id
-      type: Vulnerability
-      enrich: [state, severity, report_type, resolved_on_default_branch, present_on_default_branch]
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: FIXES_siphon_vulnerability_merge_request_links_Vulnerability
+    extract:
+      type: clickhouse
+      tables: [siphon_vulnerability_merge_request_links, merge_requests, siphon_vulnerabilities]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: merge_request_id
+            kind: MergeRequest
+            enrich: [state_id, merge_status, draft, squash, discussion_locked]
+          to:
+            field: vulnerability_id
+            kind: Vulnerability
+            enrich: [state, severity, report_type, resolved_on_default_branch, present_on_default_branch]
+          label: FIXES

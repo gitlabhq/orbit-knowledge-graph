@@ -151,19 +151,32 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_environments
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    merge_request_id:
-      to: MergeRequest
-      as: CREATED_FOR_MR
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: Environment
+    extract:
+      type: clickhouse
+      tables: [siphon_environments]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: Environment
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: id
+            kind: Environment
+          to:
+            field: merge_request_id
+            kind: MergeRequest
+          label: CREATED_FOR_MR
 storage:
   primary_key: [traversal_path, id]
   settings:

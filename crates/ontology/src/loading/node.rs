@@ -1,21 +1,23 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
+use std::path::Path;
 
 use crate::OntologyError;
-use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::constants::TRAVERSAL_PATH_COLUMN;
+use crate::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use crate::entities::{
     DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
     RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookupSpec,
     VirtualSource,
 };
 use crate::etl::{
-    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
-    ReindexSource,
+    ClickHouseExtract, DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef,
+    NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
 };
 
-use super::EtlSettings;
+use super::{EtlSettings, ReadOntologyFile};
+
+const GENERATED_QUERY: &str = "generated";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct NodeYaml {
@@ -41,7 +43,9 @@ pub(crate) struct NodeYaml {
     #[serde(default)]
     sort_key: Option<Vec<String>>,
     #[serde(default)]
-    etl: Option<EtlYaml>,
+    indexer: Option<IndexerYaml>,
+    #[serde(default)]
+    pipelines: Vec<PipelineYaml>,
     #[serde(default)]
     redaction: Option<RedactionConfig>,
     #[serde(default)]
@@ -51,67 +55,56 @@ pub(crate) struct NodeYaml {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type")]
-pub(crate) enum EtlYaml {
-    #[serde(rename = "table")]
-    Table {
-        source: String,
-        #[serde(default)]
-        watermark: Option<String>,
-        #[serde(default)]
-        deleted: Option<String>,
-        #[serde(default)]
-        order_by: Option<Vec<String>>,
-        #[serde(default)]
-        transform: Option<String>,
-        #[serde(default)]
-        reindex_on: Vec<ReindexOnYaml>,
-        #[serde(default)]
-        edges: BTreeMap<String, EdgeMappingYamlEntry>,
-    },
-    #[serde(rename = "query")]
-    Query {
-        source: String,
-        select: String,
-        from: String,
-        #[serde(default, rename = "where")]
-        where_clause: Option<String>,
-        #[serde(default)]
-        watermark: Option<String>,
-        #[serde(default)]
-        deleted: Option<String>,
-        #[serde(default)]
-        order_by: Option<Vec<String>>,
-        #[serde(default)]
-        traversal_path_filter: Option<String>,
-        #[serde(default)]
-        table_alias: Option<String>,
-        #[serde(default)]
-        page_join: Option<Box<PageJoinYaml>>,
-        #[serde(default)]
-        transform: Option<String>,
-        #[serde(default)]
-        reindex_on: Vec<ReindexOnYaml>,
-        #[serde(default)]
-        edges: BTreeMap<String, EdgeMappingYamlEntry>,
-    },
+pub(crate) struct IndexerYaml {
+    #[serde(default)]
+    reindex: Option<String>,
+    /// Explicit reindex trigger tables. Required, and only allowed, when
+    /// `reindex: use_specified_tables`.
+    #[serde(default)]
+    tables: Vec<ReindexOnYaml>,
 }
 
 #[derive(Debug, Deserialize)]
+pub(crate) struct PipelineYaml {
+    name: String,
+    extract: ExtractYaml,
+    transform: TransformYaml,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtractYaml {
+    #[serde(rename = "type")]
+    source_type: ExtractSourceYaml,
+    tables: Vec<String>,
+    order_by: Vec<String>,
+    query: String,
+    /// Extra `_batch` WHERE predicate appended to the traversal-path scope, e.g.
+    /// `state = 5`. Used by `query: generated` edges and `query: generated` nodes.
+    #[serde(default)]
+    filter: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ExtractSourceYaml {
+    ClickHouse,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum ReindexOnYaml {
     Bare(String),
     Detailed(DetailedReindexYaml),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct DetailedReindexYaml {
     table: String,
     #[serde(default)]
     traversal_path: Option<PathResolutionYaml>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct PathResolutionYaml {
     #[serde(default)]
     column: Option<String>,
@@ -122,65 +115,40 @@ pub(crate) struct PathResolutionYaml {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct PageJoinYaml {
-    table: String,
-    alias: String,
-    fk_column: String,
-    select: Vec<String>,
-    #[serde(default, rename = "where")]
-    where_clause: Option<String>,
+struct TransformYaml {
+    #[serde(rename = "type")]
+    type_name: String,
     #[serde(default)]
-    watermark: Option<String>,
-    #[serde(default)]
-    traversal_path_column: Option<String>,
+    edges: Vec<EdgeMappingYaml>,
 }
 
-impl EtlYaml {
-    pub(crate) fn transform(&self) -> Option<&str> {
-        match self {
-            EtlYaml::Table { transform, .. } | EtlYaml::Query { transform, .. } => {
-                transform.as_deref()
-            }
-        }
-    }
+#[derive(Debug, Deserialize)]
+struct EdgeMappingYaml {
+    from: EndpointYaml,
+    to: EndpointYaml,
+    label: String,
+    #[serde(default)]
+    array_field: Option<String>,
+    #[serde(default)]
+    mutable: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct EndpointYaml {
+    field: String,
+    kind: EndpointKindYaml,
+    #[serde(default)]
+    enrich: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum EdgeMappingYamlEntry {
-    Single(EdgeMappingYaml),
-    Multi(Vec<EdgeMappingYaml>),
-}
-
-impl EdgeMappingYamlEntry {
-    fn into_vec(self) -> Vec<EdgeMappingYaml> {
-        match self {
-            EdgeMappingYamlEntry::Single(m) => vec![m],
-            EdgeMappingYamlEntry::Multi(v) => v,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct EdgeMappingYaml {
-    #[serde(rename = "to")]
-    target_literal: Option<String>,
-    #[serde(rename = "to_column")]
-    target_column: Option<String>,
-    #[serde(default)]
-    type_mapping: BTreeMap<String, String>,
-    #[serde(rename = "as")]
-    relationship_kind: String,
-    #[serde(default)]
-    direction: EdgeDirection,
-    #[serde(default)]
-    delimiter: Option<String>,
-    #[serde(default)]
-    array_field: Option<String>,
-    #[serde(default)]
-    array: bool,
-    #[serde(default)]
-    mutable: bool,
+enum EndpointKindYaml {
+    Literal(String),
+    Derived {
+        derive: String,
+        mapping: BTreeMap<String, String>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,9 +294,11 @@ impl NodeYaml {
     pub(crate) fn into_entity(
         self,
         name: String,
+        yaml_path: &str,
         default_entity_sort_key: &[String],
         etl_settings: &EtlSettings,
         internal_column_prefix: &str,
+        reader: &impl ReadOntologyFile,
     ) -> Result<NodeEntity, OntologyError> {
         let mut primary_keys = Vec::new();
 
@@ -472,25 +442,41 @@ impl NodeYaml {
             .sort_key
             .unwrap_or_else(|| default_entity_sort_key.to_vec());
 
-        match self.etl.as_ref().and_then(|e| e.transform()) {
-            Some(transform) if transform != DEFAULT_TRANSFORM => {
-                return Err(OntologyError::Validation(format!(
-                    "node '{name}' sets etl.transform '{transform}'; custom transforms are only for derived entities"
-                )));
-            }
-            _ => {}
-        }
-
         let node_scope = if self.global {
             EtlScope::Global
         } else {
             EtlScope::Namespaced
         };
-        let etl = self
-            .etl
-            .map(|e| e.into_config(&name, etl_settings, node_scope))
-            .transpose()?;
-
+        if let Some(indexer) = &self.indexer {
+            indexer.validate(&name)?;
+        }
+        let reindex = ReindexDirective::from_indexer(self.indexer.as_ref());
+        let pipelines = self
+            .pipelines
+            .into_iter()
+            .map(|p| {
+                p.into_pipeline(
+                    &name,
+                    etl_settings,
+                    node_scope,
+                    reader,
+                    PipelineOptions {
+                        yaml_path,
+                        allow_rust_transform: false,
+                        is_derived: false,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let reindex_on = reindex.resolve_reindex_sources(&name, &pipelines)?;
+        for pipeline in &pipelines {
+            if !matches!(pipeline.transform, Transform::DataFusion { .. }) {
+                return Err(OntologyError::Validation(format!(
+                    "node '{name}' sets transform '{}'; custom transforms are only for derived entities",
+                    pipeline.name
+                )));
+            }
+        }
         let has_traversal_path = fields
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
@@ -514,7 +500,8 @@ impl NodeYaml {
             default_columns: self.default_columns,
             sort_key,
             destination_table: self.destination_table,
-            etl,
+            pipelines,
+            reindex_on,
             redaction: self.redaction,
             style: self.style,
             has_traversal_path,
@@ -524,101 +511,254 @@ impl NodeYaml {
     }
 }
 
-fn convert_edge_mappings(
-    raw: BTreeMap<String, EdgeMappingYamlEntry>,
-) -> Result<BTreeMap<String, Vec<EdgeMapping>>, OntologyError> {
-    raw.into_iter()
-        .map(|(column, entry)| {
-            let mappings = entry.into_vec();
-            if mappings.is_empty() {
-                return Err(OntologyError::Validation(format!(
-                    "edge '{}': mapping list cannot be empty",
-                    column
-                )));
-            }
-            let mut converted = Vec::with_capacity(mappings.len());
-            let mut seen_kinds: std::collections::HashSet<(String, EdgeDirection)> =
-                std::collections::HashSet::new();
-            for mapping in mappings {
-                let target = match (mapping.target_literal, mapping.target_column) {
-                    (Some(lit), None) => {
-                        if !mapping.type_mapping.is_empty() {
-                            return Err(OntologyError::Validation(format!(
-                                "edge '{}': 'type_mapping' requires 'to_column'",
-                                column
-                            )));
-                        }
-                        EdgeTarget::Literal(lit)
-                    }
-                    (None, Some(col)) => EdgeTarget::Column {
-                        column: col,
-                        type_mapping: mapping.type_mapping,
-                    },
-                    (Some(_), Some(_)) => {
-                        return Err(OntologyError::Validation(format!(
-                            "edge '{}': use 'to' or 'to_column', not both",
-                            column
-                        )));
-                    }
-                    (None, None) => {
-                        return Err(OntologyError::Validation(format!(
-                            "edge '{}': requires 'to' or 'to_column'",
-                            column
-                        )));
-                    }
-                };
-                let multi_value_options = [
-                    mapping.delimiter.is_some(),
-                    mapping.array_field.is_some(),
-                    mapping.array,
-                ];
-                if multi_value_options.iter().filter(|&&v| v).count() > 1 {
-                    return Err(OntologyError::Validation(format!(
-                        "edge '{}': use only one of 'delimiter', 'array_field', or 'array'",
-                        column
-                    )));
+impl IndexerYaml {
+    pub(crate) fn validate(&self, entity_name: &str) -> Result<(), OntologyError> {
+        match self.reindex.as_deref() {
+            None | Some("use_source_tables") => {
+                if self.tables.is_empty() {
+                    Ok(())
+                } else {
+                    Err(OntologyError::Validation(format!(
+                        "entity '{entity_name}' declares indexer.tables but reindex is \
+                         'use_source_tables'; set reindex to 'use_specified_tables' to list \
+                         explicit reindex trigger tables"
+                    )))
                 }
-                let key = (mapping.relationship_kind.clone(), mapping.direction);
-                if !seen_kinds.insert(key) {
-                    return Err(OntologyError::Validation(format!(
-                        "edge '{}': duplicate (relationship_kind={}, direction={:?})",
-                        column, mapping.relationship_kind, mapping.direction
-                    )));
-                }
-                converted.push(EdgeMapping {
-                    target,
-                    relationship_kind: mapping.relationship_kind,
-                    direction: mapping.direction,
-                    delimiter: mapping.delimiter,
-                    array_field: mapping.array_field,
-                    array: mapping.array,
-                    mutable: mapping.mutable,
-                });
             }
-            Ok((column, converted))
+            Some("use_specified_tables") => {
+                if self.tables.is_empty() {
+                    Err(OntologyError::Validation(format!(
+                        "entity '{entity_name}' sets indexer.reindex 'use_specified_tables' but \
+                         declares no indexer.tables"
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+            Some(value) => Err(OntologyError::Validation(format!(
+                "entity '{entity_name}' sets unsupported indexer.reindex '{value}'"
+            ))),
+        }
+    }
+
+    pub(crate) fn uses_source_tables(&self) -> bool {
+        matches!(self.reindex.as_deref(), None | Some("use_source_tables"))
+    }
+
+    pub(crate) fn specified_reindex(&self) -> Vec<ReindexOnYaml> {
+        self.tables.clone()
+    }
+}
+
+/// Entity-level reindex configuration resolved from the `indexer` block. Reindex
+/// is an indexer concern declared once per entity, and the pipeline model knows
+/// nothing about it: either the trigger tables are derived from the pipelines'
+/// source tables (`use_source_tables`), or listed explicitly under
+/// `indexer.tables` (`use_specified_tables`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReindexDirective {
+    use_source_tables: bool,
+    specified: Vec<ReindexOnYaml>,
+}
+
+impl ReindexDirective {
+    pub(crate) fn from_indexer(indexer: Option<&IndexerYaml>) -> Self {
+        Self {
+            use_source_tables: indexer.is_some_and(IndexerYaml::uses_source_tables),
+            specified: indexer
+                .map(IndexerYaml::specified_reindex)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Resolves this entity's reindex trigger tables. `use_specified_tables`
+    /// takes the explicit list; `use_source_tables` derives the first source
+    /// table of each namespaced pipeline (global entities do not participate in
+    /// namespace-change reindexing).
+    pub(crate) fn resolve_reindex_sources(
+        self,
+        entity_name: &str,
+        pipelines: &[Pipeline],
+    ) -> Result<Vec<ReindexSource>, OntologyError> {
+        if !self.specified.is_empty() {
+            return convert_reindex_on(entity_name, self.specified);
+        }
+        if !self.use_source_tables {
+            return Ok(Vec::new());
+        }
+        Ok(pipelines
+            .iter()
+            .filter(|p| p.scope == EtlScope::Namespaced)
+            .filter_map(|p| {
+                let Extract::ClickHouse(extract) = &p.extract;
+                extract.tables.first()
+            })
+            .map(|table| ReindexSource {
+                table: table.clone(),
+                target: entity_name.to_string(),
+                traversal_path: default_path_resolution(),
+            })
+            .collect())
+    }
+}
+
+pub(crate) struct PipelineOptions<'a> {
+    pub yaml_path: &'a str,
+    pub allow_rust_transform: bool,
+    /// True only for derived-entity pipelines, which must carry authored SQL
+    /// (their rows are neither node properties nor edge endpoints, so there is
+    /// nothing for the indexer to generate a projection from).
+    pub is_derived: bool,
+}
+
+impl PipelineYaml {
+    pub(crate) fn into_pipeline(
+        self,
+        entity_name: &str,
+        etl_settings: &EtlSettings,
+        scope: EtlScope,
+        reader: &impl ReadOntologyFile,
+        options: PipelineOptions,
+    ) -> Result<Pipeline, OntologyError> {
+        let PipelineYaml {
+            name,
+            extract,
+            transform,
+        } = self;
+        let transform = transform.into_transform()?;
+        if matches!(transform, Transform::Rust(_)) && !options.allow_rust_transform {
+            return Err(OntologyError::Validation(format!(
+                "entity '{entity_name}' pipeline '{name}' uses a Rust transform outside derived entities"
+            )));
+        }
+        build_pipeline(BuildPipeline {
+            name,
+            extract,
+            transform,
+            etl_settings,
+            scope,
+            reader,
+            yaml_path: options.yaml_path,
+            is_derived: options.is_derived,
         })
-        .collect()
+    }
+
+    pub(crate) fn into_edge_pipeline(
+        self,
+        relationship_kind: &str,
+        yaml_path: &str,
+        etl_settings: &EtlSettings,
+        scope: EtlScope,
+        reader: &impl ReadOntologyFile,
+    ) -> Result<Pipeline, OntologyError> {
+        let PipelineYaml {
+            name,
+            extract,
+            transform,
+        } = self;
+        let transform = transform.into_transform()?;
+        // The indexer builds an edge extract from exactly one mapping (batch +
+        // enrichment CTEs); more than one has no single-table shape to generate.
+        let edge_count = match &transform {
+            Transform::DataFusion { edges } => edges.len(),
+            Transform::Rust(_) => 0,
+        };
+        if edge_count != 1 {
+            return Err(OntologyError::Validation(format!(
+                "edge '{relationship_kind}' pipeline '{name}' must declare exactly one \
+                 datafusion edge mapping, found {edge_count}"
+            )));
+        }
+        build_pipeline(BuildPipeline {
+            name,
+            extract,
+            transform,
+            etl_settings,
+            scope,
+            reader,
+            yaml_path,
+            is_derived: false,
+        })
+    }
+}
+
+struct BuildPipeline<'a, R: ReadOntologyFile> {
+    name: String,
+    extract: ExtractYaml,
+    transform: Transform,
+    etl_settings: &'a EtlSettings,
+    scope: EtlScope,
+    reader: &'a R,
+    yaml_path: &'a str,
+    is_derived: bool,
+}
+
+/// Builds the declarative `Pipeline` shared by node and edge construction. The
+/// extract SQL itself is not produced here — the indexer generates it from this
+/// model; only authored `.sql` files are resolved (verbatim) at load time.
+fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeline, OntologyError> {
+    if b.extract.order_by.is_empty() {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': extract.order_by cannot be empty",
+            b.name
+        )));
+    }
+    if b.extract.tables.is_empty() {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': extract.tables cannot be empty",
+            b.name
+        )));
+    }
+    let generated = b.extract.query.as_str() == GENERATED_QUERY;
+    // Derived-entity rows are neither node properties nor edge endpoints, so the
+    // indexer has nothing to project them from; they must carry authored SQL.
+    if b.is_derived && generated {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': derived entities require an authored .sql extract, not query: generated",
+            b.name
+        )));
+    }
+    if b.extract.filter.is_some() && !generated {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': extract.filter requires query: generated (authored .sql ignores it)",
+            b.name
+        )));
+    }
+    let query =
+        b.extract
+            .resolve_query(b.reader, &b.name, b.yaml_path, b.extract.filter.clone())?;
+    // Sql pipelines recover their effective watermark/deleted from the authored
+    // `.sql` in the indexer; here both are always the settings defaults.
+    let watermark = b.etl_settings.watermark.clone();
+    let deleted = b.etl_settings.deleted.clone();
+    let extract = match b.extract.source_type {
+        ExtractSourceYaml::ClickHouse => Extract::ClickHouse(ClickHouseExtract {
+            tables: b.extract.tables,
+            order_by: b.extract.order_by,
+            watermark,
+            deleted,
+            query,
+        }),
+    };
+    Ok(Pipeline {
+        name: b.name,
+        scope: b.scope,
+        extract,
+        transform: b.transform,
+    })
 }
 
 pub(crate) fn convert_reindex_on(
     entity_name: &str,
-    raw: Vec<ReindexOnYaml>,
-    default_table: Option<&str>,
+    entries: Vec<ReindexOnYaml>,
 ) -> Result<Vec<ReindexSource>, OntologyError> {
-    let raw = if raw.is_empty() {
-        default_table
-            .map(|table| vec![ReindexOnYaml::Bare(table.to_string())])
-            .unwrap_or_default()
-    } else {
-        raw
-    };
-
-    raw.into_iter()
+    entries
+        .into_iter()
         .map(|entry| match entry {
             ReindexOnYaml::Bare(table) => Ok(ReindexSource {
                 table,
                 target: entity_name.to_string(),
-                traversal_path: PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string()),
+                traversal_path: default_path_resolution(),
             }),
             ReindexOnYaml::Detailed(detailed) => Ok(ReindexSource {
                 table: detailed.table,
@@ -629,15 +769,23 @@ pub(crate) fn convert_reindex_on(
         .collect()
 }
 
+fn default_path_resolution() -> PathResolution {
+    PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string())
+}
+
 fn convert_path_resolution(
     entity_name: &str,
-    raw: Option<PathResolutionYaml>,
+    resolution: Option<PathResolutionYaml>,
 ) -> Result<PathResolution, OntologyError> {
-    let Some(raw) = raw else {
-        return Ok(PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string()));
+    let Some(resolution) = resolution else {
+        return Ok(default_path_resolution());
     };
 
-    match (raw.column, raw.dictionary, raw.key_column) {
+    match (
+        resolution.column,
+        resolution.dictionary,
+        resolution.key_column,
+    ) {
         (Some(column), None, None) => Ok(PathResolution::Column(column)),
         (None, Some(dictionary), Some(key_column)) => Ok(PathResolution::Dictionary {
             dictionary,
@@ -655,187 +803,84 @@ fn convert_path_resolution(
         (Some(_), None, Some(_)) => Err(OntologyError::Validation(format!(
             "{entity_name}: reindex_on.traversal_path.column cannot use key_column"
         ))),
-        (None, None, None) => Ok(PathResolution::Column(TRAVERSAL_PATH_COLUMN.to_string())),
+        (None, None, None) => Ok(default_path_resolution()),
     }
 }
 
-/// Replaces `{{watermark_column}}` and `{{deleted_column}}` placeholders with
-/// the configured column names, rejecting ETL SQL that hardcodes either literal.
-///
-/// Both literals are checked on the raw input *before* any substitution so that
-/// the check doesn't false-positive on the rendered output (substitution
-/// reintroduces the literal).
-pub(crate) fn render_etl_placeholders(
-    entity: &str,
-    field: &str,
-    raw: &str,
-    watermark: &str,
-    deleted: &str,
-) -> Result<String, OntologyError> {
-    if raw.contains(watermark) {
-        return Err(OntologyError::Validation(format!(
-            "entity '{entity}' field '{field}' hardcodes watermark column \
-             '{watermark}'; use {{{{watermark_column}}}} placeholder instead"
-        )));
-    }
-    if raw.contains(deleted) {
-        return Err(OntologyError::Validation(format!(
-            "entity '{entity}' field '{field}' hardcodes deleted column \
-             '{deleted}'; use {{{{deleted_column}}}} placeholder instead"
-        )));
-    }
-    let rendered = raw
-        .replace("{{watermark_column}}", watermark)
-        .replace("{{deleted_column}}", deleted);
-    if rendered.contains("{{") {
-        return Err(OntologyError::Validation(format!(
-            "entity '{entity}' field '{field}' contains unresolved placeholder '{{{{..}}}}'",
-        )));
-    }
-    Ok(rendered)
-}
-
-fn render_optional(
-    entity: &str,
-    field: &str,
-    raw: Option<String>,
-    watermark: &str,
-    deleted: &str,
-) -> Result<Option<String>, OntologyError> {
-    raw.map(|s| render_etl_placeholders(entity, field, &s, watermark, deleted))
-        .transpose()
-}
-
-impl EtlYaml {
-    pub(crate) fn into_config(
-        self,
-        entity_name: &str,
-        etl_settings: &EtlSettings,
-        scope: EtlScope,
-    ) -> Result<EtlConfig, OntologyError> {
-        let wm = &etl_settings.watermark;
-        let del = &etl_settings.deleted;
-        match self {
-            EtlYaml::Table {
-                source,
-                watermark,
-                deleted,
-                order_by,
-                transform: _,
-                reindex_on,
-                edges,
-            } => {
-                let watermark = match watermark {
-                    Some(w) => render_etl_placeholders(entity_name, "watermark", &w, wm, del)?,
-                    None => wm.clone(),
-                };
-                let deleted = match deleted {
-                    Some(d) => render_etl_placeholders(entity_name, "deleted", &d, wm, del)?,
-                    None => del.clone(),
-                };
-                let reindex_on = convert_reindex_on(
-                    entity_name,
-                    reindex_on,
-                    (scope == EtlScope::Namespaced).then_some(source.as_str()),
-                )?;
-                Ok(EtlConfig::Table {
-                    scope,
-                    source,
-                    watermark,
-                    deleted,
-                    order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
-                    reindex_on,
-                    edges: convert_edge_mappings(edges)?,
-                })
+impl ExtractYaml {
+    /// Classifies the `query:` field. `generated` builds `ExtractQuery::Generated`
+    /// (the indexer produces the SQL); a `.sql` file is read and carried verbatim.
+    /// No substitution or parsing happens here — that is the indexer's concern.
+    fn resolve_query(
+        &self,
+        reader: &impl ReadOntologyFile,
+        pipeline_name: &str,
+        yaml_path: &str,
+        filter: Option<String>,
+    ) -> Result<ExtractQuery, OntologyError> {
+        match self.query.as_str() {
+            GENERATED_QUERY => Ok(ExtractQuery::Generated { filter }),
+            file if file.ends_with(".sql") => {
+                let sql_path = Path::new(yaml_path)
+                    .parent()
+                    .map(|dir| dir.join(file))
+                    .unwrap_or_else(|| Path::new(file).to_path_buf())
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                Ok(ExtractQuery::Sql(reader.read(&sql_path)?))
             }
-            EtlYaml::Query {
-                source,
-                select,
-                from,
-                where_clause,
-                watermark,
-                deleted,
-                order_by,
-                traversal_path_filter,
-                table_alias,
-                page_join,
-                transform: _,
-                reindex_on,
-                edges,
-            } => {
-                let select = render_etl_placeholders(entity_name, "select", &select, wm, del)?;
-                let from = render_etl_placeholders(entity_name, "from", &from, wm, del)?;
-                let where_clause = render_optional(entity_name, "where", where_clause, wm, del)?;
-                let watermark = match watermark {
-                    Some(w) => render_etl_placeholders(entity_name, "watermark", &w, wm, del)?,
-                    None => wm.clone(),
-                };
-                let deleted = match deleted {
-                    Some(d) => render_etl_placeholders(entity_name, "deleted", &d, wm, del)?,
-                    None => del.clone(),
-                };
-                let traversal_path_filter = render_optional(
-                    entity_name,
-                    "traversal_path_filter",
-                    traversal_path_filter,
-                    wm,
-                    del,
-                )?;
-
-                let page_join = page_join
-                    .map(|pj| {
-                        let pj = *pj;
-                        let pj_where = render_optional(
-                            entity_name,
-                            "page_join.where",
-                            pj.where_clause,
-                            wm,
-                            del,
-                        )?;
-                        let pj_watermark = match pj.watermark {
-                            Some(w) => render_etl_placeholders(
-                                entity_name,
-                                "page_join.watermark",
-                                &w,
-                                wm,
-                                del,
-                            )?,
-                            None => wm.clone(),
-                        };
-                        Ok(Box::new(crate::etl::PageJoin {
-                            table: pj.table,
-                            alias: pj.alias,
-                            fk_column: pj.fk_column,
-                            select: pj.select,
-                            where_clause: pj_where,
-                            watermark: pj_watermark,
-                            traversal_path_column: pj.traversal_path_column,
-                        }))
-                    })
-                    .transpose()?;
-                let reindex_on = convert_reindex_on(
-                    entity_name,
-                    reindex_on,
-                    (scope == EtlScope::Namespaced).then_some(source.as_str()),
-                )?;
-
-                Ok(EtlConfig::Query {
-                    scope,
-                    source,
-                    select,
-                    from,
-                    where_clause,
-                    watermark,
-                    deleted,
-                    order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
-                    reindex_on,
-                    traversal_path_filter,
-                    table_alias,
-                    page_join,
-                    edges: convert_edge_mappings(edges)?,
-                })
-            }
+            other => Err(OntologyError::Validation(format!(
+                "pipeline '{pipeline_name}': unsupported extract.query '{other}'"
+            ))),
         }
+    }
+}
+
+impl TransformYaml {
+    fn into_transform(self) -> Result<Transform, OntologyError> {
+        if self.type_name == DEFAULT_TRANSFORM {
+            let edges = self
+                .edges
+                .into_iter()
+                .map(EdgeMappingYaml::into_mapping)
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Transform::DataFusion { edges });
+        }
+        if !self.edges.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "Rust transform '{}' cannot declare datafusion edges",
+                self.type_name
+            )));
+        }
+        Ok(Transform::Rust(self.type_name))
+    }
+}
+
+impl EdgeMappingYaml {
+    fn into_mapping(self) -> Result<EdgeMapping, OntologyError> {
+        Ok(EdgeMapping {
+            label: self.label,
+            source: self.from.into_node_ref()?,
+            target: self.to.into_node_ref()?,
+            array_field: self.array_field,
+            mutable: self.mutable,
+        })
+    }
+}
+
+impl EndpointYaml {
+    fn into_node_ref(self) -> Result<NodeRef, OntologyError> {
+        Ok(NodeRef {
+            field: self.field,
+            kind: match self.kind {
+                EndpointKindYaml::Literal(lit) => NodeRefKind::Literal(lit),
+                EndpointKindYaml::Derived { derive, mapping } => NodeRefKind::Derived {
+                    column: derive,
+                    mapping,
+                },
+            },
+            enrich: self.enrich,
+        })
     }
 }
 
@@ -934,6 +979,17 @@ mod tests {
         }
     }
 
+    struct EmptyReader;
+
+    impl ReadOntologyFile for EmptyReader {
+        fn read(&self, path: &str) -> Result<String, OntologyError> {
+            Err(OntologyError::Io {
+                path: path.to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
+            })
+        }
+    }
+
     #[test]
     fn embedded_ontology_depends_on_references_are_valid() {
         let ontology = Ontology::load_embedded().expect("embedded ontology should load");
@@ -950,64 +1006,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn every_namespaced_entity_declares_reindex_on() {
-        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
-        let missing_node_sources: Vec<&str> = ontology
-            .nodes()
-            .filter_map(|node| {
-                let etl = node.etl.as_ref()?;
-                (etl.scope() == EtlScope::Namespaced && etl.reindex_on().is_empty())
-                    .then_some(node.name.as_str())
-            })
-            .collect();
-        assert!(missing_node_sources.is_empty(), "{missing_node_sources:?}");
-
-        let missing_derived_sources: Vec<&str> = ontology
-            .derived_entities()
-            .filter_map(|entity| {
-                (entity.etl.scope() == EtlScope::Namespaced && entity.etl.reindex_on().is_empty())
-                    .then_some(entity.name.as_str())
-            })
-            .collect();
-        assert!(
-            missing_derived_sources.is_empty(),
-            "{missing_derived_sources:?}"
-        );
-
-        let missing_edge_sources: Vec<&str> = ontology
-            .edge_etl_configs()
-            .filter_map(|(relationship_kind, config)| {
-                (config.scope == EtlScope::Namespaced && config.reindex_on.is_empty())
-                    .then_some(relationship_kind)
-            })
-            .collect();
-        assert!(missing_edge_sources.is_empty(), "{missing_edge_sources:?}");
-
-        let system_note = ontology
-            .derived_entities()
-            .find(|entity| entity.name == "SystemNote")
-            .expect("SystemNote derived entity");
-        let system_note_tables: Vec<&str> = system_note
-            .etl
-            .reindex_on()
-            .iter()
-            .map(|source_table| source_table.table.as_str())
-            .collect();
-        assert!(system_note_tables.contains(&"siphon_notes"));
-        assert!(system_note_tables.contains(&"siphon_system_note_metadata"));
-
-        let has_label = ontology.get_edge_etl("HAS_LABEL").unwrap();
-        assert_eq!(has_label[0].reindex_on[0].table, "siphon_label_links");
-    }
-
     fn parse_test_node(yaml: &str) -> Result<NodeEntity, OntologyError> {
         let node: NodeYaml = serde_yaml::from_str(yaml).unwrap();
         node.into_entity(
             "TestNode".to_string(),
+            "nodes/test/test_node.yaml",
             &["id".to_string()],
             &test_etl_settings(),
             "_gkg_",
+            &EmptyReader,
         )
     }
 
@@ -1113,31 +1120,6 @@ mod tests {
     }
 
     #[test]
-    fn node_rejects_custom_etl_transform() {
-        let result = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: siphon_test
-              transform: system_notes
-            "#,
-        );
-        let err = result.expect_err("custom transform on a node should be rejected");
-        assert!(
-            err.to_string()
-                .contains("custom transforms are only for derived entities"),
-            "got: {err}"
-        );
-    }
-
-    #[test]
     fn depends_on_accepts_valid_db_column() {
         let result = parse_test_node(
             r#"
@@ -1167,14 +1149,9 @@ mod tests {
         );
     }
 
-    fn parse_etl_yaml(yaml: &str) -> Result<EtlConfig, OntologyError> {
-        let node = parse_test_node(yaml)?;
-        Ok(node.etl.expect("etl block expected"))
-    }
-
     #[test]
-    fn reindex_on_defaults_to_primary_source_and_traversal_path_column() {
-        let etl = parse_etl_yaml(
+    fn node_rejects_empty_extract_tables() {
+        let result = parse_test_node(
             r#"
             node_type: entity
             domain: test
@@ -1183,255 +1160,220 @@ mod tests {
               id:
                 type: int64
                 source: id
-            etl:
-              type: table
-              source: source_table
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: []
+                  order_by: [id]
+                  query: generated
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("empty extract.tables should be rejected");
+        assert!(
+            err.to_string().contains("extract.tables cannot be empty"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_filter_on_sql_query() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: test_node.sql
+                  filter: "state = 5"
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("filter on an authored .sql query should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.filter requires query: generated"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_rust_transform_pipeline() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: generated
+                transform:
+                  type: system_notes
+            "#,
+        );
+        let err = result.expect_err("custom transform on a node should be rejected");
+        assert!(
+            err.to_string()
+                .contains("uses a Rust transform outside derived entities"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_pipeline_converts_edges_and_generated_sql() {
+        let node = parse_test_node(
+            r#"
+            node_type: TestNode
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              project_id:
+                type: int64
+                source: project_id
+              traversal_path:
+                type: string
+                source: traversal_path
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [traversal_path, id]
+                  query: generated
+                transform:
+                  type: datafusion
+                  edges:
+                    - from:
+                        field: id
+                        kind: TestNode
+                      to:
+                        field: project_id
+                        kind: Project
+                      label: IN_PROJECT
             "#,
         )
-        .expect("source table should default from etl source");
-
-        let [source_table] = etl.reindex_on() else {
-            panic!("expected one source table");
+        .expect("pipeline should parse");
+        let pipeline = node.pipelines.first().expect("pipeline should exist");
+        assert_eq!(pipeline.name, "TestNode");
+        let Extract::ClickHouse(extract) = &pipeline.extract;
+        assert!(matches!(
+            extract.query,
+            ExtractQuery::Generated { filter: None }
+        ));
+        let Transform::DataFusion { edges } = &pipeline.transform else {
+            panic!("expected datafusion transform");
         };
-        assert_eq!(source_table.table, "source_table");
+        assert_eq!(edges[0].label, "IN_PROJECT");
+        assert!(
+            matches!(edges[0].target.kind, NodeRefKind::Literal(ref kind) if kind == "Project")
+        );
+    }
+
+    #[test]
+    fn pipeline_reindex_on_defaults_to_traversal_path_column() {
+        let node = parse_test_node(
+            r#"
+            node_type: TestNode
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              traversal_path:
+                type: string
+                source: traversal_path
+            indexer:
+              reindex: use_specified_tables
+              tables: [source_table, source_details]
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [traversal_path, id]
+                  query: generated
+                transform:
+                  type: datafusion
+            "#,
+        )
+        .expect("pipeline should parse");
+        let sources = &node.reindex_on;
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].table, "source_table");
         assert_eq!(
-            source_table.traversal_path,
+            sources[0].traversal_path,
             PathResolution::Column("traversal_path".to_string())
         );
+        assert_eq!(sources[1].table, "source_details");
     }
 
     #[test]
-    fn reindex_on_accepts_bare_table_names() {
-        let etl = parse_etl_yaml(
+    fn pipeline_reindex_on_accepts_dictionary_resolution() {
+        let node = parse_test_node(
             r#"
-            node_type: entity
+            node_type: TestNode
             domain: test
             destination_table: gl_test
             properties:
               id:
                 type: int64
                 source: id
-            etl:
-              type: table
-              source: merge_requests
-              reindex_on: [merge_requests, siphon_merge_request_metrics]
-            "#,
-        )
-        .expect("bare table names should parse");
-
-        let tables: Vec<&str> = etl
-            .reindex_on()
-            .iter()
-            .map(|source| source.table.as_str())
-            .collect();
-        assert_eq!(tables, ["merge_requests", "siphon_merge_request_metrics"]);
-        assert!(
-            etl.reindex_on().iter().all(|source| source.traversal_path
-                == PathResolution::Column("traversal_path".to_string()))
-        );
-    }
-
-    #[test]
-    fn reindex_on_accepts_dictionary_traversal_path() {
-        let etl = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: project_namespace_traversal_paths
-              select: "id, traversal_path"
-              from: "project_namespace_traversal_paths"
-              reindex_on:
-                - table: siphon_projects
+              traversal_path:
+                type: string
+                source: traversal_path
+            indexer:
+              reindex: use_specified_tables
+              tables:
+                - table: source_details
                   traversal_path:
-                    dictionary: project_traversal_paths_dict
-                    key_column: id
+                    dictionary: source_paths_dict
+                    key_column: source_id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [traversal_path, id]
+                  query: generated
+                transform:
+                  type: datafusion
             "#,
         )
-        .expect("dictionary source table should parse");
-
-        let [source_table] = etl.reindex_on() else {
-            panic!("expected one source table");
+        .expect("pipeline should parse");
+        let [source] = node.reindex_on.as_slice() else {
+            panic!("expected one reindex source");
         };
+        assert_eq!(source.table, "source_details");
         assert_eq!(
-            source_table.traversal_path,
+            source.traversal_path,
             PathResolution::Dictionary {
-                dictionary: "project_traversal_paths_dict".to_string(),
-                key_column: "id".to_string()
+                dictionary: "source_paths_dict".to_string(),
+                key_column: "source_id".to_string(),
             }
-        );
-    }
-
-    #[test]
-    fn reindex_on_rejects_ambiguous_traversal_path() {
-        let result = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: source_table
-              reindex_on:
-                - table: source_table
-                  traversal_path:
-                    column: traversal_path
-                    dictionary: traversal_paths_dict
-                    key_column: id
-            "#,
-        );
-        let err = result.expect_err("ambiguous traversal path should fail");
-        assert!(err.to_string().contains("column or dictionary"));
-    }
-
-    const FK_NODE_HEADER: &str = r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: source_table
-              edges:
-        "#;
-
-    #[test]
-    fn fk_edges_accept_single_mapping() {
-        let etl = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: source_table
-              edges:
-                project_id:
-                  to: Project
-                  as: IN_PROJECT
-                  direction: outgoing
-            "#,
-        )
-        .expect("single mapping should parse");
-
-        let mappings = etl.edges().get("project_id").expect("project_id present");
-        assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].relationship_kind, "IN_PROJECT");
-        assert_eq!(mappings[0].direction, EdgeDirection::Outgoing);
-    }
-
-    #[test]
-    fn fk_edges_accept_multiple_mappings_per_column() {
-        let etl = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: source_table
-              edges:
-                pipeline_id:
-                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
-                  - { to: Pipeline, as: HAS_JOB, direction: incoming }
-            "#,
-        )
-        .expect("array form should parse");
-
-        let mappings = etl.edges().get("pipeline_id").expect("pipeline_id present");
-        assert_eq!(mappings.len(), 2);
-        assert_eq!(mappings[0].relationship_kind, "IN_PIPELINE");
-        assert_eq!(mappings[0].direction, EdgeDirection::Outgoing);
-        assert_eq!(mappings[1].relationship_kind, "HAS_JOB");
-        assert_eq!(mappings[1].direction, EdgeDirection::Incoming);
-    }
-
-    #[test]
-    fn fk_edges_reject_duplicate_emission_on_same_column() {
-        let _ = FK_NODE_HEADER;
-        let result = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: source_table
-              edges:
-                pipeline_id:
-                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
-                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
-            "#,
-        );
-        let err = result
-            .expect_err("duplicate emission should error")
-            .to_string();
-        assert!(err.contains("duplicate"), "got: {err}");
-        assert!(err.contains("IN_PIPELINE"), "got: {err}");
-    }
-
-    #[test]
-    fn fk_edges_flatten_via_edge_mappings_iter() {
-        let etl = parse_etl_yaml(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: table
-              source: source_table
-              edges:
-                pipeline_id:
-                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
-                  - { to: Pipeline, as: HAS_JOB, direction: incoming }
-                project_id:
-                  to: Project
-                  as: IN_PROJECT
-                  direction: outgoing
-            "#,
-        )
-        .expect("mixed forms should parse");
-
-        let flattened: Vec<(&str, &str)> = etl
-            .edge_mappings()
-            .map(|(col, m)| (col.as_str(), m.relationship_kind.as_str()))
-            .collect();
-        assert_eq!(
-            flattened,
-            vec![
-                ("pipeline_id", "IN_PIPELINE"),
-                ("pipeline_id", "HAS_JOB"),
-                ("project_id", "IN_PROJECT"),
-            ]
         );
     }
 
@@ -1542,114 +1484,33 @@ mod tests {
     }
 
     #[test]
-    fn hardcoded_watermark_in_select_is_rejected() {
-        let result = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "argMax(col, _siphon_watermark) AS col"
-              from: source_table
-            "#,
-        );
-        let err = result.expect_err("hardcoded watermark should be rejected");
-        assert!(
-            err.to_string().contains("hardcodes watermark column"),
-            "got: {err}"
-        );
-        assert!(
-            err.to_string().contains("{{watermark_column}}"),
-            "error should mention the placeholder, got: {err}"
-        );
-    }
-
-    #[test]
-    fn watermark_placeholder_in_aliased_watermark_renders_correctly() {
-        let node = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "id"
-              from: source_table AS t
-              watermark: "t.{{watermark_column}}"
-              table_alias: t
-            "#,
-        )
-        .expect("placeholder should be accepted");
-        let etl = node.etl.unwrap();
-        assert_eq!(etl.watermark(), "t._siphon_watermark");
-    }
-
-    #[test]
-    fn watermark_placeholder_in_from_renders_correctly() {
-        let node = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "id"
-              from: "source_table AS t JOIN (SELECT argMax(x, {{watermark_column}}) FROM y GROUP BY id) z ON t.id = z.id"
-            "#,
-        )
-        .expect("placeholder in from should be accepted");
-        let EtlConfig::Query { from, .. } = node.etl.unwrap() else {
-            panic!("expected Query");
+    fn generated_edge_carries_filter_and_enrich_declaration() {
+        // The edge SQL itself is generated by the indexer (covered by its golden);
+        // here we assert the declarative model the indexer consumes.
+        let ontology = crate::Ontology::load_embedded().expect("load");
+        let edge_pipeline = |name: &str| {
+            ontology
+                .edge_pipelines
+                .values()
+                .flatten()
+                .find(|p| p.name == name)
+                .unwrap_or_else(|| panic!("pipeline {name} not found"))
         };
-        assert!(
-            from.contains("_siphon_watermark"),
-            "placeholder should be rendered: {from}"
-        );
-        assert!(
-            !from.contains("{{watermark_column}}"),
-            "placeholder should not remain: {from}"
-        );
-    }
 
-    #[test]
-    fn unresolved_placeholder_is_rejected() {
-        let result = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "argMax(col, {{typo_column}}) AS col"
-              from: source_table
-            "#,
-        );
-        let err = result.expect_err("unresolved placeholder should be rejected");
-        assert!(
-            err.to_string().contains("unresolved placeholder"),
-            "got: {err}"
-        );
+        let reopened = edge_pipeline("REOPENED_siphon_resource_state_events_MergeRequest");
+        let Extract::ClickHouse(reopened_extract) = &reopened.extract;
+        let ExtractQuery::Generated { filter } = &reopened_extract.query else {
+            panic!("REOPENED should be a generated edge");
+        };
+        assert_eq!(filter.as_deref(), Some("state = 5"));
+
+        // MEMBER_OF's `to` endpoint is polymorphic (Group/Project via source_type),
+        // so it declares no enrichable literal kind.
+        let member = edge_pipeline("MEMBER_OF_siphon_members");
+        let mapping = &member.transform.edges()[0];
+        assert!(matches!(mapping.source.kind, NodeRefKind::Literal(ref k) if k == "User"));
+        assert!(!mapping.source.enrich.is_empty());
+        assert!(matches!(mapping.target.kind, NodeRefKind::Derived { .. }));
     }
 
     #[test]
@@ -1664,9 +1525,6 @@ mod tests {
                 type: int64
                 source: id
                 binary: true
-            etl:
-              type: table
-              source: source_table
             "#,
         );
         let err = result.expect_err("binary on int64 should be rejected");
@@ -1675,127 +1533,5 @@ mod tests {
                 .contains("'binary: true' is only valid for 'type: string'"),
             "got: {err}"
         );
-    }
-
-    #[test]
-    fn hardcoded_deleted_in_where_is_rejected() {
-        let result = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "id"
-              from: source_table
-              where: "_siphon_deleted = false"
-            "#,
-        );
-        let err = result.expect_err("hardcoded deleted should be rejected");
-        assert!(
-            err.to_string().contains("hardcodes deleted column"),
-            "got: {err}"
-        );
-        assert!(
-            err.to_string().contains("{{deleted_column}}"),
-            "error should mention the placeholder, got: {err}"
-        );
-    }
-
-    #[test]
-    fn deleted_placeholder_renders_correctly() {
-        let node = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "id"
-              from: source_table AS t
-              where: "t.{{deleted_column}} = false"
-              deleted: "t.{{deleted_column}}"
-            "#,
-        )
-        .expect("deleted placeholder should be accepted");
-        let EtlConfig::Query {
-            where_clause,
-            deleted,
-            ..
-        } = node.etl.unwrap()
-        else {
-            panic!("expected Query");
-        };
-        assert_eq!(where_clause.unwrap(), "t._siphon_deleted = false");
-        assert_eq!(deleted, "t._siphon_deleted");
-    }
-
-    #[test]
-    fn both_placeholders_render_in_same_field() {
-        let node = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "argMax({{deleted_column}}, {{watermark_column}}) AS deleted"
-              from: source_table
-            "#,
-        )
-        .expect("both placeholders in one field should be accepted");
-        let EtlConfig::Query { select, .. } = node.etl.unwrap() else {
-            panic!("expected Query");
-        };
-        assert_eq!(
-            select,
-            "argMax(_siphon_deleted, _siphon_watermark) AS deleted"
-        );
-    }
-
-    #[test]
-    fn page_join_watermark_defaults_to_etl_settings() {
-        let node = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id:
-                type: int64
-                source: id
-            etl:
-              type: query
-              source: source_table
-              select: "id"
-              from: source_table
-              page_join:
-                table: joined_table
-                alias: jt
-                fk_column: source_id
-                select: [extra_col]
-            "#,
-        )
-        .expect("page_join without watermark should use default");
-        let EtlConfig::Query { page_join, .. } = node.etl.unwrap() else {
-            panic!("expected Query");
-        };
-        let pj = page_join.expect("page_join should be present");
-        assert_eq!(pj.watermark, "_siphon_watermark");
     }
 }

@@ -44,7 +44,7 @@ ClickHouse, not just table structure:
   stores these as string values, so old rows remain with the old name while the compiler emits
   the new name. Without a bump, affected edges are silently missing from query results.
 - **ETL mapping changes**: column renames, enum value changes, FK rewiring. The ETL pipeline
-  is fully ontology-driven (`PlanInput` is built from `&Ontology`), so these are always
+  is fully ontology-driven (`plan::build_plans` walks `&Ontology`), so these are always
   ontology YAML changes and the CI check catches them automatically.
 
 Changes that do **not** require a bump: ontology description updates, comments, formatting,
@@ -321,7 +321,7 @@ time:
 | `modules/code/config.rs` | All code-module node and edge tables (`gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, edge table) |
 | `modules/namespace_deletion/store.rs` | `checkpoint`, `code_indexing_checkpoint`, `namespace_deletion_schedule` |
 | `modules/namespace_deletion/lower.rs` | All ontology node and edge tables |
-| `modules/sdlc/plan/input.rs` | All SDLC node destination tables and per-relationship edge tables (resolved from ontology) |
+| `modules/sdlc/plan/build.rs` | All SDLC node destination tables and per-relationship edge tables (resolved from ontology) |
 
 Datalake tables (`siphon_*`) are never prefixed — only graph tables are.
 

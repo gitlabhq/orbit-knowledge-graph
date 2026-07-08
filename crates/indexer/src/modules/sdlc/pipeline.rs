@@ -484,12 +484,16 @@ mod tests {
         Plan {
             name: name.to_string(),
             target: name.to_string(),
-            extract_template: "SELECT id, name, _siphon_watermark AS _version, \
+            scope: ontology::EtlScope::Namespaced,
+            extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
+                "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{filters}} \
                  ORDER BY id LIMIT {{batch_size}}"
-                .to_string(),
+                    .to_string(),
+            )
+            .expect("valid template"),
             watermark_column: "_siphon_watermark".to_string(),
             deleted_column: "_siphon_deleted".to_string(),
             sort_key: vec!["id".to_string()],

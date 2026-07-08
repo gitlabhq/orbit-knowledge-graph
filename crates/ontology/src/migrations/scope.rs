@@ -166,7 +166,7 @@ pub fn derive_scope(
 pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for node in ontology.nodes() {
-        if node.etl.is_some() {
+        if !node.pipelines.is_empty() {
             names.insert(node.name.clone());
         }
     }
@@ -185,7 +185,7 @@ pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
 pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for node in ontology.nodes() {
-        if node.etl.is_none() {
+        if node.pipelines.is_empty() {
             names.insert(node.name.clone());
         }
     }
@@ -260,7 +260,7 @@ fn table_owned_by_scope(
 fn is_code_table(ontology: &Ontology, table: &str) -> bool {
     ontology
         .nodes()
-        .any(|n| n.etl.is_none() && n.destination_table == table)
+        .any(|n| n.pipelines.is_empty() && n.destination_table == table)
         || table == "gl_code_edge"
 }
 

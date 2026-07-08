@@ -101,11 +101,17 @@ properties:
     nullable: true
     description: "Last contact timestamp."
 
-etl:
-  type: table
-  source: siphon_ci_runners
-  order_by: [id, runner_type]
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: Runner
+    extract:
+      type: clickhouse
+      tables: [siphon_ci_runners]
+      order_by: [id, runner_type]
+      query: generated
+    transform:
+      type: datafusion
 storage:
   primary_key: [id]
   settings:

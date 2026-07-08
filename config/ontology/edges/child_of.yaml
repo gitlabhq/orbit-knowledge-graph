@@ -7,15 +7,24 @@ variants:
     to_node: { type: Pipeline, id: id }
     description: "Pipeline is a downstream child of the source pipeline."
 
-etl:
-  - scope: namespaced
-    source: siphon_ci_sources_pipelines
-    order_by: [traversal_path, id, partition_id]
-    from:
-      id: pipeline_id
-      type: Pipeline
-      enrich: [status, source, tag, failure_reason, protected]
-    to:
-      id: source_pipeline_id
-      type: Pipeline
-      enrich: [status, source, tag, failure_reason, protected]
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: CHILD_OF_siphon_ci_sources_pipelines_Pipeline
+    extract:
+      type: clickhouse
+      tables: [siphon_ci_sources_pipelines, siphon_p_ci_pipelines]
+      order_by: [traversal_path, id, partition_id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: pipeline_id
+            kind: Pipeline
+            enrich: [status, source, tag, failure_reason, protected]
+          to:
+            field: source_pipeline_id
+            kind: Pipeline
+            enrich: [status, source, tag, failure_reason, protected]
+          label: CHILD_OF

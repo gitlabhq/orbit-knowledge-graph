@@ -134,8 +134,19 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Edge/node `RecordBatch` specs:** derive column specs from the ontology — `edge_specs(ontology)`
   in `modules/code/arrow_converter.rs` (also `crates/duckdb-client/src/converter.rs`). Do not
   hardcode them; hardcoded specs silently drift from `config/graph.sql`.
-- **Filtering:** push row filters into the extraction SQL (`WHERE`, `action IN (...)`) instead of
-  post-filtering in Rust, so rows you discard never cross the wire.
+- **Extraction SQL:** declare the source shape in ontology pipelines. Use `query: generated` for
+  single-table projections and enriching edges (the indexer builds the SQL from the entity's
+  fields + the transform's edge mappings); use a co-located `.sql` file (`query: <name>.sql`) only
+  for genuinely complex joins, page-bounded enrichment, and row predicates, so rows you discard
+  never cross the wire. The ontology carries a `.sql` file verbatim as
+  `ExtractQuery::Sql`; the indexer's `plan/extract/sql.rs` substitutes `{{watermark_column}}`/
+  `{{deleted_column}}`, recovers the effective watermark/deleted from the file's `AS _version`/
+  `AS _deleted`, and validates markers. All ClickHouse dialect and SQL generation live in the
+  indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`: it
+  decomposes each pipeline and hands `extract/` transform-neutral inputs (it produces an
+  `ExtractSpec` with a validated `ExtractTemplate`) and `transform.rs` the rest; `enrichment.rs`
+  derives the shared `_eN` joins. `extract/` imports nothing from `transform`. None of this lives
+  in the ontology crate.
 - **Concurrency:** independent datalake lookups (routes / MR / work-item) should run concurrently
   (e.g. `tokio::try_join!`), not sequentially.
 - **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
@@ -154,9 +165,10 @@ below and in the root `AGENTS.md`.
 
 ### When a Rust transform is justified (ADR 015)
 
-The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `data_fusion`
+The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `datafusion`
 transform is a row-wise SQL projection of one extracted block and is the **default** for every
-node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity's `etl.transform`)
+node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity pipeline's
+`transform.type`)
 is justified **only when the graph shape cannot be expressed as that SQL projection** — concretely,
 when it needs:
 
@@ -166,7 +178,7 @@ when it needs:
   several edge kinds).
 
 If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
-`data_fusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
+`datafusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
 `docs/design-documents/decisions/015_pluggable_entity_pipelines.md`.
 
 ### Adding a handler

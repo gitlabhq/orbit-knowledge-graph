@@ -275,10 +275,12 @@ fn derive_indexing_state(progress: &IndexingProgress) -> IndexingState {
 fn namespaced_entity_kinds(ontology: &Ontology) -> Vec<String> {
     ontology
         .nodes()
-        .filter_map(|n| {
-            let etl = n.etl.as_ref()?;
-            (etl.scope() == EtlScope::Namespaced).then(|| n.name.clone())
+        .filter(|n| {
+            n.pipelines
+                .iter()
+                .any(|pipeline| pipeline.scope == EtlScope::Namespaced)
         })
+        .map(|n| n.name.clone())
         .collect()
 }
 

@@ -5,10 +5,11 @@ use arrow::record_batch::RecordBatch;
 use serde_json::Value;
 use tracing::{debug, warn};
 
+use ontology::{Extract, Ontology};
+
 use crate::handler::HandlerError;
 
 use super::datalake::DatalakeQuery;
-use super::plan::input::PlanInput;
 
 /// The probe derives its bucket width from the id span to land near this count;
 /// a fixed width would collapse a narrow id range into a single bucket.
@@ -42,25 +43,27 @@ pub(in crate::modules::sdlc) struct PartitionStrategy {
 }
 
 pub(in crate::modules::sdlc) fn build_strategies(
-    inputs: &PlanInput,
+    ontology: &Ontology,
     overrides: &HashMap<String, u32>,
     min_rows: u64,
 ) -> HashMap<String, PartitionStrategy> {
-    inputs
-        .node_plans
-        .iter()
-        .filter_map(|node| {
-            let count = *overrides.get(&node.name)?;
+    ontology
+        .nodes()
+        .flat_map(|node| node.pipelines.iter())
+        .filter_map(|pipeline| {
+            let count = *overrides.get(&pipeline.name)?;
             if count <= 1 {
                 return None;
             }
-            let key_columns = partition_key_columns(&node.extract.order_by)?;
+            let Extract::ClickHouse(extract) = &pipeline.extract;
+            let key_columns = partition_key_columns(&extract.order_by)?;
+            let base_table = extract.tables.first()?.clone();
             Some((
-                node.name.clone(),
+                pipeline.name.clone(),
                 PartitionStrategy {
                     count,
                     key_columns,
-                    datalake_table: node.extract.base_table.clone(),
+                    datalake_table: base_table,
                     min_rows,
                 },
             ))
@@ -496,37 +499,10 @@ mod tests {
 
     #[test]
     fn build_strategies_resolves_composite_key_for_overridden_entities() {
-        use crate::modules::sdlc::plan::input::{
-            ExtractColumn, ExtractPlan, ExtractSource, NodePlan,
-        };
-        use ontology::EtlScope;
-
-        let inputs = PlanInput {
-            node_plans: vec![NodePlan {
-                name: "User".to_string(),
-                scope: EtlScope::Global,
-                columns: vec![],
-                edges: vec![],
-                extract: ExtractPlan {
-                    destination_table: "gl_user".to_string(),
-                    columns: vec![ExtractColumn::Bare("id".to_string())],
-                    source: ExtractSource::Table("siphon_users".to_string()),
-                    base_table: "siphon_users".to_string(),
-                    watermark: "_siphon_watermark".to_string(),
-                    deleted: "_siphon_deleted".to_string(),
-                    order_by: vec!["id".to_string()],
-                    namespaced: false,
-                    traversal_path_filter: None,
-                    additional_where: None,
-                    enrichment: None,
-                },
-            }],
-            standalone_edge_plans: vec![],
-            derived_entity_plans: vec![],
-        };
+        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
 
         let overrides = HashMap::from([("User".to_string(), 4)]);
-        let strategies = build_strategies(&inputs, &overrides, 50_000_000);
+        let strategies = build_strategies(&ontology, &overrides, 50_000_000);
         let user = strategies.get("User").expect("User should be partitioned");
         assert_eq!(user.count, 4);
         assert_eq!(user.key_columns, keys(&["id"]));
@@ -534,7 +510,7 @@ mod tests {
         assert_eq!(user.min_rows, 50_000_000);
 
         let no_overrides = HashMap::new();
-        let strategies = build_strategies(&inputs, &no_overrides, 50_000_000);
+        let strategies = build_strategies(&ontology, &no_overrides, 50_000_000);
         assert!(strategies.is_empty());
     }
 }

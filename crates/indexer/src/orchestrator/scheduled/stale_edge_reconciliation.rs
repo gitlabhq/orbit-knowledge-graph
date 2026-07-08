@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlScope, NodeEntity, Ontology};
+use ontology::{EdgeMapping, EtlScope, NodeEntity, NodeRef, NodeRefKind, Ontology};
 use tracing::{info, warn};
 
 use crate::checkpoint::CheckpointStore;
@@ -31,6 +31,8 @@ struct ReconciliationSpec {
     other_id_column: &'static str,
 }
 
+/// Periodic, dispatcher-side sweep that tombstones stale FK-derived edges.
+///
 /// The watermark cursor advances only on full success; re-tombstoning is a
 /// no-op, so a failed run just widens the next window.
 pub struct StaleEdgeReconciliation {
@@ -182,15 +184,14 @@ impl StaleEdgeReconciliation {
 fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
     let mut specs = Vec::new();
     for node in ontology.nodes() {
-        let Some(etl) = &node.etl else { continue };
-        // Global owners lack a traversal_path, so the dual-IN PK prune can't apply;
-        // staleness only affects namespaced entities (MR, WorkItem, Pipeline).
-        if etl.scope() != EtlScope::Namespaced {
-            continue;
-        }
-        for (fk_extract_column, mapping) in etl.edge_mappings() {
-            if let Some(spec) = reconciliation_spec(ontology, node, fk_extract_column, mapping) {
-                specs.push(spec);
+        for pipeline in &node.pipelines {
+            if pipeline.scope != EtlScope::Namespaced {
+                continue;
+            }
+            for mapping in pipeline.transform.edges() {
+                if let Some(spec) = reconciliation_spec(ontology, node, mapping) {
+                    specs.push(spec);
+                }
             }
         }
     }
@@ -198,13 +199,12 @@ fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
 }
 
 fn is_scalar_edge(mapping: &EdgeMapping) -> bool {
-    mapping.delimiter.is_none() && mapping.array_field.is_none() && !mapping.array
+    mapping.array_field.is_none()
 }
 
 fn reconciliation_spec(
     ontology: &Ontology,
     node: &NodeEntity,
-    fk_extract_column: &str,
     mapping: &EdgeMapping,
 ) -> Option<ReconciliationSpec> {
     if !mapping.mutable {
@@ -213,39 +213,43 @@ fn reconciliation_spec(
     if !is_scalar_edge(mapping) {
         return None;
     }
-    let EdgeTarget::Literal(other_kind) = &mapping.target else {
+
+    let owner = owner_node_ref(mapping, &node.name)?;
+    let other = other_node_ref(mapping, &node.name)?;
+    let NodeRefKind::Literal(other_kind) = &other.kind else {
         return None;
     };
-    // No stored field for this extract column means the current FK isn't queryable — skip.
     let owner_fk_column = node
         .fields
         .iter()
-        .find(|field| field.column_name() == Some(fk_extract_column))
+        .find(|field| field.column_name() == Some(other.field.as_str()))
         .map(|field| field.name.clone())?;
 
     let edge_table = prefixed_table_name(
-        ontology.edge_table_for_relationship(&mapping.relationship_kind),
+        ontology.edge_table_for_relationship(&mapping.label),
         *SCHEMA_VERSION,
     );
     let owner_node_table = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
 
-    let (source_kind, target_kind, owner_id_column, other_id_column) = match mapping.direction {
-        EdgeDirection::Outgoing => (
-            node.name.clone(),
-            other_kind.clone(),
-            "source_id",
-            "target_id",
-        ),
-        EdgeDirection::Incoming => (
-            other_kind.clone(),
-            node.name.clone(),
-            "target_id",
-            "source_id",
-        ),
-    };
+    let (source_kind, target_kind, owner_id_column, other_id_column) =
+        if std::ptr::addr_eq(owner, &mapping.source) {
+            (
+                node.name.clone(),
+                other_kind.clone(),
+                "source_id",
+                "target_id",
+            )
+        } else {
+            (
+                other_kind.clone(),
+                node.name.clone(),
+                "target_id",
+                "source_id",
+            )
+        };
 
     Some(ReconciliationSpec {
-        relationship_kind: mapping.relationship_kind.clone(),
+        relationship_kind: mapping.label.clone(),
         edge_table,
         owner_node_table,
         owner_fk_column,
@@ -256,6 +260,23 @@ fn reconciliation_spec(
     })
 }
 
+fn owner_node_ref<'a>(mapping: &'a EdgeMapping, node_name: &str) -> Option<&'a NodeRef> {
+    [&mapping.source, &mapping.target]
+        .into_iter()
+        .find(|node_ref| {
+            matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
+                && node_ref.field == "id"
+        })
+}
+
+fn other_node_ref<'a>(mapping: &'a EdgeMapping, node_name: &str) -> Option<&'a NodeRef> {
+    [&mapping.source, &mapping.target]
+        .into_iter()
+        .find(|node_ref| !matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name && node_ref.field == "id"))
+}
+
+/// Builds the single tombstone statement for one spec.
+///
 /// `source_kind`/`target_kind` are pinned to concrete node types so a kind
 /// emitted from several FK columns into the same table (e.g. `TRIGGERED` from
 /// both `merge_request_id` and `user_id`) reconciles each variant in isolation.
@@ -317,12 +338,18 @@ mod tests {
 
     fn mapping(relationship_kind: &str) -> EdgeMapping {
         EdgeMapping {
-            target: EdgeTarget::Literal("User".to_string()),
-            relationship_kind: relationship_kind.to_string(),
-            direction: EdgeDirection::Incoming,
-            delimiter: None,
+            source: NodeRef {
+                field: "user_id".to_string(),
+                kind: NodeRefKind::Literal("User".to_string()),
+                enrich: vec![],
+            },
+            target: NodeRef {
+                field: "id".to_string(),
+                kind: NodeRefKind::Literal("MergeRequest".to_string()),
+                enrich: vec![],
+            },
+            label: relationship_kind.to_string(),
             array_field: None,
-            array: false,
             mutable: true,
         }
     }
@@ -399,13 +426,7 @@ mod tests {
             ..mapping("AUTHORED")
         };
         assert!(
-            reconciliation_spec(
-                &ontology,
-                merge_request_node(&ontology),
-                "author_id",
-                &immutable
-            )
-            .is_none()
+            reconciliation_spec(&ontology, merge_request_node(&ontology), &immutable).is_none()
         );
     }
 
@@ -417,13 +438,7 @@ mod tests {
             ..mapping("REVIEWER")
         };
         assert!(
-            reconciliation_spec(
-                &ontology,
-                merge_request_node(&ontology),
-                "reviewers",
-                &array_edge
-            )
-            .is_none()
+            reconciliation_spec(&ontology, merge_request_node(&ontology), &array_edge).is_none()
         );
     }
 
@@ -431,20 +446,18 @@ mod tests {
     fn mutable_polymorphic_edge_is_skipped() {
         let ontology = Ontology::load_embedded().unwrap();
         let polymorphic = EdgeMapping {
-            target: EdgeTarget::Column {
-                column: "noteable_type".to_string(),
-                type_mapping: Default::default(),
+            source: NodeRef {
+                field: "noteable_id".to_string(),
+                kind: NodeRefKind::Derived {
+                    column: "noteable_type".to_string(),
+                    mapping: Default::default(),
+                },
+                enrich: vec![],
             },
             ..mapping("HAS_NOTE")
         };
         assert!(
-            reconciliation_spec(
-                &ontology,
-                merge_request_node(&ontology),
-                "noteable_id",
-                &polymorphic
-            )
-            .is_none()
+            reconciliation_spec(&ontology, merge_request_node(&ontology), &polymorphic).is_none()
         );
     }
 
@@ -458,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn sql_pins_kinds_and_compares_other_endpoint() {
+    fn sql_pins_kinds_and_compares_other_node_ref() {
         let spec = ReconciliationSpec {
             relationship_kind: "TRIGGERED".to_string(),
             edge_table: "v57_gl_ci_edge".to_string(),

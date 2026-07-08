@@ -76,19 +76,32 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_labels
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    group_id:
-      to: Group
-      as: IN_GROUP
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: Label
+    extract:
+      type: clickhouse
+      tables: [siphon_labels]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: Label
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: id
+            kind: Label
+          to:
+            field: group_id
+            kind: Group
+          label: IN_GROUP
 storage:
   primary_key: [traversal_path, id]
   settings:

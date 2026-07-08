@@ -8,13 +8,22 @@ variants:
     scope: same_namespace
     description: "Package declares a dependency."
 
-etl:
-  - scope: namespaced
-    source: siphon_packages_dependency_links
-    order_by: [traversal_path, id]
-    from:
-      id: package_id
-      type: Package
-    to:
-      id: dependency_id
-      type: Dependency
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: DECLARES_DEPENDENCY_siphon_packages_dependency_links_Dependency
+    extract:
+      type: clickhouse
+      tables: [siphon_packages_dependency_links]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: package_id
+            kind: Package
+          to:
+            field: dependency_id
+            kind: Dependency
+          label: DECLARES_DEPENDENCY

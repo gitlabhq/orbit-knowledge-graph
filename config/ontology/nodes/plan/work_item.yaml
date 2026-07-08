@@ -150,32 +150,54 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: work_items
-  edges:
-    author_id:
-      to: User
-      as: AUTHORED
-      direction: incoming
-    milestone_id:
-      to: Milestone
-      as: IN_MILESTONE
-      direction: outgoing
-      mutable: true
-    namespace_id:
-      to: Group
-      as: IN_GROUP
-      direction: outgoing
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    closed_by_id:
-      to: User
-      as: CLOSED
-      direction: incoming
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: WorkItem
+    extract:
+      type: clickhouse
+      tables: [work_items]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: author_id
+            kind: User
+          to:
+            field: id
+            kind: WorkItem
+          label: AUTHORED
+        - from:
+            field: id
+            kind: WorkItem
+          to:
+            field: milestone_id
+            kind: Milestone
+          label: IN_MILESTONE
+          mutable: true
+        - from:
+            field: id
+            kind: WorkItem
+          to:
+            field: namespace_id
+            kind: Group
+          label: IN_GROUP
+        - from:
+            field: id
+            kind: WorkItem
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: closed_by_id
+            kind: User
+          to:
+            field: id
+            kind: WorkItem
+          label: CLOSED
 storage:
   primary_key: [traversal_path, id]
   settings:

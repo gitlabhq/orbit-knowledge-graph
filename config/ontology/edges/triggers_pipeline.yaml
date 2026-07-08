@@ -8,15 +8,24 @@ variants:
     to_node: { type: Pipeline, id: id }
     description: "Bridge job (type='Ci::Bridge') triggered the downstream pipeline."
 
-etl:
-  - scope: namespaced
-    source: siphon_ci_sources_pipelines
-    order_by: [traversal_path, id, partition_id]
-    from:
-      id: source_job_id
-      type: Job
-      enrich: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
-    to:
-      id: pipeline_id
-      type: Pipeline
-      enrich: [status, source, tag, failure_reason, protected]
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: TRIGGERS_PIPELINE_siphon_ci_sources_pipelines_Pipeline
+    extract:
+      type: clickhouse
+      tables: [siphon_ci_sources_pipelines, siphon_p_ci_builds, siphon_p_ci_pipelines]
+      order_by: [traversal_path, id, partition_id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: source_job_id
+            kind: Job
+            enrich: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
+          to:
+            field: pipeline_id
+            kind: Pipeline
+            enrich: [status, source, tag, failure_reason, protected]
+          label: TRIGGERS_PIPELINE

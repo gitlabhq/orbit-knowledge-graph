@@ -1,14 +1,11 @@
 use serde::Deserialize;
-use std::collections::BTreeMap;
 
 use crate::OntologyError;
-use crate::entities::{
-    EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeVariantScope,
-};
-use crate::etl::EtlScope;
+use crate::entities::{EdgeEntity, EdgeVariantScope};
+use crate::etl::{EtlScope, Pipeline, ReindexSource};
 
-use super::EtlSettings;
-use super::node::{ReindexOnYaml, convert_reindex_on, render_etl_placeholders};
+use super::node::{IndexerYaml, PipelineYaml, ReindexDirective};
+use super::{EtlSettings, ReadOntologyFile};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct EdgeYaml {
@@ -21,7 +18,9 @@ pub(crate) struct EdgeYaml {
     #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
-    etl: Vec<EdgeEtlYaml>,
+    indexer: Option<IndexerYaml>,
+    #[serde(default)]
+    pipelines: Vec<PipelineYaml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,37 +38,6 @@ struct EdgeNodeRef {
     #[serde(rename = "type")]
     node_type: String,
     id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeEtlYaml {
-    scope: EtlScope,
-    source: String,
-    #[serde(default)]
-    watermark: Option<String>,
-    #[serde(default)]
-    deleted: Option<String>,
-    order_by: Vec<String>,
-    #[serde(rename = "where", default)]
-    filter: Option<String>,
-    #[serde(default)]
-    reindex_on: Vec<ReindexOnYaml>,
-    from: EdgeEndpointYaml,
-    to: EdgeEndpointYaml,
-}
-
-#[derive(Debug, Deserialize)]
-struct EdgeEndpointYaml {
-    id: String,
-    #[serde(rename = "type")]
-    type_literal: Option<String>,
-    #[serde(rename = "type_column")]
-    type_column: Option<String>,
-    #[serde(default)]
-    type_mapping: BTreeMap<String, String>,
-    /// Columns to enrich from this endpoint's node datalake table.
-    #[serde(default)]
-    enrich: Vec<String>,
 }
 
 impl EdgeYaml {
@@ -94,80 +62,31 @@ impl EdgeYaml {
             .collect()
     }
 
-    pub(crate) fn into_etl_configs(
+    pub(crate) fn into_pipelines(
         self,
         relationship_kind: &str,
+        yaml_path: &str,
         etl_settings: &EtlSettings,
-    ) -> Result<Vec<EdgeSourceEtlConfig>, OntologyError> {
-        let wm = &etl_settings.watermark;
-        let del = &etl_settings.deleted;
-        self.etl
+        reader: &impl ReadOntologyFile,
+    ) -> Result<(Vec<Pipeline>, Vec<ReindexSource>), OntologyError> {
+        if let Some(indexer) = &self.indexer {
+            indexer.validate(relationship_kind)?;
+        }
+        let reindex = ReindexDirective::from_indexer(self.indexer.as_ref());
+        let pipelines = self
+            .pipelines
             .into_iter()
-            .map(|etl| {
-                let from = convert_endpoint(etl.from, "from")?;
-                let to = convert_endpoint(etl.to, "to")?;
-
-                let watermark = match etl.watermark {
-                    Some(w) => {
-                        render_etl_placeholders(relationship_kind, "etl.watermark", &w, wm, del)?
-                    }
-                    None => wm.clone(),
-                };
-                let deleted = match etl.deleted {
-                    Some(d) => {
-                        render_etl_placeholders(relationship_kind, "etl.deleted", &d, wm, del)?
-                    }
-                    None => del.clone(),
-                };
-                let reindex_on = convert_reindex_on(
+            .map(|p| {
+                p.into_edge_pipeline(
                     relationship_kind,
-                    etl.reindex_on,
-                    (etl.scope == EtlScope::Namespaced).then_some(etl.source.as_str()),
-                )?;
-
-                Ok(EdgeSourceEtlConfig {
-                    scope: etl.scope,
-                    source: etl.source,
-                    watermark,
-                    deleted,
-                    order_by: etl.order_by,
-                    filter: etl.filter,
-                    reindex_on,
-                    from,
-                    to,
-                })
+                    yaml_path,
+                    etl_settings,
+                    EtlScope::Namespaced,
+                    reader,
+                )
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        let reindex_on = reindex.resolve_reindex_sources(relationship_kind, &pipelines)?;
+        Ok((pipelines, reindex_on))
     }
-}
-
-fn convert_endpoint(
-    ep: EdgeEndpointYaml,
-    endpoint_name: &str,
-) -> Result<EdgeEndpoint, OntologyError> {
-    let node_type = match (ep.type_literal, ep.type_column) {
-        (Some(lit), None) => EdgeEndpointType::Literal(lit),
-        (None, Some(col)) => EdgeEndpointType::Column {
-            column: col,
-            type_mapping: ep.type_mapping,
-        },
-        (Some(_), Some(_)) => {
-            return Err(OntologyError::Validation(format!(
-                "edge source endpoint '{}': use 'type' or 'type_column', not both",
-                endpoint_name
-            )));
-        }
-        (None, None) => {
-            return Err(OntologyError::Validation(format!(
-                "edge source endpoint '{}': requires 'type' or 'type_column'",
-                endpoint_name
-            )));
-        }
-    };
-
-    Ok(EdgeEndpoint {
-        id_column: ep.id,
-        node_type,
-        enrich: ep.enrich,
-    })
 }

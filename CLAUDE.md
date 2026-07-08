@@ -20,7 +20,14 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
 - **Rails owns authorization.** GKG delegates all access decisions to Rails via gRPC (traversal paths, resource permissions). See `docs/design-documents/security.md`.
 - **ClickHouse = datalake + graph.** Datalake DB holds raw Siphon rows; graph DB holds indexed property graph tables. The indexer transforms between them.
-- **Ontology-driven graph.** YAML in `config/ontology/nodes/` and `config/ontology/edges/` drives ETL, query validation, redaction, and edge table routing. New entity types start there, not in Rust. Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`). Schema: `config/schemas/ontology.schema.json`.
+- **Ontology-driven graph.** YAML in `config/ontology/nodes/`, `config/ontology/edges/`, and `config/ontology/derived/` drives ETL, query validation, redaction, and edge table routing.
+  Nodes, edges, and derived entities declare `pipelines:` with `extract` and `transform` sections.
+  Setting `query: generated` lets the indexer build the extract SQL from the declaration — a single-table projection for nodes and non-enriching edges, or a `_batch` CTE plus endpoint-enrichment CTEs for edges that denormalize their endpoints (declared under `transform.edges` as `from`/`to` `enrich:`, so edge YAML never restates the join).
+  An optional `extract.filter` adds a `_batch` predicate (e.g. `state = 5`) and may use `{{watermark_column}}`/`{{deleted_column}}`.
+  Six genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, Finding) plus the SystemNote derived entity keep a SQL file next to the YAML; derived pipelines are always authored SQL, since their rows are neither node properties nor edge endpoints to generate a projection from.
+  New entity types start in the ontology, not in Rust.
+  Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`).
+  Schema: `config/schemas/ontology.schema.json`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
 - **Layered configuration.** `AppConfig` in `crates/gkg-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
