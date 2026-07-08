@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: How Orbit Remote secures your data, including the roles required to query, the authorization model, and programmatic access.
+description: How Orbit Remote secures your data, including the roles required to query, the authorization model, data handling and AI, and programmatic access.
 title: Orbit Remote security
 ---
 
@@ -71,6 +71,36 @@ Access is enforced in the following layers:
 
 Orbit is read-only. It reads changes from GitLab and never writes back, runs in a separate
 environment, and stores no permission data of its own.
+
+## Data handling and AI
+
+### Deterministic query engine
+
+Orbit is a deterministic data API.
+There is no language model or model inference running behind Orbit queries.
+When you send a query, Orbit compiles the JSON DSL to ClickHouse SQL, executes it, and returns
+typed results.
+The graph contains only the data GitLab has indexed from your instance.
+Orbit does not generate, infer, or hallucinate results.
+
+### No model training on your data
+
+GitLab does not train generative AI models on your Orbit data.
+This applies to the indexed graph, source code, SDLC objects, and query inputs and outputs.
+GitLab's AI vendors are contractually barred from training on customer inputs or outputs.
+
+This posture is the same as the rest of the GitLab SaaS AI offering and is not specific to
+the Orbit beta.
+
+### Data residency
+
+Orbit graph data is stored in ClickHouse on GitLab-managed infrastructure in `us-east1`
+(South Carolina, United States).
+Orbit follows the same data compliance requirements as other GitLab SaaS features that use
+ClickHouse, such as Advanced Search and CI/CD analytics.
+
+Contractual data residency guarantees and customer-selectable region controls are available
+on [GitLab Dedicated](https://docs.gitlab.com/dedicated/), not on GitLab.com.
 
 ## Programmatic access
 
