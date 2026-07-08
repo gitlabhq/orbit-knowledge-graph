@@ -157,18 +157,33 @@
           },
           "required": ["type", "source", "description"],
           "additionalProperties": false,
-          "if": {
-            "not": {
-              "properties": { "type": { "const": "enum" } },
-              "required": ["type"]
+          "allOf": [
+            {
+              "if": {
+                "not": {
+                  "properties": { "type": { "const": "enum" } },
+                  "required": ["type"]
+                }
+              },
+              "then": {
+                "properties": {
+                  "values": false,
+                  "enum_type": false
+                }
+              }
+            },
+            {
+              "if": {
+                "not": {
+                  "properties": { "type": { "const": "string" } },
+                  "required": ["type"]
+                }
+              },
+              "then": {
+                "properties": { "binary": { "const": false } }
+              }
             }
-          },
-          "then": {
-            "properties": {
-              "values": false,
-              "enum_type": false
-            }
-          }
+          ]
         },
         {
           "type": "object",

@@ -373,6 +373,14 @@ impl NodeYaml {
                     }
                 };
 
+                if prop_def.binary && prop_def.data_type != DataType::String {
+                    return Err(OntologyError::Validation(format!(
+                        "property '{prop_name}' on node '{name}': \
+                         'binary: true' is only valid for 'type: string', got {:?}",
+                        prop_def.data_type
+                    )));
+                }
+
                 let selectivity = prop_def
                     .selectivity
                     .unwrap_or_else(|| FieldSelectivity::from_data_type(prop_def.data_type));
@@ -1640,6 +1648,31 @@ mod tests {
         let err = result.expect_err("unresolved placeholder should be rejected");
         assert!(
             err.to_string().contains("unresolved placeholder"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn binary_flag_on_non_string_field_is_rejected() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+                binary: true
+            etl:
+              type: table
+              source: source_table
+            "#,
+        );
+        let err = result.expect_err("binary on int64 should be rejected");
+        assert!(
+            err.to_string()
+                .contains("'binary: true' is only valid for 'type: string'"),
             "got: {err}"
         );
     }
