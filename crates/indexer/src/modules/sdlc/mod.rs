@@ -29,22 +29,12 @@ use metrics::SdlcMetrics;
 use pipeline::Pipeline;
 use tracing::{info, warn};
 
-/// The dispatch-plan names for a set of re-index targets, split by scope. Plan
-/// names are the segment after `ns.<id>.` / `global.` in a checkpoint key, so
-/// checkpoint seeding and the completion gate use them to identify which keys
-/// belong to invalidated plans. Names are independent of batch sizes.
 #[derive(Debug)]
 pub struct DispatchPlanNames {
     pub namespaced: Vec<String>,
     pub global: Vec<String>,
 }
 
-/// The dispatch plans a narrowed `sdlc` migration invalidates: the scope's
-/// entities (or every SDLC entity when it names none), with each FK-derived
-/// relationship kind expanded to the entities that emit it. A target that
-/// resolves to no plan even after expansion is an orphan edge kind — declared
-/// but produced by no dispatcher, so it carries no data and is dropped; it
-/// contributes no checkpoint to seed out or gate on, which is correct.
 pub fn invalidated_dispatch_plans(
     ontology: &ontology::Ontology,
     scope: &ScopeDeclaration,
@@ -190,11 +180,6 @@ pub async fn register_handlers(
     Ok(())
 }
 
-/// Replaces each target that no dispatch plan produces directly (an FK-derived
-/// relationship kind like `HAS_NOTE`, emitted only as a side effect of a node's
-/// ETL) with the node/derived entities that emit it — re-running those plans
-/// re-emits the edges, which supersede in the cloned edge table. Targets that
-/// already have a plan pass through; orphan edge kinds with no emitter drop out.
 fn expand_targets_to_emitting_entities(
     ontology: &ontology::Ontology,
     targets: &BTreeSet<String>,
@@ -288,8 +273,6 @@ mod tests {
         }
     }
 
-    // HAS_NOTE is FK-derived: emitted by the Note node's ETL, with no dispatch
-    // plan of its own. Invalidating it must re-index Note.
     #[test]
     fn invalidated_dispatch_plans_expands_fk_edge_kind_to_emitting_node() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
@@ -310,12 +293,6 @@ mod tests {
         assert_eq!(whole.global.len(), all.global.len());
     }
 
-    // A narrowed migration skips (with a warn) any invalidated target that
-    // resolves to zero plans, treating it as an orphan with no rows to
-    // re-index. That skip is only safe while the orphan set stays empty: an
-    // entry here means the emitted-kinds mapping missed a real emitter (a
-    // silently un-re-indexed change), so this pins the set at build time
-    // instead of discovering it at runtime.
     #[test]
     fn orphan_sdlc_entities_are_exactly_the_known_set() {
         let ontology = Ontology::load_embedded().expect("should load ontology");

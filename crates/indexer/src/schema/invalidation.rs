@@ -1,17 +1,5 @@
-//! Decides, per graph table, whether a narrowed schema migration rebuilds it
-//! empty or clones it from the active version.
-//!
-//! A table is rebuilt empty only when *every* entity that writes to it is
-//! invalidated by the migration; otherwise its rows are still valid under the
-//! new schema and it is cloned intact (zero-copy) so the force-backfill only
-//! has to re-emit the invalidated entities.
-//!
-//! Accepted caveat for shared edge tables: cloning keeps every existing edge
-//! row, and a force-backfilled entity supersedes its own rows key-for-key via
-//! ReplacingMergeTree. If a migration *re-keys* the edge rows of an entity that
-//! is NOT invalidated (e.g. changes a surviving edge's sort key), the old-key
-//! rows survive in the clone with no writer to supersede them. The ledger
-//! author must widen the entry to cover that entity in that case.
+//! Table cloning decisions for narrowed schema migrations. Entity edge-key
+//! changes must be in the ledger, or cloned shared edge tables can retain old-key rows.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,9 +7,6 @@ use ontology::Ontology;
 use ontology::migrations::{Scope, ScopeDeclaration, code_entity_names, sdlc_entity_names};
 use query_engine::compiler::generate_graph_tables_with_prefix;
 
-/// The code-indexing checkpoint is the one auxiliary table tied to a scope:
-/// only a `code`-scoped migration invalidates code coverage, so only then is it
-/// rebuilt empty. Every other scope clones it to preserve indexed-project state.
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,9 +15,6 @@ pub enum TableMigrationAction {
     CloneFromActive,
 }
 
-/// Maps every graph table (unprefixed name) to its migration action for a
-/// narrowed `scope`. Not meant for [`Scope::All`], which takes the unconditional
-/// rebuild path and never consults this map.
 #[must_use]
 pub fn classify_tables_for_scope(
     ontology: &Ontology,
@@ -82,10 +64,6 @@ fn action_for_table(
     }
 }
 
-/// The entities whose rows land in `table`: node/derived entities whose
-/// destination table it is, node/derived entities emitting a relationship kind
-/// routed to it, and edge kinds routed to it. Auxiliary tables (checkpoint,
-/// deletion schedule) have no entity writers and so are never rebuilt here.
 fn writers_of_table(ontology: &Ontology, table: &str) -> BTreeSet<String> {
     let mut writers = BTreeSet::new();
 

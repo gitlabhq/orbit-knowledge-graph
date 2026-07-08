@@ -59,7 +59,6 @@ const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 
-/// The SDLC checkpoint table, seeded (not cloned) on a narrowed `sdlc` migration.
 const CHECKPOINT_TABLE: &str = "checkpoint";
 
 #[derive(Debug, Error)]
@@ -147,6 +146,63 @@ pub async fn run_if_needed(
             .await
         }
     }
+}
+
+pub async fn prepare_narrowed_tables(
+    graph: &ArrowClickHouseClient,
+    source: &DictionarySource<'_>,
+    ontology: &ontology::Ontology,
+    metrics: &MigrationMetrics,
+    scope: &ScopeDeclaration,
+    active_version: u32,
+) -> Result<(), MigrationError> {
+    let new_prefix = table_prefix(*SCHEMA_VERSION);
+    let old_prefix = table_prefix(active_version);
+    let actions = classify_tables_for_scope(ontology, scope);
+
+    let existing_old = version_object_names(graph, active_version).await?;
+    let existing_new = version_object_names(graph, *SCHEMA_VERSION).await?;
+
+    let tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
+    let mut cloned = 0;
+    let mut rebuilt = 0;
+    let mut seeded = 0;
+    for table in &tables {
+        let base = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
+
+        if base == CHECKPOINT_TABLE && scope.scope == Scope::Sdlc {
+            seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, scope).await?;
+            seeded += 1;
+            continue;
+        }
+
+        let old_name = format!("{old_prefix}{base}");
+        let clone_from_active = matches!(
+            actions.get(base),
+            Some(TableMigrationAction::CloneFromActive)
+        ) && existing_old.contains(&old_name);
+
+        if clone_from_active {
+            clone_table(graph, &old_name, &table.name, &existing_new).await?;
+            cloned += 1;
+        } else {
+            info!(table = %table.name, "rebuilding table empty");
+            graph
+                .execute(&emit_create_table(table))
+                .await
+                .map_err(|e| MigrationError::Ddl {
+                    table: table.name.clone(),
+                    reason: e.to_string(),
+                })?;
+            rebuilt += 1;
+        }
+    }
+
+    info!(cloned, rebuilt, seeded, prefix = %new_prefix, "narrowed migration tables prepared");
+
+    create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
+    metrics.record("create_tables", "success");
+    Ok(())
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer
@@ -353,9 +409,6 @@ async fn run_migration_locked(
         }
     };
 
-    // A narrowed migration seeds the invalidated plans' checkpoints out of the
-    // new checkpoint table; the first ordinary dispatch to reach a seeded-out
-    // plan epoch-backfills it. No forced publish, no ordering constraint.
     let create_result = if scope.scope == Scope::All {
         create_prefixed_tables(graph, source, ontology, metrics).await
     } else {
@@ -380,8 +433,6 @@ async fn run_migration_locked(
     }
     metrics.record("mark_migrating", "success");
 
-    // Open the re-index campaign for this migration. The completion checker
-    // clears it on promotion.
     campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
 
     let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
@@ -453,74 +504,6 @@ async fn create_prefixed_tables(
     Ok(())
 }
 
-/// Clones every table whose rows survive the narrowed migration, rebuilds the
-/// invalidated ones empty, and (SDLC scope) seeds the checkpoint table so only
-/// invalidated plans re-index. Dictionaries and views are always recreated
-/// (never cloned), since they only project over the tables. Public so the
-/// narrowed preparation can be exercised against real ClickHouse in tests.
-pub async fn prepare_narrowed_tables(
-    graph: &ArrowClickHouseClient,
-    source: &DictionarySource<'_>,
-    ontology: &ontology::Ontology,
-    metrics: &MigrationMetrics,
-    scope: &ScopeDeclaration,
-    active_version: u32,
-) -> Result<(), MigrationError> {
-    let new_prefix = table_prefix(*SCHEMA_VERSION);
-    let old_prefix = table_prefix(active_version);
-    let actions = classify_tables_for_scope(ontology, scope);
-
-    let existing_old = version_object_names(graph, active_version).await?;
-    let existing_new = version_object_names(graph, *SCHEMA_VERSION).await?;
-
-    let tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
-    let mut cloned = 0;
-    let mut rebuilt = 0;
-    let mut seeded = 0;
-    for table in &tables {
-        let base = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
-
-        if base == CHECKPOINT_TABLE && scope.scope == Scope::Sdlc {
-            seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, scope).await?;
-            seeded += 1;
-            continue;
-        }
-
-        let old_name = format!("{old_prefix}{base}");
-        let clone_from_active = matches!(
-            actions.get(base),
-            Some(TableMigrationAction::CloneFromActive)
-        ) && existing_old.contains(&old_name);
-
-        if clone_from_active {
-            clone_table(graph, &old_name, &table.name, &existing_new).await?;
-            cloned += 1;
-        } else {
-            info!(table = %table.name, "rebuilding table empty");
-            graph
-                .execute(&emit_create_table(table))
-                .await
-                .map_err(|e| MigrationError::Ddl {
-                    table: table.name.clone(),
-                    reason: e.to_string(),
-                })?;
-            rebuilt += 1;
-        }
-    }
-
-    info!(cloned, rebuilt, seeded, prefix = %new_prefix, "narrowed migration tables prepared");
-
-    create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
-    metrics.record("create_tables", "success");
-    Ok(())
-}
-
-/// Creates the new SDLC checkpoint table empty, then copies the surviving
-/// checkpoint state from the active version: every `_deleted = false` key
-/// except (a) `dispatch.%` cursors — so the cold-start sweep fires as it does
-/// today — and (b) keys of invalidated plans (both `ns.{id}.{plan}` and
-/// `global.{plan}`, including `.p{N}of{M}` partition sub-keys), so those plans
-/// start with no checkpoint and epoch-backfill on the next dispatch.
 async fn seed_sdlc_checkpoint(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
@@ -552,10 +535,7 @@ async fn seed_sdlc_checkpoint(
         })
 }
 
-/// Zero-copy `CLONE AS` of `old_name` into `new_name`. A crash between `CLONE
-/// AS`'s create and attach can leave an empty shell that `IF NOT EXISTS` would
-/// then skip; if the destination exists empty while the source has rows, drop
-/// and re-clone (safe: nothing reads the new prefix until `migrating` is set).
+/// ClickHouse `CLONE AS` can leave an empty shell after an interrupted attach.
 async fn clone_table(
     graph: &ArrowClickHouseClient,
     old_name: &str,
@@ -629,11 +609,6 @@ async fn create_dictionaries_and_views(
     Ok(())
 }
 
-/// `INSERT … SELECT` that seeds `new_table` from `old_table`, keeping the latest
-/// non-deleted state per key while dropping `dispatch.%` cursors and any key of
-/// an invalidated plan. Plan names carry no dots, so a key's plan segment is a
-/// fixed `splitByChar('.', …)` position for both parents and `.p{N}of{M}`
-/// partition sub-keys. `{ns_plans}` / `{global_plans}` are bound at execution.
 fn seed_checkpoint_sql(new_table: &str, old_table: &str) -> String {
     format!(
         "INSERT INTO {new_table} \

@@ -15,7 +15,7 @@
 //!    their base name matches a `gc_preserve_patterns` regex.
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
@@ -27,8 +27,6 @@ use query_engine::compiler::{
     generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
 };
 use tracing::{info, warn};
-
-use std::sync::LazyLock;
 
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
@@ -126,12 +124,6 @@ SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
 FROM gkg_schema_version FINAL \
 WHERE status = 'migrating' AND version = {version:UInt32}";
 
-/// Namespaces holding a COMPLETED checkpoint for *every* invalidated namespaced
-/// plan. Seeding leaves invalidated plans with no key, so presence of a
-/// completed row is a truthful "re-indexed" signal. A completed checkpoint has
-/// the null cursor marker (`'null'`, or `''` — both mean "not mid-pull" to the
-/// checkpoint decoder); `length(...) = 3` matches the `ns.{id}.{plan}` parent
-/// exactly and excludes `.p{N}of{M}` partition sub-keys.
 const COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS: &str = "\
 SELECT count() AS ns_count FROM ( \
     SELECT splitByChar('.', key)[2] AS ns \
@@ -145,7 +137,6 @@ SELECT count() AS ns_count FROM ( \
     HAVING uniqExact(splitByChar('.', key)[3]) = {plan_count:UInt64} \
 )";
 
-/// Distinct invalidated global plans with a completed `global.<plan>` checkpoint.
 const COUNT_COMPLETE_GLOBAL_PLANS: &str = "\
 SELECT count(DISTINCT splitByChar('.', key)[2]) AS ns_count \
 FROM {table:Identifier} FINAL \
@@ -211,7 +202,6 @@ impl ScheduledTask for MigrationCompletionChecker {
     }
 
     async fn run(&self) -> Result<(), TaskError> {
-        // Acquire the migration lock to prevent concurrent checks.
         let acquired = self
             .lock_service
             .try_acquire(MIGRATION_LOCK_KEY, LOCK_TTL)
@@ -228,6 +218,26 @@ impl ScheduledTask for MigrationCompletionChecker {
 
         result
     }
+}
+
+pub async fn sdlc_narrowing_complete(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    scope: &ScopeDeclaration,
+    checkpoint_table: &str,
+    enabled_count: u64,
+) -> Result<(u64, bool), String> {
+    let plans = invalidated_dispatch_plans(ontology, scope);
+
+    let completed_namespaces =
+        count_completed_namespaces(graph, checkpoint_table, &plans.namespaced).await?;
+    let namespaced_ready = plans.namespaced.is_empty() || completed_namespaces >= enabled_count;
+
+    let completed_global =
+        count_completed_global_plans(graph, checkpoint_table, &plans.global).await?;
+    let global_ready = completed_global as usize == plans.global.len();
+
+    Ok((completed_namespaces, namespaced_ready && global_ready))
 }
 
 impl MigrationCompletionChecker {
@@ -281,7 +291,6 @@ impl MigrationCompletionChecker {
             return Ok(());
         }
 
-        // Promote: migrating → active, old active → retired.
         let versions = read_all_versions(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
@@ -311,7 +320,6 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
-        // Campaign ends when its migration completes.
         self.campaign.clear();
 
         self.metrics.record_migration_completed();
@@ -378,9 +386,6 @@ impl MigrationCompletionChecker {
 
         let scope = self.invalidation_scope(version).await?;
         let (sdlc_indexed, sdlc_ready) = match scope.scope {
-            // A cloned SDLC dataset satisfies the any-key gate immediately
-            // (correct: a code narrowing leaves SDLC current), and `*` keeps
-            // the original full-rebuild gate.
             Scope::All | Scope::Code => {
                 let sdlc_table = format!("{prefix}checkpoint");
                 let count = self
@@ -428,13 +433,9 @@ impl MigrationCompletionChecker {
             eligible_projects,
         );
 
-        // Code coverage is tracked in `coverage` above for observability, but
-        // it explicitly does NOT block promotion.
         Ok(sdlc_ready)
     }
 
-    /// The scope crossed by the in-flight migration: active version → migrating
-    /// version through the ledger. Selects which promotion gate applies.
     async fn invalidation_scope(&self, migrating_version: u32) -> Result<ScopeDeclaration, String> {
         let active = read_active_version(&self.graph)
             .await
@@ -693,32 +694,6 @@ impl MigrationCompletionChecker {
 
         Ok(())
     }
-}
-
-/// Narrowed-SDLC promotion gate over `checkpoint_table`: every enabled namespace
-/// holds a COMPLETED checkpoint for every invalidated namespaced plan, and every
-/// invalidated global plan has a completed checkpoint. Seeding leaves invalidated
-/// plans unseeded, so a completed row is a truthful "re-indexed" signal. Returns
-/// `(completed_namespaces, ready)`. Public so the gate can be exercised against
-/// real ClickHouse with a synthetic scope in tests.
-pub async fn sdlc_narrowing_complete(
-    graph: &ArrowClickHouseClient,
-    ontology: &ontology::Ontology,
-    scope: &ScopeDeclaration,
-    checkpoint_table: &str,
-    enabled_count: u64,
-) -> Result<(u64, bool), String> {
-    let plans = invalidated_dispatch_plans(ontology, scope);
-
-    let completed_namespaces =
-        count_completed_namespaces(graph, checkpoint_table, &plans.namespaced).await?;
-    let namespaced_ready = plans.namespaced.is_empty() || completed_namespaces >= enabled_count;
-
-    let completed_global =
-        count_completed_global_plans(graph, checkpoint_table, &plans.global).await?;
-    let global_ready = completed_global as usize == plans.global.len();
-
-    Ok((completed_namespaces, namespaced_ready && global_ready))
 }
 
 async fn count_completed_namespaces(

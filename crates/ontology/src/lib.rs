@@ -50,6 +50,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
+use errors::describe_valid_fields;
 use loading::EtlSettings;
 
 /// A query-graph edge for [`Ontology::propagate_scope_prefixes`]. Abstracts
@@ -150,8 +151,6 @@ impl Default for Ontology {
         Self::new()
     }
 }
-
-use errors::describe_valid_fields;
 
 impl Ontology {
     #[must_use]
@@ -854,11 +853,6 @@ impl Ontology {
             .unwrap_or(&self.default_edge_table)
     }
 
-    /// The relationship kinds whose edge rows `entity_name` produces. An edge
-    /// kind emits itself; a node emits the kinds named in its ETL edge mappings;
-    /// a derived entity emits the kinds in its `emits:` list. Unknown names emit
-    /// nothing. Lets a caller find which edge table an entity writes to by
-    /// routing each returned kind through [`Self::edge_table_for_relationship`].
     #[must_use]
     pub fn relationship_kinds_emitted_by(&self, entity_name: &str) -> BTreeSet<String> {
         if self.has_edge(entity_name) {

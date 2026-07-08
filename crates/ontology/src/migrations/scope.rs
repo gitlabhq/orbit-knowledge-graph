@@ -196,9 +196,6 @@ pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     names
 }
 
-/// Names of the code-graph entities: nodes with no `etl:` block (parsed from
-/// their own archive, not Siphon) and relationship kinds routed to a code edge
-/// table. The `code` counterpart to [`sdlc_entity_names`].
 #[must_use]
 pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     let mut names = BTreeSet::new();

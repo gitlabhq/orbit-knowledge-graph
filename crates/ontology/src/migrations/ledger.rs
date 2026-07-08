@@ -23,7 +23,6 @@ const LEDGER_HEADER: &str = "\
 # with no entry is treated as \"*\", which also makes pruning old entries safe.
 ";
 
-/// The ledger compiled into the binary from `config/schema-migrations.yaml`.
 const EMBEDDED_LEDGER: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -38,16 +37,11 @@ impl MigrationLedger {
         serde_yaml::from_str(content).map_err(|e| format!("parsing migration ledger: {e}"))
     }
 
-    /// Parses the ledger baked into the binary at build time, so the dispatcher
-    /// can consult it at runtime without reading the filesystem.
     pub fn load_embedded() -> Result<Self, String> {
         Self::parse(EMBEDDED_LEDGER)
     }
 
-    /// The union of every entry's scope for the versions crossed by migrating
-    /// `active_version` → `target_version`. A version in range with no entry, or
-    /// a rollback (`active_version >= target_version`), widens to [`Scope::All`]
-    /// so an unmapped or reversed step always triggers a full rebuild.
+    /// Union of ledger scopes between versions; gaps and rollbacks widen to [`Scope::All`].
     #[must_use]
     pub fn invalidation_scope_between(
         &self,
