@@ -2,7 +2,7 @@
 title: "GKG ADR 006: Orbit + Duo Agent Platform integration"
 creation-date: "2026-03-26"
 last-updated: "2026-07-08"
-authors: [ "@michaelangeloio" ]
+authors: [ "@michaelangeloio", "@dgruzd", "@jgdoyon1", "@michaelusa", "@bohdanpk" ]
 toc_hide: true
 ---
 
@@ -51,7 +51,9 @@ scope, created by Rails when the workflow starts. All GitLab API traffic from
 DWS is proxied through Workhorse by the executor HTTP client; DWS makes no
 direct HTTP calls to Rails. The Orbit REST API accepts the `ai_workflows`
 scope through the same shared concern other DWS-called APIs use, so the
-integration needs no new data-plane auth mechanism.
+integration needs no new data-plane auth mechanism. The scope is broader than
+Orbit, so every Orbit route also requires the `read_knowledge_graph`
+permission; the scope only admits the token type.
 
 ## Decision
 
@@ -170,14 +172,20 @@ the other settings: it is flat-rate and has not adopted Orbit deliberately.
   MCP tools directly.
 - Other foundational agents, such as the data-analyst agent, receive the
   tools through the same injection, with guidance in their flow definitions.
-- The developer flow has an Orbit-aware variant whose system prompt is tuned
-  for graph tools. The flow version resolver selects it when Orbit is enabled
-  for the user.
-- Developer and CI flows that execute shell commands can also reach Orbit
-  through the `glab orbit` CLI, which wraps the same REST API and carries a
-  skill prompt of its own.
 - Custom catalog agents select Orbit tools per agent. The injected tool list
   is the intersection of the agent's selection and the pre-approved set.
+
+Duo Developer takes a different route and does not use the MCP tools at all.
+The flow version resolver swaps in an Orbit variant of the developer flow when
+Orbit is enabled for the user. That variant is a single agent with shell
+access in its execution environment, and its system prompt includes a shared
+Orbit skill that teaches the agent to reach Orbit through the
+pre-authenticated `glab orbit` CLI: discover the schema and query DSL first,
+then run queries against the same REST API the other channels use. The CLI
+also serves a local graph for code-structure questions about the current
+branch, which the remote graph does not cover. Flows that already give the
+agent a shell get Orbit this way for free; the MCP path exists for the
+surfaces that do not.
 
 ### Caller identification
 
@@ -286,15 +294,6 @@ What this requires:
   Workhorse query acceleration recovers most of it on the expensive path.
 - Tool behavior such as caching, retries, and error shaping is controlled at
   the MCP server and prompt level, not by custom DWS code.
-
-### Risks
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Replication lag produces empty results | Agent gives a wrong answer | Prompt-guided fallback to the REST tool; fallback hints in empty-result responses; evaluations measure fallback behavior |
-| Tool descriptions crowd the context window | Agent misuses or ignores Orbit tools | TOON-encoded descriptions keep the DSL grammar compact; progressive disclosure keeps schema output small |
-| Query latency degrades agent responses | Slower answers | Workhorse query acceleration; server-side limits; expectations qualified by query shape |
-| `ai_workflows` scope is broader than Orbit | Security concern | Every Orbit route also requires the `read_knowledge_graph` permission; the scope only admits the token type |
 
 ## Alternatives considered
 
