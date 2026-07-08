@@ -89,7 +89,7 @@ sources:
   nodes/plan/work_item.yaml: cb3d343b88290e1b9b60d7f0419f11002f1f029abe31a89900c6a45da53db42b
   nodes/security/finding.yaml: 392718218bdc7644e42ab42963ebd65019f1889ff44e8ddaa50f03d9326b420e
   nodes/security/identifier.yaml: 8ac2146c203251a35c0abc3cd75f2b73865b34ed34145091a82572a17afdfafa
-  nodes/security/occurrence.yaml: 70d8c2c64ccf541221abb26a343f80306fa285b704e06151422ef9e7e17bdb81
+  nodes/security/occurrence.yaml: 88753873bd66ea3d0d16e68ce078e72c212b19ceba794a072f1995c684d892b5
   nodes/security/scanner.yaml: 6d154aa36542290b38cc47c6051dbec48c4c9869e4005c63853f4eddef271636
   nodes/security/security_scan.yaml: be8d0fb520cdf57ebfe894d008f1e41a5212c19ab64b9c2bd38133949a4bc8c6
   nodes/security/vulnerability.yaml: 83591341eb1aa3a0599860a555cc402f40de2b4242bcb855de738264c1033c2e
