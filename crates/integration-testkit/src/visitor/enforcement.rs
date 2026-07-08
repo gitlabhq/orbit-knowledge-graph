@@ -887,7 +887,7 @@ mod tests {
             r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2],
                          "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}},
-                "order_by": {"node": "u", "property": "id"},
+                "order_by": "u.id",
                 "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );

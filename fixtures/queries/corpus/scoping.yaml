@@ -808,7 +808,7 @@ proj_id_mr_orderby_limit_page:
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "cursor": {"page_size": 20},
       "options": {"include_debug_sql": true}
     }
@@ -825,7 +825,7 @@ proj_id_mr_orderby_limit_page2:
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "cursor": {"page_size": 40},
       "options": {"include_debug_sql": true}
     }

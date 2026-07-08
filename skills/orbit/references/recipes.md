@@ -326,7 +326,7 @@ is no `Issue` node. List the work items in a project via the `IN_PROJECT`
     "relationships": [
       {"type": "IN_PROJECT", "from": "wi", "to": "p"}
     ],
-    "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"},
+    "order_by": "-wi.created_at",
     "limit": 50
   }
 }
@@ -463,7 +463,7 @@ only properties listed in the text-indexed properties table in
       },
       "columns": ["iid", "title", "state"]
     },
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "order_by": "-mr.created_at",
     "limit": 10
   }
 }

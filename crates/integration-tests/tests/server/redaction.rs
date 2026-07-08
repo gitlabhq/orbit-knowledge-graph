@@ -3627,7 +3627,7 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -3669,7 +3669,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -3715,13 +3715,13 @@ async fn cursor_pagination_rejects_foreign_token(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
     let other = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 5000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -3746,7 +3746,7 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
