@@ -23,6 +23,7 @@ pub mod etl;
 pub mod introspection;
 mod json_schema;
 mod loading;
+pub mod migrations;
 pub mod query_dsl;
 
 pub use constants::{

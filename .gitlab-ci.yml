@@ -198,6 +198,17 @@ named-query-schema-validate:
   script:
     - find config/named_queries -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/named_query.schema.json
 
+migration-ledger-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - uvx check-jsonschema --verbose --schemafile config/schemas/schema-migrations.schema.json config/schema-migrations.yaml
+
 indexer-scenario-schema-validate:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
@@ -274,18 +285,16 @@ ddl-freshness-check:
   script:
     - bash ./scripts/check-ddl-freshness.sh
 
-schema-version-check:
+migration-ledger-check:
   stage: lint
-  image: alpine:latest
-  tags:
-    - saas-linux-medium-amd64
   extends:
+    - .job-template
+    - .sccache-template
     - .mr-only-rules
   needs: []
   script:
-    - apk add --no-cache git bash
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
-    - bash ./scripts/check-schema-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - bash ./scripts/check-migration-ledger.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 response-schema-version-check:
   stage: lint

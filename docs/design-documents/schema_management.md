@@ -18,9 +18,8 @@ keys, and explicit `SETTINGS` entries that need to be emitted into the generated
 
 This file covers ClickHouse DDL versioning only. The query **response format** is
 versioned separately as a semver in `config/RAW_OUTPUT_FORMAT_VERSION` and
-enforced by `scripts/check-response-schema-version.sh` alongside
-`scripts/check-schema-version.sh`. See [ADR 004](decisions/004_unified_response_schema.md)
-for the response format contract.
+enforced by `scripts/check-response-schema-version.sh`. See
+[ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
 ### `config/SCHEMA_VERSION`
 
@@ -179,14 +178,19 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-A CI job (`schema-version-check`, lint stage, MR-only) fails if `config/graph.sql`
-or `config/ontology/` changes without a corresponding bump to `config/SCHEMA_VERSION`.
-The same check runs as a lefthook pre-commit hook for immediate local feedback.
+The migration ledger is the single version-bump gate. `gkg-server`'s build script
+fails if the ontology or its generated DDL drift from the committed fingerprint
+snapshot (`config/schema-migrations.fingerprint.yaml`), or if the ledger is
+malformed, so drift fails every local and CI build. The CI job
+`migration-ledger-check` (lint stage, MR-only) additionally requires, when the
+snapshot changed, that `config/SCHEMA_VERSION` is bumped to exactly base + 1 and
+that the new `config/schema-migrations.yaml` entry covers the detected drift.
 Local (DuckDB) DDL is generated from the ontology at runtime, so `config/ontology/`
 changes automatically affect both ClickHouse and DuckDB schemas.
 
-Non-schema ontology changes (descriptions, comments) can bypass the check by adding
-`[skip schema-version-check]` to the MR description.
+Because the snapshot hashes the canonicalized ontology, comment- and formatting-only
+edits do not require a bump. A genuinely non-invalidating change can bypass the gate
+with `[skip migration-ledger-check]` in the MR description.
 
 ## Zero-downtime migration orchestrator
 
