@@ -20,10 +20,10 @@ even though the data for that subgroup is already indexed, the query engine is a
 subgroup-aware, and the permission model already scopes the JWT to the user's actual
 subgroup path.
 
-On **GitLab Self-Managed**, this denial does not occur. `OrbitLicense.available_for?`
+On **GitLab Self-Managed**, this denial does not occur. [`OrbitLicense.available_for?`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/orbit_license.rb#L32)
 returns early with `::License.feature_available?(:orbit)` when
 `gitlab_com_subscriptions` is unavailable, performing no top-level group check.
-`GoverningNamespaceFinder` likewise returns `Group.none` off-SaaS.
+[`GoverningNamespaceFinder`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/app/finders/analytics/knowledge_graph/governing_namespace_finder.rb#L10) likewise returns `Group.none` off-SaaS.
 GitLab Self-Managed subgroup-only users can already use Orbit end-to-end, which serves as
 existing production evidence that the GKG query engine handles subgroup-scoped JWT
 paths correctly.
@@ -34,19 +34,19 @@ Orbit scoped to that subgroup, without requiring top-level group membership.
 ### Precise diagnosis: entitlement-check scoping, not a permission or licensing gap
 
 Verified against the `gitlab-org/gitlab` default branch as of this document's
-creation date.
+creation date; code links are permalinks pinned to [`6b61b453`](https://gitlab.com/gitlab-org/gitlab/-/tree/6b61b453bb92925f4db3af16a638a862c8e1a27f).
 
-**Permissions already work for subgroups.** `AuthorizationContext#reporter_plus_traversal_ids`
-calls `Search::GroupsFinder(min_access_level: REPORTER)` and publishes the user's
+**Permissions already work for subgroups.** [`AuthorizationContext#reporter_plus_traversal_ids`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/authorization_context.rb#L33)
+calls [`Search::GroupsFinder`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/app/finders/search/groups_finder.rb)`(min_access_level: REPORTER)` and publishes the user's
 actual traversal paths (including subgroup paths like `1/22/200/`) verbatim into the
-JWT (`jwt_auth.rb`: `payload.merge!(context.reporter_plus_traversal_ids)`). There is
+JWT ([`jwt_auth.rb`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/jwt_auth.rb#L128): `payload.merge!(context.reporter_plus_traversal_ids)`). There is
 no reduction to root, no depth check, and no top-level filter anywhere in the
 permission-scoping path. A subgroup-only Reporter already produces a correctly
 subgroup-scoped JWT. The DSL permission `read_knowledge_graph` is a flat
 `boundary_type: :user` permission and is not hierarchical.
 
 **Enablement already passes for a subgroup-only user whose root is enrolled.**
-`AuthorizationContext#has_enabled_namespaces?` computes
+[`AuthorizationContext#has_enabled_namespaces?`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/authorization_context.rb#L39) computes
 `reporter_plus_root_namespace_ids = reporter_plus_group_rows.filter_map { |row| row[:traversal_ids].first }.uniq`,
 which extracts the root of each authorized path. For a subgroup member of
 `[1, 22, 200]`, `traversal_ids.first` is `1` (the root). It then checks
@@ -57,14 +57,14 @@ is enrolled.
 **The sole blocker on SaaS is the entitlement check** in
 `OrbitLicense.available_for?`. On SaaS it evaluates
 `user.authorized_groups.top_level.any? { |g| g.licensed_feature_available?(:orbit) && namespace_enrollable_or_enrolled?(g) }`.
-The key is `user.authorized_groups`: in `app/models/user.rb`, `authorized_groups`
+The key is `user.authorized_groups`: in `app/models/user.rb`, [`authorized_groups`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/app/models/user.rb#L1622)
 unions direct groups and their **descendants**, shared groups and their descendants,
 and project-authorized groups and their ancestors, but it does **not** include
 ancestors of directly-authorized groups. For a user with Reporter on subgroup `200`
 (under root `1`): `authorized_groups` contains `200` and its descendants but not
 root `1`; therefore `authorized_groups.top_level` (`parent_id IS NULL`) is empty;
 therefore the entitlement check returns `false`, even though root `1` is licensed
-and enrolled. `OrbitLicense` documents this awareness in its own comment: "Self-managed
+and enrolled. `OrbitLicense` documents this awareness in [its own comment](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/orbit_license.rb#L15): "Self-managed
 delegates to the instance license … users with no top-level group memberships … would
 otherwise be denied on a fully licensed instance."
 
@@ -89,12 +89,12 @@ blocker:
 
 | # | Touchpoint | Location | Role | Subgroup-only user? |
 |---|------------|----------|------|---------------------|
-| 1 | **Enablement** | `enabled_namespace.rb` | Tenant on/off: "Only top-level groups can be indexed" | **Passes**: subgroup data is indexed under the enrolled root |
-| 2 | **Enablement re-check** | `AuthorizationContext#has_enabled_namespaces?` | Checks `EnabledNamespace` for the root of each authorized path | **Passes**: `traversal_ids.first` resolves to the enrolled root |
-| 3 | **Entitlement** | `OrbitLicense.available_for?` | Checks `:orbit` license + `namespace_enrollable_or_enrolled?` on `user.authorized_groups.top_level` | **Fails**: `authorized_groups` excludes ancestors of direct memberships, so `top_level` is empty |
-| 4 | **Billing attribution** | `GoverningNamespaceFinder` | Resolves the billing namespace from the user's root groups on a paid plan; returns `Group.none` off-SaaS | **Dependent decision**: requires product/SOX alignment |
+| 1 | **Enablement** | [`enabled_namespace.rb`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/app/models/analytics/knowledge_graph/enabled_namespace.rb#L22) | Tenant on/off: "Only top-level groups can be indexed" | **Passes**: subgroup data is indexed under the enrolled root |
+| 2 | **Enablement re-check** | [`AuthorizationContext#has_enabled_namespaces?`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/authorization_context.rb#L39) | Checks `EnabledNamespace` for the root of each authorized path | **Passes**: `traversal_ids.first` resolves to the enrolled root |
+| 3 | **Entitlement** | [`OrbitLicense.available_for?`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/orbit_license.rb#L32) | Checks `:orbit` license + `namespace_enrollable_or_enrolled?` on `user.authorized_groups.top_level` | **Fails**: `authorized_groups` excludes ancestors of direct memberships, so `top_level` is empty |
+| 4 | **Billing attribution** | [`GoverningNamespaceFinder`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/app/finders/analytics/knowledge_graph/governing_namespace_finder.rb#L10) | Resolves the billing namespace from the user's root groups on a paid plan; returns `Group.none` off-SaaS | **Dependent decision**: requires product/SOX alignment |
 
-`SecurityContext` validates path **format** (`^(\d+/)+$`), not depth. Existing unit
+[`SecurityContext`](../../../crates/query-engine/compiler/src/types.rs#L94) validates path **format** (`^(\d+/)+$`), not depth. Existing unit
 tests exercise subgroup paths (`1/22/`, `1/33/`). Partition pruning keys on
 `segments[1]` (the top-level namespace ID), which any subgroup path still contains.
 ClickHouse already holds subgroup data because indexing dispatches per enabled root
@@ -112,7 +112,7 @@ holding Reporter on the top-level group itself.
   the SaaS branch of `OrbitLicense.available_for?` iterates, so the entitlement
   check fails for the subgroup-only user.
 - For the same subgroup-only user, resolving the root via each authorized path's
-  `traversal_ids.first` **did** yield the root namespace — confirming that the
+  `traversal_ids.first` **did** yield the root namespace, confirming that the
   root is reachable and that broadening the entitlement predicate along this path
   would recognize it.
 - `AuthorizationContext#has_enabled_namespaces?` returned **true** for the
@@ -164,7 +164,7 @@ dependency with unknown timeline.
 | Rails gate reconciliation | 1-2 days | Single source of truth for "entitled + scope" across touchpoints 3/4 |
 | Rails tests | 1 day | Subgroup-member specs across entitlement and billing |
 | Documentation (`security.md`, SOX boundary note) | 0.5 day | Reflect subgroup access |
-| **Product / Billing / Security decision** | **Blocking, unknown** | The real critical path; not engineering days |
+| **Product / Billing / Security decision** | **Blocking, unknown** | Critical path; not engineering days |
 
 ### Alternatives considered
 
@@ -280,7 +280,7 @@ What gets harder:
   subgroups produces more distinct prefixes than one holding a single top-level group,
   because the trie compaction cannot merge siblings the user does not hold. Monitor
   the existing `gkg.rails.traversal_ids_computed` metric and the >100-prefix alert
-  documented in `security.md`. Beyond the alert, the `MAX_TRAVERSAL_IDS = 500` cap in
+  documented in `security.md`. Beyond the alert, the [`MAX_TRAVERSAL_IDS = 500`](https://gitlab.com/gitlab-org/gitlab/-/blob/6b61b453bb92925f4db3af16a638a862c8e1a27f/ee/lib/analytics/knowledge_graph/authorization_context.rb#L8) cap in
   `AuthorizationContext` silently truncates to the first 500 sorted paths, causing
   scope loss rather than an error. Scattered subgroup-only grants raise the likelihood
   of hitting this cap.
