@@ -410,7 +410,6 @@ edges:
   HAS_FINDING: edges/has_finding.yaml
   DETECTED_BY: edges/detected_by.yaml
   HAS_IDENTIFIER: edges/has_identifier.yaml
-  DETECTED_IN: edges/detected_in.yaml
   RESOLVED_BY: edges/resolved_by.yaml
   CONFIRMED_BY: edges/confirmed_by.yaml
   DISMISSED_BY: edges/dismissed_by.yaml
@@ -425,8 +424,6 @@ edges:
   IMPORTS: edges/imports.yaml
   CALLS: edges/calls.yaml
   EXTENDS: edges/extends.yaml
-  TARGETS: edges/targets.yaml
-  FROM_BRANCH: edges/from_branch.yaml
   ON_BRANCH: edges/on_branch.yaml
   OCCURRENCE_OF: edges/occurrence.yaml
   SCANS: edges/scans.yaml

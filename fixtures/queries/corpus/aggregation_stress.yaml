@@ -3320,55 +3320,6 @@ join_finding_scanner_080_by_scanner_vendor:
       "limit": 20
     }
 
-join_finding_pipeline_081_by_pipeline_status:
-  desc: "Join finding pipeline 081 by pipeline status"
-  category: aggregation
-  suite: grouping_stress
-  expect: empty  # DETECTED_IN is declared in the edge ontology but no node ETL emits it, so this edge is unpopulated
-  query: |
-    {
-      "query_type": "aggregation",
-      "nodes": [
-        {
-          "id": "f",
-          "entity": "Finding",
-          "filters": {
-            "deduplicated": true
-          }
-        },
-        {
-          "id": "pipe",
-          "entity": "Pipeline"
-        }
-      ],
-      "relationships": [
-        {
-          "type": "DETECTED_IN",
-          "from": "f",
-          "to": "pipe"
-        }
-      ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
-      "aggregations": [
-        {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
-        }
-      ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
-      "limit": 20
-    }
-
 join_occurrence_project_082_by_project_visibility:
   desc: "Join occurrence project 082 by project visibility"
   category: aggregation

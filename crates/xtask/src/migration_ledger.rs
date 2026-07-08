@@ -321,6 +321,20 @@ pub fn bump(
     Ok(())
 }
 
+/// Regenerate the fingerprint snapshot without a version bump or ledger entry,
+/// for ontology drift that changes no generated DDL (verify this by diffing
+/// the `ddl:` section of the snapshot before committing).
+pub fn snapshot() -> Result<()> {
+    let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
+    let current = current_fingerprints(&ontology);
+    fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
+    println!(
+        "regenerated fingerprint snapshot at {}",
+        fingerprint_path().display()
+    );
+    Ok(())
+}
+
 /// First-time snapshot: write the fingerprint file without bumping.
 fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result<()> {
     let version = read_schema_version()?;

@@ -381,6 +381,10 @@ description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 run = "cargo xtask migration-ledger bump"
 description = "Bump SCHEMA_VERSION, append a migration ledger entry, and re-snapshot fingerprints"
 
+[tasks."schema:snapshot"]
+run = "cargo xtask migration-ledger snapshot"
+description = "Regenerate the fingerprint snapshot without bumping SCHEMA_VERSION or the ledger (no-op ontology drift only)"
+
 [tasks."schema:ledger:check"]
 run = "cargo xtask migration-ledger check"
 description = "Fail if the migration ledger or fingerprint snapshot drifted from the ontology"

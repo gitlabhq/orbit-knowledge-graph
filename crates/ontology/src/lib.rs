@@ -1643,7 +1643,6 @@ mod tests {
             "DETECTED_BY",
             "HAS_IDENTIFIER",
             "OCCURRENCE_OF",
-            "DETECTED_IN",
             "SCANS",
         ] {
             let entries = ontology

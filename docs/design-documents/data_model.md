@@ -83,7 +83,6 @@ graph TD
     MergeRequest -- HAS_NOTE --> Note
     MergeRequest -- HAS_LABEL --> Label
 
-    MergeRequest -- TARGETS --> Branch
     MergeRequest -- CLOSES --> WorkItem
     MergeRequest -- TRIGGERED --> Pipeline
     User -- TRIGGERED --> Job
@@ -116,7 +115,6 @@ graph TD
 | `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
 | `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
 | `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
-| `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `MergeRequest` | `Pipeline`     | A merge request triggered a pipeline.                                                                   |
 | `TRIGGERED`                         | `User`         | `Pipeline`, `Job` | A user triggered a pipeline or job directly.                                                       |
@@ -148,7 +146,6 @@ graph TD
 | `LAST_EDITED_BY`                    | `User`         | `MergeRequest` | User who most recently edited the merge request's content (title/description).                         |
 | `HAS_FINDING`                       | `SecurityScan`, `Vulnerability` | `Finding`, `VulnerabilityOccurrence` | A security scan produced findings, or a vulnerability points at its canonical occurrence. |
 | `HAS_IDENTIFIER`                    | `Vulnerability`, `Finding`, `VulnerabilityOccurrence` | `VulnerabilityIdentifier` | An entity is associated with vulnerability identifiers.              |
-| `DETECTED_IN`                       | `Finding` | `Pipeline` | A finding was first or most recently detected in a pipeline. |
 | `DETECTED_BY`                       | `Finding`, `VulnerabilityOccurrence` | `VulnerabilityScanner` | Security data is associated with a scanner.                              |
 | `OCCURRENCE_OF`                     | `VulnerabilityOccurrence` | `Vulnerability` | A vulnerability occurrence is linked to a vulnerability. |
 | `DEPLOYED_BY`                       | `User`         | `Deployment`   | User who triggered the deployment.                                                                      |
@@ -162,7 +159,6 @@ graph TD
 | `FIXES`                             | `MergeRequest` | `Vulnerability`| A merge request fixes a vulnerability.                                                                  |
 | `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | A work item is related to or blocks another work item (edge property `link_type`: `relates_to`, `blocks`). |
 | `MERGED_AT_COMMIT`                  | `MergeRequest` | `Commit`       | The commit a merge request was merged at. Write-once FK (immutable). |
-| `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
 | `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
 | `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
 

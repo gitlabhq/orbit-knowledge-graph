@@ -24,11 +24,9 @@ sources:
   edges/deployed_by.yaml: 584bfb6bea5bb02510d782b241241f424e90a1c10eb3488b6e6b5e526e193d13
   edges/deployed_to.yaml: 17d2d599699828fe2f93eb6e12e9159b3c364480d66b85dc2f360b92b01880d8
   edges/detected_by.yaml: 5912efd9e11c179fc20d834d90b7bb035d350513c674a5d4b3cbd764bb43c58b
-  edges/detected_in.yaml: 7fce951ee7e644765e2e4b24c7dcb33da91996e057b10d3539f41038c261f832
   edges/dismissed_by.yaml: 7d4c3c629b15958b73d089c42b09fcfa9f67edd3c2b06a23c2d660ce3e687ed7
   edges/extends.yaml: a08e64df0c5294f9765dd02f3c0ea5aef0eb7a732e396f592d6ee62c8537c32d
   edges/fixes.yaml: 9582ca83b7b2e969aae6f468811620ee7bed2339aa08d2281273a05ea05cf6aa
-  edges/from_branch.yaml: ca4afe4731777662ee1672e2b1515e57de201a94e9aa4510fb9c1da7c59692aa
   edges/has_diff.yaml: fb0619c41a1765dad85b4bf5f6c4e7dad4bd528a045f47fd2cdfc833e3415cd5
   edges/has_file.yaml: ff1d29a17856d6dab41189df5f3ef0d1f3a3e459c01e4f4aa18c601048a88658
   edges/has_finding.yaml: b19aa016b945a9d95756e26e1bf05ed63f017b4cb020bc195068d52d45d36e33
@@ -62,7 +60,6 @@ sources:
   edges/runs_on.yaml: 09b3a16d783a88f26dbba73892c1f19d0f59f52334e52c2292f29953f790b590
   edges/scans.yaml: 9adddae6656d8671d71b3adb771ab464bb63c9c341fcbe2bfc71c82505a6112d
   edges/source_project.yaml: 036b3d006bf34bfa0c6d3391518f5357e044a86dbc9639e3fd39a0281257f6ae
-  edges/targets.yaml: cb94edcc98833bb19d0d92b229a26a6149abfb8562df952001ef8059de70d295
   edges/triggered.yaml: 77d7d7bb34db06623ecb2c8ddd5bc3b15c7c7685c403bd19a401898c1624e5cb
   edges/triggered_by_pipeline.yaml: bf091bdbc168babd80b547b4a9b26531f2db1363eaabd4a502086192a104441d
   edges/triggers_pipeline.yaml: 78678f3a690addb084e93b81143a2e393ca2efb6ec9d5a0d4b5dd4fc76419dd6
@@ -100,7 +97,7 @@ sources:
   nodes/source_code/file.yaml: f6e9653b7a34e26e8ca1755d24d7de879a504ac7830d9686c57df9f2cde14f7b
   nodes/source_code/imported_symbol.yaml: c61079f0f6912c8c368c9b6866fa459beea4bcf696a5de83c6b806dd8b231a5f
   reference.yaml: 690370de8b936597b790125bbb8ce28743b4e1316f6ef28f64616ebef9dadb74
-  schema.yaml: 11a9b70946bfcdae07f75d0aabbdfbb14f1fa38b4ea7514f1c2a166e138b0771
+  schema.yaml: d9daed955cbdafbd7c90d1a1906184cfa9b4def882109aa16ef074b0210c59d6
 ddl:
   checkpoint: 2ccbd8f9e5b9cab81d102e961784539b04f50748cdbeb6635cbd766e1e3174ee
   code_indexing_checkpoint: ad895eac89a2a477af5d2dde6ad0b0e141edef708b8f298130debf498fa17b45

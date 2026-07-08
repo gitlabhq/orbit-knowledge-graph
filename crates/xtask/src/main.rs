@@ -118,6 +118,11 @@ enum MigrationLedgerCommand {
         #[arg(long)]
         base: Option<String>,
     },
+    /// Regenerate the fingerprint snapshot without touching SCHEMA_VERSION or
+    /// the ledger. For no-op ontology drift (e.g. removing a declaration that
+    /// never emitted DDL) where `mise schema:bump` would wrongly imply a
+    /// version bump is needed.
+    Snapshot,
 }
 
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
@@ -241,6 +246,7 @@ async fn main() -> Result<()> {
                 new,
             } => migration_ledger::bump(scope, entities, note, base, amend, new),
             MigrationLedgerCommand::Check { base } => migration_ledger::check(base),
+            MigrationLedgerCommand::Snapshot => migration_ledger::snapshot(),
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
