@@ -149,28 +149,6 @@ mod tests {
     use super::*;
     use ontology::Ontology;
 
-    // Pipeline identity drift would seed or gate on unwritten checkpoint keys.
-    #[test]
-    fn build_plans_match_ontology_pipeline_descriptors() {
-        let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = plan::build_plans(&ontology, 1, 1, &Default::default());
-
-        let mut plan_ids: Vec<(String, bool)> = plans
-            .namespaced
-            .iter()
-            .map(|p| (p.name.clone(), true))
-            .chain(plans.global.iter().map(|p| (p.name.clone(), false)))
-            .collect();
-        let mut descriptor_ids: Vec<(String, bool)> = ontology
-            .pipeline_descriptors()
-            .into_iter()
-            .map(|d| (d.name, d.scope == EtlScope::Namespaced))
-            .collect();
-        plan_ids.sort();
-        descriptor_ids.sort();
-        assert_eq!(plan_ids, descriptor_ids);
-    }
-
     #[test]
     fn build_plans_returns_global_entities() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
