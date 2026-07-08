@@ -134,8 +134,13 @@ pub fn derive_scope(
             }
         } else if path.starts_with("edges/") {
             match edge_kind_for_path(ontology, path) {
-                Some(relationship_kind) => {
-                    sdlc_entities.insert(relationship_kind);
+                Some(kind)
+                    if is_code_table(ontology, ontology.edge_table_for_relationship(&kind)) =>
+                {
+                    code_changed = true;
+                }
+                Some(kind) => {
+                    sdlc_entities.insert(kind);
                 }
                 None => return Some(ScopeDeclaration::all()),
             }
@@ -171,7 +176,7 @@ pub fn derive_scope(
 }
 
 /// Names accepted in an entry's `entities:` list: etl-bearing nodes, derived
-/// entities, and relationship kinds.
+/// entities, and SDLC-routed relationship kinds (code edges are excluded).
 #[must_use]
 pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
@@ -184,7 +189,9 @@ pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
         names.insert(derived.name.clone());
     }
     for kind in ontology.edge_names() {
-        names.insert(kind.to_string());
+        if !is_code_table(ontology, ontology.edge_table_for_relationship(kind)) {
+            names.insert(kind.to_string());
+        }
     }
     names
 }
@@ -434,6 +441,8 @@ mod tests {
         assert_eq!(scope, Some(ScopeDeclaration::sdlc(entities(&["Note"]))));
     }
 
+    // HAS_NOTE is FK-derived: no edge `etl:` block, but routed to the default
+    // SDLC edge table, so it must derive an sdlc entity — not code.
     #[test]
     fn derive_scope_edge_resolves_to_relationship_kind() {
         let ontology = Ontology::new().with_edges(["HAS_NOTE"]);
@@ -444,6 +453,23 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(scope, Some(ScopeDeclaration::sdlc(entities(&["HAS_NOTE"]))));
+    }
+
+    // calls/defines/extends/imports/on_branch route to gl_code_edge, so an edge
+    // change there must derive `code`, never a bogus sdlc entity.
+    #[test]
+    fn derive_scope_code_edge_is_code() {
+        let ontology = Ontology::new()
+            .with_edges(["CALLS"])
+            .with_edge_table("gl_code_edge")
+            .with_edge_for_table("CALLS", "gl_code_edge");
+        let scope = derive_scope(
+            &ontology,
+            &BTreeMap::new(),
+            &entities(&["edges/calls.yaml"]),
+            &entities(&["gl_code_edge"]),
+        );
+        assert_eq!(scope, Some(ScopeDeclaration::code()));
     }
 
     #[test]
