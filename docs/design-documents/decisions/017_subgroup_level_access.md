@@ -150,43 +150,6 @@ Concretely:
    This requires a product and billing decision
    (see [Open questions](#open-questions)).
 
-### Effort
-
-Code effort: approximately 4-6 engineering days, dominated by the Rails entitlement
-rework. Cross-functional billing and product decisions are a separate blocking
-dependency with unknown timeline.
-
-| Workstream | Effort | Notes |
-|------------|--------|-------|
-| GKG (Rust) core | 0 days | Already subgroup-aware; no change |
-| GKG isolation integration test | 0.5 day | Sibling-subgroup isolation for a subgroup-only path set |
-| Rails `OrbitLicense` rework | 1-2 days | Broaden entitlement check to resolve each path's root |
-| Rails gate reconciliation | 1-2 days | Single source of truth for "entitled + scope" across touchpoints 3/4 |
-| Rails tests | 1 day | Subgroup-member specs across entitlement and billing |
-| Documentation (`security.md`, SOX boundary note) | 0.5 day | Reflect subgroup access |
-| **Product / Billing / Security decision** | **Blocking, unknown** | Critical path; not engineering days |
-
-### Alternatives considered
-
-**Option B: per-subgroup enrollment (change `EnabledNamespace`).** Allow enrolling
-individual subgroups and dispatch indexing per enrolled subgroup. Rejected as
-higher-surface for little benefit: the data is already present in ClickHouse under the
-root's traversal hierarchy, so per-subgroup enrollment multiplies the
-billing/enrollment surface without unlocking new data. It also requires new migrations,
-extends the SOX review surface, and enlarges the test matrix. Option B only becomes
-relevant if product wants subgroups usable under a *non-enrolled* root.
-
-**Option C: derive the enrolled root as the governing namespace.** A variant of the
-proposed decision where the entitlement predicate resolves the subgroup's containing
-enrolled root and uses that root as the governing namespace for billing attribution.
-This makes the billing trade-off explicit (all subgroup usage bills to the enrolled
-root) without requiring per-subgroup enrollment. Worth evaluating as the concrete
-implementation of the touchpoint-4 reconciliation.
-
-**Do nothing (keep top-level only on SaaS).** Preserves the current model but blocks
-use cases where a SaaS user has Reporter+ on a subgroup without top-level membership.
-The status quo remains the fallback if the billing/SOX questions cannot be resolved.
-
 ### Open questions
 
 This ADR is Proposed specifically to align the team on these questions before
