@@ -854,6 +854,33 @@ impl Ontology {
             .unwrap_or(&self.default_edge_table)
     }
 
+    /// The relationship kinds whose edge rows `entity_name` produces. An edge
+    /// kind emits itself; a node emits the kinds named in its ETL edge mappings;
+    /// a derived entity emits the kinds in its `emits:` list. Unknown names emit
+    /// nothing. Lets a caller find which edge table an entity writes to by
+    /// routing each returned kind through [`Self::edge_table_for_relationship`].
+    #[must_use]
+    pub fn relationship_kinds_emitted_by(&self, entity_name: &str) -> BTreeSet<String> {
+        if self.has_edge(entity_name) {
+            return std::iter::once(entity_name.to_string()).collect();
+        }
+        if let Some(node) = self.get_node(entity_name) {
+            return node
+                .etl
+                .as_ref()
+                .map(|etl| {
+                    etl.edge_mappings()
+                        .map(|(_, mapping)| mapping.relationship_kind.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        self.derived_entities()
+            .find(|derived| derived.name == entity_name)
+            .map(|derived| derived.emits.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// Returns `true` when **at least one** variant of `relationship_kind` is
     /// scope-preserving. This is a coarse pre-filter — callers that need
     /// per-variant accuracy must inspect [`EdgeEntity::scope`] directly,
@@ -3019,6 +3046,44 @@ properties:
             "SystemNote extract is a JOIN (query ETL)"
         );
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_edge_kind_is_itself() {
+        let o = Ontology::load_embedded().unwrap();
+        assert_eq!(
+            o.relationship_kinds_emitted_by("MENTIONS"),
+            std::iter::once("MENTIONS".to_string()).collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_derived_entity_are_its_emits() {
+        let o = Ontology::load_embedded().unwrap();
+        assert!(
+            o.relationship_kinds_emitted_by("SystemNote")
+                .contains("MENTIONS")
+        );
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_node_are_its_edge_mappings() {
+        let o = Ontology::load_embedded().unwrap();
+        let note = o.get_node("Note").expect("Note node must load");
+        let expected: BTreeSet<String> = note
+            .etl
+            .as_ref()
+            .expect("Note has ETL")
+            .edge_mappings()
+            .map(|(_, mapping)| mapping.relationship_kind.clone())
+            .collect();
+        assert_eq!(o.relationship_kinds_emitted_by("Note"), expected);
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_unknown_entity_is_empty() {
+        let o = Ontology::load_embedded().unwrap();
+        assert!(o.relationship_kinds_emitted_by("Ghost").is_empty());
     }
 
     #[test]

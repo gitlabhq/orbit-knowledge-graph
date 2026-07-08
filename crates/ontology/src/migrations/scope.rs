@@ -62,7 +62,7 @@ impl ScopeDeclaration {
     }
 
     #[must_use]
-    fn all() -> Self {
+    pub fn all() -> Self {
         Self {
             scope: Scope::All,
             entities: BTreeSet::new(),
@@ -190,6 +190,25 @@ pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
     }
     for kind in ontology.edge_names() {
         if !is_code_table(ontology, ontology.edge_table_for_relationship(kind)) {
+            names.insert(kind.to_string());
+        }
+    }
+    names
+}
+
+/// Names of the code-graph entities: nodes with no `etl:` block (parsed from
+/// their own archive, not Siphon) and relationship kinds routed to a code edge
+/// table. The `code` counterpart to [`sdlc_entity_names`].
+#[must_use]
+pub fn code_entity_names(ontology: &Ontology) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for node in ontology.nodes() {
+        if node.etl.is_none() {
+            names.insert(node.name.clone());
+        }
+    }
+    for kind in ontology.edge_names() {
+        if is_code_table(ontology, ontology.edge_table_for_relationship(kind)) {
             names.insert(kind.to_string());
         }
     }

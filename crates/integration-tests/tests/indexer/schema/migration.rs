@@ -4,6 +4,7 @@ use std::time::Duration;
 use clickhouse_client::FromArrowColumn;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
+use indexer::orchestrator::scheduled::migration_completion;
 use indexer::schema::migration;
 use indexer::schema::version::{
     SCHEMA_VERSION, SchemaWaitError, ensure_version_table, prefixed_table_name,
@@ -12,8 +13,10 @@ use indexer::schema::version::{
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
+use ontology::migrations::{Scope, ScopeDeclaration};
 use query_engine::compiler::{
-    DictionarySource, generate_graph_dictionaries_with_prefix, generate_graph_tables_with_prefix,
+    DictionarySource, emit_create_table, generate_graph_dictionaries_with_prefix,
+    generate_graph_tables_with_prefix,
 };
 
 fn dictionary_source(config: &gkg_server_config::ClickHouseConfiguration) -> DictionarySource<'_> {
@@ -760,4 +763,111 @@ async fn wait_until_ready_ready_when_rebuilding_below_active() {
     )
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidated_plan() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    let active_version = *SCHEMA_VERSION - 1;
+    let old_prefix = table_prefix(active_version);
+    let new_checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+
+    for table in generate_graph_tables_with_prefix(&ontology, &old_prefix) {
+        client.execute(&emit_create_table(&table)).await.unwrap();
+    }
+
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}gl_edge \
+         (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version) \
+         VALUES ('1/100/', 'MENTIONS', 1, 'User', 2, 'Note', '2024-01-01 00:00:00.000000')"
+    ))
+    .await;
+
+    for (key, cursor_values) in [
+        ("ns.100.User", "null"),
+        ("global.User", "null"),
+        ("ns.100.Note", "null"),
+        ("ns.100.Note.p1of2", r#"{"c":["1/100/","5"]}"#),
+        ("dispatch.sdlc.namespace.sweep", "null"),
+    ] {
+        ctx.execute(&format!(
+            "INSERT INTO {old_prefix}checkpoint (key, watermark, cursor_values, _version) \
+             VALUES ('{key}', '2024-01-01 00:00:00.000000', '{cursor_values}', '2024-01-01 00:00:00.000000')"
+        ))
+        .await;
+    }
+
+    let scope = ScopeDeclaration {
+        scope: Scope::Sdlc,
+        entities: ["Note".to_string()].into_iter().collect(),
+    };
+    migration::prepare_narrowed_tables(
+        &client,
+        &dictionary_source(&ctx.config),
+        &ontology,
+        &metrics,
+        &scope,
+        active_version,
+    )
+    .await
+    .unwrap();
+
+    let new_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+    let edge_rows = ctx
+        .query(&format!(
+            "SELECT toInt64(count()) AS cnt FROM {new_edge} FINAL"
+        ))
+        .await;
+    assert_eq!(
+        i64::extract_column(&edge_rows, 0).unwrap(),
+        vec![1],
+        "an unchanged edge table must be cloned with its rows"
+    );
+
+    let surviving = ctx
+        .query(&format!(
+            "SELECT key FROM {new_checkpoint} FINAL WHERE _deleted = false ORDER BY key"
+        ))
+        .await;
+    assert_eq!(
+        String::extract_column(&surviving, 0).unwrap(),
+        vec!["global.User".to_string(), "ns.100.User".to_string()],
+        "seeding keeps unchanged plans but drops dispatch cursors (to re-fire the cold-start sweep) \
+         and the invalidated plan with its partition sub-key"
+    );
+
+    let (_, ready_before) = migration_completion::sdlc_narrowing_complete(
+        &client,
+        &ontology,
+        &scope,
+        &new_checkpoint,
+        1,
+    )
+    .await
+    .unwrap();
+    assert!(
+        !ready_before,
+        "the gate must block until the invalidated plan has a completed checkpoint"
+    );
+
+    ctx.execute(&format!(
+        "INSERT INTO {new_checkpoint} (key, watermark, cursor_values, _version) \
+         VALUES ('ns.100.Note', '2024-02-01 00:00:00.000000', 'null', '2024-02-01 00:00:00.000000')"
+    ))
+    .await;
+
+    let (_, ready_after) = migration_completion::sdlc_narrowing_complete(
+        &client,
+        &ontology,
+        &scope,
+        &new_checkpoint,
+        1,
+    )
+    .await
+    .unwrap();
+    assert!(
+        ready_after,
+        "the gate must promote once every enabled namespace has the invalidated plan's completed checkpoint"
+    );
 }

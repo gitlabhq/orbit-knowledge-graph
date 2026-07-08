@@ -23,6 +23,9 @@ const LEDGER_HEADER: &str = "\
 # with no entry is treated as \"*\", which also makes pruning old entries safe.
 ";
 
+/// The ledger compiled into the binary from `config/schema-migrations.yaml`.
+const EMBEDDED_LEDGER: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MigrationLedger {
@@ -33,6 +36,44 @@ pub struct MigrationLedger {
 impl MigrationLedger {
     pub fn parse(content: &str) -> Result<Self, String> {
         serde_yaml::from_str(content).map_err(|e| format!("parsing migration ledger: {e}"))
+    }
+
+    /// Parses the ledger baked into the binary at build time, so the dispatcher
+    /// can consult it at runtime without reading the filesystem.
+    pub fn load_embedded() -> Result<Self, String> {
+        Self::parse(EMBEDDED_LEDGER)
+    }
+
+    /// The union of every entry's scope for the versions crossed by migrating
+    /// `active_version` → `target_version`. A version in range with no entry, or
+    /// a rollback (`active_version >= target_version`), widens to [`Scope::All`]
+    /// so an unmapped or reversed step always triggers a full rebuild.
+    #[must_use]
+    pub fn invalidation_scope_between(
+        &self,
+        active_version: u32,
+        target_version: u32,
+    ) -> ScopeDeclaration {
+        if active_version >= target_version {
+            return ScopeDeclaration::all();
+        }
+
+        let mut scope: Option<ScopeDeclaration> = None;
+        for version in (active_version + 1)..=target_version {
+            let entry = self
+                .migrations
+                .iter()
+                .find(|entry| entry.version == version);
+            let declaration = match entry {
+                Some(entry) => entry.declaration(),
+                None => return ScopeDeclaration::all(),
+            };
+            scope = Some(match scope {
+                Some(accumulated) => accumulated.widened_with(&declaration),
+                None => declaration,
+            });
+        }
+        scope.unwrap_or_else(ScopeDeclaration::all)
     }
 
     /// Serialized YAML with the usage header.
@@ -200,6 +241,88 @@ mod tests {
         let ontology = Ontology::new();
         let err = ledger.validate(&ontology, 1).unwrap_err();
         assert!(err.contains("only valid with `scope: sdlc`"), "{err}");
+    }
+
+    fn ledger(entries: Vec<MigrationEntry>) -> MigrationLedger {
+        MigrationLedger {
+            migrations: entries,
+        }
+    }
+
+    fn entry(version: u32, scope: Scope, entity_names: &[&str]) -> MigrationEntry {
+        MigrationEntry {
+            version,
+            scope,
+            entities: entities(entity_names),
+            note: None,
+        }
+    }
+
+    #[test]
+    fn invalidation_scope_single_entry_in_range() {
+        let ledger = ledger(vec![entry(81, Scope::Sdlc, &["Note"])]);
+        assert_eq!(
+            ledger.invalidation_scope_between(80, 81),
+            ScopeDeclaration {
+                scope: Scope::Sdlc,
+                entities: entities(&["Note"]),
+            }
+        );
+    }
+
+    #[test]
+    fn invalidation_scope_unions_across_range() {
+        let ledger = ledger(vec![
+            entry(83, Scope::Sdlc, &["Issue"]),
+            entry(82, Scope::Sdlc, &["Note"]),
+        ]);
+        assert_eq!(
+            ledger.invalidation_scope_between(81, 83),
+            ScopeDeclaration {
+                scope: Scope::Sdlc,
+                entities: entities(&["Issue", "Note"]),
+            }
+        );
+    }
+
+    #[test]
+    fn invalidation_scope_gap_in_range_widens_to_all() {
+        let ledger = ledger(vec![entry(83, Scope::Sdlc, &["Note"])]);
+        assert_eq!(
+            ledger.invalidation_scope_between(81, 83),
+            ScopeDeclaration::all()
+        );
+    }
+
+    #[test]
+    fn invalidation_scope_rollback_direction_is_all() {
+        let ledger = ledger(vec![entry(82, Scope::Sdlc, &["Note"])]);
+        assert_eq!(
+            ledger.invalidation_scope_between(83, 82),
+            ScopeDeclaration::all()
+        );
+        assert_eq!(
+            ledger.invalidation_scope_between(82, 82),
+            ScopeDeclaration::all()
+        );
+    }
+
+    #[test]
+    fn invalidation_scope_mixing_code_and_sdlc_widens_to_all() {
+        let ledger = ledger(vec![
+            entry(82, Scope::Code, &[]),
+            entry(81, Scope::Sdlc, &["Note"]),
+        ]);
+        assert_eq!(
+            ledger.invalidation_scope_between(80, 82),
+            ScopeDeclaration::all()
+        );
+    }
+
+    #[test]
+    fn embedded_ledger_loads() {
+        let ledger = MigrationLedger::load_embedded().expect("embedded ledger must parse");
+        assert!(!ledger.migrations.is_empty());
     }
 
     #[test]

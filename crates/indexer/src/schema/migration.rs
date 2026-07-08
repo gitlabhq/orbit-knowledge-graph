@@ -21,9 +21,13 @@
 //! **Rollback** (`active > SCHEMA_VERSION`, an older binary was deployed):
 //! see [`run_rollback`] for the two cases (tables retained vs. already GC'd).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arrow::datatypes::UInt64Type;
+use gkg_utils::arrow::ArrowUtils;
+use ontology::migrations::{MigrationLedger, Scope, ScopeDeclaration};
 use query_engine::compiler::{
     DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
@@ -37,6 +41,8 @@ use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
+use crate::modules::sdlc::invalidated_dispatch_plans;
+use crate::schema::invalidation::{TableMigrationAction, classify_tables_for_scope};
 use crate::schema::version::{
     SCHEMA_VERSION, SchemaVersionError, drop_kind_for_engine, list_version_objects,
     mark_version_active, mark_version_retired, read_active_version, read_all_versions,
@@ -53,6 +59,9 @@ const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 
+/// The SDLC checkpoint table, seeded (not cloned) on a narrowed `sdlc` migration.
+const CHECKPOINT_TABLE: &str = "checkpoint";
+
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error("schema version error: {0}")]
@@ -66,6 +75,9 @@ pub enum MigrationError {
 
     #[error("migration lock held by another pod after {seconds}s; giving up")]
     LockTimeout { seconds: u64 },
+
+    #[error("migration ledger error: {0}")]
+    Ledger(String),
 }
 
 /// Runs the migration check. Must be called at boot, before the task loops
@@ -332,7 +344,24 @@ async fn run_migration_locked(
     // exist. Reserved for future dual-write scenarios.
     metrics.record("drain", "success");
 
-    let create_result = create_prefixed_tables(graph, source, ontology, metrics).await;
+    let scope = match MigrationLedger::load_embedded() {
+        Ok(ledger) => ledger.invalidation_scope_between(active_version, *SCHEMA_VERSION),
+        Err(e) => {
+            warn!(error = %e, "failed to load migration ledger — releasing lock");
+            let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
+            return Err(MigrationError::Ledger(e));
+        }
+    };
+
+    // A narrowed migration seeds the invalidated plans' checkpoints out of the
+    // new checkpoint table; the first ordinary dispatch to reach a seeded-out
+    // plan epoch-backfills it. No forced publish, no ordering constraint.
+    let create_result = if scope.scope == Scope::All {
+        create_prefixed_tables(graph, source, ontology, metrics).await
+    } else {
+        info!(version = *SCHEMA_VERSION, %scope, "narrowed migration — cloning unchanged tables");
+        prepare_narrowed_tables(graph, source, ontology, metrics, &scope, active_version).await
+    };
     if let Err(ref e) = create_result {
         warn!(error = %e, "failed to create new-prefix tables — releasing lock");
         let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
@@ -419,7 +448,153 @@ async fn create_prefixed_tables(
 
     info!(count = tables.len(), prefix = %new_prefix, "new-prefix tables created");
 
-    let dicts = generate_graph_dictionaries_with_prefix(ontology, &new_prefix);
+    create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
+    metrics.record("create_tables", "success");
+    Ok(())
+}
+
+/// Clones every table whose rows survive the narrowed migration, rebuilds the
+/// invalidated ones empty, and (SDLC scope) seeds the checkpoint table so only
+/// invalidated plans re-index. Dictionaries and views are always recreated
+/// (never cloned), since they only project over the tables. Public so the
+/// narrowed preparation can be exercised against real ClickHouse in tests.
+pub async fn prepare_narrowed_tables(
+    graph: &ArrowClickHouseClient,
+    source: &DictionarySource<'_>,
+    ontology: &ontology::Ontology,
+    metrics: &MigrationMetrics,
+    scope: &ScopeDeclaration,
+    active_version: u32,
+) -> Result<(), MigrationError> {
+    let new_prefix = table_prefix(*SCHEMA_VERSION);
+    let old_prefix = table_prefix(active_version);
+    let actions = classify_tables_for_scope(ontology, scope);
+
+    let existing_old = version_object_names(graph, active_version).await?;
+    let existing_new = version_object_names(graph, *SCHEMA_VERSION).await?;
+
+    let tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
+    let mut cloned = 0;
+    let mut rebuilt = 0;
+    let mut seeded = 0;
+    for table in &tables {
+        let base = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
+
+        if base == CHECKPOINT_TABLE && scope.scope == Scope::Sdlc {
+            seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, scope).await?;
+            seeded += 1;
+            continue;
+        }
+
+        let old_name = format!("{old_prefix}{base}");
+        let clone_from_active = matches!(
+            actions.get(base),
+            Some(TableMigrationAction::CloneFromActive)
+        ) && existing_old.contains(&old_name);
+
+        if clone_from_active {
+            clone_table(graph, &old_name, &table.name, &existing_new).await?;
+            cloned += 1;
+        } else {
+            info!(table = %table.name, "rebuilding table empty");
+            graph
+                .execute(&emit_create_table(table))
+                .await
+                .map_err(|e| MigrationError::Ddl {
+                    table: table.name.clone(),
+                    reason: e.to_string(),
+                })?;
+            rebuilt += 1;
+        }
+    }
+
+    info!(cloned, rebuilt, seeded, prefix = %new_prefix, "narrowed migration tables prepared");
+
+    create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
+    metrics.record("create_tables", "success");
+    Ok(())
+}
+
+/// Creates the new SDLC checkpoint table empty, then copies the surviving
+/// checkpoint state from the active version: every `_deleted = false` key
+/// except (a) `dispatch.%` cursors — so the cold-start sweep fires as it does
+/// today — and (b) keys of invalidated plans (both `ns.{id}.{plan}` and
+/// `global.{plan}`, including `.p{N}of{M}` partition sub-keys), so those plans
+/// start with no checkpoint and epoch-backfill on the next dispatch.
+async fn seed_sdlc_checkpoint(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    new_table: &query_engine::compiler::ast::ddl::CreateTable,
+    old_prefix: &str,
+    scope: &ScopeDeclaration,
+) -> Result<(), MigrationError> {
+    graph
+        .execute(&emit_create_table(new_table))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })?;
+
+    let plans = invalidated_dispatch_plans(ontology, scope);
+
+    let old_table = format!("{old_prefix}{CHECKPOINT_TABLE}");
+    info!(from = %old_table, to = %new_table.name, "seeding checkpoint from active version");
+    graph
+        .query(&seed_checkpoint_sql(&new_table.name, &old_table))
+        .param("ns_plans", &plans.namespaced)
+        .param("global_plans", &plans.global)
+        .execute()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })
+}
+
+/// Zero-copy `CLONE AS` of `old_name` into `new_name`. A crash between `CLONE
+/// AS`'s create and attach can leave an empty shell that `IF NOT EXISTS` would
+/// then skip; if the destination exists empty while the source has rows, drop
+/// and re-clone (safe: nothing reads the new prefix until `migrating` is set).
+async fn clone_table(
+    graph: &ArrowClickHouseClient,
+    old_name: &str,
+    new_name: &str,
+    existing_new: &HashSet<String>,
+) -> Result<(), MigrationError> {
+    if existing_new.contains(new_name)
+        && count_rows(graph, new_name).await? == 0
+        && count_rows(graph, old_name).await? > 0
+    {
+        warn!(table = %new_name, "re-cloning empty shell left by an interrupted migration");
+        graph
+            .execute(&format!("DROP TABLE IF EXISTS {new_name}"))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: new_name.to_string(),
+                reason: e.to_string(),
+            })?;
+    }
+
+    info!(from = %old_name, to = %new_name, "cloning table from active version");
+    graph
+        .execute(&format!(
+            "CREATE TABLE IF NOT EXISTS {new_name} CLONE AS {old_name}"
+        ))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_name.to_string(),
+            reason: e.to_string(),
+        })
+}
+
+async fn create_dictionaries_and_views(
+    graph: &ArrowClickHouseClient,
+    source: &DictionarySource<'_>,
+    ontology: &ontology::Ontology,
+    new_prefix: &str,
+) -> Result<(), MigrationError> {
+    let dicts = generate_graph_dictionaries_with_prefix(ontology, new_prefix);
     for dict in &dicts {
         info!(dictionary = %dict.name, source = %dict.source_table, "creating dictionary");
         graph
@@ -433,7 +608,7 @@ async fn create_prefixed_tables(
 
     // Materialized views depend on the tables they SELECT FROM, so they
     // must be created after all tables exist.
-    let views = generate_graph_materialized_views_with_prefix(ontology, &new_prefix);
+    let views = generate_graph_materialized_views_with_prefix(ontology, new_prefix);
     for view in &views {
         info!(view = %view.name, "creating materialized view");
         graph
@@ -446,19 +621,83 @@ async fn create_prefixed_tables(
     }
 
     info!(
-        tables = tables.len(),
         dictionaries = dicts.len(),
         views = views.len(),
         prefix = %new_prefix,
-        "new-prefix tables, dictionaries, and materialized views created"
+        "dictionaries and materialized views created"
     );
-    metrics.record("create_tables", "success");
     Ok(())
+}
+
+/// `INSERT … SELECT` that seeds `new_table` from `old_table`, keeping the latest
+/// non-deleted state per key while dropping `dispatch.%` cursors and any key of
+/// an invalidated plan. Plan names carry no dots, so a key's plan segment is a
+/// fixed `splitByChar('.', …)` position for both parents and `.p{N}of{M}`
+/// partition sub-keys. `{ns_plans}` / `{global_plans}` are bound at execution.
+fn seed_checkpoint_sql(new_table: &str, old_table: &str) -> String {
+    format!(
+        "INSERT INTO {new_table} \
+         SELECT * FROM {old_table} FINAL \
+         WHERE _deleted = false \
+           AND NOT startsWith(key, 'dispatch.') \
+           AND NOT ( \
+             (splitByChar('.', key)[1] = 'ns' \
+                AND splitByChar('.', key)[3] IN {{ns_plans:Array(String)}}) \
+             OR (splitByChar('.', key)[1] = 'global' \
+                AND splitByChar('.', key)[2] IN {{global_plans:Array(String)}}) \
+           )"
+    )
+}
+
+async fn version_object_names(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<HashSet<String>, MigrationError> {
+    Ok(list_version_objects(graph, version)
+        .await?
+        .into_iter()
+        .map(|object| object.name)
+        .collect())
+}
+
+async fn count_rows(graph: &ArrowClickHouseClient, table: &str) -> Result<u64, MigrationError> {
+    let batches = graph
+        .query(&format!("SELECT count() AS cnt FROM {table}"))
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.to_string(),
+            reason: e.to_string(),
+        })?;
+    Ok(batches
+        .first()
+        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "cnt", 0))
+        .unwrap_or(0))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seed_checkpoint_sql_excludes_dispatch_and_invalidated_plans() {
+        let sql = seed_checkpoint_sql("v81_checkpoint", "v80_checkpoint");
+        assert!(sql.contains("INSERT INTO v81_checkpoint"));
+        assert!(sql.contains("FROM v80_checkpoint FINAL"));
+        assert!(sql.contains("_deleted = false"));
+        assert!(
+            sql.contains("NOT startsWith(key, 'dispatch.')"),
+            "dispatch cursors must be dropped so the cold-start sweep re-fires: {sql}"
+        );
+        assert!(
+            sql.contains("splitByChar('.', key)[3] IN {ns_plans:Array(String)}"),
+            "namespaced invalidated plans (and their .p partition sub-keys) must be dropped: {sql}"
+        );
+        assert!(
+            sql.contains("splitByChar('.', key)[2] IN {global_plans:Array(String)}"),
+            "global invalidated plans must be dropped: {sql}"
+        );
+    }
 
     #[test]
     fn generate_graph_tables_produces_ddl_for_all_ontology_tables() {

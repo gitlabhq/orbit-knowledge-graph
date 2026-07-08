@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
+use ontology::migrations::{MigrationLedger, Scope, ScopeDeclaration};
 use query_engine::compiler::{
     generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
 };
@@ -32,11 +33,13 @@ use std::sync::LazyLock;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
+use crate::modules::sdlc::invalidated_dispatch_plans;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::metrics::CompletionMetrics;
 use crate::schema::version::{
     SCHEMA_VERSION, drop_kind_for_engine, mark_version_active, mark_version_dropped,
-    mark_version_retired, read_all_versions, read_migrating_version, table_prefix,
+    mark_version_retired, read_active_version, read_all_versions, read_migrating_version,
+    table_prefix,
 };
 
 /// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
@@ -122,6 +125,35 @@ const READ_MIGRATING_AGE: &str = "\
 SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
 FROM gkg_schema_version FINAL \
 WHERE status = 'migrating' AND version = {version:UInt32}";
+
+/// Namespaces holding a COMPLETED checkpoint for *every* invalidated namespaced
+/// plan. Seeding leaves invalidated plans with no key, so presence of a
+/// completed row is a truthful "re-indexed" signal. A completed checkpoint has
+/// the null cursor marker (`'null'`, or `''` — both mean "not mid-pull" to the
+/// checkpoint decoder); `length(...) = 3` matches the `ns.{id}.{plan}` parent
+/// exactly and excludes `.p{N}of{M}` partition sub-keys.
+const COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS: &str = "\
+SELECT count() AS ns_count FROM ( \
+    SELECT splitByChar('.', key)[2] AS ns \
+    FROM {table:Identifier} FINAL \
+    WHERE _deleted = false \
+      AND cursor_values IN ('null', '') \
+      AND length(splitByChar('.', key)) = 3 \
+      AND splitByChar('.', key)[1] = 'ns' \
+      AND splitByChar('.', key)[3] IN {plans:Array(String)} \
+    GROUP BY ns \
+    HAVING uniqExact(splitByChar('.', key)[3]) = {plan_count:UInt64} \
+)";
+
+/// Distinct invalidated global plans with a completed `global.<plan>` checkpoint.
+const COUNT_COMPLETE_GLOBAL_PLANS: &str = "\
+SELECT count(DISTINCT splitByChar('.', key)[2]) AS ns_count \
+FROM {table:Identifier} FINAL \
+WHERE _deleted = false \
+  AND cursor_values IN ('null', '') \
+  AND length(splitByChar('.', key)) = 2 \
+  AND splitByChar('.', key)[1] = 'global' \
+  AND splitByChar('.', key)[2] IN {plans:Array(String)}";
 
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
@@ -332,14 +364,6 @@ impl MigrationCompletionChecker {
             return Ok(false);
         }
 
-        // SDLC completeness: namespaces with entries in the new checkpoint
-        // table. This is the *only* gate for promotion.
-        let sdlc_table = format!("{prefix}checkpoint");
-        let sdlc_count = self
-            .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
-            .await
-            .map_err(|e| format!("count SDLC checkpoint namespaces: {e}"))?;
-
         // Code-indexing telemetry. Computed for visibility and emitted as a
         // structured log field below; explicitly NOT part of the promotion
         // predicate. The backfill dispatcher fills
@@ -352,13 +376,40 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| format!("compute code coverage: {e}"))?;
 
+        let scope = self.invalidation_scope(version).await?;
+        let (sdlc_indexed, sdlc_ready) = match scope.scope {
+            // A cloned SDLC dataset satisfies the any-key gate immediately
+            // (correct: a code narrowing leaves SDLC current), and `*` keeps
+            // the original full-rebuild gate.
+            Scope::All | Scope::Code => {
+                let sdlc_table = format!("{prefix}checkpoint");
+                let count = self
+                    .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
+                    .await
+                    .map_err(|e| format!("count SDLC checkpoint namespaces: {e}"))?;
+                (count, count >= enabled_count)
+            }
+            Scope::Sdlc => {
+                let checkpoint_table = format!("{prefix}checkpoint");
+                sdlc_narrowing_complete(
+                    &self.graph,
+                    &self.ontology,
+                    &scope,
+                    &checkpoint_table,
+                    enabled_count,
+                )
+                .await?
+            }
+        };
+
         info!(
             version,
-            sdlc_indexed_namespaces = sdlc_count,
+            sdlc_indexed_namespaces = sdlc_indexed,
             enabled_namespaces = enabled_count,
             code_indexed_projects = indexed_projects,
             code_eligible_projects = eligible_projects,
             code_coverage = coverage,
+            migration_scope = %scope,
             "migration completion status"
         );
 
@@ -368,7 +419,7 @@ impl MigrationCompletionChecker {
         // < 95% for >24h post-promotion, etc.).
         let current = *SCHEMA_VERSION;
         self.metrics
-            .record_units("sdlc", version, current, sdlc_count, enabled_count);
+            .record_units("sdlc", version, current, sdlc_indexed, enabled_count);
         self.metrics.record_units(
             "code",
             version,
@@ -377,10 +428,20 @@ impl MigrationCompletionChecker {
             eligible_projects,
         );
 
-        // Promotion fires as soon as SDLC has covered every enabled
-        // namespace. Code coverage is tracked in `coverage` above for
-        // observability, but it explicitly does NOT block promotion.
-        Ok(sdlc_count >= enabled_count)
+        // Code coverage is tracked in `coverage` above for observability, but
+        // it explicitly does NOT block promotion.
+        Ok(sdlc_ready)
+    }
+
+    /// The scope crossed by the in-flight migration: active version → migrating
+    /// version through the ledger. Selects which promotion gate applies.
+    async fn invalidation_scope(&self, migrating_version: u32) -> Result<ScopeDeclaration, String> {
+        let active = read_active_version(&self.graph)
+            .await
+            .map_err(|e| format!("read active version: {e}"))?
+            .unwrap_or(0);
+        let ledger = MigrationLedger::load_embedded()?;
+        Ok(ledger.invalidation_scope_between(active, migrating_version))
     }
 
     /// Reads the wall-clock age (in seconds) of the row that marked the
@@ -634,6 +695,75 @@ impl MigrationCompletionChecker {
     }
 }
 
+/// Narrowed-SDLC promotion gate over `checkpoint_table`: every enabled namespace
+/// holds a COMPLETED checkpoint for every invalidated namespaced plan, and every
+/// invalidated global plan has a completed checkpoint. Seeding leaves invalidated
+/// plans unseeded, so a completed row is a truthful "re-indexed" signal. Returns
+/// `(completed_namespaces, ready)`. Public so the gate can be exercised against
+/// real ClickHouse with a synthetic scope in tests.
+pub async fn sdlc_narrowing_complete(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    scope: &ScopeDeclaration,
+    checkpoint_table: &str,
+    enabled_count: u64,
+) -> Result<(u64, bool), String> {
+    let plans = invalidated_dispatch_plans(ontology, scope);
+
+    let completed_namespaces =
+        count_completed_namespaces(graph, checkpoint_table, &plans.namespaced).await?;
+    let namespaced_ready = plans.namespaced.is_empty() || completed_namespaces >= enabled_count;
+
+    let completed_global =
+        count_completed_global_plans(graph, checkpoint_table, &plans.global).await?;
+    let global_ready = completed_global as usize == plans.global.len();
+
+    Ok((completed_namespaces, namespaced_ready && global_ready))
+}
+
+async fn count_completed_namespaces(
+    graph: &ArrowClickHouseClient,
+    checkpoint_table: &str,
+    namespaced_plans: &[String],
+) -> Result<u64, String> {
+    if namespaced_plans.is_empty() {
+        return Ok(0);
+    }
+    let batches = graph
+        .query(COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS)
+        .param("table", checkpoint_table)
+        .param("plans", namespaced_plans)
+        .param("plan_count", namespaced_plans.len() as u64)
+        .fetch_arrow()
+        .await
+        .map_err(|e| e.to_string())?;
+    batches
+        .first()
+        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
+        .ok_or_else(|| "no ns_count in result".to_string())
+}
+
+async fn count_completed_global_plans(
+    graph: &ArrowClickHouseClient,
+    checkpoint_table: &str,
+    global_plans: &[String],
+) -> Result<u64, String> {
+    if global_plans.is_empty() {
+        return Ok(0);
+    }
+    let batches = graph
+        .query(COUNT_COMPLETE_GLOBAL_PLANS)
+        .param("table", checkpoint_table)
+        .param("plans", global_plans)
+        .fetch_arrow()
+        .await
+        .map_err(|e| e.to_string())?;
+    batches
+        .first()
+        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
+        .ok_or_else(|| "no ns_count in result".to_string())
+}
+
 /// Builds the set of object names the ontology creates (tables, views,
 /// dictionaries) — without any version prefix. Used to validate that a
 /// `v<N>_*` object found in `system.tables` was created by the migration
@@ -684,6 +814,40 @@ mod tests {
     fn default_config_has_cron() {
         let config = MigrationCompletionConfig::default();
         assert!(config.schedule.cron.is_some());
+    }
+
+    #[test]
+    fn complete_namespaces_query_gates_on_completed_marker_and_all_plans() {
+        assert!(COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("{table:Identifier}"));
+        assert!(
+            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("cursor_values IN ('null', '')"),
+            "only a completed (not mid-pull) checkpoint counts"
+        );
+        assert!(
+            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("length(splitByChar('.', key)) = 3"),
+            "exact ns.{{id}}.{{plan}} match excludes .p{{N}}of{{M}} partition sub-keys"
+        );
+        assert!(
+            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS
+                .contains("splitByChar('.', key)[3] IN {plans:Array(String)}")
+        );
+        assert!(
+            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("= {plan_count:UInt64}"),
+            "a namespace counts only once it has every invalidated plan"
+        );
+        assert!(!COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("migration_started_at"));
+    }
+
+    #[test]
+    fn complete_global_query_gates_on_completed_marker_and_plans() {
+        assert!(COUNT_COMPLETE_GLOBAL_PLANS.contains("{table:Identifier}"));
+        assert!(COUNT_COMPLETE_GLOBAL_PLANS.contains("cursor_values IN ('null', '')"));
+        assert!(COUNT_COMPLETE_GLOBAL_PLANS.contains("length(splitByChar('.', key)) = 2"));
+        assert!(
+            COUNT_COMPLETE_GLOBAL_PLANS
+                .contains("splitByChar('.', key)[2] IN {plans:Array(String)}")
+        );
+        assert!(!COUNT_COMPLETE_GLOBAL_PLANS.contains("migration_started_at"));
     }
 
     #[test]
