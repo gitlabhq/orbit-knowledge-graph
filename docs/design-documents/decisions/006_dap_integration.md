@@ -1,342 +1,334 @@
-# Orbit + DAP integration spec
-
-**Date:** 2026-03-26
-**Author:** @michaelangeloio
-**Epic:** [gitlab-org&21075](https://gitlab.com/groups/gitlab-org/-/epics/21075)
-**Status:** Draft
-**Related:** [Orbit usage billing spec](orbit-usage-billing-spec.md)
-
+---
+title: "GKG ADR 006: Orbit + Duo Agent Platform integration"
+creation-date: "2026-03-26"
+last-updated: "2026-07-08"
+authors: [ "@michaelangeloio" ]
+toc_hide: true
 ---
 
-## 1. Problem statement
+## Status
 
-Orbit (GitLab Knowledge Graph / GKG) has two tools -- `get_graph_schema` and `query_graph` -- that let LLMs query structured graph data instead of making dozens of individual REST API calls. In early testing, this cuts tool call volume and gives agents better answers because they get relational data in one shot.
+Accepted
 
-Today these tools are only reachable via the Rails REST API (`/api/v4/orbit/*`) and the MCP server (`/api/v4/orbit/mcp`). DAP agents can't use them because there's no wiring between the Duo Workflow Service and Orbit.
+## Date
 
-This spec covers getting Orbit tools into DWS for agentic web chat. For billing and usage tracking, see the [usage billing spec](orbit-usage-billing-spec.md).
+2026-03-26
 
----
+## Context
 
-## 2. Consumption channels
+Orbit (the GitLab Knowledge Graph, GKG) exposes agent-facing tools that let
+LLMs query structured graph data instead of assembling answers from dozens of
+REST calls. `query_graph` executes a query written in the condensed graph DSL.
+`get_graph_schema` returns the ontology with progressive disclosure.
+`list_commands` and `invoke_command` form the named-command surface
+([ADR 011](011_agent_command_surface.md)). Giving agents these tools cuts
+tool-call volume and produces better answers because the agent receives
+relational data in one shot.
 
-Four ways to consume Orbit, each with different auth and billing:
+These tools are reachable through the Rails REST API (`/api/v4/orbit/*`) and
+the Orbit MCP server (`/api/v4/orbit/mcp`). The Duo Agent Platform (DAP)
+executes agents in the Duo Workflow Service (DWS), a separate service with no
+direct connection to GKG. This document defines how Orbit tools reach DAP
+agents.
 
-| Channel | Path | Auth Mechanism | Billing Model | Status |
-|---------|------|----------------|---------------|--------|
-| **DAP (DWS)** | User -> Rails -> DWS -> Rails -> GKG | User OAuth token (`ai_workflows` scope) | Zero-rated / bundled with Duo seat | **This spec** |
-| **Frontend (Dashboard)** | User -> Rails -> GKG (gRPC) | User JWT (HS256, existing) | N/A (included in license) | Implemented |
-| **Core Feature** | Internal Rails service -> GKG | System JWT (HS256, existing) | N/A (infrastructure) | Implemented |
-| **External Agents (MCP, glab cli)** | Agent -> Rails OAuth -> GKG | OAuth + User JWT (existing) | Metered / paid add-on | Implemented |
+Billing and usage tracking are covered separately in
+[ADR 007](007_monetization_engineering.md).
 
-DWS already calls Rails APIs on every workflow. When a user starts agentic web chat, Rails creates an OAuth token with the `ai_workflows` scope and passes it to DWS via gRPC metadata. DWS uses this token to call Rails endpoints (directly via `DirectGitLabHttpClient` on .com, or proxied through Workhorse via `ExecutorGitLabHttpClient`).
+### Consumption channels
 
-The Orbit REST API (`/api/v4/orbit/*`) already exists and accepts standard user auth. DWS can call it using the same OAuth token it uses for every other Rails API call. No new auth mechanism is needed for the integration itself -- DWS is already authenticated.
+Orbit has four consumption channels, each with its own auth and billing
+treatment:
 
-For billing verification (proving a request came from DWS for zero-rating), see the [usage billing spec](orbit-usage-billing-spec.md).
+| Channel | Path | Auth | Billing |
+|---------|------|------|---------|
+| DAP (DWS) | User -> Rails -> DWS -> Workhorse -> Rails (Orbit MCP) -> GKG | User OAuth token (`ai_workflows` scope) | Zero-rated, bundled with the Duo seat |
+| Frontend (dashboard) | User -> Rails -> GKG (gRPC) | User JWT (HS256) | Included in the license |
+| Core features | Internal Rails service -> GKG | System JWT (HS256) | Infrastructure, not billed |
+| External agents (MCP, `glab` CLI) | Agent -> Rails OAuth -> GKG | OAuth + user JWT | Metered, paid add-on |
 
----
+DWS authenticates to Rails with an OAuth token carrying the `ai_workflows`
+scope, created by Rails when the workflow starts. All GitLab API traffic from
+DWS is proxied through Workhorse by the executor HTTP client; DWS makes no
+direct HTTP calls to Rails. The Orbit REST API accepts the `ai_workflows`
+scope through the same shared concern other DWS-called APIs use, so the
+integration needs no new data-plane auth mechanism.
 
-## 3. Architecture
+## Decision
 
-### 3.1 Request flow (DWS channel)
+Orbit is a first-class MCP server in the Duo Agent Platform. Rails defines the
+`orbit` server in its MCP configuration service the same way it defines the
+built-in GitLab MCP server, Workhorse hosts the MCP session, and DWS consumes
+the tools like any other MCP tools. There are no Orbit-specific tool classes
+in DWS.
 
-```
-User (Web Chat)
-  │
-  ▼
+### Request flow
+
+```plaintext
+User (agentic chat, foundational agent, or catalog agent)
+  |
+  v
 GitLab Rails
-  │  (1) Creates OAuth token (ai_workflows scope)
-  │  (2) Opens gRPC stream to DWS with token in metadata
-  ▼
-DWS (Python/LangGraph)
-  │  (3) Agent selects Orbit tool based on user query
-  │  (4) DWS calls Rails REST API:
-  │      POST /api/v4/orbit/query
-  │      GET  /api/v4/orbit/schema
-  │      GET  /api/v4/orbit/tools
-  │      Auth: Bearer <user_oauth_token> (existing)
-  ▼
+  |  creates an OAuth token (ai_workflows scope)
+  |  starts the workflow in DWS over gRPC
+  v
+DWS (Python / LangGraph)
+  |  fetches the MCP server config that Rails assembles per workflow
+  |  the agent selects an Orbit tool; DWS emits a RunMCPTool action
+  v
+Workhorse
+  |  holds the MCP session to the Orbit server
+  |  forwards the tool call to POST /api/v4/orbit/mcp
+  |  stamps the channel identity header
+  v
 GitLab Rails
-  │  (5) Validates OAuth token (ai_workflows scope)
-  │  (6) Proxies to GKG via gRPC (existing flow)
-  │  (7) Fires usage event
-  ▼
-GKG Service (Rust/gRPC)
-  │  (8) Executes query with redaction
-  │  (9) Returns result
-  ▼
-Response bubbles back: GKG -> Rails -> DWS -> Agent -> User
+  |  validates the OAuth token and the read_knowledge_graph permission
+  |  proxies to GKG over gRPC and answers redaction callbacks
+  |  fires usage events
+  v
+GKG (Rust)
+  |  executes the query with redaction
+  v
+Result returns through Rails and Workhorse to DWS, then to the agent
 ```
 
-### 3.2 Why DWS -> Rails -> GKG (not DWS -> GKG directly)
-
-1. Rails owns authorization -- the bidirectional streaming redaction protocol requires Rails to authorize each resource. DWS can't do this.
-2. GKG runs in a customer-controlled environment (SM/Dedicated). DWS is a cloud service. Rails is the bridge.
-3. DWS already calls Rails for every other tool (`GitLabApiGet`, `GitLabGraphQL`, etc.). Orbit tools follow the same pattern.
-4. Avoids adding a gRPC client to DWS and managing a separate auth channel.
-
----
-
-## 4. Integration paths
-
-There are two viable paths for getting Orbit tools into DWS. Both use the existing Orbit REST API (`/api/v4/orbit/*`) as the data layer. The choice affects how tools are discovered, registered, and executed.
-
-### 4.1 Path A: first-class MCP server
-
-Treat the Orbit MCP server as a first-class citizen in `McpConfigService`, the same way the GitLab MCP server (`gitlab_search`, `search`, `semantic_code_search`) is hardcoded today. The Orbit MCP server would be defined in code behind a feature flag -- no admin setup, no OAuth flow for users.
-
-**How it works today for the GitLab MCP server:**
-1. `McpConfigService` builds a config hash with the server URL, auth headers, and a tool allowlist
-2. Workhorse receives the config, opens an MCP session to the server, calls `ListTools`
-3. Workhorse filters tools against the allowlist, prefixes names with the server name
-4. Tool definitions (name, description, input schema) are passed to DWS as `McpTool` protobufs
-5. When the agent calls a tool, DWS sends a `RunMCPTool` action back to Workhorse, which proxies to the MCP server
-
-**What we'd add for Orbit:**
-- Add an `orbit` entry to `McpConfigService` (similar to the `gitlab` entry), gated behind the `knowledge_graph` feature flag
-- The MCP server URL is `{gitlab_url}/api/v4/orbit/mcp` (already implemented in Rails)
-- Auth uses the same user OAuth token already available in `McpConfigService`
-- Tool allowlist: `query_graph`, `get_graph_schema`
-- Include for all workflow definitions (not just `chat` like the GitLab MCP server)
-
-**Advantages:**
-- No DWS code changes at all -- MCP tool loading is already dynamic
-- Tool descriptions come from GKG automatically (the MCP `ListTools` response includes them)
-- Workhorse handles tool execution proxying
-- Can be feature-flagged on/off without deploying DWS
-- Users can also create custom agents with Orbit MCP tools via the catalog (once connected)
-- Good for rapid internal testing and proof of concept
-
-**Disadvantages:**
-- MCP JSON-RPC overhead for what is ultimately a REST call
-- Tool execution goes DWS -> Workhorse -> Rails MCP -> GKG (extra hop through Workhorse)
-- Less control over tool behavior (no custom caching, retry, or error handling in DWS)
-- MCP tool descriptions get prefixed with `orbit_` and an untrusted warning banner
-
-### 4.2 Path B: native DWS tools
-
-Create two new `DuoBaseTool` subclasses in DWS that call the Orbit REST API directly using the existing `GitLabHttpClient` (which already carries the user's OAuth token).
-
-**Two tools:**
-
-| Tool | REST endpoint | Purpose |
-|------|---------------|---------|
-| `orbit_query_graph` | `POST /api/v4/orbit/query` (response_format=llm) | Execute a graph query |
-| `orbit_get_graph_schema` | `GET /api/v4/orbit/schema` (response_format=llm) | Get the ontology |
-
-**Tool descriptions from the API:** Both tools fetch their LLM-facing descriptions from `GET /api/v4/orbit/tools` at workflow start. This endpoint returns the tool name, description (with embedded DSL schema), and parameter definitions. The descriptions are cached for the workflow's lifetime -- no cross-process cache needed since each workflow is short-lived.
-
-**Registration:** Add an `"orbit"` entry to the DWS `ToolsRegistry` agent privileges. Rails controls enablement via `agent_privileges_names` in the `WorkflowConfig` GraphQL response -- when Orbit is enabled for the user's namespace, Rails includes `"orbit"` in the privileges list. DWS only registers the tools when the privilege is present. Same mechanism as every other tool.
-
-**BuiltInTool catalog entries:** Add `orbit_query_graph` and `orbit_get_graph_schema` to the `BuiltInToolDefinitions` list in Rails (currently 89 tools). This lets users select Orbit tools when creating custom agents in the catalog.
-
-**Advantages:**
-- Direct REST calls -- simpler data flow (DWS -> Rails -> GKG, no Workhorse hop)
-- Full control over tool behavior: caching, error handling, response parsing, retry logic
-- Can add Orbit-specific logic (e.g., check if result is empty and suggest fallback in tool output)
-- Tool descriptions fetched from `GET /api/v4/orbit/tools` stay in sync with the ontology
-- Tools are selectable in the catalog for custom agent creation
-
-**Disadvantages:**
-- Requires DWS code changes (new tool classes, registry update)
-- Requires Rails changes (BuiltInTool entries, privilege wiring)
-- Tool descriptions need explicit fetch logic (MCP gets them for free via ListTools)
-
-### 4.3 Recommendation
-
-Both paths work. They're not mutually exclusive -- we can do MCP first for rapid internal testing (proof of concept behind a feature flag, no DWS deploy needed), then build native tools for production.
-
-**Phase 1 (internal testing):** MCP path. Define Orbit as a first-class MCP server in `McpConfigService` behind the existing `knowledge_graph` feature flag. This lets us test Orbit tools in agentic chat on staging without any DWS code changes. Custom agents can also use the Orbit MCP server.
-
-**Phase 2 (production):** Native DWS tools. Build the `DuoBaseTool` subclasses that call the REST API directly, add to `BuiltInToolDefinitions` for catalog selection. This gives us the control we need for production quality: proper error handling, description caching from `GET /api/v4/orbit/tools`, and no MCP overhead.
-
-### 4.4 Fallback to standard tools
-
-When Orbit returns empty results (replication lag -- entity not yet indexed), the agent should fall back to existing tools like `GitLabApiGet`. This is handled by the skill prompt (section 7), not by tool-level logic. The agent sees both Orbit tools and standard tools and picks the right one based on the prompt guidance.
-
-`GitLabApiGet` already exists as a generic fallback for any Rails API endpoint.
-
----
-
-## 5. GitLab Rails changes
-
-### 5.1 Orbit API scope update
-
-The Orbit REST API (`/api/v4/orbit/*`) needs to accept the `ai_workflows` OAuth scope so DWS can call it. The `AiWorkflowsAccess` concern is already used by dozens of other APIs that DWS calls -- adding it to the Orbit endpoints is a one-liner.
-
-### 5.2 MCP config update (Path A)
-
-Add Orbit as a first-class MCP server in `McpConfigService`, gated behind the existing `knowledge_graph` feature flag. When enabled, the service includes an `orbit` entry pointing at `/api/v4/orbit/mcp` with the user's OAuth token and a tool allowlist of `query_graph` and `get_graph_schema`.
-
-Unlike the GitLab MCP server (which is only included for `workflow_definition == 'chat'`), the Orbit MCP entry should be included for all workflow definitions so it's available to foundational flows like `developer` too.
-
-### 5.3 Caller identification for metrics
-
-The Orbit API should detect whether the caller is DWS and tag the request accordingly in metrics. This gives us visibility into DAP-originated Orbit usage from day one, before the full usage billing implementation (see [billing spec](orbit-usage-billing-spec.md)).
-
-For the initial integration, a simple check on the OAuth token's scope is sufficient:
-
-```ruby
-# In Orbit::Data API:
-def caller_channel
-  if current_token&.scopes&.include?('ai_workflows')
-    :dws
-  elsif current_token&.scopes&.include?('mcp_orbit')
-    :mcp
-  else
-    :frontend
-  end
-end
-```
-
-The `ai_workflows` scope is exclusive to DWS -- users can't create PATs or standard OAuth tokens with it. This isn't tamper-proof (a user could extract the token and replay it), but it's good enough for metrics. The billing spec covers the HMAC-based verification needed for actual zero-rating.
-
-Log the channel on every Orbit API request so we can answer:
-- How many Orbit queries come from DWS vs. MCP vs. frontend?
-- What query types does the DWS agent use most?
-- What's the latency profile per channel?
-
-**Files to modify:**
-- `ee/lib/api/orbit/data.rb` -- detect caller channel, include in structured logging / internal events
-
-### 5.4 WorkflowConfig update (Path B)
-
-**Files to modify:**
-- Rails GraphQL that returns `WorkflowConfig` -- include `"orbit"` in `agent_privileges_names` when Orbit is available for the user's namespace.
-
-```ruby
-# In WorkflowConfig resolver:
-if Feature.enabled?(:knowledge_graph, user)
-  privileges << "orbit"
-end
-```
-
-DWS picks up the privilege automatically. No DWS config changes needed.
-
----
-
-## 6. GKG service changes
-
-### 6.1 Caller type in JWT claims (follow-up, not MVP)
-
-For MVP, GKG doesn't need to know the caller type. The user's JWT carries the same traversal IDs regardless of whether the request came from the dashboard or DWS.
-
-**Follow-up:** Add an optional `caller_type` claim for telemetry:
-
-```rust
-pub struct Claims {
-    // ... existing fields ...
-    pub caller_type: Option<CallerType>,  // new
-}
-
-pub enum CallerType {
-    User,       // Frontend dashboard
-    Dws,        // Duo Workflow Service / DAP
-    Mcp,        // External MCP agent
-    System,     // Internal Rails service
-}
-```
-
-### 6.2 No REST API on GKG
-
-ADR 003 established that Rails is the REST proxy. DWS calls Rails, not GKG. No new endpoints on the Rust service.
-
----
-
-## 7. Prompt engineering
-
-### 7.1 Why prompting matters here
-
-Adding Orbit tools to an agent isn't just a tool registration problem. The tool descriptions alone are ~3k tokens each (they embed the full query DSL schema). Dropping them into an already-crowded tool list without guidance can confuse the agent about when to use them vs. standard tools, dilute the context window, and lead to worse performance overall. The team explicitly flagged this concern: "more tools create more noise, so you have to convince your agent to use the tools."
-
-The prompt needs to cover three things:
-1. **When to prefer Orbit** over standard tools (relational queries, aggregations, cross-entity lookups)
-2. **When NOT to use Orbit** (just-created entities, full file contents, job logs, non-default branches)
-3. **How to use Orbit well** (progressive disclosure pattern, multi-step queries, DSL constraints)
-
-### 7.2 Replication lag handling
-
-Orbit data is not real-time (yet). The pipeline (PostgreSQL -> Siphon CDC -> NATS -> ClickHouse -> GKG Indexer) introduces a short delay. Current estimates put lag at a few seconds under normal load, but this hasn't been validated at scale. Siphon has a 500MB/min throughput limit.
-
-GKG tracks data freshness via a `gkg.indexer.sdlc.watermark.lag` metric (seconds between the indexing watermark and wall clock). Each namespace also has a `last_indexed_at` timestamp in ClickHouse.
-
-**How the agent should handle this:**
-- Default to Orbit for any entity that isn't brand new
-- If the user references something they just created ("the issue I just filed", "the MR I just opened"), try Orbit first but expect it might return empty
-- On empty results for a recently-referenced entity, fall back to `GitLabApiGet` (which hits the Rails REST API directly and is always up to date)
-- Don't try to use Orbit for full file contents, job logs, or diff content -- those aren't in the graph. Use `GitLabApiGet` or `read_file` instead
-
-### 7.3 Progressive disclosure pattern
-
-The `get_graph_schema` tool is designed for a two-step discovery pattern:
-
-1. **First call** (no arguments): returns a compact listing of domains, node types, and edge types. Costs minimal tokens.
-2. **Second call** (`expand_nodes: ["User", "MergeRequest"]`): returns full property lists and relationship details for only the relevant types.
-
-The agent should never call `expand_nodes: ["*"]` unless specifically asked to describe the entire schema. Expanding all nodes wastes tokens and provides information the agent doesn't need for a focused query.
-
-### 7.4 Prompt content
-
-The skill prompt should guide the agent on tool selection, replication lag, and query patterns:
-
-```
-You have access to the GitLab Knowledge Graph (Orbit), which contains
-structured data about this instance's projects, issues, merge requests,
-pipelines, vulnerabilities, users, and code.
-
-WHEN TO USE ORBIT TOOLS:
-- Questions involving multiple entity types ("MRs that fix vulnerabilities")
-- Aggregations ("how many pipelines failed this week")
-- Relationship traversals ("who authored the MR that fixed this bug")
-- Cross-entity search ("find all critical vulnerabilities in group X")
-- Neighbor discovery ("what's connected to this merge request")
-- Path finding ("how are user X and vulnerability Y related")
-
-WHEN TO USE STANDARD TOOLS INSTEAD:
-- The entity was just created (seconds/minutes ago) -- it may not be
-  indexed yet. Try Orbit first; if empty, fall back to GitLabApiGet.
-- You need full file contents, job logs, or diff content -- not in the graph.
-- You need real-time pipeline status or deployment state.
-- The user references a specific resource by URL -- fetch it directly.
-
-HOW TO USE ORBIT WELL:
-1. Call get_graph_schema first to discover available entity types.
-   Only expand the nodes relevant to the question.
-2. Construct a query_graph call using the DSL. The DSL supports
-   traversal (multi-hop), aggregation, search, pathfinding, and
-   neighbor queries.
-3. Query limits: max 3 hops, max 1000 results, max 500 node_ids
-   per selector. Filter early to stay within limits.
-4. Results come in GOON format (compact text optimized for LLMs).
-
-REPLICATION LAG:
-Orbit data is eventually consistent. If a query returns no results
-for an entity the user just mentioned, fall back to GitLabApiGet.
-Do not tell the user the data doesn't exist -- it may just not be
-indexed yet.
-```
-
-### 7.5 Where prompts live (phased)
-
-**Phase 1, option A -- custom agent prompt:**
-When creating a custom Orbit agent in the catalog, the system prompt above is embedded directly in the agent definition. This is the simplest path -- no code changes in DWS, the prompt is just part of the catalog agent's configuration. Anyone creating or cloning the agent can iterate on the prompt.
-
-**Phase 1, option B -- inline in DWS flow config:**
-If we decide to have Orbit tools embedded in foundational LangGraph workflows (like `developer_next`), the prompt goes inline in the flow config YAML under the component's `prompts` section. This gives us tighter control over how Orbit integrates with multi-step flows but requires a DWS deploy to iterate.
-
-**Phase 2 -- fetched from GKG API:**
-The prompts move to a new REST endpoint (`GET /api/v4/orbit/skills` or `GET /api/v4/orbit/prompts`) served by Rails (proxying to GKG). This lets the GKG team iterate on prompts without touching the catalog or DWS code. The endpoint returns skill prompts keyed by agent context (e.g., `developer`, `security_analyst`, `general_chat`), so different agents can get tailored guidance.
-
-Eventually this could feed into whatever prompt catalog DAP builds. The GKG repo remains the source of truth for Orbit-specific prompting since the prompts are tightly coupled to the ontology and query DSL.
-
----
-
-## 8. Risks
+The REST data endpoints (`POST /api/v4/orbit/query`,
+`GET /api/v4/orbit/schema`) remain available for other consumers. The DAP
+path does not use them for tool execution.
+
+### Why DWS -> Rails -> GKG, not DWS -> GKG
+
+1. Rails owns authorization. The bidirectional streaming redaction protocol
+   requires Rails to authorize each resource in a result set, and DWS cannot
+   do that.
+2. GKG runs wherever the GitLab instance runs, including self-managed and
+   Dedicated environments, and DWS deployment topologies vary as well. Rails
+   is the one component that always sits next to GKG and holds the
+   authorization context.
+3. DWS already reaches every other GitLab capability through Rails. Orbit
+   follows the same principle, delivered over MCP rather than as native
+   tools.
+4. DWS never needs its own gRPC client to GKG or a separate auth channel. The
+   only gRPC clients to GKG live in Rails and Workhorse.
+
+Workhorse is a deliberate part of this path, not incidental proxying. It
+hosts the MCP client, resolves the internal endpoint path for the built-in
+servers, forwards session identifiers, mints the channel identity header, and
+accelerates query execution by streaming results from GKG directly
+([ADR 008](008_workhorse_query_acceleration.md)).
+
+### First-class MCP server
+
+For the built-in `gitlab` and `orbit` servers, the Rails MCP configuration
+service supplies auth headers (the user's OAuth token), the pre-approved tool
+set, and a trusted flag. It does not supply a URL; Workhorse resolves the
+internal endpoint path from the server name. Workhorse opens the MCP session,
+lists the tools, filters them against the allowlist, prefixes each name with
+the server name (`orbit_query_graph` and so on), and passes the definitions to
+DWS as protobuf messages. When the agent calls a tool, DWS sends a
+`RunMCPTool` action back through Workhorse, which proxies it to the server.
+
+Because Rails marks the Orbit server trusted, and DWS derives tool trust from
+that flag, Orbit tool descriptions carry no untrusted-source warning banner.
+The name prefix is the only transformation.
+
+The trusted tool set is `query_graph`, `get_graph_schema`, `list_commands`,
+and `invoke_command`. A feature flag switches the visible surface between the
+legacy query pair and the named-command pair, so the legacy tools can be
+retired without changing the transport.
+
+This shape has three properties the design depends on:
+
+- No per-tool code in DWS. Tool loading is dynamic, and descriptions come
+  from the MCP tool listing, so they stay in sync with the ontology.
+- Rollout and rollback are flag-driven and need no DWS deploy.
+- Custom agents in the AI Catalog can select Orbit tools like any other MCP
+  tools.
+
+### Gating
+
+Enablement runs through a single Rails facade rather than scattered
+feature-flag checks. The facade layers:
+
+1. Platform kill switches: the `knowledge_graph` and
+   `orbit_foundational_agent` feature flags. Either one off disables Orbit
+   everywhere.
+2. The MCP client flag, which gates whether Rails sends any MCP servers to
+   DWS at all.
+3. A per-user preference: a master killswitch plus one subsetting per surface
+   (agentic chat, the standalone Orbit agent, other foundational agents, and
+   custom catalog agents).
+
+When a workflow starts, Rails classifies it into one of those surfaces and
+consults the matching predicate. If the predicate passes, the `orbit` server
+is added to the MCP payload. If not, the entry is absent and the agent never
+learns Orbit exists for that run. Duo Code Review is excluded regardless of
+the other settings: it is flat-rate and has not adopted Orbit deliberately.
+
+### Surfaces
+
+- Agentic chat and the standalone Orbit foundational agent receive the Orbit
+  MCP tools directly.
+- Other foundational agents, such as the data-analyst agent, receive the
+  tools through the same injection, with guidance in their flow definitions.
+- The developer flow has an Orbit-aware variant whose system prompt is tuned
+  for graph tools. The flow version resolver selects it when Orbit is enabled
+  for the user.
+- Developer and CI flows that execute shell commands can also reach Orbit
+  through the `glab orbit` CLI, which wraps the same REST API and carries a
+  skill prompt of its own.
+- Custom catalog agents select Orbit tools per agent. The injected tool list
+  is the intersection of the agent's selection and the pre-approved set.
+
+### Caller identification
+
+Every Orbit request is classified by source: frontend, DWS, MCP, REST, code
+intelligence, or core. Browser requests are detected by a verified session,
+DWS by the `ai_workflows` scope, and the MCP surface by its endpoint; other
+authenticated callers default to REST. The classification travels to GKG as a
+required source-type claim on the JWT, which matches the telemetry enum, so
+per-channel usage, query mix, and latency can be answered from either side of
+the gRPC boundary.
+
+Scope-based detection is enough for metrics but is not tamper proof, since a
+user could extract an `ai_workflows` token and replay it. For attribution
+strong enough to support zero-rating, Workhorse stamps Orbit calls that
+originate from DWS with a short-lived signed channel header that Rails
+verifies. [ADR 007](007_monetization_engineering.md) covers that mechanism.
+
+### GKG service changes
+
+GKG needs no new endpoints for this integration.
+[ADR 003](003_api_design.md) established Rails as the REST proxy, and that
+holds: GKG serves gRPC only, and capabilities added for agents (schema and
+DSL discovery, named-query execution) are gRPC methods. The JWT claims carry
+the source type described above; traversal IDs and redaction behave the same
+for every channel.
+
+### Prompt engineering
+
+Adding Orbit tools to an agent takes more than registering them. Each tool
+description embeds the full query DSL grammar (TOON-encoded), which makes
+descriptions large, on the order of a few thousand tokens. Dropped into an
+already crowded tool list without guidance, they can confuse the agent about
+when to prefer them and dilute the context window. The prompt has to cover
+when to prefer Orbit, when to avoid it, and how to use it well.
+
+#### Replication lag
+
+Orbit data is not real time. The pipeline (PostgreSQL to Siphon CDC to NATS
+to ClickHouse to the GKG indexer) introduces a short delay. GKG tracks
+freshness with a watermark lag metric (seconds between the indexing watermark
+and wall clock), and each namespace has a last-indexed timestamp.
+
+Agents should default to Orbit for anything that is not brand new, expect an
+empty result for entities the user just created, and fall back to the generic
+REST tool when that happens. An empty result should never be reported to the
+user as "does not exist". Empty-result tool responses are also a good place
+to carry the fallback hint, so the guidance does not rely on the system
+prompt alone. Full file contents, job logs, and diff content are not in the
+graph; agents should use the standard tools for those.
+
+#### Progressive disclosure
+
+`get_graph_schema` supports a two-step pattern. The first call, with no
+arguments, returns a compact listing of domains, node types, and edge types.
+A second call with `expand_nodes` returns full property and relationship
+detail for only the named types. Expanding everything is reserved for when
+the user asks to describe the whole schema.
+
+#### Query guidance
+
+Prompt content for Orbit-aware agents should teach:
+
+- When to use Orbit: questions that span entity types, aggregations,
+  relationship traversals, cross-entity search, neighbor discovery, and path
+  finding.
+- When to use standard tools instead: just-created entities, full file
+  contents, job logs or diffs, real-time pipeline or deployment state, or a
+  resource the user referenced by URL.
+- How to query: discover the schema first and expand only the relevant
+  nodes, respect the server limits (3 hops, 1,000 results, 500 node IDs per
+  selector) and filter early, and read results as GOON, the compact text
+  format for LLM consumption ([ADR 012](012_goon_format.md)).
+
+Guidance in flow definitions must stay consistent with the server limits and
+with itself. A prompt that names the wrong depth ceiling, or encourages
+expanding the whole schema, directly degrades agent behavior and is treated
+as a defect.
+
+#### Where prompts live
+
+Orbit prompt content lives inline in the DWS flow configurations and a shared
+skill partial, maintained alongside the agent definitions. That keeps prompts
+under flow version pinning, keeps prompt changes reviewable in one place, and
+avoids a runtime fetch on every workflow. The GKG repository documents the
+intended guidance; the flow definitions are the runtime source of truth.
+
+## Consequences
+
+What this enables:
+
+- Agents get relational answers in one tool call instead of chaining REST
+  calls.
+- New Orbit capabilities, such as named commands or schema changes, reach
+  agents without DWS or Rails deploys, because tool descriptions are fetched
+  at session start.
+- Per-surface gating and per-user preferences allow gradual rollout and a
+  quick kill.
+
+What this requires:
+
+- Latency expectations must account for the whole path, DWS to Workhorse to
+  Rails to GKG and back, not just query execution. Simple lookups return
+  quickly; multi-hop traversals and aggregations can be much slower and can
+  reach the query timeout.
+- The MCP JSON-RPC framing adds overhead compared with a direct REST call.
+  Workhorse query acceleration recovers most of it on the expensive path.
+- Tool behavior such as caching, retries, and error shaping is controlled at
+  the MCP server and prompt level, not by custom DWS code.
+
+### Risks
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Replication lag causes empty Orbit results | Agent gives wrong answer | Skill prompt instructs fallback; Duo Evals measure fallback success rate |
-| Tool description too large for LLM context | Agent can't use Orbit tools | TOON-encoded descriptions are ~3k tokens each; within budget |
-| Orbit query latency degrades agent response time | Slower agent responses | Measure in Duo Evals; ClickHouse queries are typically <200ms |
-| `ai_workflows` scope too broad for Orbit | Security concern | Orbit endpoints already require `read_knowledge_graph` permission; scope just allows the token type |
+| Replication lag produces empty results | Agent gives a wrong answer | Prompt-guided fallback to the REST tool; fallback hints in empty-result responses; evaluations measure fallback behavior |
+| Tool descriptions crowd the context window | Agent misuses or ignores Orbit tools | TOON-encoded descriptions keep the DSL grammar compact; progressive disclosure keeps schema output small |
+| Query latency degrades agent responses | Slower answers | Workhorse query acceleration; server-side limits; expectations qualified by query shape |
+| `ai_workflows` scope is broader than Orbit | Security concern | Every Orbit route also requires the `read_knowledge_graph` permission; the scope only admits the token type |
+
+## Alternatives considered
+
+### Native DWS tools
+
+Build Orbit tool classes in DWS that call the Orbit REST API directly,
+registered through a dedicated agent privilege and listed in the Rails
+built-in tool catalog. Rejected: it duplicates tool definitions in three
+places (DWS classes, Rails catalog entries, GKG descriptions), needs explicit
+description-fetch logic that MCP provides for free, and couples Orbit
+iteration to DWS and Rails deploys.
+
+### Direct DWS to GKG connection
+
+Give DWS its own gRPC client to GKG. Rejected: Rails owns authorization and
+the redaction protocol, and GKG is not reachable from cloud services in
+self-managed and Dedicated topologies.
+
+### GKG-served prompts
+
+Serve agent prompt content from a REST endpoint so the GKG team could iterate
+on prompts without touching flow definitions. Rejected in review: prompts in
+flow definitions are version-pinned, reviewable, and traceable, and a runtime
+prompt fetch would break pinning while adding a query to every workflow.
+
+## References
+
+- [ADR 003: Orbit API design](003_api_design.md), Rails as the REST proxy
+- [ADR 007: Orbit monetization engineering](007_monetization_engineering.md),
+  billing, quotas, and channel attribution
+- [ADR 008: Workhorse query acceleration](008_workhorse_query_acceleration.md)
+- [ADR 011: Agent command surface](011_agent_command_surface.md),
+  `list_commands` and `invoke_command`
+- [ADR 012: GOON format](012_goon_format.md)
+- [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md),
+  the consumer-side map of the Rails routing seams
+- [Security](../security.md), the redaction and authorization model
