@@ -15,6 +15,21 @@ pub struct QueryRequest {
     pub query_type: i32,
 }
 
+pub async fn send_invalid_request_error(
+    tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    message: String,
+) {
+    warn!(error = %message, "Rejecting invalid query request");
+    let _ = tx
+        .send(Ok(ExecuteQueryMessage {
+            content: Some(execute_query_message::Content::Error(ExecuteQueryError {
+                code: "invalid_request".to_string(),
+                message,
+            })),
+        }))
+        .await;
+}
+
 pub async fn receive_query_request(
     stream: &mut Streaming<ExecuteQueryMessage>,
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,

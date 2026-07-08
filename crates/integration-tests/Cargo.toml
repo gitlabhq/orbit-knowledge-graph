@@ -18,6 +18,7 @@ gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
+named-queries = { path = "../named-queries" }
 nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
 ontology = { path = "../ontology" }

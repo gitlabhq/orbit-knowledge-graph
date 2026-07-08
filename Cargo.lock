@@ -5376,6 +5376,7 @@ dependencies = [
  "labkit-events",
  "mimalloc",
  "moka",
+ "named-queries",
  "nats-client",
  "ontology",
  "opentelemetry",
@@ -5386,7 +5387,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml",
  "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
@@ -6383,6 +6383,7 @@ dependencies = [
  "jsonschema",
  "labkit",
  "labkit-events",
+ "named-queries",
  "nats-client",
  "ontology",
  "opentelemetry",
@@ -7942,6 +7943,18 @@ name = "murmurhash32"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2195bf6aa996a481483b29d62a7663eed3fe39600c460e323f8ff41e90bdd89b"
+
+[[package]]
+name = "named-queries"
+version = "0.1.0"
+dependencies = [
+ "jsonschema",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "native-tls"

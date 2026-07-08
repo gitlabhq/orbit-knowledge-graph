@@ -98,9 +98,10 @@ fn invalid_entity_type_rejected() {
     let msg = err.to_string();
     assert!(msg.contains("NonexistentType"), "got: {msg}");
     // The enrichment must surface valid candidates, not strip or truncate them.
-    assert!(msg.contains("Valid values include:"), "got: {msg}");
+    assert!(msg.contains("Valid values:"), "got: {msg}");
     assert!(msg.contains("Branch"), "got: {msg}");
-    assert!(msg.contains("get_graph_schema"), "got: {msg}");
+    assert!(msg.contains("WorkItem"), "got: {msg}");
+    assert!(!msg.contains("more —"), "got: {msg}");
 }
 
 #[test]
@@ -118,9 +119,9 @@ fn invalid_filter_key_lists_valid_candidates() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("project_full_path"), "got: {msg}");
-    assert!(msg.contains("Valid values include:"), "got: {msg}");
+    assert!(msg.contains("Valid values:"), "got: {msg}");
     assert!(msg.contains("username"), "got: {msg}");
-    assert!(msg.contains("get_graph_schema"), "got: {msg}");
+    assert!(!msg.contains("more —"), "got: {msg}");
     // The opaque "or N other candidates" truncation must not leak through.
     assert!(!msg.contains("other candidates"), "got: {msg}");
 }

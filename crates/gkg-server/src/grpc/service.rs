@@ -17,18 +17,20 @@ use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
-use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
+use crate::pipeline::{
+    QueryPipelineService, receive_query_request, send_invalid_request_error, send_query_error,
+};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
     GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
     InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
-    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
-    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
-    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
-    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
-    invoke_agent_command_response,
+    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, QueryType,
+    ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
+    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
+    execute_query_message, get_graph_schema_response, get_query_dsl_response,
+    get_response_format_response, invoke_agent_command_response,
 };
 use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
 use gkg_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
@@ -61,6 +63,7 @@ pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
+    named_queries: Arc<named_queries::NamedQueries>,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
@@ -82,10 +85,15 @@ impl KnowledgeGraphServiceImpl {
         let pipeline =
             QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), analytics_config);
         let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
+        let named_queries = Arc::new(
+            named_queries::NamedQueries::load_embedded()
+                .expect("embedded named queries are validated by the build script"),
+        );
         Self {
             validator,
             ontology,
             tool_service,
+            named_queries,
             pipeline,
             cluster_health,
             graph_status,
@@ -292,6 +300,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let named_queries = Arc::clone(&self.named_queries);
         let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
@@ -302,7 +311,27 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     None => return,
                 };
 
-                info!(query_len = req.query.len(), "Executing query");
+                let resolved = match QueryType::try_from(req.query_type) {
+                    Ok(QueryType::Json) => Ok(req.query),
+                    Ok(QueryType::Named) => {
+                        let values = named_queries::BindingValues {
+                            current_user_id: claims.user_id,
+                        };
+                        named_queries
+                            .render_request(&req.query, &values)
+                            .map_err(|e| e.to_string())
+                    }
+                    Err(_) => Err(format!("Unknown query_type: {}", req.query_type)),
+                };
+                let query_json = match resolved {
+                    Ok(query) => query,
+                    Err(message) => {
+                        send_invalid_request_error(&tx, message).await;
+                        return;
+                    }
+                };
+
+                info!(query_len = query_json.len(), "Executing query");
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
@@ -311,7 +340,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     .run_query(
                         claims,
                         coding_agent,
-                        &req.query,
+                        &query_json,
                         tx.clone(),
                         stream,
                         timeout,

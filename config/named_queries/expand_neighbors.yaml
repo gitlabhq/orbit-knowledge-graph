@@ -1,0 +1,22 @@
+name: expand_neighbors
+description: Immediate graph neighborhood of selected nodes.
+parameters:
+  entity:
+    schema: { type: string }
+    example: User
+  node_ids:
+    schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
+    example: [1]
+  limit:
+    schema: { type: integer, minimum: 1, maximum: 500 }
+    example: 100
+query:
+  query_type: neighbors
+  node:
+    id: center
+    entity: { $param: entity }
+    node_ids: { $param: node_ids }
+  neighbors:
+    node: center
+    direction: both
+  limit: { $param: limit }

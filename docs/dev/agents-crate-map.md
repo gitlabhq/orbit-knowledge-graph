@@ -22,6 +22,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |
 | `utils` | Shared ClickHouse parameter types (`ChScalar`, `ChType`), Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
+| `named-queries` | Named query templates: parses/validates YAML under `config/named_queries/`, embeds it via `rust-embed`, and renders `$binding` placeholders (server-derived `BindingValues`) and `$param` placeholders (client-supplied, JSON-schema-validated per template); used by `gkg-server`'s build script (compile-time validation with declared `example` values) and at runtime for `QUERY_TYPE_NAMED` execution |
 | `nats-client` | Shared NATS client wrapper (`NatsClient`), KV bucket services (`KvServices`), circuit-breaking decorator (`CircuitBreakingNatsClient`), testkit feature |
 | `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakerRegistry`, `CircuitBreakableError`) with observer hooks and per-service config |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |

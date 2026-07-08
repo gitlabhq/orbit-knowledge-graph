@@ -32,6 +32,17 @@ The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`,
 
 Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version lives in `config/QUERY_DSL_VERSION` and is tied to the `graph_query` schema `$id` major version; the query response format version lives in `config/RAW_OUTPUT_FORMAT_VERSION`.
 
+### Named Queries
+
+Named queries are server-defined query templates for preset consumers (the Orbit dashboard) so clients invoke a stable name instead of authoring a Query DSL string that can drift from the server's grammar and ontology. Templates live as YAML under `config/named_queries/`, validated against `config/schemas/named_query.schema.json` and compiled against the ontology by `gkg-server`'s build script, so a template that no longer matches the DSL or ontology fails the build.
+
+At runtime the same files are embedded into the binary (via the `named-queries` crate). A client executes one by sending `ExecuteQuery` with `query_type = QUERY_TYPE_NAMED` and, in the `query` field, a JSON envelope `{"name": ..., "parameters": {...}}` (`parameters` may be omitted for templates that declare none). The server renders two placeholder kinds and runs the result through the standard pipeline, so quota, security context, redaction, and response formatting behave exactly as for client-authored queries:
+
+- `{ "$binding": ... }` — identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
+- `{ "$param": ... }` — selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer), validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
+
+Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. There is no discovery RPC; clients reference names as stable identifiers. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side — parameters carry only values, so the drift-by-construction guarantee is preserved.
+
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 
 ## Web Server Architecture

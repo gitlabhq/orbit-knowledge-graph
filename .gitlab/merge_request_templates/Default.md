@@ -73,7 +73,7 @@ this block.
 
 </details>
 
-/label ~"devops::analytics" ~"section::analytics" ~"knowledge graph" ~"group::knowledge-graph"
+/label ~"devops::analytics" ~"section::analytics" ~"knowledge graph" ~"group::context-systems"
 
 /assign me
 <!--

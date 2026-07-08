@@ -30,6 +30,7 @@ gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
+named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
@@ -60,10 +61,8 @@ toon-format = { workspace = true }
 
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }
+named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
-serde = { workspace = true }
-serde_json = { workspace = true }
-serde_yaml = { workspace = true }
 tonic-prost-build = { workspace = true }
 
 [dev-dependencies]

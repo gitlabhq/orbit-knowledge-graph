@@ -1,3 +1,29 @@
+## [0.86.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.85.1...v0.86.0) (2026-07-07)
+
+### Features
+
+* **gkg-server:** add named query definitions compiled against the ontology at build time ([71efc4c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/71efc4c461362708764845d2714685d561704875)) by Aaron Algutifan
+* **gkg-server:** execute named queries by name over gRPC ([37c8fc5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/37c8fc5030e0305e5deb8c142dd309baa20cca4c)) by Aaron Algutifan
+* **indexer:** deterministic logical-bytes meter for graph writes ([89e99f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/89e99f24502d38be8733b37fa023c23b690c6e06)) by Jean-Gabriel Doyon
+* **indexer:** reconcile NATS messages stuck after max_deliver exhaustion ([59a6fe2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/59a6fe28620188556a4d880ed4e8e2ffbbb31053)) by Jean-Gabriel Doyon
+* **indexer:** two-axis NATS versioning with idle-release GC ([87aa2b8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/87aa2b82a37e48a7655fa649491b83b0f7de680f)) by Aaron Algutifan
+* **server:** report cluster health as migrating during schema migration ([33670e3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/33670e32e5f4806c57025ed825a75dbbeae3e37d)) by Jean-Gabriel Doyon
+* **webserver:** report migrating readiness state during schema migration ([803d255](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/803d2558ec2fb3fd13eeebdab6488b44f23e787c)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **orbit-skill:** repo-map helper script robustness and test gaps ([7ce2b6a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7ce2b6a3c0ab95c97c6d33c61064cdd9ba2254f9)) by Dmitry Gruzd
+* **query-engine:** align graph_query schema with compiler limits and path types ([730ed57](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/730ed576fc86c113fecf47405c7e788f1d3190fe)) by Dmitry Gruzd
+* **query:** replace offset cursors with keyset pagination ([fd96455](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fd964559121239e4f2b7b086bde72badd9817d8b)) by Michael Angelo Rivera
+
+### Other
+
+* **cookbook:** reimagine as a prompt-first library ([a77fbf6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a77fbf65066c70f2376009babad306d563e1ac2e)) by Meg Corren
+* **deps:** fix cargo-audit and cargo-deny advisory failures ([4bf2db9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4bf2db97a5526b1979c71dfedb32bed8a3afe217)) by Dmitry Gruzd
+* **docs:** lint root and docs/dev markdown, not just docs/source ([0b0edd0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0b0edd0a6424315662dabf1820b98f4c8ce6f4fe)) by Dmitry Gruzd
+* **orbit-skill:** fix query-language options/path-types, surface token operators, tighten SKILL.md ([ff408d2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff408d294c2517c1ec7e9c4379d91f1fe984849f)) by Dmitry Gruzd
+* **xtask:** add build-time crate-map drift check ([d49241d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d49241d6af406bd94aef14b26c8f920395d5a3ab)) by Dmitry Gruzd
+
 ## [0.85.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.85.0...v0.85.1) (2026-07-06)
 
 ### Fixes

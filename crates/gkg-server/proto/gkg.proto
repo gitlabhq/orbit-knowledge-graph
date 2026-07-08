@@ -85,9 +85,10 @@ message ExecuteQueryMessage {
   }
 }
 
-// Query language selector. Only JSON DSL is supported today.
+// Query language selector.
 enum QueryType {
   QUERY_TYPE_JSON = 0;
+  QUERY_TYPE_NAMED = 1;  // `query` is a named-query envelope: {"name": ..., "parameters": {...}}
 }
 
 // Client-sent initial message to start a query.
@@ -351,6 +352,7 @@ enum ClusterStatus {
   CLUSTER_STATUS_HEALTHY = 1;
   CLUSTER_STATUS_DEGRADED = 2;
   CLUSTER_STATUS_UNHEALTHY = 3;
+  CLUSTER_STATUS_MIGRATING = 4;
 }
 
 // Health of a single service component (clickhouse, indexer, webserver).

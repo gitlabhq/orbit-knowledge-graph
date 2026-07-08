@@ -195,58 +195,21 @@ fn load_corpus() -> Vec<SmokeCase> {
 }
 
 fn load_named_queries() -> Vec<SmokeCase> {
-    #[derive(Deserialize)]
-    struct NamedQuery {
-        name: String,
-        query: serde_json::Value,
-    }
+    let queries =
+        named_queries::NamedQueries::load_from_dir(std::path::Path::new(NAMED_QUERIES_DIR))
+            .unwrap_or_else(|e| panic!("load named queries from {NAMED_QUERIES_DIR}: {e}"));
 
-    let mut files: Vec<_> = std::fs::read_dir(NAMED_QUERIES_DIR)
-        .unwrap_or_else(|e| panic!("read named queries dir {NAMED_QUERIES_DIR}: {e}"))
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "yaml"))
-        .collect();
-    files.sort();
-    assert!(
-        !files.is_empty(),
-        "no named query YAML files found in {NAMED_QUERIES_DIR}"
-    );
-
-    files
+    let values = named_queries::BindingValues { current_user_id: 1 };
+    queries
         .iter()
-        .map(|path| {
-            let text = std::fs::read_to_string(path).expect("read named query file");
-            let named: NamedQuery = serde_yaml::from_str(&text)
-                .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
-            let mut query = named.query;
-            render_bindings(&mut query);
-            SmokeCase {
-                key: format!("named_query::{}", named.name),
-                query: serde_json::to_string(&query).expect("serialize named query"),
-                expects_error: false,
-            }
+        .map(|query| SmokeCase {
+            key: format!("named_query::{}", query.name),
+            query: query
+                .render(&values, &query.example_parameters())
+                .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
+            expects_error: false,
         })
         .collect()
-}
-
-fn render_bindings(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.contains_key("$binding") {
-                *value = serde_json::Value::from(1);
-                return;
-            }
-            for nested in map.values_mut() {
-                render_bindings(nested);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                render_bindings(item);
-            }
-        }
-        _ => {}
-    }
 }
 
 fn load_doc_queries() -> (Vec<SmokeCase>, Vec<String>) {

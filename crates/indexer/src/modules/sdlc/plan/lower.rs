@@ -555,6 +555,7 @@ fn extract_column_alias(column: &ExtractColumn) -> String {
         ExtractColumn::Bare(name) => name.as_str(),
         ExtractColumn::ToString(name) => name.as_str(),
         ExtractColumn::DateClamp(name) => name.as_str(),
+        ExtractColumn::Utf8Clamp(name) => name.as_str(),
     };
     raw.rsplit_once(" AS ")
         .map(|(_, alias)| alias.trim().to_string())
@@ -571,6 +572,9 @@ fn lower_extract_column(column: &ExtractColumn) -> String {
         ExtractColumn::DateClamp(name) => format!(
             "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL) AS {name}"
         ),
+        ExtractColumn::Utf8Clamp(name) => {
+            format!("if(isValidUTF8({name}), {name}, hex({name})) AS {name}")
+        }
     }
 }
 
@@ -1091,6 +1095,30 @@ mod tests {
         let sql = render_global_extract(&plan);
         assert!(
             sql.contains("if(due_date >= toDate('1900-01-01') AND due_date <= toDate('2299-12-31'), due_date, NULL) AS due_date"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn extract_plan_hex_encodes_binary_columns() {
+        let extract = ExtractPlan {
+            destination_table: "gl_vulnerability_occurrence".to_string(),
+            columns: vec![ExtractColumn::Utf8Clamp("location_fingerprint".to_string())],
+            source: ExtractSource::Table("siphon_vulnerability_occurrences".to_string()),
+            base_table: "siphon_vulnerability_occurrences".to_string(),
+            watermark: "_siphon_watermark".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
+            namespaced: false,
+            traversal_path_filter: None,
+            additional_where: None,
+            enrichment: None,
+        };
+
+        let plan = lower_extract_plan(extract, 1000);
+        let sql = render_global_extract(&plan);
+        assert!(
+            sql.contains("if(isValidUTF8(location_fingerprint), location_fingerprint, hex(location_fingerprint)) AS location_fingerprint"),
             "sql: {sql}"
         );
     }
