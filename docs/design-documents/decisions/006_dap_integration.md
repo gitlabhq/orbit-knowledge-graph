@@ -2,7 +2,7 @@
 title: "GKG ADR 006: Orbit + Duo Agent Platform integration"
 creation-date: "2026-03-26"
 last-updated: "2026-07-08"
-authors: [ "@michaelangeloio", "@dgruzd", "@jgdoyon1", "@michaelusa", "@bohdanpk", "@tschmidt", "@shekharpatnaik", "@eduardobonet" ]
+authors: [ "@michaelangeloio", "@dgruzd", "@jgdoyon1", "@michaelusa", "@bohdanpk", "@thomas-schmidt", "@shekharpatnaik", "@eduardobonet" ]
 toc_hide: true
 ---
 
