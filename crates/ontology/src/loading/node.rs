@@ -216,6 +216,8 @@ struct PropertyYaml {
     mutable: bool,
     #[serde(default)]
     terminal_values: Option<Vec<String>>,
+    #[serde(default)]
+    binary: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,6 +399,7 @@ impl NodeYaml {
                     }),
                     mutable: prop_def.mutable,
                     terminal_values: prop_def.terminal_values,
+                    binary: prop_def.binary,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

@@ -145,6 +145,11 @@
               "items": { "type": "string" },
               "description": "For enum fields, values that once reached never change (absorbing states). A filter on a terminal value can skip FINAL dedup."
             },
+            "binary": {
+              "type": "boolean",
+              "description": "Source column is a Postgres bytea that may hold non-UTF8 bytes. Extraction hex-encodes invalid values so a single binary row cannot poison the Arrow batch.",
+              "default": false
+            },
             "traversal_path_lookup": {
               "$ref": "#/definitions/traversalPathLookup",
               "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."

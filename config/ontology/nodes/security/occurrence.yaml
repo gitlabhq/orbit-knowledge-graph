@@ -66,6 +66,7 @@ properties:
     type: string
     source: location_fingerprint
     nullable: false
+    binary: true
     description: "Location fingerprint."
 
   severity:
