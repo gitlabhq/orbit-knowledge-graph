@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
 #
-# One entry per SCHEMA_VERSION bump, appended by `mise schema:bump`.
+# One entry per SCHEMA_VERSION bump, newest first (prepended by `mise schema:bump`).
 # Each entry declares how much of the graph a given version invalidates:
 #   scope: "*"    full rebuild (fail-safe; the default for anything unmapped)
 #   scope: sdlc   SDLC-sourced tables; optional `entities:` narrows to a subset
