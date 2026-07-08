@@ -564,6 +564,9 @@ pub struct Field {
     pub mutable: bool,
     /// For enum fields, values that once reached never change (absorbing states).
     pub terminal_values: Option<Vec<String>>,
+    /// Source column is a Postgres `bytea` that may hold non-UTF8 bytes. Extraction
+    /// hex-encodes invalid values so a single binary row cannot poison the Arrow batch.
+    pub binary: bool,
 }
 
 impl Default for Field {
@@ -583,6 +586,7 @@ impl Default for Field {
             traversal_path_lookup: None,
             mutable: true,
             terminal_values: None,
+            binary: false,
         }
     }
 }

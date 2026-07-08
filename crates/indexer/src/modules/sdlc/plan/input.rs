@@ -139,6 +139,10 @@ pub(in crate::modules::sdlc) enum ExtractColumn {
     /// A single out-of-range row would poison the whole Arrow batch, so we clamp
     /// at the SQL projection layer and let NULL propagate.
     DateClamp(String),
+    /// Postgres `bytea` columns can hold raw non-UTF8 bytes; the Arrow decoder
+    /// rejects the whole batch on one such value. Hex-encode invalid values at the
+    /// projection layer, leaving already-valid rows untouched.
+    Utf8Clamp(String),
 }
 
 impl ExtractColumn {
@@ -146,7 +150,8 @@ impl ExtractColumn {
         match self {
             ExtractColumn::Bare(name)
             | ExtractColumn::ToString(name)
-            | ExtractColumn::DateClamp(name) => name,
+            | ExtractColumn::DateClamp(name)
+            | ExtractColumn::Utf8Clamp(name) => name,
         }
     }
 }
@@ -207,6 +212,7 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
             Some(match &field.data_type {
                 DataType::Uuid => ExtractColumn::ToString(col.to_string()),
                 DataType::Date => ExtractColumn::DateClamp(col.to_string()),
+                _ if field.binary => ExtractColumn::Utf8Clamp(col.to_string()),
                 _ => ExtractColumn::Bare(col.to_string()),
             })
         })
@@ -830,6 +836,24 @@ mod tests {
         assert!(
             matches!(start, ExtractColumn::DateClamp(_)),
             "Milestone.start_date must be DateClamp"
+        );
+    }
+
+    #[test]
+    fn from_ontology_emits_utf8_clamp_for_binary_columns() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = from_ontology(&ontology);
+
+        let occurrence = plans
+            .node_plans
+            .iter()
+            .find(|p| p.name == "VulnerabilityOccurrence")
+            .expect("VulnerabilityOccurrence plan should exist");
+        let fingerprint = find_column(occurrence, "location_fingerprint")
+            .expect("VulnerabilityOccurrence location_fingerprint column");
+        assert!(
+            matches!(fingerprint, ExtractColumn::Utf8Clamp(_)),
+            "location_fingerprint (binary) must be Utf8Clamp, got different variant"
         );
     }
 
