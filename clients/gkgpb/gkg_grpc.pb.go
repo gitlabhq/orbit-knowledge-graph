@@ -31,6 +31,7 @@ const (
 	KnowledgeGraphService_ExecuteQuery_FullMethodName       = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
 	KnowledgeGraphService_GetGraphSchema_FullMethodName     = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
 	KnowledgeGraphService_GetQueryDsl_FullMethodName        = "/gkg.v1.KnowledgeGraphService/GetQueryDsl"
+	KnowledgeGraphService_ListNamedQueries_FullMethodName   = "/gkg.v1.KnowledgeGraphService/ListNamedQueries"
 	KnowledgeGraphService_GetResponseFormat_FullMethodName  = "/gkg.v1.KnowledgeGraphService/GetResponseFormat"
 	KnowledgeGraphService_GetClusterHealth_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
 	KnowledgeGraphService_GetGraphStatus_FullMethodName     = "/gkg.v1.KnowledgeGraphService/GetGraphStatus"
@@ -65,6 +66,12 @@ type KnowledgeGraphServiceClient interface {
 	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
 	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
+	// Lists the server-defined named queries with their DSL rendered for the
+	// caller (bindings resolved from JWT claims, parameters filled with their
+	// declared examples). Lets clients discover and display named queries
+	// without owning copies of the query text.
+	// Used by GET /api/v4/orbit/templates.
+	ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
 	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
 	// Direct API helper for REST consumers. MCP agents should use the command
@@ -149,6 +156,16 @@ func (c *knowledgeGraphServiceClient) GetQueryDsl(ctx context.Context, in *GetQu
 	return out, nil
 }
 
+func (c *knowledgeGraphServiceClient) ListNamedQueries(ctx context.Context, in *ListNamedQueriesRequest, opts ...grpc.CallOption) (*ListNamedQueriesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListNamedQueriesResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_ListNamedQueries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *knowledgeGraphServiceClient) GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetResponseFormatResponse)
@@ -208,6 +225,12 @@ type KnowledgeGraphServiceServer interface {
 	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
 	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
+	// Lists the server-defined named queries with their DSL rendered for the
+	// caller (bindings resolved from JWT claims, parameters filled with their
+	// declared examples). Lets clients discover and display named queries
+	// without owning copies of the query text.
+	// Used by GET /api/v4/orbit/templates.
+	ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
 	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
 	// Direct API helper for REST consumers. MCP agents should use the command
@@ -246,6 +269,9 @@ func (UnimplementedKnowledgeGraphServiceServer) GetGraphSchema(context.Context, 
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetQueryDsl not implemented")
+}
+func (UnimplementedKnowledgeGraphServiceServer) ListNamedQueries(context.Context, *ListNamedQueriesRequest) (*ListNamedQueriesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListNamedQueries not implemented")
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetResponseFormat not implemented")
@@ -374,6 +400,24 @@ func _KnowledgeGraphService_GetQueryDsl_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KnowledgeGraphService_ListNamedQueries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListNamedQueriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).ListNamedQueries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_ListNamedQueries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).ListNamedQueries(ctx, req.(*ListNamedQueriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KnowledgeGraphService_GetResponseFormat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetResponseFormatRequest)
 	if err := dec(in); err != nil {
@@ -454,6 +498,10 @@ var KnowledgeGraphService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQueryDsl",
 			Handler:    _KnowledgeGraphService_GetQueryDsl_Handler,
+		},
+		{
+			MethodName: "ListNamedQueries",
+			Handler:    _KnowledgeGraphService_ListNamedQueries_Handler,
 		},
 		{
 			MethodName: "GetResponseFormat",
