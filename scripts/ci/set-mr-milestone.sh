@@ -63,7 +63,7 @@ process_mr() {
   local iid is_draft has_milestone
 
   iid="$(printf '%s' "$mr" | jq -r '.iid')"
-  is_draft="$(printf '%s' "$mr" | jq -r '.work_in_progress')"
+  is_draft="$(printf '%s' "$mr" | jq -r '.draft')"
   has_milestone="$(printf '%s' "$mr" | jq -r 'if .milestone == null then "false" else "true" end')"
 
   if [ "$is_draft" = "true" ]; then
@@ -92,10 +92,16 @@ MILESTONE_TITLE="$(printf '%s' "$CURRENT_MILESTONE" | jq -r '.title')"
 
 log "Milestone sweeper: current=$MILESTONE_TITLE (id=$MILESTONE_ID) today=$TODAY dry_run=$DRY_RUN"
 
+# A single MR's failure (e.g. a transient 5xx on the PUT) must not abort the
+# sweep and silently skip the rest under set -e, so each MR is isolated with
+# `|| log`. The upstream MR-list fetch is not guarded, so a total API outage
+# still fails the job loudly rather than reporting a false-green empty sweep.
 api --paginate "projects/$PROJECT_ID/merge_requests?state=opened&per_page=100" \
   | jq -c '.[]' \
   | while IFS= read -r mr; do
-      process_mr "$mr" "$MILESTONE_ID"
+      iid="$(printf '%s' "$mr" | jq -r '.iid')"
+      process_mr "$mr" "$MILESTONE_ID" \
+        || log "MR !$iid: processing failed, continuing with remaining MRs"
     done
 
 log "Milestone sweeper: done"
