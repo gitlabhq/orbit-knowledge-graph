@@ -1,10 +1,10 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod commands;
 mod descriptions;
 mod list;
 mod mcp;
-mod repo_map;
 mod skill;
 mod sql;
 mod sql_format;
@@ -254,7 +254,7 @@ enum Commands {
         db: Option<PathBuf>,
 
         #[command(subcommand)]
-        command: repo_map::RepoMapCommand,
+        command: commands::repo_map::RepoMapCommand,
     },
 }
 
@@ -328,7 +328,7 @@ async fn main() -> Result<()> {
             extensions,
             db,
             command,
-        } => repo_map::run(repo, extensions, db, command),
+        } => commands::repo_map::run(repo, extensions, db, command),
     }
 }
 
