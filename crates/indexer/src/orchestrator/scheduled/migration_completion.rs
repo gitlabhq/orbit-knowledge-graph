@@ -220,13 +220,19 @@ impl ScheduledTask for MigrationCompletionChecker {
     }
 }
 
-pub async fn sdlc_narrowing_complete(
+#[derive(Debug)]
+pub struct SdlcReindexProgress {
+    pub completed_namespaces: u64,
+    pub ready: bool,
+}
+
+pub async fn get_sdlc_reindex_progress(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
     scope: &ScopeDeclaration,
     checkpoint_table: &str,
     enabled_count: u64,
-) -> Result<(u64, bool), String> {
+) -> Result<SdlcReindexProgress, String> {
     let pipelines = find_invalidated_pipelines(ontology, scope);
 
     let completed_namespaces =
@@ -237,7 +243,10 @@ pub async fn sdlc_narrowing_complete(
         count_completed_global_plans(graph, checkpoint_table, &pipelines.global).await?;
     let global_ready = completed_global as usize == pipelines.global.len();
 
-    Ok((completed_namespaces, namespaced_ready && global_ready))
+    Ok(SdlcReindexProgress {
+        completed_namespaces,
+        ready: namespaced_ready && global_ready,
+    })
 }
 
 impl MigrationCompletionChecker {
@@ -385,18 +394,21 @@ impl MigrationCompletionChecker {
             .map_err(|e| format!("compute code coverage: {e}"))?;
 
         let scope = self.invalidation_scope(version).await?;
-        let (sdlc_indexed, sdlc_ready) = match scope.scope {
+        let sdlc_progress = match scope.scope {
             Scope::All | Scope::Code => {
                 let sdlc_table = format!("{prefix}checkpoint");
                 let count = self
                     .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
                     .await
                     .map_err(|e| format!("count SDLC checkpoint namespaces: {e}"))?;
-                (count, count >= enabled_count)
+                SdlcReindexProgress {
+                    completed_namespaces: count,
+                    ready: count >= enabled_count,
+                }
             }
             Scope::Sdlc => {
                 let checkpoint_table = format!("{prefix}checkpoint");
-                sdlc_narrowing_complete(
+                get_sdlc_reindex_progress(
                     &self.graph,
                     &self.ontology,
                     &scope,
@@ -409,7 +421,7 @@ impl MigrationCompletionChecker {
 
         info!(
             version,
-            sdlc_indexed_namespaces = sdlc_indexed,
+            sdlc_indexed_namespaces = sdlc_progress.completed_namespaces,
             enabled_namespaces = enabled_count,
             code_indexed_projects = indexed_projects,
             code_eligible_projects = eligible_projects,
@@ -423,8 +435,13 @@ impl MigrationCompletionChecker {
         // per-scope thresholds (sdlc < 100% during migration window, code
         // < 95% for >24h post-promotion, etc.).
         let current = *SCHEMA_VERSION;
-        self.metrics
-            .record_units("sdlc", version, current, sdlc_indexed, enabled_count);
+        self.metrics.record_units(
+            "sdlc",
+            version,
+            current,
+            sdlc_progress.completed_namespaces,
+            enabled_count,
+        );
         self.metrics.record_units(
             "code",
             version,
@@ -433,7 +450,7 @@ impl MigrationCompletionChecker {
             eligible_projects,
         );
 
-        Ok(sdlc_ready)
+        Ok(sdlc_progress.ready)
     }
 
     async fn invalidation_scope(&self, migrating_version: u32) -> Result<ScopeDeclaration, String> {

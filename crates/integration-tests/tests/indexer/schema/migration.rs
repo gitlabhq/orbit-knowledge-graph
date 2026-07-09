@@ -783,6 +783,16 @@ async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidate
          VALUES ('1/100/', 'MENTIONS', 1, 'User', 2, 'Note', '2024-01-01 00:00:00.000000')"
     ))
     .await;
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}gl_note (traversal_path, id, _version) \
+         VALUES ('1/100/', 5, '2024-01-01 00:00:00.000000')"
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}gl_merge_request (traversal_path, id, _version) \
+         VALUES ('1/100/', 7, '2024-01-01 00:00:00.000000')"
+    ))
+    .await;
 
     for (key, cursor_values) in [
         ("ns.100.User", "null"),
@@ -825,6 +835,28 @@ async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidate
         "an unchanged edge table must be cloned with its rows"
     );
 
+    let new_note = prefixed_table_name("gl_note", *SCHEMA_VERSION);
+    let note_rows = ctx
+        .query(&format!("SELECT toInt64(count()) AS cnt FROM {new_note}"))
+        .await;
+    assert_eq!(
+        i64::extract_column(&note_rows, 0).unwrap(),
+        vec![0],
+        "the invalidated entity's node table must be rebuilt empty, not cloned"
+    );
+
+    let new_mr = prefixed_table_name("gl_merge_request", *SCHEMA_VERSION);
+    let mr_rows = ctx
+        .query(&format!(
+            "SELECT toInt64(count()) AS cnt FROM {new_mr} FINAL"
+        ))
+        .await;
+    assert_eq!(
+        i64::extract_column(&mr_rows, 0).unwrap(),
+        vec![1],
+        "an uninvalidated node table must be cloned with its rows"
+    );
+
     let surviving = ctx
         .query(&format!(
             "SELECT key FROM {new_checkpoint} FINAL WHERE _deleted = false ORDER BY key"
@@ -837,7 +869,7 @@ async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidate
          and the invalidated plan with its partition sub-key"
     );
 
-    let (_, ready_before) = migration_completion::sdlc_narrowing_complete(
+    let before = migration_completion::get_sdlc_reindex_progress(
         &client,
         &ontology,
         &scope,
@@ -847,7 +879,7 @@ async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidate
     .await
     .unwrap();
     assert!(
-        !ready_before,
+        !before.ready,
         "the gate must block until the invalidated plan has a completed checkpoint"
     );
 
@@ -857,7 +889,7 @@ async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidate
     ))
     .await;
 
-    let (_, ready_after) = migration_completion::sdlc_narrowing_complete(
+    let after = migration_completion::get_sdlc_reindex_progress(
         &client,
         &ontology,
         &scope,
@@ -867,7 +899,474 @@ async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidate
     .await
     .unwrap();
     assert!(
-        ready_after,
+        after.ready,
         "the gate must promote once every enabled namespace has the invalidated plan's completed checkpoint"
+    );
+}
+
+async fn create_version_tables(ctx: &TestContext, ontology: &ontology::Ontology, prefix: &str) {
+    let client = ctx.create_client();
+    for table in generate_graph_tables_with_prefix(ontology, prefix) {
+        client.execute(&emit_create_table(&table)).await.unwrap();
+    }
+}
+
+async fn insert_checkpoint_row(
+    ctx: &TestContext,
+    table: &str,
+    key: &str,
+    cursor_values: &str,
+    version: &str,
+) {
+    ctx.execute(&format!(
+        "INSERT INTO {table} (key, watermark, cursor_values, _version) \
+         VALUES ('{key}', '{version}', '{cursor_values}', '{version}')"
+    ))
+    .await;
+}
+
+async fn count_rows(ctx: &TestContext, table: &str) -> i64 {
+    let batches = ctx
+        .query(&format!(
+            "SELECT toInt64(count()) AS cnt FROM {table} FINAL"
+        ))
+        .await;
+    i64::extract_column(&batches, 0).unwrap()[0]
+}
+
+fn sdlc_scope(entities: &[&str]) -> ScopeDeclaration {
+    ScopeDeclaration {
+        scope: Scope::Sdlc,
+        entities: entities.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[tokio::test]
+async fn fk_edge_scope_reindexes_note_without_wiping_its_table() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    let active_version = *SCHEMA_VERSION - 1;
+    let old_prefix = table_prefix(active_version);
+    create_version_tables(&ctx, &ontology, &old_prefix).await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}gl_note (traversal_path, id, _version) \
+         VALUES ('1/100/', 5, '2024-01-01 00:00:00.000000')"
+    ))
+    .await;
+    let old_checkpoint = format!("{old_prefix}checkpoint");
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "ns.100.Note",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "ns.100.User",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+
+    migration::prepare_narrowed_tables(
+        &client,
+        &dictionary_source(&ctx.config),
+        &ontology,
+        &metrics,
+        &sdlc_scope(&["HAS_NOTE"]),
+        active_version,
+    )
+    .await
+    .unwrap();
+
+    let new_note = prefixed_table_name("gl_note", *SCHEMA_VERSION);
+    assert_eq!(
+        count_rows(&ctx, &new_note).await,
+        1,
+        "HAS_NOTE does not invalidate the Note table itself; it must be cloned, \
+         with re-emitted rows superseding in place"
+    );
+
+    let new_checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    let surviving = ctx
+        .query(&format!(
+            "SELECT key FROM {new_checkpoint} FINAL WHERE _deleted = false ORDER BY key"
+        ))
+        .await;
+    assert_eq!(
+        String::extract_column(&surviving, 0).unwrap(),
+        vec!["ns.100.User".to_string()],
+        "HAS_NOTE must expand to the Note pipeline and drop its checkpoint keys"
+    );
+
+    let scope = sdlc_scope(&["HAS_NOTE"]);
+    let before = migration_completion::get_sdlc_reindex_progress(
+        &client,
+        &ontology,
+        &scope,
+        &new_checkpoint,
+        1,
+    )
+    .await
+    .unwrap();
+    assert!(
+        !before.ready,
+        "the gate must wait on the expanded Note pipeline"
+    );
+
+    insert_checkpoint_row(
+        &ctx,
+        &new_checkpoint,
+        "ns.100.Note",
+        "null",
+        "2024-06-01 00:00:00.000000",
+    )
+    .await;
+    let after = migration_completion::get_sdlc_reindex_progress(
+        &client,
+        &ontology,
+        &scope,
+        &new_checkpoint,
+        1,
+    )
+    .await
+    .unwrap();
+    assert!(after.ready);
+}
+#[tokio::test]
+async fn narrowed_migration_survives_interruption_rerun_and_edge_reemission() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    let active_version = *SCHEMA_VERSION - 1;
+    let old_prefix = table_prefix(active_version);
+    create_version_tables(&ctx, &ontology, &old_prefix).await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}gl_edge \
+         (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version) \
+         VALUES ('1/100/', 'HAS_NOTE', 7, 'MergeRequest', 5, 'Note', '2024-01-01 00:00:00.000000')"
+    ))
+    .await;
+    let old_checkpoint = format!("{old_prefix}checkpoint");
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "ns.100.User",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "ns.100.Note",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+
+    let new_edge_table =
+        generate_graph_tables_with_prefix(&ontology, &table_prefix(*SCHEMA_VERSION))
+            .into_iter()
+            .find(|table| table.name == prefixed_table_name("gl_edge", *SCHEMA_VERSION))
+            .unwrap();
+    client
+        .execute(&emit_create_table(&new_edge_table))
+        .await
+        .unwrap();
+
+    for _ in 0..2 {
+        migration::prepare_narrowed_tables(
+            &client,
+            &dictionary_source(&ctx.config),
+            &ontology,
+            &metrics,
+            &sdlc_scope(&["Note"]),
+            active_version,
+        )
+        .await
+        .unwrap();
+    }
+
+    let new_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+    assert_eq!(
+        count_rows(&ctx, &new_edge).await,
+        1,
+        "an empty shell left by an interrupted clone must be dropped and re-cloned, \
+         and a rerun must not duplicate the cloned rows"
+    );
+
+    let new_checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    let surviving = ctx
+        .query(&format!(
+            "SELECT key FROM {new_checkpoint} FINAL WHERE _deleted = false ORDER BY key"
+        ))
+        .await;
+    assert_eq!(
+        String::extract_column(&surviving, 0).unwrap(),
+        vec!["ns.100.User".to_string()],
+        "a crash-rerun of the migration must not duplicate or resurrect checkpoint keys"
+    );
+
+    ctx.execute(&format!(
+        "INSERT INTO {new_edge} \
+         (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version) \
+         VALUES ('1/100/', 'HAS_NOTE', 7, 'MergeRequest', 5, 'Note', '2024-06-01 00:00:00.000000')"
+    ))
+    .await;
+    assert_eq!(
+        count_rows(&ctx, &new_edge).await,
+        1,
+        "a re-emitted edge with the same sort key must supersede the cloned row, not duplicate it"
+    );
+}
+
+#[tokio::test]
+async fn gate_promotes_only_when_every_invalidated_pipeline_completes_everywhere() {
+    let (ctx, ontology, _) = setup().await;
+    let client = ctx.create_client();
+    create_version_tables(&ctx, &ontology, &table_prefix(*SCHEMA_VERSION)).await;
+    let checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+
+    let progress = |scope: ScopeDeclaration, enabled_count: u64| {
+        let client = client.clone();
+        let ontology = ontology.clone();
+        let checkpoint = checkpoint.clone();
+        async move {
+            migration_completion::get_sdlc_reindex_progress(
+                &client,
+                &ontology,
+                &scope,
+                &checkpoint,
+                enabled_count,
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    insert_checkpoint_row(
+        &ctx,
+        &checkpoint,
+        "ns.100.Note",
+        r#"{"c":["1/100/","5"]}"#,
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    assert!(
+        !progress(sdlc_scope(&["Note"]), 1).await.ready,
+        "an in-progress cursor is not a completed pipeline"
+    );
+
+    insert_checkpoint_row(
+        &ctx,
+        &checkpoint,
+        "ns.100.Note",
+        "null",
+        "2024-06-01 00:00:00.000000",
+    )
+    .await;
+    assert!(
+        progress(sdlc_scope(&["Note"]), 1).await.ready,
+        "the newer completed row must replace the in-progress cursor under FINAL"
+    );
+
+    let one_of_two = progress(sdlc_scope(&["Note"]), 2).await;
+    assert_eq!(one_of_two.completed_namespaces, 1);
+    assert!(
+        !one_of_two.ready,
+        "one completed namespace out of two enabled must not promote"
+    );
+    insert_checkpoint_row(
+        &ctx,
+        &checkpoint,
+        "ns.200.Note",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    assert!(progress(sdlc_scope(&["Note"]), 2).await.ready);
+
+    let missing_pipeline = progress(sdlc_scope(&["Note", "MergeRequest"]), 2).await;
+    assert_eq!(missing_pipeline.completed_namespaces, 0);
+    assert!(
+        !missing_pipeline.ready,
+        "a namespace missing one of the invalidated pipelines must not count as complete"
+    );
+    for ns in [100, 200] {
+        insert_checkpoint_row(
+            &ctx,
+            &checkpoint,
+            &format!("ns.{ns}.MergeRequest"),
+            "null",
+            "2024-01-01 00:00:00.000000",
+        )
+        .await;
+    }
+    assert!(
+        progress(sdlc_scope(&["Note", "MergeRequest"]), 2)
+            .await
+            .ready
+    );
+
+    let global_pending = progress(sdlc_scope(&["User"]), 2).await;
+    assert_eq!(
+        global_pending.completed_namespaces, 0,
+        "a global-only scope has no namespaced pipelines to count"
+    );
+    assert!(
+        !global_pending.ready,
+        "the gate must wait on the invalidated global pipeline"
+    );
+    insert_checkpoint_row(
+        &ctx,
+        &checkpoint,
+        "global.User",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    assert!(progress(sdlc_scope(&["User"]), 2).await.ready);
+}
+
+#[tokio::test]
+async fn whole_sdlc_scope_seeds_empty_checkpoint_and_rebuilds_sdlc_tables() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    let active_version = *SCHEMA_VERSION - 1;
+    let old_prefix = table_prefix(active_version);
+    create_version_tables(&ctx, &ontology, &old_prefix).await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}gl_note (traversal_path, id, _version) \
+         VALUES ('1/100/', 5, '2024-01-01 00:00:00.000000')"
+    ))
+    .await;
+    let old_checkpoint = format!("{old_prefix}checkpoint");
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "ns.100.Note",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "global.User",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+
+    migration::prepare_narrowed_tables(
+        &client,
+        &dictionary_source(&ctx.config),
+        &ontology,
+        &metrics,
+        &sdlc_scope(&[]),
+        active_version,
+    )
+    .await
+    .unwrap();
+
+    let new_note = prefixed_table_name("gl_note", *SCHEMA_VERSION);
+    assert_eq!(
+        count_rows(&ctx, &new_note).await,
+        0,
+        "whole-sdlc scope invalidates every sdlc writer, so node tables rebuild empty"
+    );
+    let new_checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    assert_eq!(
+        count_rows(&ctx, &new_checkpoint).await,
+        0,
+        "whole-sdlc scope must seed no pipeline checkpoints — everything re-indexes from epoch"
+    );
+}
+
+#[tokio::test]
+async fn code_scope_clones_sdlc_state_intact_and_rebuilds_code_checkpoint() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    let active_version = *SCHEMA_VERSION - 1;
+    let old_prefix = table_prefix(active_version);
+    create_version_tables(&ctx, &ontology, &old_prefix).await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}gl_note (traversal_path, id, _version) \
+         VALUES ('1/100/', 5, '2024-01-01 00:00:00.000000')"
+    ))
+    .await;
+    let old_checkpoint = format!("{old_prefix}checkpoint");
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "ns.100.Note",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    insert_checkpoint_row(
+        &ctx,
+        &old_checkpoint,
+        "dispatch.sdlc.namespace.sweep",
+        "null",
+        "2024-01-01 00:00:00.000000",
+    )
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {old_prefix}code_indexing_checkpoint \
+         (traversal_path, project_id, branch, last_task_id, _version) \
+         VALUES ('1/100/', 42, 'main', 1, 1)"
+    ))
+    .await;
+
+    migration::prepare_narrowed_tables(
+        &client,
+        &dictionary_source(&ctx.config),
+        &ontology,
+        &metrics,
+        &ScopeDeclaration {
+            scope: Scope::Code,
+            entities: Default::default(),
+        },
+        active_version,
+    )
+    .await
+    .unwrap();
+
+    let new_note = prefixed_table_name("gl_note", *SCHEMA_VERSION);
+    assert_eq!(
+        count_rows(&ctx, &new_note).await,
+        1,
+        "a code-scope migration must not touch SDLC data"
+    );
+
+    let new_checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+    let surviving = ctx
+        .query(&format!(
+            "SELECT key FROM {new_checkpoint} FINAL WHERE _deleted = false ORDER BY key"
+        ))
+        .await;
+    assert_eq!(
+        String::extract_column(&surviving, 0).unwrap(),
+        vec![
+            "dispatch.sdlc.namespace.sweep".to_string(),
+            "ns.100.Note".to_string()
+        ],
+        "code scope clones the SDLC checkpoint intact — dispatch keys survive so the \
+         cold-start sweep does not re-fire SDLC indexing"
+    );
+
+    let new_code_checkpoint = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+    assert_eq!(
+        count_rows(&ctx, &new_code_checkpoint).await,
+        0,
+        "the code checkpoint must be rebuilt empty so the code backfill re-dispatches"
     );
 }
