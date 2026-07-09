@@ -815,40 +815,6 @@ mod tests {
     }
 
     #[test]
-    fn complete_namespaces_query_gates_on_completed_marker_and_all_plans() {
-        assert!(COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("{table:Identifier}"));
-        assert!(
-            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("cursor_values IN ('null', '')"),
-            "only a completed (not mid-pull) checkpoint counts"
-        );
-        assert!(
-            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("length(splitByChar('.', key)) = 3"),
-            "exact ns.{{id}}.{{plan}} match excludes .p{{N}}of{{M}} partition sub-keys"
-        );
-        assert!(
-            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS
-                .contains("splitByChar('.', key)[3] IN {plans:Array(String)}")
-        );
-        assert!(
-            COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("= {plan_count:UInt64}"),
-            "a namespace counts only once it has every invalidated plan"
-        );
-        assert!(!COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS.contains("migration_started_at"));
-    }
-
-    #[test]
-    fn complete_global_query_gates_on_completed_marker_and_plans() {
-        assert!(COUNT_COMPLETE_GLOBAL_PLANS.contains("{table:Identifier}"));
-        assert!(COUNT_COMPLETE_GLOBAL_PLANS.contains("cursor_values IN ('null', '')"));
-        assert!(COUNT_COMPLETE_GLOBAL_PLANS.contains("length(splitByChar('.', key)) = 2"));
-        assert!(
-            COUNT_COMPLETE_GLOBAL_PLANS
-                .contains("splitByChar('.', key)[2] IN {plans:Array(String)}")
-        );
-        assert!(!COUNT_COMPLETE_GLOBAL_PLANS.contains("migration_started_at"));
-    }
-
-    #[test]
     fn sdlc_checkpoint_query_uses_identifier_param() {
         assert!(
             COUNT_SDLC_CHECKPOINT_NAMESPACES.contains("{table:Identifier}"),

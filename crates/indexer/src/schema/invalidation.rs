@@ -8,6 +8,7 @@ use ontology::{EtlScope, Ontology};
 use query_engine::compiler::generate_graph_tables_with_prefix;
 use tracing::warn;
 
+// TODO: move to the ontology as the single source for checkpoint table names.
 pub(crate) const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,10 +28,13 @@ pub fn classify_tables_for_scope(
     scope: &MigrationScope,
 ) -> BTreeMap<String, TableMigrationAction> {
     let invalidated = invalidated_entities(ontology, scope);
-    generate_graph_tables_with_prefix(ontology, "")
+    let tables = generate_graph_tables_with_prefix(ontology, "");
+
+    tables
         .into_iter()
         .map(|table| {
-            let action = action_for_table(ontology, &table.name, scope, &invalidated);
+            let action =
+                compute_migration_action_for_table(ontology, &table.name, scope, &invalidated);
             (table.name, action)
         })
         .collect()
@@ -78,7 +82,7 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
     }
 }
 
-fn action_for_table(
+fn compute_migration_action_for_table(
     ontology: &Ontology,
     table: &str,
     scope: &MigrationScope,
@@ -92,7 +96,7 @@ fn action_for_table(
         };
     }
 
-    let writers = writers_of_table(ontology, table);
+    let writers = entities_writing_to_table(ontology, table);
     if !writers.is_empty() && writers.iter().all(|writer| invalidated.contains(writer)) {
         TableMigrationAction::RebuildEmpty
     } else {
@@ -100,16 +104,16 @@ fn action_for_table(
     }
 }
 
-fn writers_of_table(ontology: &Ontology, table: &str) -> BTreeSet<String> {
+fn entities_writing_to_table(ontology: &Ontology, table: &str) -> BTreeSet<String> {
     let mut writers = BTreeSet::new();
 
     for node in ontology.nodes() {
-        if node.destination_table == table || emits_to_table(ontology, &node.name, table) {
+        if node.destination_table == table || emits_edge_to_table(ontology, &node.name, table) {
             writers.insert(node.name.clone());
         }
     }
     for derived in ontology.derived_entities() {
-        if emits_to_table(ontology, &derived.name, table) {
+        if emits_edge_to_table(ontology, &derived.name, table) {
             writers.insert(derived.name.clone());
         }
     }
@@ -122,7 +126,7 @@ fn writers_of_table(ontology: &Ontology, table: &str) -> BTreeSet<String> {
     writers
 }
 
-fn emits_to_table(ontology: &Ontology, entity: &str, table: &str) -> bool {
+fn emits_edge_to_table(ontology: &Ontology, entity: &str, table: &str) -> bool {
     ontology
         .relationship_kinds_emitted_by(entity)
         .iter()

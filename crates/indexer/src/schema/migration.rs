@@ -59,6 +59,7 @@ const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 
+// TODO: move to the ontology as the single source for checkpoint table names.
 pub(crate) const CHECKPOINT_TABLE: &str = "checkpoint";
 
 #[derive(Debug, Error)]
