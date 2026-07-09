@@ -724,6 +724,29 @@ fn repo_map_ext_filter_scopes_languages() {
 }
 
 #[test]
+fn repo_map_extends_and_imports_render_rows() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    let extends = String::from_utf8(repo_map(&repo.path, dd, &["extends", "Base"]).stdout).unwrap();
+    assert!(extends.contains("DESCENDANTS — Base"));
+    assert!(
+        extends.contains("Base") && extends.contains("App"),
+        "EXTENDS chain must list the base and its descendant: {extends}"
+    );
+
+    let imports =
+        String::from_utf8(repo_map(&repo.path, dd, &["imports", "read_file"]).stdout).unwrap();
+    assert!(imports.contains("IMPORTERS — pattern 'read_file'"));
+    assert!(
+        imports.contains("read_file") && imports.contains("src.utils"),
+        "IMPORTERS must resolve the imported symbol and its source path: {imports}"
+    );
+}
+
+#[test]
 fn repo_map_subdir_repo_resolves_from_root() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
