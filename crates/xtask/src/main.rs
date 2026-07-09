@@ -132,6 +132,9 @@ enum DdlTarget {
     Remote,
     /// DuckDB DDL (local graph tables + manifest).
     Local,
+    /// Unversioned ClickHouse objects (namespace-storage snapshot, refreshable
+    /// MV, and reporting views) that survive schema migrations.
+    Unversioned,
 }
 
 #[derive(Subcommand)]
@@ -233,6 +236,12 @@ async fn main() -> Result<()> {
                     anyhow::bail!("--prefix and --diff are only supported for --target remote");
                 }
                 ddl::run_local(ontology)
+            }
+            DdlTarget::Unversioned => {
+                if !prefix.is_empty() || diff.is_some() {
+                    anyhow::bail!("--prefix and --diff are only supported for --target remote");
+                }
+                ddl::run_unversioned(ontology)
             }
         },
         Command::Schema { output } => schema::run(output),

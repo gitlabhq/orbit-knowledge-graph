@@ -264,12 +264,14 @@ config/SCHEMA_VERSION        # e.g. 64 -> 65
 mise run schema:generate:ddl
 ```
 
-This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql`
-(local/DuckDB). Expect:
+This rewrites `config/graph.sql` (remote/ClickHouse), `config/graph_local.sql`
+(local/DuckDB), and `config/graph_unversioned.sql` (unversioned ClickHouse
+objects). Expect:
 
 - `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block + the version stamp.
 - **Edges have no per-edge table** — they're rows in the shared `gl_edge` table, so a new edge produces *no* new `CREATE TABLE`. That's correct.
 - `config/graph_local.sql`: only the version-stamp line changes for SDLC nodes — the local/DuckDB graph doesn't contain the namespace-graph `gl_*` node tables (so `gl_<node>` being absent there is expected, same as `gl_package`).
+- `config/graph_unversioned.sql`: a non-global node adds one namespace-storage attribution branch (a global node adds it to the `__global` branch); the file has no version stamp because its objects survive schema migrations.
 
 > **`include_dir`/`rust_embed` gotcha:** the embedded ontology is read live from
 > `config/ontology` at runtime in debug builds, but only via the `schema.yaml`
