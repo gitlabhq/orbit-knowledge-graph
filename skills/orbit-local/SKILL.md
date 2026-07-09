@@ -46,14 +46,15 @@ wrapper flags, config keys, and pass-through rules:
 ## Gotchas (read first)
 
 - **`index` operates on git repositories found under `PATH`.** Pointing it at a
-  plain subdirectory that is not its own repo indexes nothing (`repo_count: 0`)
-  and prints no graph stats. Pass a repository root.
+  plain subdirectory that is not its own repo indexes nothing (no graph stats are
+  printed at all). Pass a repository root.
 - **Queries are SQL, not the DSL.** `orbit sql "SELECT …"` runs against DuckDB
   tables (`gl_definition`, `gl_edge`, `gl_file`, `gl_directory`,
   `gl_imported_symbol`). There is no `query_type`/`nodes`/`relationships` JSON
   here — that is Orbit Remote.
-- **`definition_type` values are capitalized** (`Function`, `Method`, `Struct`,
-  `Field`, `Module`, `Constant`, …). Filtering `WHERE definition_type='function'`
+- **`definition_type` values are capitalized** (`Function`, `Method`,
+  `AssociatedFunction`, `Struct`, `Field`, `Variant`, `Module`, `Constant`, …).
+  Filtering `WHERE definition_type='function'`
   returns zero rows; use `'Function'`. Run `orbit schema gl_definition` when
   unsure of columns.
 - **Relationships live in `gl_edge`**, keyed by `source_id`/`target_id` with

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""local_repo_map.py — produce a high-level repo map from Orbit's local DuckDB graph.
+"""repo_map.py — produce a high-level repo map from Orbit's local DuckDB graph.
 
 Usage:
-    local_repo_map.py overview                  # languages, top dirs, key types
-    local_repo_map.py tree [PATH_PREFIX]        # classes/structs grouped by file
-    local_repo_map.py api  PATH_PREFIX          # types + methods + signatures
-    local_repo_map.py class FQN_OR_NAME         # methods + signatures of one class
-    local_repo_map.py extends NAME              # descendants of a base class/trait
-    local_repo_map.py imports PATTERN           # who imports symbols matching PATTERN
+    repo_map.py overview                  # languages, top dirs, key types
+    repo_map.py tree [PATH_PREFIX]        # classes/structs grouped by file
+    repo_map.py api  PATH_PREFIX          # types + methods + signatures
+    repo_map.py class FQN_OR_NAME         # methods + signatures of one class
+    repo_map.py extends NAME              # descendants of a base class/trait
+    repo_map.py imports PATTERN           # who imports symbols matching PATTERN
 
 Scoped to the current commit (`git rev-parse HEAD`). If the commit is not
 indexed, the script prints the index command and exits.
@@ -182,9 +182,9 @@ def split_repo_path_arg(argv: list[str]) -> tuple[Path | None, list[str]]:
     """Accept an optional repository path before the subcommand.
 
     Examples:
-      local_repo_map.py /path/to/repo
-      local_repo_map.py /path/to/repo api crates/foo
-      local_repo_map.py --ext rs tree crates/foo
+      repo_map.py /path/to/repo
+      repo_map.py /path/to/repo api crates/foo
+      repo_map.py --ext rs tree crates/foo
     """
     if argv and not argv[0].startswith("-") and argv[0] not in SUBCOMMANDS:
         path = Path(argv[0]).expanduser()

@@ -12,7 +12,7 @@ you query directly (`_orbit_manifest` is bookkeeping).
 | `gl_definition` | a defined symbol | `id`, `name`, `fqn`, `definition_type`, `file_path`, `start_line`, `end_line`, `commit_sha` |
 | `gl_file` | an indexed file | `id`, `path`, `language`, `commit_sha` |
 | `gl_directory` | a directory | `id`, `path`, `name` |
-| `gl_imported_symbol` | an import occurrence | `id`, `name`, `import_path`, `file_path` |
+| `gl_imported_symbol` | an import occurrence | `id`, `identifier_name`, `import_path`, `file_path` |
 | `gl_edge` | a relationship | `source_id`, `source_kind`, `relationship_kind`, `target_id`, `target_kind` |
 
 `relationship_kind` values: `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`,
@@ -75,7 +75,7 @@ Who imports a symbol:
 
 ```bash
 orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
-           WHERE name LIKE '%Workspace%' ORDER BY file_path"
+           WHERE identifier_name LIKE '%Workspace%' ORDER BY file_path"
 ```
 
 ## Notes
