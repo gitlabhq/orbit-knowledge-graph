@@ -724,6 +724,27 @@ fn repo_map_ext_filter_scopes_languages() {
 }
 
 #[test]
+fn repo_map_subdir_repo_resolves_from_root() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    // Pointing `--repo` at a subdirectory must still anchor at the git
+    // top-level so signature extraction (read_text against repo-root-relative
+    // paths) works, not silently degrade to bare names.
+    let subdir = repo.path.join("src");
+    let api = String::from_utf8(repo_map(&subdir, dd, &["api", "src"]).stdout).unwrap();
+    assert!(
+        api.contains("class App(Base):") && api.contains("def run(self):"),
+        "subdir --repo must extract signatures, not bare names: {api}"
+    );
+
+    let class = String::from_utf8(repo_map(&subdir, dd, &["class", "App"]).stdout).unwrap();
+    assert!(class.contains("CLASS — App") && class.contains("def run(self):"));
+}
+
+#[test]
 fn repo_map_relative_db_resolves_from_caller_cwd() {
     let repo = create_test_repo();
     let caller = tempfile::TempDir::new().unwrap();

@@ -192,8 +192,13 @@ pub(crate) fn run(
     // repo root — otherwise a relative db resolves against the repo instead.
     let db = workspace::resolve_db_path(db)?;
 
-    let git = workspace::git_info(&repo_path)
-        .with_context(|| format!("failed to read git info for {}", repo_path.display()))?;
+    // `orbit index` stores paths relative to the git working-tree root, so a
+    // `--repo` pointing at a subdirectory must anchor there too, not at the
+    // subdirectory itself.
+    let top_level = workspace::git_toplevel(&repo_path)
+        .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
+    let git = workspace::git_info(&top_level)
+        .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
 
     // `read_text` in the api/class queries resolves its globs against the
     // process CWD, and the graph stores repo-relative file paths, so anchor
