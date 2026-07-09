@@ -21,7 +21,7 @@
 //! **Rollback** (`active > SCHEMA_VERSION`, an older binary was deployed):
 //! see [`run_rollback`] for the two cases (tables retained vs. already GC'd).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -173,40 +173,25 @@ pub async fn clone_unchanged_migration_tables(
     let old_prefix = table_prefix(active_version);
     let actions = classify_tables_for_scope(ontology, scope);
 
-    let existing_old = version_object_names(graph, active_version).await?;
-    let existing_new = version_object_names(graph, *SCHEMA_VERSION).await?;
+    let existing_old = get_existing_tables(graph, active_version).await?;
+    let existing_new = get_existing_tables(graph, *SCHEMA_VERSION).await?;
 
     let tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
     let mut cloned = 0;
     let mut rebuilt = 0;
     let mut seeded = 0;
     for table in &tables {
-        let base = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
+        let base_table_name = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
+        let old_name = format!("{old_prefix}{base_table_name}");
 
-        if base == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Sdlc(_)) {
+        if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Sdlc(_)) {
             seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, scope).await?;
             seeded += 1;
-            continue;
-        }
-
-        let old_name = format!("{old_prefix}{base}");
-        let clone_from_active = matches!(
-            actions.get(base),
-            Some(TableMigrationAction::CloneFromActive)
-        ) && existing_old.contains(&old_name);
-
-        if clone_from_active {
+        } else if should_clone(base_table_name, &old_name, &actions, &existing_old) {
             clone_table(graph, &old_name, &table.name, &existing_new).await?;
             cloned += 1;
         } else {
-            info!(table = %table.name, "rebuilding table empty");
-            graph
-                .execute(&emit_create_table(table))
-                .await
-                .map_err(|e| MigrationError::Ddl {
-                    table: table.name.clone(),
-                    reason: e.to_string(),
-                })?;
+            rebuild_empty_table(graph, table).await?;
             rebuilt += 1;
         }
     }
@@ -216,6 +201,32 @@ pub async fn clone_unchanged_migration_tables(
     create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
     metrics.record("create_tables", "success");
     Ok(())
+}
+
+fn should_clone(
+    base_table_name: &str,
+    old_name: &str,
+    actions: &BTreeMap<String, TableMigrationAction>,
+    existing_old: &HashSet<String>,
+) -> bool {
+    let action = actions.get(base_table_name);
+    let scope_keeps_data = matches!(action, Some(TableMigrationAction::CloneFromActive));
+    let source_exists = existing_old.contains(old_name);
+    scope_keeps_data && source_exists
+}
+
+async fn rebuild_empty_table(
+    graph: &ArrowClickHouseClient,
+    table: &query_engine::compiler::ast::ddl::CreateTable,
+) -> Result<(), MigrationError> {
+    info!(table = %table.name, "rebuilding table empty");
+    graph
+        .execute(&emit_create_table(table))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.name.clone(),
+            reason: e.to_string(),
+        })
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer
@@ -558,6 +569,7 @@ async fn clone_table(
     new_name: &str,
     existing_new: &HashSet<String>,
 ) -> Result<(), MigrationError> {
+    // Drop an interrupted clone's empty shell, else the CREATE IF NOT EXISTS below skips it.
     if existing_new.contains(new_name)
         && count_rows(graph, new_name).await? == 0
         && count_rows(graph, old_name).await? > 0
@@ -625,14 +637,14 @@ async fn create_dictionaries_and_views(
     Ok(())
 }
 
-async fn version_object_names(
+async fn get_existing_tables(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<HashSet<String>, MigrationError> {
     Ok(list_version_objects(graph, version)
         .await?
         .into_iter()
-        .map(|object| object.name)
+        .map(|table| table.name)
         .collect())
 }
 
