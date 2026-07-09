@@ -141,7 +141,7 @@ SELECT count() AS ns_count FROM ( \
 
 /// Counts how many of the given global plans have a completed checkpoint (null cursor).
 const COUNT_COMPLETE_GLOBAL_PLANS: &str = "\
-SELECT count(DISTINCT splitByChar('.', key)[2]) AS ns_count \
+SELECT count(DISTINCT splitByChar('.', key)[2]) AS plan_count \
 FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND cursor_values IN ('null', '') \
@@ -758,8 +758,8 @@ async fn count_completed_global_plans(
         .map_err(|e| e.to_string())?;
     batches
         .first()
-        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
-        .ok_or_else(|| "no ns_count in result".to_string())
+        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "plan_count", 0))
+        .ok_or_else(|| "no plan_count in result".to_string())
 }
 
 /// Builds the set of object names the ontology creates (tables, views,

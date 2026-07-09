@@ -650,7 +650,8 @@ async fn get_existing_tables(
 
 async fn count_rows(graph: &ArrowClickHouseClient, table: &str) -> Result<u64, MigrationError> {
     let batches = graph
-        .query(&format!("SELECT count() AS cnt FROM {table}"))
+        .query("SELECT count() AS cnt FROM {table:Identifier}")
+        .param("table", table)
         .fetch_arrow()
         .await
         .map_err(|e| MigrationError::Ddl {
