@@ -795,10 +795,10 @@ async fn sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidated_plan() 
     .await;
 
     for (key, cursor_values) in [
-        ("ns.100.User", "null"),
         ("global.User", "null"),
+        ("ns.100.Job.p1of2", "null"),
+        ("ns.100.Job.p2of2", "null"),
         ("ns.100.Note", "null"),
-        ("ns.100.Note.p1of2", r#"{"c":["1/100/","5"]}"#),
         ("dispatch.sdlc.namespace.sweep", "null"),
     ] {
         ctx.execute(&format!(
@@ -861,9 +861,13 @@ async fn sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidated_plan() 
         .await;
     assert_eq!(
         String::extract_column(&surviving, 0).unwrap(),
-        vec!["global.User".to_string(), "ns.100.User".to_string()],
-        "seeding keeps unchanged plans but drops dispatch cursors (to re-fire the cold-start sweep) \
-         and the invalidated plan with its partition sub-key"
+        vec![
+            "global.User".to_string(),
+            "ns.100.Job.p1of2".to_string(),
+            "ns.100.Job.p2of2".to_string(),
+        ],
+        "seeding keeps unchanged plans — including a partitioned entity's sub-keys — and drops \
+         the dispatch cursor and the invalidated plan"
     );
 
     let before = migration_completion::get_sdlc_reindex_progress(
