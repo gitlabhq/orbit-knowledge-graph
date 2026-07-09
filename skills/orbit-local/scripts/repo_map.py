@@ -31,7 +31,7 @@ from pathlib import Path
 
 # How to invoke the Orbit local CLI. Defaults to the glab wrapper; when this
 # skill ships bundled with the standalone binary, set ORBIT_CMD=orbit.
-ORBIT_CMD = shlex.split(os.environ.get("ORBIT_CMD", "glab orbit local"))
+ORBIT_CMD = shlex.split(os.environ.get("ORBIT_CMD", "glab orbit local --yes"))
 
 # ---------------------------------------------------------------------------
 # Common SQL fragments

@@ -7,7 +7,7 @@ directory-level map is more useful than reading files one by one.
 
 The script summarizes languages, top-level structure, key abstractions,
 definitions, per-file APIs, inheritance edges, and imports using Orbit Local's
-indexed `File`, `Definition`, `ImportedSymbol`, and relationship tables.
+indexed `gl_file`, `gl_definition`, `gl_imported_symbol`, and `gl_edge` tables.
 
 ## When to use it
 

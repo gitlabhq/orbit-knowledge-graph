@@ -60,7 +60,9 @@ wrapper flags, config keys, and pass-through rules:
 - **Relationships live in `gl_edge`**, keyed by `source_id`/`target_id` with
   `relationship_kind` in `DEFINES`, `CALLS`, `IMPORTS`, `CONTAINS`, `EXTENDS`.
   Join back to `gl_definition` on `id` to resolve names.
-- **The graph is per-commit.** `gl_*` rows carry `commit_sha`; re-run `index`
+- **The graph is per-commit.** The node tables (`gl_definition`, `gl_file`,
+  `gl_directory`, `gl_imported_symbol`) carry `commit_sha`; `gl_edge` does
+  not - join back to a definition to scope edges to a commit. Re-run `index`
   after checking out a different commit. Default database is
   `~/.orbit/graph.duckdb` (override with `--db`).
 
