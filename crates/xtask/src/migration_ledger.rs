@@ -9,7 +9,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
 use ontology::migrations::{
-    self, Fingerprints, MigrationEntry, MigrationLedger, Scope, ScopeDeclaration, derive_scope,
+    self, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope, derive_scope,
 };
 
 const DEFAULT_BASE: &str = "origin/main";
@@ -90,7 +90,7 @@ fn git_show(base: &str, repo_path: &str) -> Option<String> {
 fn parse_explicit_scope(
     scope: Option<String>,
     entities: Option<String>,
-) -> Result<Option<ScopeDeclaration>> {
+) -> Result<Option<MigrationScope>> {
     let Some(scope) = scope else {
         if entities.is_some() {
             bail!("--entities requires --scope sdlc");
@@ -99,9 +99,9 @@ fn parse_explicit_scope(
     };
 
     let scope = match scope.as_str() {
-        "*" => Scope::All,
-        "sdlc" => Scope::Sdlc,
-        "code" => Scope::Code,
+        "*" => LedgerScope::All,
+        "sdlc" => LedgerScope::Sdlc,
+        "code" => LedgerScope::Code,
         other => bail!("unknown scope '{other}'; expected '*', 'sdlc', or 'code'"),
     };
 
@@ -114,11 +114,24 @@ fn parse_explicit_scope(
         })
         .unwrap_or_default();
 
-    if !entities.is_empty() && scope != Scope::Sdlc {
+    if !entities.is_empty() && scope != LedgerScope::Sdlc {
         bail!("--entities is only valid with --scope sdlc");
     }
 
-    Ok(Some(ScopeDeclaration { scope, entities }))
+    Ok(Some(match scope {
+        LedgerScope::All => MigrationScope::Full,
+        LedgerScope::Code => MigrationScope::Code,
+        LedgerScope::Sdlc => MigrationScope::Sdlc(entities),
+    }))
+}
+
+/// Lowers a [`MigrationScope`] into the wire `scope:` + `entities:` fields of a ledger entry.
+fn ledger_entry_fields(scope: MigrationScope) -> (LedgerScope, BTreeSet<String>) {
+    match scope {
+        MigrationScope::Full => (LedgerScope::All, BTreeSet::new()),
+        MigrationScope::Code => (LedgerScope::Code, BTreeSet::new()),
+        MigrationScope::Sdlc(entities) => (LedgerScope::Sdlc, entities),
+    }
 }
 
 pub fn check(base: Option<String>) -> Result<()> {
@@ -194,7 +207,7 @@ fn check_under_declaration(
         &source_contents,
         &changed_sources,
         &changed_tables,
-    ) && !entry.declaration().covers_scope_of(&required)
+    ) && !entry.migration_scope().covers_scope_of(&required)
     {
         bail!(
             "ledger entry for version {schema_version} under-declares the change: \
@@ -278,12 +291,13 @@ pub fn bump(
         if ledger.migrations.iter().any(|e| e.version == new_version) {
             bail!("ledger already has an entry for version {new_version}");
         }
+        let (scope, entities) = ledger_entry_fields(entry_declaration);
         ledger.migrations.insert(
             0,
             MigrationEntry {
                 version: new_version,
-                scope: entry_declaration.scope,
-                entities: entry_declaration.entities,
+                scope,
+                entities,
                 note,
             },
         );
@@ -293,9 +307,10 @@ pub fn bump(
             .migrations
             .first_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
-        let widened = latest.declaration().widened_with(&entry_declaration);
-        latest.scope = widened.scope;
-        latest.entities = widened.entities;
+        let widened = latest.migration_scope().widened_with(&entry_declaration);
+        let (scope, entities) = ledger_entry_fields(widened);
+        latest.scope = scope;
+        latest.entities = entities;
         if note.is_some() {
             latest.note = note;
         }
@@ -316,7 +331,7 @@ pub fn bump(
     println!(
         "{} version {final_version}: {}",
         if is_new { "bumped to" } else { "amended" },
-        entry.declaration(),
+        entry.migration_scope(),
     );
     Ok(())
 }

@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::Ontology;
 
-/// How much of the graph an entry (or a derived drift) invalidates.
+/// The ledger YAML `scope:` value; an `entities:` subset narrows `Sdlc` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Scope {
+pub enum LedgerScope {
     /// Full rebuild.
     #[serde(rename = "*")]
     All,
@@ -18,97 +18,73 @@ pub enum Scope {
     Code,
 }
 
-/// A scope paired with the SDLC entities that narrow it.
+/// What a migration invalidates and must re-index. Empty `Sdlc` set = the whole SDLC domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScopeDeclaration {
-    pub scope: Scope,
-    /// Empty means the whole scope; only `sdlc` declarations carry entities.
-    pub entities: BTreeSet<String>,
+pub enum MigrationScope {
+    Full,
+    Code,
+    Sdlc(BTreeSet<String>),
 }
 
-impl ScopeDeclaration {
+impl MigrationScope {
     #[must_use]
     pub fn covers_scope_of(&self, required: &Self) -> bool {
-        match (self.scope, required.scope) {
-            (Scope::All, _) => true,
-            (_, Scope::All) => false,
-            (Scope::Code, Scope::Code) => true,
-            (Scope::Code, Scope::Sdlc) | (Scope::Sdlc, Scope::Code) => false,
-            (Scope::Sdlc, Scope::Sdlc) => {
-                if self.entities.is_empty() {
+        match (self, required) {
+            (Self::Full, _) => true,
+            (_, Self::Full) => false,
+            (Self::Code, Self::Code) => true,
+            (Self::Code, Self::Sdlc(_)) | (Self::Sdlc(_), Self::Code) => false,
+            (Self::Sdlc(covering), Self::Sdlc(required)) => {
+                if covering.is_empty() {
                     true
                 } else {
-                    !required.entities.is_empty() && required.entities.is_subset(&self.entities)
+                    !required.is_empty() && required.is_subset(covering)
                 }
             }
         }
     }
 
-    /// The widest of the two declarations; mixing `code` and `sdlc` widens to `"*"`.
+    /// The widest of the two scopes; mixing `code` and `sdlc` widens to `"*"`.
     #[must_use]
     pub fn widened_with(&self, other: &Self) -> Self {
-        match (self.scope, other.scope) {
-            (Scope::All, _) | (_, Scope::All) => Self::all(),
-            (Scope::Code, Scope::Code) => Self::code(),
-            (Scope::Code, Scope::Sdlc) | (Scope::Sdlc, Scope::Code) => Self::all(),
-            (Scope::Sdlc, Scope::Sdlc) => {
-                if self.entities.is_empty() || other.entities.is_empty() {
-                    Self::sdlc(BTreeSet::new())
+        match (self, other) {
+            (Self::Full, _) | (_, Self::Full) => Self::Full,
+            (Self::Code, Self::Code) => Self::Code,
+            (Self::Code, Self::Sdlc(_)) | (Self::Sdlc(_), Self::Code) => Self::Full,
+            (Self::Sdlc(left), Self::Sdlc(right)) => {
+                if left.is_empty() || right.is_empty() {
+                    Self::Sdlc(BTreeSet::new())
                 } else {
-                    Self::sdlc(self.entities.union(&other.entities).cloned().collect())
+                    Self::Sdlc(left.union(right).cloned().collect())
                 }
             }
-        }
-    }
-
-    #[must_use]
-    pub fn all() -> Self {
-        Self {
-            scope: Scope::All,
-            entities: BTreeSet::new(),
-        }
-    }
-
-    #[must_use]
-    fn code() -> Self {
-        Self {
-            scope: Scope::Code,
-            entities: BTreeSet::new(),
-        }
-    }
-
-    #[must_use]
-    fn sdlc(entities: BTreeSet<String>) -> Self {
-        Self {
-            scope: Scope::Sdlc,
-            entities,
         }
     }
 }
 
-impl std::fmt::Display for ScopeDeclaration {
+impl std::fmt::Display for MigrationScope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.scope {
-            Scope::All => write!(f, "scope \"*\""),
-            Scope::Code => write!(f, "scope code"),
-            Scope::Sdlc if self.entities.is_empty() => write!(f, "scope sdlc"),
-            Scope::Sdlc => {
-                let list = self.entities.iter().cloned().collect::<Vec<_>>().join(", ");
+        match self {
+            Self::Full => write!(f, "scope \"*\""),
+            Self::Code => write!(f, "scope code"),
+            Self::Sdlc(entities) if entities.is_empty() => write!(f, "scope sdlc"),
+            Self::Sdlc(entities) => {
+                let list = entities.iter().cloned().collect::<Vec<_>>().join(", ");
                 write!(f, "scope sdlc, entities [{list}]")
             }
         }
     }
 }
 
-/// The minimal [`ScopeDeclaration`] a fingerprint diff justifies, or `None` if
-/// nothing changed. Fail-safe: anything unmapped widens to [`Scope::All`].
+/// The minimal [`MigrationScope`] a fingerprint diff justifies, or `None` if
+/// nothing changed. Fail-safe: anything unmapped widens to [`MigrationScope::Full`].
 #[must_use]
 pub fn derive_scope(
     ontology: &Ontology,
     source_contents: &BTreeMap<String, String>,
     changed_sources: &BTreeSet<String>,
     changed_tables: &BTreeSet<String>,
-) -> Option<ScopeDeclaration> {
+) -> Option<MigrationScope> {
     if changed_sources.is_empty() && changed_tables.is_empty() {
         return None;
     }
@@ -118,7 +94,7 @@ pub fn derive_scope(
 
     for path in changed_sources {
         if path == "schema.yaml" || path == "reference.yaml" {
-            return Some(ScopeDeclaration::all());
+            return Some(MigrationScope::Full);
         }
         if path.starts_with("nodes/") {
             match source_contents
@@ -130,7 +106,7 @@ pub fn derive_scope(
                     sdlc_entities.insert(entity);
                 }
                 Some(NodeScope::Code) => code_changed = true,
-                None => return Some(ScopeDeclaration::all()),
+                None => return Some(MigrationScope::Full),
             }
         } else if path.starts_with("edges/") {
             match edge_kind_for_path(ontology, path) {
@@ -142,7 +118,7 @@ pub fn derive_scope(
                 Some(kind) => {
                     sdlc_entities.insert(kind);
                 }
-                None => return Some(ScopeDeclaration::all()),
+                None => return Some(MigrationScope::Full),
             }
         } else if path.starts_with("derived/") {
             match source_contents
@@ -153,26 +129,26 @@ pub fn derive_scope(
                 Some(entity) => {
                     sdlc_entities.insert(entity);
                 }
-                None => return Some(ScopeDeclaration::all()),
+                None => return Some(MigrationScope::Full),
             }
         } else {
-            return Some(ScopeDeclaration::all());
+            return Some(MigrationScope::Full);
         }
     }
 
     for table in changed_tables {
         if !table_owned_by_scope(ontology, table, &sdlc_entities, code_changed) {
-            return Some(ScopeDeclaration::all());
+            return Some(MigrationScope::Full);
         }
     }
 
     if !sdlc_entities.is_empty() && code_changed {
-        return Some(ScopeDeclaration::all());
+        return Some(MigrationScope::Full);
     }
     if code_changed {
-        return Some(ScopeDeclaration::code());
+        return Some(MigrationScope::Code);
     }
-    Some(ScopeDeclaration::sdlc(sdlc_entities))
+    Some(MigrationScope::Sdlc(sdlc_entities))
 }
 
 /// Names accepted in an entry's `entities:` list: etl-bearing nodes, derived
@@ -289,60 +265,50 @@ mod tests {
 
     #[test]
     fn scope_covers_star_covers_all() {
-        assert!(
-            ScopeDeclaration::all().covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"])))
-        );
-        assert!(ScopeDeclaration::all().covers_scope_of(&ScopeDeclaration::code()));
+        assert!(MigrationScope::Full.covers_scope_of(&MigrationScope::Sdlc(entities(&["Note"]))));
+        assert!(MigrationScope::Full.covers_scope_of(&MigrationScope::Code));
     }
 
     #[test]
     fn scope_covers_sdlc_subset_rules() {
-        let any_sdlc = ScopeDeclaration::sdlc(BTreeSet::new());
-        assert!(any_sdlc.covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"]))));
+        let any_sdlc = MigrationScope::Sdlc(BTreeSet::new());
+        assert!(any_sdlc.covers_scope_of(&MigrationScope::Sdlc(entities(&["Note"]))));
         assert!(
-            ScopeDeclaration::sdlc(entities(&["Note", "Issue"]))
-                .covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"])))
+            MigrationScope::Sdlc(entities(&["Note", "Issue"]))
+                .covers_scope_of(&MigrationScope::Sdlc(entities(&["Note"])))
         );
         assert!(
-            !ScopeDeclaration::sdlc(entities(&["Note"]))
-                .covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Issue"])))
+            !MigrationScope::Sdlc(entities(&["Note"]))
+                .covers_scope_of(&MigrationScope::Sdlc(entities(&["Issue"])))
         );
-        assert!(!ScopeDeclaration::sdlc(entities(&["Note"])).covers_scope_of(&any_sdlc));
+        assert!(!MigrationScope::Sdlc(entities(&["Note"])).covers_scope_of(&any_sdlc));
     }
 
     #[test]
     fn scope_covers_code_and_sdlc_are_disjoint() {
-        assert!(
-            !ScopeDeclaration::code().covers_scope_of(&ScopeDeclaration::sdlc(entities(&["Note"])))
-        );
-        assert!(
-            !ScopeDeclaration::sdlc(BTreeSet::new()).covers_scope_of(&ScopeDeclaration::code())
-        );
-        assert!(ScopeDeclaration::code().covers_scope_of(&ScopeDeclaration::code()));
+        assert!(!MigrationScope::Code.covers_scope_of(&MigrationScope::Sdlc(entities(&["Note"]))));
+        assert!(!MigrationScope::Sdlc(BTreeSet::new()).covers_scope_of(&MigrationScope::Code));
+        assert!(MigrationScope::Code.covers_scope_of(&MigrationScope::Code));
     }
 
     #[test]
     fn widen_mixes_code_and_sdlc_to_all() {
-        let widened =
-            ScopeDeclaration::sdlc(entities(&["Note"])).widened_with(&ScopeDeclaration::code());
-        assert_eq!(widened, ScopeDeclaration::all());
+        let widened = MigrationScope::Sdlc(entities(&["Note"])).widened_with(&MigrationScope::Code);
+        assert_eq!(widened, MigrationScope::Full);
     }
 
     #[test]
     fn widen_unions_sdlc_entities() {
-        let widened = ScopeDeclaration::sdlc(entities(&["Note"]))
-            .widened_with(&ScopeDeclaration::sdlc(entities(&["Issue"])));
-        assert_eq!(
-            widened,
-            ScopeDeclaration::sdlc(entities(&["Issue", "Note"]))
-        );
+        let widened = MigrationScope::Sdlc(entities(&["Note"]))
+            .widened_with(&MigrationScope::Sdlc(entities(&["Issue"])));
+        assert_eq!(widened, MigrationScope::Sdlc(entities(&["Issue", "Note"])));
     }
 
     #[test]
     fn widen_empty_entities_absorbs() {
-        let widened = ScopeDeclaration::sdlc(entities(&["Note"]))
-            .widened_with(&ScopeDeclaration::sdlc(BTreeSet::new()));
-        assert_eq!(widened, ScopeDeclaration::sdlc(BTreeSet::new()));
+        let widened = MigrationScope::Sdlc(entities(&["Note"]))
+            .widened_with(&MigrationScope::Sdlc(BTreeSet::new()));
+        assert_eq!(widened, MigrationScope::Sdlc(BTreeSet::new()));
     }
 
     #[test]
@@ -368,7 +334,7 @@ mod tests {
             &entities(&["schema.yaml"]),
             &BTreeSet::new(),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::all()));
+        assert_eq!(scope, Some(MigrationScope::Full));
     }
 
     #[test]
@@ -384,7 +350,7 @@ mod tests {
             &entities(&["nodes/core/note.yaml"]),
             &BTreeSet::new(),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::sdlc(entities(&["Note"]))));
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Note"]))));
     }
 
     #[test]
@@ -400,7 +366,7 @@ mod tests {
             &entities(&["nodes/source_code/file.yaml"]),
             &BTreeSet::new(),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::code()));
+        assert_eq!(scope, Some(MigrationScope::Code));
     }
 
     #[test]
@@ -422,7 +388,7 @@ mod tests {
             &entities(&["nodes/core/note.yaml", "nodes/source_code/file.yaml"]),
             &BTreeSet::new(),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::all()));
+        assert_eq!(scope, Some(MigrationScope::Full));
     }
 
     #[test]
@@ -438,7 +404,7 @@ mod tests {
             &entities(&["nodes/core/note.yaml"]),
             &entities(&["checkpoint"]),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::all()));
+        assert_eq!(scope, Some(MigrationScope::Full));
     }
 
     #[test]
@@ -454,7 +420,7 @@ mod tests {
             &entities(&["nodes/core/note.yaml"]),
             &entities(&["gl_note"]),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::sdlc(entities(&["Note"]))));
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Note"]))));
     }
 
     // HAS_NOTE is FK-derived: no edge `etl:` block, but routed to the default
@@ -468,7 +434,7 @@ mod tests {
             &entities(&["edges/has_note.yaml"]),
             &BTreeSet::new(),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::sdlc(entities(&["HAS_NOTE"]))));
+        assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["HAS_NOTE"]))));
     }
 
     // calls/defines/extends/imports/on_branch route to gl_code_edge, so an edge
@@ -485,7 +451,7 @@ mod tests {
             &entities(&["edges/calls.yaml"]),
             &entities(&["gl_code_edge"]),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::code()));
+        assert_eq!(scope, Some(MigrationScope::Code));
     }
 
     #[test]
@@ -497,6 +463,6 @@ mod tests {
             &entities(&["edges/ghost.yaml"]),
             &BTreeSet::new(),
         );
-        assert_eq!(scope, Some(ScopeDeclaration::all()));
+        assert_eq!(scope, Some(MigrationScope::Full));
     }
 }

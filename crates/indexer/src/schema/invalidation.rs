@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ontology::migrations::{Scope, ScopeDeclaration, code_entity_names, sdlc_entity_names};
+use ontology::migrations::{MigrationScope, code_entity_names, sdlc_entity_names};
 use ontology::{EtlScope, Ontology};
 use query_engine::compiler::generate_graph_tables_with_prefix;
 use tracing::warn;
@@ -24,7 +24,7 @@ pub struct InvalidatedPipelines {
 
 pub fn classify_tables_for_scope(
     ontology: &Ontology,
-    scope: &ScopeDeclaration,
+    scope: &MigrationScope,
 ) -> BTreeMap<String, TableMigrationAction> {
     let invalidated = invalidated_entities(ontology, scope);
     generate_graph_tables_with_prefix(ontology, "")
@@ -39,7 +39,7 @@ pub fn classify_tables_for_scope(
 /// FK-derived edge kinds invalidate the pipelines that emit them.
 pub fn find_invalidated_pipelines(
     ontology: &Ontology,
-    scope: &ScopeDeclaration,
+    scope: &MigrationScope,
 ) -> InvalidatedPipelines {
     let invalidated = invalidated_entities(ontology, scope);
     let descriptors = ontology.pipeline_descriptors();
@@ -66,26 +66,26 @@ pub fn find_invalidated_pipelines(
     InvalidatedPipelines { namespaced, global }
 }
 
-fn invalidated_entities(ontology: &Ontology, scope: &ScopeDeclaration) -> BTreeSet<String> {
-    match scope.scope {
-        Scope::All => sdlc_entity_names(ontology)
+fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet<String> {
+    match scope {
+        MigrationScope::Full => sdlc_entity_names(ontology)
             .into_iter()
             .chain(code_entity_names(ontology))
             .collect(),
-        Scope::Sdlc if scope.entities.is_empty() => sdlc_entity_names(ontology),
-        Scope::Sdlc => scope.entities.clone(),
-        Scope::Code => code_entity_names(ontology),
+        MigrationScope::Sdlc(entities) if entities.is_empty() => sdlc_entity_names(ontology),
+        MigrationScope::Sdlc(entities) => entities.clone(),
+        MigrationScope::Code => code_entity_names(ontology),
     }
 }
 
 fn action_for_table(
     ontology: &Ontology,
     table: &str,
-    scope: &ScopeDeclaration,
+    scope: &MigrationScope,
     invalidated: &BTreeSet<String>,
 ) -> TableMigrationAction {
     if table == CODE_INDEXING_CHECKPOINT_TABLE {
-        return if scope.scope == Scope::Code {
+        return if matches!(scope, MigrationScope::Code) {
             TableMigrationAction::RebuildEmpty
         } else {
             TableMigrationAction::CloneFromActive
@@ -137,7 +137,7 @@ mod tests {
         names.iter().map(|s| s.to_string()).collect()
     }
 
-    fn classify(scope: ScopeDeclaration) -> BTreeMap<String, TableMigrationAction> {
+    fn classify(scope: MigrationScope) -> BTreeMap<String, TableMigrationAction> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         classify_tables_for_scope(&ontology, &scope)
     }
@@ -147,11 +147,8 @@ mod tests {
             .unwrap_or_else(|| panic!("table '{table}' missing from classification: {map:?}"))
     }
 
-    fn sdlc_scope(names: &[&str]) -> ScopeDeclaration {
-        ScopeDeclaration {
-            scope: Scope::Sdlc,
-            entities: entities(names),
-        }
+    fn sdlc_scope(names: &[&str]) -> MigrationScope {
+        MigrationScope::Sdlc(entities(names))
     }
 
     #[test]
@@ -218,10 +215,7 @@ mod tests {
 
     #[test]
     fn note_scope_migration_rebuilds_only_its_node_table() {
-        let map = classify(ScopeDeclaration {
-            scope: Scope::Sdlc,
-            entities: entities(&["Note"]),
-        });
+        let map = classify(MigrationScope::Sdlc(entities(&["Note"])));
         assert_eq!(action(&map, "gl_note"), TableMigrationAction::RebuildEmpty);
         assert_eq!(
             action(&map, "gl_edge"),
@@ -235,10 +229,7 @@ mod tests {
 
     #[test]
     fn full_sdlc_scope_rebuilds_sdlc_tables_and_clones_code() {
-        let map = classify(ScopeDeclaration {
-            scope: Scope::Sdlc,
-            entities: BTreeSet::new(),
-        });
+        let map = classify(MigrationScope::Sdlc(BTreeSet::new()));
         assert_eq!(action(&map, "gl_note"), TableMigrationAction::RebuildEmpty);
         assert_eq!(action(&map, "gl_edge"), TableMigrationAction::RebuildEmpty);
         assert_eq!(
@@ -261,10 +252,7 @@ mod tests {
 
     #[test]
     fn code_scope_rebuilds_code_tables_and_checkpoint() {
-        let map = classify(ScopeDeclaration {
-            scope: Scope::Code,
-            entities: BTreeSet::new(),
-        });
+        let map = classify(MigrationScope::Code);
         for table in ["gl_definition", "gl_file", "gl_directory", "gl_code_edge"] {
             assert_eq!(
                 action(&map, table),

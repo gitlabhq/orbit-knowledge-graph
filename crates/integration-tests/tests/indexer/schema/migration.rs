@@ -13,7 +13,7 @@ use indexer::schema::version::{
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
-use ontology::migrations::{Scope, ScopeDeclaration};
+use ontology::migrations::MigrationScope;
 use query_engine::compiler::{
     DictionarySource, emit_create_table, generate_graph_dictionaries_with_prefix,
     generate_graph_tables_with_prefix,
@@ -808,10 +808,7 @@ async fn sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidated_plan() 
         .await;
     }
 
-    let scope = ScopeDeclaration {
-        scope: Scope::Sdlc,
-        entities: ["Note".to_string()].into_iter().collect(),
-    };
+    let scope = MigrationScope::Sdlc(["Note".to_string()].into_iter().collect());
     migration::clone_unchanged_migration_tables(
         &client,
         &dictionary_source(&ctx.config),
@@ -934,11 +931,8 @@ async fn count_rows(ctx: &TestContext, table: &str) -> i64 {
     i64::extract_column(&batches, 0).unwrap()[0]
 }
 
-fn sdlc_scope(entities: &[&str]) -> ScopeDeclaration {
-    ScopeDeclaration {
-        scope: Scope::Sdlc,
-        entities: entities.iter().map(|s| s.to_string()).collect(),
-    }
+fn sdlc_scope(entities: &[&str]) -> MigrationScope {
+    MigrationScope::Sdlc(entities.iter().map(|s| s.to_string()).collect())
 }
 
 #[tokio::test]
@@ -1132,7 +1126,7 @@ async fn gate_promotes_only_when_every_invalidated_pipeline_completes_everywhere
     create_version_tables(&ctx, &ontology, &table_prefix(*SCHEMA_VERSION)).await;
     let checkpoint = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
 
-    let progress = |scope: ScopeDeclaration, enabled_count: u64| {
+    let progress = |scope: MigrationScope, enabled_count: u64| {
         let client = client.clone();
         let ontology = ontology.clone();
         let checkpoint = checkpoint.clone();
@@ -1331,10 +1325,7 @@ async fn code_scope_clones_sdlc_state_intact_and_rebuilds_code_checkpoint() {
         &dictionary_source(&ctx.config),
         &ontology,
         &metrics,
-        &ScopeDeclaration {
-            scope: Scope::Code,
-            entities: Default::default(),
-        },
+        &MigrationScope::Code,
         active_version,
     )
     .await

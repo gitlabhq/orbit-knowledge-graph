@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use arrow::datatypes::UInt64Type;
 use gkg_utils::arrow::ArrowUtils;
-use ontology::migrations::{MigrationLedger, Scope, ScopeDeclaration};
+use ontology::migrations::{MigrationLedger, MigrationScope};
 use query_engine::compiler::{
     DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
@@ -153,7 +153,7 @@ pub async fn clone_unchanged_migration_tables(
     source: &DictionarySource<'_>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
-    scope: &ScopeDeclaration,
+    scope: &MigrationScope,
     active_version: u32,
 ) -> Result<(), MigrationError> {
     let new_prefix = table_prefix(*SCHEMA_VERSION);
@@ -170,7 +170,7 @@ pub async fn clone_unchanged_migration_tables(
     for table in &tables {
         let base = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
 
-        if base == CHECKPOINT_TABLE && scope.scope == Scope::Sdlc {
+        if base == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Sdlc(_)) {
             seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, scope).await?;
             seeded += 1;
             continue;
@@ -409,7 +409,7 @@ async fn run_migration_locked(
         }
     };
 
-    let create_result = if scope.scope == Scope::All {
+    let create_result = if matches!(scope, MigrationScope::Full) {
         create_prefixed_tables(graph, source, ontology, metrics).await
     } else {
         info!(version = *SCHEMA_VERSION, %scope, "clone-based migration — cloning unchanged tables");
@@ -510,7 +510,7 @@ async fn seed_sdlc_checkpoint(
     ontology: &ontology::Ontology,
     new_table: &query_engine::compiler::ast::ddl::CreateTable,
     old_prefix: &str,
-    scope: &ScopeDeclaration,
+    scope: &MigrationScope,
 ) -> Result<(), MigrationError> {
     graph
         .execute(&emit_create_table(new_table))

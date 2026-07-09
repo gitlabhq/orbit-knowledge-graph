@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
-use ontology::migrations::{MigrationLedger, Scope, ScopeDeclaration};
+use ontology::migrations::{MigrationLedger, MigrationScope};
 use query_engine::compiler::{
     generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
 };
@@ -229,7 +229,7 @@ pub struct SdlcReindexProgress {
 pub async fn get_sdlc_reindex_progress(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
-    scope: &ScopeDeclaration,
+    scope: &MigrationScope,
     checkpoint_table: &str,
     enabled_count: u64,
 ) -> Result<SdlcReindexProgress, String> {
@@ -393,9 +393,9 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| format!("compute code coverage: {e}"))?;
 
-        let scope = self.invalidation_scope(version).await?;
-        let sdlc_progress = match scope.scope {
-            Scope::All | Scope::Code => {
+        let scope = self.resolve_migration_scope(version).await?;
+        let sdlc_progress = match &scope {
+            MigrationScope::Full | MigrationScope::Code => {
                 let sdlc_table = format!("{prefix}checkpoint");
                 let count = self
                     .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
@@ -406,7 +406,7 @@ impl MigrationCompletionChecker {
                     ready: count >= enabled_count,
                 }
             }
-            Scope::Sdlc => {
+            MigrationScope::Sdlc(_) => {
                 let checkpoint_table = format!("{prefix}checkpoint");
                 get_sdlc_reindex_progress(
                     &self.graph,
@@ -453,7 +453,10 @@ impl MigrationCompletionChecker {
         Ok(sdlc_progress.ready)
     }
 
-    async fn invalidation_scope(&self, migrating_version: u32) -> Result<ScopeDeclaration, String> {
+    async fn resolve_migration_scope(
+        &self,
+        migrating_version: u32,
+    ) -> Result<MigrationScope, String> {
         let active = read_active_version(&self.graph)
             .await
             .map_err(|e| format!("read active version: {e}"))?
