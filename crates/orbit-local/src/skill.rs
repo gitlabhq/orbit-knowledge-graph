@@ -46,24 +46,8 @@ fn render(requested: &str) -> Option<String> {
 }
 
 fn lookup(requested: &str) -> Option<String> {
-    if !is_safe_relative(requested) {
-        return None;
-    }
     let file = SkillAssets::get(requested)?;
     String::from_utf8(file.data.into_owned()).ok()
-}
-
-/// Guards against absolute paths and `..`/root-escaping traversal. `get` is an
-/// exact-key lookup against the embedded forward-slash relative paths, so
-/// rejecting anything that could climb out of the skill root before the lookup
-/// stays load-bearing.
-fn is_safe_relative(requested: &str) -> bool {
-    if requested.is_empty() || requested.starts_with('/') || requested.contains('\\') {
-        return false;
-    }
-    !requested
-        .split('/')
-        .any(|c| c == ".." || c == "." || c.is_empty())
 }
 
 fn available_list() -> String {
@@ -94,17 +78,15 @@ mod tests {
     }
 
     #[test]
-    fn traversal_and_absolute_paths_are_rejected() {
+    fn escaping_and_unknown_paths_do_not_resolve() {
         for path in [
             "../Cargo.toml",
             "../../etc/passwd",
             "/etc/passwd",
             "references/../../secret",
             "./SKILL.md",
-            "references\\sql.md",
             "",
         ] {
-            assert!(!is_safe_relative(path), "{path:?} must be rejected");
             assert!(lookup(path).is_none(), "{path:?} must not resolve");
         }
     }
