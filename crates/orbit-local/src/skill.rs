@@ -1,14 +1,18 @@
-//! Serves the bundled `orbit-local` skill from the binary itself. The file
-//! table is embedded at build time from `skills/orbit-local/` (see `build.rs`),
-//! so the content is always matched to the binary version and present for every
-//! install method — `glab orbit local`, a release-tarball download, or a dev
-//! build — with no packaging step. `repo_map.py` still needs a filesystem path
-//! to run; `orbit skill scripts/repo_map.py > /tmp/repo_map.py` reconstitutes
-//! one anywhere the binary is.
+//! Serves the bundled `orbit-local` skill from the binary itself. The skill
+//! directory is embedded at compile time via `rust-embed` (same pattern the
+//! ontology and named-queries crates use), so the content is always matched to
+//! the binary version and present for every install method — `glab orbit
+//! local`, a release-tarball download, or a dev build — with no packaging step.
+//! `repo_map.py` still needs a filesystem path to run; `orbit skill
+//! scripts/repo_map.py > /tmp/repo_map.py` reconstitutes one anywhere the binary
+//! is.
 
 use anyhow::{Result, bail};
+use rust_embed::Embed;
 
-include!(concat!(env!("OUT_DIR"), "/skill_files.rs"));
+#[derive(Embed)]
+#[folder = "$SKILLS_DIR/orbit-local"]
+struct SkillAssets;
 
 const MANIFEST: &str = "SKILL.md";
 
@@ -37,23 +41,22 @@ fn render(requested: &str) -> Option<String> {
     if requested == MANIFEST {
         Some(format!("{contents}{MANIFEST_BINARY_HINT}"))
     } else {
-        Some(contents.to_string())
+        Some(contents)
     }
 }
 
-fn lookup(requested: &str) -> Option<&'static str> {
+fn lookup(requested: &str) -> Option<String> {
     if !is_safe_relative(requested) {
         return None;
     }
-    SKILL_FILES
-        .iter()
-        .find(|(rel, _)| *rel == requested)
-        .map(|(_, contents)| *contents)
+    let file = SkillAssets::get(requested)?;
+    String::from_utf8(file.data.into_owned()).ok()
 }
 
-/// Guards against absolute paths and `..`/root-escaping traversal. The embedded
-/// table only holds forward-slash relative paths, so anything that could climb
-/// out of the skill root is rejected before the lookup.
+/// Guards against absolute paths and `..`/root-escaping traversal. `get` is an
+/// exact-key lookup against the embedded forward-slash relative paths, so
+/// rejecting anything that could climb out of the skill root before the lookup
+/// stays load-bearing.
 fn is_safe_relative(requested: &str) -> bool {
     if requested.is_empty() || requested.starts_with('/') || requested.contains('\\') {
         return false;
@@ -64,11 +67,9 @@ fn is_safe_relative(requested: &str) -> bool {
 }
 
 fn available_list() -> String {
-    SKILL_FILES
-        .iter()
-        .map(|(rel, _)| format!("  {rel}"))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut files: Vec<String> = SkillAssets::iter().map(|p| format!("  {p}")).collect();
+    files.sort();
+    files.join("\n")
 }
 
 #[cfg(test)]
@@ -111,7 +112,7 @@ mod tests {
     #[test]
     fn embedded_set_is_non_trivial() {
         assert!(
-            SKILL_FILES.len() >= 3,
+            SkillAssets::iter().count() >= 3,
             "expected the manifest plus at least references/ and scripts/ content"
         );
     }

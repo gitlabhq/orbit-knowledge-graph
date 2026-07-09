@@ -8584,6 +8584,7 @@ dependencies = [
  "mimalloc",
  "ontology",
  "rmcp",
+ "rust-embed",
  "schemars 1.2.1",
  "serde",
  "serde_json",
