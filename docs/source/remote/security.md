@@ -69,6 +69,8 @@ Access is enforced in the following layers:
   each item and removes anything you cannot access. This catches confidential items and
   runtime controls such as SAML group links and IP restrictions.
 
+Group [IP address restrictions](https://docs.gitlab.com/user/group/access_and_permissions/#restrict-group-access-by-ip-address) apply to query results: a request from an IP outside a group's allowed ranges returns no results from that group.
+
 Orbit is read-only. It reads changes from GitLab and never writes back, runs in a separate
 environment, and stores no permission data of its own.
 
