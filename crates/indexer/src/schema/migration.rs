@@ -62,6 +62,18 @@ const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 // TODO: move to the ontology as the single source for checkpoint table names.
 pub(crate) const CHECKPOINT_TABLE: &str = "checkpoint";
 
+/// Clones the active checkpoint into the new version, dropping dispatch cursors (so the
+/// cold-start sweep re-fires) and the invalidated plans' keys (so they re-index from epoch).
+const SEED_CHECKPOINT_SQL: &str = "\
+INSERT INTO {new_table:Identifier} \
+SELECT * FROM {old_table:Identifier} FINAL \
+WHERE _deleted = false \
+  AND NOT startsWith(key, 'dispatch.') \
+  AND NOT ( \
+    (splitByChar('.', key)[1] = 'ns' AND splitByChar('.', key)[3] IN {ns_plans:Array(String)}) \
+    OR (splitByChar('.', key)[1] = 'global' AND splitByChar('.', key)[2] IN {global_plans:Array(String)}) \
+  )";
+
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error("schema version error: {0}")]
@@ -526,7 +538,9 @@ async fn seed_sdlc_checkpoint(
     let old_table = format!("{old_prefix}{CHECKPOINT_TABLE}");
     info!(from = %old_table, to = %new_table.name, "seeding checkpoint from active version");
     graph
-        .query(&seed_checkpoint_sql(&new_table.name, &old_table))
+        .query(SEED_CHECKPOINT_SQL)
+        .param("new_table", &new_table.name)
+        .param("old_table", &old_table)
         .param("ns_plans", &pipelines.namespaced)
         .param("global_plans", &pipelines.global)
         .execute()
@@ -611,21 +625,6 @@ async fn create_dictionaries_and_views(
     Ok(())
 }
 
-fn seed_checkpoint_sql(new_table: &str, old_table: &str) -> String {
-    format!(
-        "INSERT INTO {new_table} \
-         SELECT * FROM {old_table} FINAL \
-         WHERE _deleted = false \
-           AND NOT startsWith(key, 'dispatch.') \
-           AND NOT ( \
-             (splitByChar('.', key)[1] = 'ns' \
-                AND splitByChar('.', key)[3] IN {{ns_plans:Array(String)}}) \
-             OR (splitByChar('.', key)[1] = 'global' \
-                AND splitByChar('.', key)[2] IN {{global_plans:Array(String)}}) \
-           )"
-    )
-}
-
 async fn version_object_names(
     graph: &ArrowClickHouseClient,
     version: u32,
@@ -655,26 +654,6 @@ async fn count_rows(graph: &ArrowClickHouseClient, table: &str) -> Result<u64, M
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn seed_checkpoint_sql_excludes_dispatch_and_invalidated_plans() {
-        let sql = seed_checkpoint_sql("v81_checkpoint", "v80_checkpoint");
-        assert!(sql.contains("INSERT INTO v81_checkpoint"));
-        assert!(sql.contains("FROM v80_checkpoint FINAL"));
-        assert!(sql.contains("_deleted = false"));
-        assert!(
-            sql.contains("NOT startsWith(key, 'dispatch.')"),
-            "dispatch cursors must be dropped so the cold-start sweep re-fires: {sql}"
-        );
-        assert!(
-            sql.contains("splitByChar('.', key)[3] IN {ns_plans:Array(String)}"),
-            "namespaced invalidated plans (and their .p partition sub-keys) must be dropped: {sql}"
-        );
-        assert!(
-            sql.contains("splitByChar('.', key)[2] IN {global_plans:Array(String)}"),
-            "global invalidated plans must be dropped: {sql}"
-        );
-    }
 
     #[test]
     fn generate_graph_tables_produces_ddl_for_all_ontology_tables() {

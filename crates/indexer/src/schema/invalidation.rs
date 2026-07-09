@@ -59,6 +59,7 @@ pub fn find_invalidated_pipelines(
     let mut namespaced = Vec::new();
     let mut global = Vec::new();
     for descriptor in descriptors {
+        // Keep only pipelines that emit at least one invalidated entity.
         if descriptor.reindex_targets.is_disjoint(&invalidated) {
             continue;
         }
