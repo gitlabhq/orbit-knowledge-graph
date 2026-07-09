@@ -29,16 +29,31 @@ Bump the `version` field in `SKILL.md` frontmatter on every change under
 
 ## Trigger test
 
-Canonical prompts for validating skill-discovery routing between `orbit` and its
-sibling `glab` skill. After changing the `description` field, present both skill
-descriptions to the model and ask it to route each prompt to exactly one skill,
-then check the routing matches the expectations below. This is harness-agnostic —
-any agent runner that exposes skill descriptions to the model works.
+Canonical prompts for validating skill-discovery routing between `orbit`, its
+sibling `orbit-local` skill, and the `glab` skill. After changing the
+`description` field, present all three skill descriptions to the model and ask
+it to route each prompt to exactly one skill, then check the routing matches the
+expectations below. This is harness-agnostic — any agent runner that exposes
+skill descriptions to the model works.
 
-The sibling `glab` skill description used for routing is:
-`"GitLab workflow automation using glab CLI"`. Routing currently relies on
-orbit's deferral clause ("Do not use for single-entity…"); glab's description
-carries no counter-signal. Keep this in mind when evaluating borderline cases.
+The sibling skill descriptions used for routing are:
+
+- **`glab`**: `"GitLab workflow automation using glab CLI"`. Routing currently
+  relies on orbit's deferral clause ("Do not use for single-entity…"); glab's
+  description carries no counter-signal.
+- **`orbit-local`**: `"Index and query a LOCAL checkout of a repository offline
+  with the Orbit local CLI (the orbit binary, run directly or via
+  glab orbit local). It builds a DuckDB property graph from the working tree and
+  you query it with read-only SQL. Use when the request targets the current
+  checkout, working tree, or a branch that is not pushed/indexed remotely, or is
+  explicitly offline/local: index this repo locally, who calls X in my checkout,
+  list definitions in a file, generate a repo map of a local checkout, run SQL
+  over the local code graph, or serve the local graph over MCP. For queries
+  against already-indexed production data in GitLab (a project such as
+  gitlab-org/gitlab, cross-project blast radius, contributor or merge-request
+  aggregation) use the orbit skill; for single-entity GitLab lookups or write
+  operations use glab."`. Routing relies on the matching deferral clauses in
+  both orbit and orbit-local.
 
 **Tie-break rule for boundary cases:** when a prompt names a **single known
 entity** (one MR, one project) but phrases the question relationally (e.g.
@@ -60,6 +75,14 @@ single entity without a graph query.
 6. "How many MRs were merged per project in the gitlab-org group last month?"
 7. "Which projects depend on the gitlab-shell gem?"
 8. "Which MRs touched both app/models/user.rb and app/models/project.rb?"
+
+### Should fire orbit-local (not orbit)
+
+1. "Serve the local graph over MCP" — local MCP serving (`orbit mcp serve`)
+2. "Index this local checkout into the knowledge graph" — local indexing (`orbit index .`)
+3. "Run SQL over the local code graph to find unused imports" — local SQL query (`orbit sql`)
+4. "Generate a repo map of the working tree" — local repo map, targets working tree not a remote project
+5. "Who calls this function in my checkout?" — code-structure query scoped to the local checkout
 
 ### Should fire glab (not orbit)
 

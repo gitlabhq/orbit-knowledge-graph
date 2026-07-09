@@ -1,7 +1,20 @@
 ---
 name: orbit
-description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.17.4
+description: >
+  Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI
+  subcommands. Use for code-structure questions against already-indexed
+  production data (who calls this function, where is this symbol defined),
+  cross-project dependency and blast-radius analysis, merge-request and
+  contributor queries that require relationship traversal or aggregation, remote
+  repository map generation, and any question spanning relationships,
+  cross-entity joins, or multi-entity aggregation across GitLab entities
+  (projects, users, MRs, issues, pipelines, files, definitions,
+  vulnerabilities). For local/offline work — indexing a local checkout, querying
+  the local graph with SQL, generating a local repo map, or serving the local
+  graph over MCP — use the `orbit-local` skill. Do not use for single-entity
+  GitLab lookups or write operations that `glab` handles directly (e.g.
+  `glab mr view`, `glab mr create`).
+version: 0.17.5
 license: MIT
 metadata:
   audience: developers
@@ -144,20 +157,17 @@ lacks. Full guidance and worked examples:
 
 ## Repository map helpers
 
-For code-structure orientation before planning a change, use a bundled repo-map
-helper (script paths are relative to this skill root, not the user's current
-repo): the **local** helper for an uncommitted/branch-local checkout, the
-**remote** helper for a project already indexed in Orbit Remote. See the
-repository-map rows in [References](#references) below.
+For code-structure orientation before planning a change, use the **remote**
+repo-map helper for a project already indexed in Orbit Remote (script path is
+relative to this skill root, not the user's current repo). For a local/working-
+tree repo map, use the `orbit-local` skill instead. See the repository-map row
+in [References](#references) below.
 
 ## Local CLI (glab orbit local)
 
-`glab orbit local` downloads and runs a managed Orbit CLI binary for indexing
-and querying a local copy of the Knowledge Graph (macOS/Linux only,
-x86_64/aarch64). Prefer it over `glab orbit remote` when indexing a local
-repository for offline analysis; use `remote` to query production. Install/run
-with `glab orbit local` (add `--install` or `--update`). Full config keys and
-pass-through args: [`references/local_cli.md`](references/local_cli.md).
+Local indexing and querying (DuckDB, SQL, MCP serving) is handled by the
+`orbit-local` skill. The reference docs below are kept for completeness; prefer
+`orbit-local` for any local/offline workflow.
 
 ## References
 
@@ -167,8 +177,8 @@ pass-through args: [`references/local_cli.md`](references/local_cli.md).
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
 | Reporting results & coverage caveats | [`references/reporting.md`](references/reporting.md) |
-| Local repository map helper | [`references/local_repo_map.md`](references/local_repo_map.md) |
+| Local repository map helper (see `orbit-local` skill) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
 | CLI exit codes (1-5), errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
-| Local CLI flags, config keys & pass-through args | [`references/local_cli.md`](references/local_cli.md) |
+| Local CLI flags, config keys & pass-through args (see `orbit-local` skill) | [`references/local_cli.md`](references/local_cli.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |
