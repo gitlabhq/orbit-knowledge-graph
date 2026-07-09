@@ -4,6 +4,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod descriptions;
 mod list;
 mod mcp;
+mod skill;
 mod sql;
 mod sql_format;
 mod workspace;
@@ -219,6 +220,19 @@ enum Commands {
         #[command(subcommand)]
         command: McpCommands,
     },
+    #[command(about = descriptions::SKILL_SHORT)]
+    #[command(
+        long_about = "Print the bundled, version-matched orbit-local skill content.\n\n\
+                      With no argument, prints SKILL.md (the manifest). Pass a relative path \
+                      such as `references/sql.md` or `scripts/repo_map.py` to print that file. \
+                      Run `scripts/repo_map.py` to a file to execute it: \
+                      `orbit skill scripts/repo_map.py > /tmp/repo_map.py`."
+    )]
+    Skill {
+        /// Skill file to print, relative to the skill root (default: SKILL.md).
+        #[arg(value_name = "PATH")]
+        path: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -285,6 +299,7 @@ async fn main() -> Result<()> {
                 .expect("setting default subscriber failed");
             mcp::serve().await
         }
+        Commands::Skill { path } => skill::run(path),
     }
 }
 

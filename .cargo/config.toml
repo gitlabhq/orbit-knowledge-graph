@@ -11,4 +11,5 @@ SEEDS_DIR = { value = "config/seeds", relative = true }
 E2E_DIR = { value = "e2e", relative = true }
 HELM_DIR = { value = "helm", relative = true }
 SCRIPTS_DIR = { value = "scripts", relative = true }
+SKILLS_DIR = { value = "skills", relative = true }
 XTASK_DIR = { value = "crates/xtask", relative = true }

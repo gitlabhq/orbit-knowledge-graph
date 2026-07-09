@@ -32,6 +32,9 @@ pub(crate) const GET_SCHEMA_MCP: &str = concat!(
 
 pub(crate) const MCP_SERVE_SHORT: &str = "Serve the local graph to MCP-compatible AI agents";
 
+pub(crate) const SKILL_SHORT: &str =
+    "Print the bundled orbit-local skill content (SKILL.md or a file path)";
+
 #[cfg(test)]
 mod tests {
     use super::*;

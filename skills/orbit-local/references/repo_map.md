@@ -55,6 +55,15 @@ Resolve that path relative to the skill root, not the user's current repository.
 When running from another directory, either `cd` to the skill root first or use
 the absolute path to the loaded skill directory.
 
+If you only have the `orbit` binary (no skill directory on disk), get a
+version-matched copy of the script from the binary itself and point `ORBIT_CMD`
+at that same binary:
+
+```bash
+orbit skill scripts/repo_map.py > /tmp/repo_map.py
+ORBIT_CMD=orbit python3 /tmp/repo_map.py ~/workspace/knowledge-graph
+```
+
 Pass the target repository path as the first argument:
 
 ```bash

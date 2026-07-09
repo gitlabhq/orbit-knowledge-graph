@@ -12,7 +12,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.1.0
+version: 0.2.0
 license: MIT
 metadata:
   audience: developers
@@ -75,6 +75,7 @@ wrapper flags, config keys, and pass-through rules:
 | `orbit schema [TABLE…] [--raw]` | Describe tables/columns; scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
 | `orbit mcp serve` | Serve the local graph to MCP agents (`run_sql`, `get_graph_schema`, `index`) |
+| `orbit skill [PATH]` | Print the bundled, version-matched skill content; no arg prints `SKILL.md`, else a relative path like `references/sql.md` |
 
 ## Quick start
 
@@ -91,7 +92,9 @@ Paste-ready SQL for callers, definitions-in-file, subclasses, and imports:
 
 For a hierarchical orientation pass over a local checkout (languages, structure,
 key abstractions, per-file APIs) instead of ad-hoc SQL, use the bundled helper
-(`scripts/repo_map.py`, path relative to this skill root). Full workflow and
+(`scripts/repo_map.py`, path relative to this skill root). When you only have the
+`orbit` binary, get a version-matched copy with
+`orbit skill scripts/repo_map.py > /tmp/repo_map.py`. Full workflow and
 subcommands: [`references/repo_map.md`](references/repo_map.md).
 
 ## References

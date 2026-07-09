@@ -591,3 +591,58 @@ fn mcp_bad_sql_is_recoverable_tool_error() {
     );
     assert!(msg.contains("does_not_exist"), "missing SQL preview: {msg}");
 }
+
+#[test]
+fn skill_serves_bundled_content() {
+    let manifest = orbit_cmd().arg("skill").output().unwrap();
+    assert!(manifest.status.success());
+    let manifest = String::from_utf8(manifest.stdout).unwrap();
+    assert!(manifest.contains("name: orbit-local"));
+    assert!(manifest.contains("references/sql.md"));
+
+    for path in ["SKILL.md", "references/sql.md", "scripts/repo_map.py"] {
+        let out = orbit_cmd().args(["skill", path]).output().unwrap();
+        assert!(out.status.success(), "`orbit skill {path}` failed");
+        assert!(
+            !out.stdout.is_empty(),
+            "`orbit skill {path}` printed nothing"
+        );
+    }
+
+    let no_arg = orbit_cmd().arg("skill").output().unwrap().stdout;
+    let explicit = orbit_cmd()
+        .args(["skill", "SKILL.md"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(no_arg, explicit, "no-arg must equal `skill SKILL.md`");
+
+    let repo_map = orbit_cmd()
+        .args(["skill", "scripts/repo_map.py"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert!(String::from_utf8(repo_map).unwrap().contains("ORBIT_CMD"));
+}
+
+#[test]
+fn skill_rejects_unknown_and_escaping_paths() {
+    for path in [
+        "references/does-not-exist.md",
+        "../Cargo.toml",
+        "/etc/passwd",
+        "references/../../secret",
+    ] {
+        let out = orbit_cmd().args(["skill", path]).output().unwrap();
+        assert!(
+            !out.status.success(),
+            "`orbit skill {path}` must exit non-zero"
+        );
+        assert!(out.stdout.is_empty(), "`orbit skill {path}` leaked stdout");
+        let err = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            err.contains("Available files") && err.contains("SKILL.md"),
+            "error must list valid paths, got: {err}"
+        );
+    }
+}
