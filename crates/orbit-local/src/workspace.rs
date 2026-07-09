@@ -60,11 +60,24 @@ impl Workspace {
 }
 
 /// Resolve the DuckDB path for a command: an explicit `--db` override wins,
-/// otherwise the default workspace's `graph.duckdb`.
+/// otherwise the default workspace's `graph.duckdb`. The result is absolute so
+/// that a later `set_current_dir` (e.g. `repo-map` anchoring at the repo root)
+/// cannot change which file a relative `--db` or `ORBIT_DATA_DIR` points at.
 pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
-    match db {
-        Some(p) => Ok(p),
-        None => Ok(Workspace::open_default()?.db_path()),
+    let path = match db {
+        Some(p) => p,
+        None => Workspace::open_default()?.db_path(),
+    };
+    absolutize(path)
+}
+
+fn absolutize(path: PathBuf) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()
+            .context("failed to read current directory")?
+            .join(path))
     }
 }
 

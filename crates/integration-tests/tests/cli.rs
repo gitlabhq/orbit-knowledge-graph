@@ -724,6 +724,43 @@ fn repo_map_ext_filter_scopes_languages() {
 }
 
 #[test]
+fn repo_map_relative_db_resolves_from_caller_cwd() {
+    let repo = create_test_repo();
+    let caller = tempfile::TempDir::new().unwrap();
+
+    let index = orbit_cmd()
+        .args(["index", repo.path.to_str().unwrap(), "--db", "graph.duckdb"])
+        .current_dir(caller.path())
+        .output()
+        .unwrap();
+    assert!(
+        index.status.success(),
+        "index --db graph.duckdb failed: {}",
+        String::from_utf8_lossy(&index.stderr)
+    );
+    assert!(caller.path().join("graph.duckdb").exists());
+
+    let out = orbit_cmd()
+        .args([
+            "repo-map",
+            "--repo",
+            repo.path.to_str().unwrap(),
+            "--db",
+            "graph.duckdb",
+            "overview",
+        ])
+        .current_dir(caller.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "relative --db must resolve against caller cwd before the repo-root chdir: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8(out.stdout).unwrap().contains("REPO MAP"));
+}
+
+#[test]
 fn repo_map_reports_unindexed_commit() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();

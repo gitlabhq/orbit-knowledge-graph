@@ -186,6 +186,12 @@ pub(crate) fn run(
     command: RepoMapCommand,
 ) -> Result<()> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
+
+    // The db path (from `--db` or `ORBIT_DATA_DIR`) may be relative to the
+    // caller's CWD, so resolve it before the chdir below moves the CWD to the
+    // repo root — otherwise a relative db resolves against the repo instead.
+    let db = workspace::resolve_db_path(db)?;
+
     let git = workspace::git_info(&repo_path)
         .with_context(|| format!("failed to read git info for {}", repo_path.display()))?;
 
@@ -209,7 +215,7 @@ pub(crate) fn run(
         source_exts,
     };
 
-    let client = sql::open_graph(db)?;
+    let client = sql::open_graph(Some(db))?;
     map.preflight(&client)?;
 
     let mut out = std::io::stdout().lock();
