@@ -12,22 +12,33 @@ const MICRO_IMAGE: &str = "snowplow/snowplow-micro";
 const MICRO_TAG: &str = "2.1.2";
 const MICRO_PORT: u16 = 9090;
 
+const IGLU_CENTRAL: &str = "https://iglucentral.com";
+const GITLAB_IGLU: &str = "https://gitlab-org.gitlab.io/iglu";
+const EMBEDDED_IGLU_ROOT: &str = "/config/iglu-client-embedded";
+
+// Snowplow envelope schemas labkit-events wraps every payload in; micro
+// validates them alongside our contexts, so they must resolve offline too.
+const ENVELOPE_SCHEMAS: [&str; 3] = [
+    "iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4",
+    "iglu:com.snowplowanalytics.snowplow/contexts/jsonschema/1-0-1",
+    "iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0",
+];
+
+// Embedded-only resolver: micro containers have no egress on renovate-fork
+// runners (#995), so every schema micro needs is fetched by the test process
+// (which does have egress) and copied into EMBEDDED_IGLU_ROOT before start.
+// Drift is still caught: a schema missing from the live registries fails the
+// fetch loudly.
 const IGLU_CONFIG: &str = r#"{
   "schema": "iglu:com.snowplowanalytics.iglu/resolver-config/jsonschema/1-0-3",
   "data": {
     "cacheSize": 500,
     "repositories": [
       {
-        "name": "Iglu Central",
+        "name": "Embedded",
         "priority": 0,
-        "vendorPrefixes": ["com.snowplowanalytics"],
-        "connection": {"http": {"uri": "http://iglucentral.com"}}
-      },
-      {
-        "name": "GitLab",
-        "priority": 5,
-        "vendorPrefixes": ["com.gitlab"],
-        "connection": {"http": {"uri": "https://gitlab-org.gitlab.io/iglu"}}
+        "vendorPrefixes": [],
+        "connection": {"embedded": {"path": "/config/iglu-client-embedded"}}
       }
     ]
   }
@@ -38,18 +49,51 @@ struct Micro {
     base_url: String,
 }
 
-async fn start_micro() -> Micro {
-    let container = GenericImage::new(MICRO_IMAGE, MICRO_TAG)
+fn schema_path(uri: &str) -> &str {
+    uri.strip_prefix("iglu:")
+        .unwrap_or_else(|| panic!("not an iglu uri: {uri}"))
+}
+
+async fn fetch_schema(http: &reqwest::Client, uri: &str) -> Vec<u8> {
+    let path = schema_path(uri);
+    let registry = if path.starts_with("com.gitlab/") {
+        GITLAB_IGLU
+    } else {
+        IGLU_CENTRAL
+    };
+    let url = format!("{registry}/schemas/{path}");
+    let response = http
+        .get(&url)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .unwrap_or_else(|e| panic!("live Iglu registry fetch failed ({url}): {e}"));
+    response.bytes().await.expect("schema body").to_vec()
+}
+
+async fn start_micro(http: &reqwest::Client) -> Micro {
+    let mut image = GenericImage::new(MICRO_IMAGE, MICRO_TAG)
         .with_exposed_port(ContainerPort::Tcp(MICRO_PORT))
         .with_wait_for(WaitFor::message_on_stderr("started at http://"))
         .with_cmd(["--iglu", "/config/iglu.json"])
         .with_copy_to(
             CopyTargetOptions::new("/config/iglu.json"),
             CopyDataSource::Data(IGLU_CONFIG.as_bytes().to_vec()),
-        )
-        .start()
-        .await
-        .expect("snowplow-micro start");
+        );
+    let schemas = [
+        gkg_analytics::ORBIT_COMMON_SCHEMA,
+        gkg_analytics::ORBIT_QUERY_SCHEMA,
+    ]
+    .into_iter()
+    .chain(ENVELOPE_SCHEMAS);
+    for uri in schemas {
+        let body = fetch_schema(http, uri).await;
+        image = image.with_copy_to(
+            CopyTargetOptions::new(format!("{EMBEDDED_IGLU_ROOT}/schemas/{}", schema_path(uri))),
+            CopyDataSource::Data(body),
+        );
+    }
+    let container = image.start().await.expect("snowplow-micro start");
 
     let host = container.get_host().await.expect("micro host");
     let port = container
@@ -100,8 +144,8 @@ fn init_crypto_provider() {
 #[tokio::test]
 async fn snowplow_micro_receives_gkg_query_executed() {
     init_crypto_provider();
-    let micro = start_micro().await;
     let http = reqwest::Client::new();
+    let micro = start_micro(&http).await;
 
     let tracker = Tracker::builder(&micro.base_url, "gkg-analytics-it")
         .batch_size(1)
@@ -147,10 +191,17 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         }
         sleep(Duration::from_millis(200)).await;
     }
-    assert_eq!(
-        bad, bad_before,
-        "event landed in bad bucket — schema validation failed"
-    );
+    if bad > bad_before {
+        let bad_events: Value = http
+            .get(format!("{}/micro/bad", micro.base_url))
+            .send()
+            .await
+            .expect("GET /micro/bad")
+            .json()
+            .await
+            .expect("bad json");
+        panic!("event landed in bad bucket — schema validation failed: {bad_events:#}");
+    }
     assert_eq!(
         good,
         good_before + 1,
