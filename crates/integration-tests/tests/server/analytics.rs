@@ -16,19 +16,12 @@ const IGLU_CENTRAL: &str = "https://iglucentral.com";
 const GITLAB_IGLU: &str = "https://gitlab-org.gitlab.io/iglu";
 const EMBEDDED_IGLU_ROOT: &str = "/config/iglu-client-embedded";
 
-// Snowplow envelope schemas labkit-events wraps every payload in; micro
-// validates them alongside our contexts, so they must resolve offline too.
 const ENVELOPE_SCHEMAS: [&str; 3] = [
     "iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4",
     "iglu:com.snowplowanalytics.snowplow/contexts/jsonschema/1-0-1",
     "iglu:com.snowplowanalytics.snowplow/unstruct_event/jsonschema/1-0-0",
 ];
 
-// Embedded-only resolver: micro containers have no egress on renovate-fork
-// runners (#995), so every schema micro needs is fetched by the test process
-// (which does have egress) and copied into EMBEDDED_IGLU_ROOT before start.
-// Drift is still caught: a schema missing from the live registries fails the
-// fetch loudly.
 const IGLU_CONFIG: &str = r#"{
   "schema": "iglu:com.snowplowanalytics.iglu/resolver-config/jsonschema/1-0-3",
   "data": {
