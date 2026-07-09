@@ -254,6 +254,7 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
 
+        let mut retired_versions = Vec::new();
         for entry in &versions {
             if entry.status == "active" && entry.version != migrating_version {
                 info!(
@@ -268,6 +269,7 @@ impl MigrationCompletionChecker {
                 ) {
                     self.stop_merges_for_version(entry.version).await;
                 }
+                retired_versions.push(entry.version);
             }
         }
 
@@ -278,6 +280,24 @@ impl MigrationCompletionChecker {
         mark_version_active(&self.graph, migrating_version)
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
+
+        // Each outgoing version's refreshable MV still targets that version's
+        // tables; left running it error-loops once GC drops them. Drop it
+        // before recreating the MV for the promoted version. Best-effort: an
+        // ops artifact must not fail the promotion it rides behind.
+        for old_version in retired_versions {
+            if let Err(e) =
+                crate::schema::migration::drop_unversioned_refresh_mv(&self.graph, old_version)
+                    .await
+            {
+                warn!(version = old_version, error = %e, "failed to drop outgoing unversioned MV after promotion");
+            }
+        }
+        if let Err(e) =
+            crate::schema::migration::apply_unversioned_ddl(&self.graph, migrating_version).await
+        {
+            warn!(version = migrating_version, error = %e, "failed to apply unversioned objects after promotion");
+        }
 
         // Campaign ends when its migration completes.
         self.campaign.clear();
