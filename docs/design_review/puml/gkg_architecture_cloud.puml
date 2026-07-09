@@ -1,0 +1,77 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam defaultFontSize 10
+skinparam padding 3
+
+title GitLab Knowledge Graph (Orbit) --- Cloud Architecture
+
+rectangle "Orbit Module Boundary" as module #E8F4FD {
+
+  rectangle "Ingestion" as ingest #CCE5CC {
+    component "SDLC Indexer\n(Rust ETL)" as sdlc
+    component "Code Indexer\n(parser-core,\nOXC, tree-sitter)" as code
+  }
+
+  rectangle "Query & Serving" as serve #B3D9FF {
+    component "Graph Query Engine\n(JSON DSL -> ClickHouse SQL)\n13-phase compiler" as qe
+    component "gRPC Server (tonic)\n(9 RPCs)\n+ /live, /ready (Axum)" as http
+    component "JWT Auth\nMiddleware" as jwt
+  }
+
+  rectangle "Observability" as obs #E0E0E0 {
+    component "Prometheus + OTEL" as mon
+  }
+}
+
+rectangle "GitLab Monolith (Rails)" as mono #FFE0B2 {
+  component "Orbit Dashboard\n(/dashboard/orbit)\nVue 3 + Three.js" as dash
+  component "Duo Agent Platform\n(DAP)" as dap
+  component "gRPC Client\n(9 RPCs, stub cache)" as grpc
+  component "Redaction (gRPC stream)\n(Ability.allowed?)" as redact
+  component "3-Layer Auth\n(org isolation,\nJWT traversal-path filter,\nredaction)" as auth
+  component "Siphon CDC\n(PostgreSQL -> CH)" as siphon
+}
+
+rectangle "Infrastructure" as infra #FFF3E0 {
+  component "ClickHouse Cloud\n(code + SDLC\ndata lake)" as ch
+  component "NATS JetStream\n(event coordination)" as nats
+  component "Gitaly\n(source code)" as gitaly
+  component "PostgreSQL\n(SDLC entities)" as pg
+}
+
+rectangle "Consumers" as consumers #F3E5F5 {
+  component "LLM Agents\n(via DAP)" as llm
+  component "Developers\n(Orbit dashboard)" as devs
+  component "Web IDE /\nDuo Chat" as ide
+}
+
+' Ingestion flows
+siphon --> nats : CDC events
+pg --> siphon : keyset pagination
+nats --> sdlc : JetStream subscribe
+sdlc --> ch : write property\ngraph tables
+gitaly --> code : streaming archive\ndownload
+code --> ch : write code\ngraph tables
+
+' Query flows
+http --> qe : JSON DSL
+qe --> ch : parameterized SQL
+qe --> auth : traversal_path\nfilter injection
+jwt --> auth : traversal paths\n(JWT claims from Rails)
+qe --> redact : global ID extraction\n(gRPC-stream redaction)
+jwt --> http : validate
+
+' Consumer flows
+dap --> jwt : HTTP + JWT (via Rails)
+grpc --> http : gRPC (9 RPCs)
+dash --> grpc : /api/v4/orbit/* (async)
+ide --> dap : MCP tools (via Rails)
+llm --> dap : query_graph\nget_graph_schema
+
+' Developer access
+devs --> dash
+devs --> ide
+
+@enduml
