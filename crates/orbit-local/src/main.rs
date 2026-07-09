@@ -4,6 +4,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod descriptions;
 mod list;
 mod mcp;
+mod repo_map;
 mod skill;
 mod sql;
 mod sql_format;
@@ -233,6 +234,30 @@ enum Commands {
         #[arg(value_name = "PATH")]
         path: Option<String>,
     },
+    #[command(name = "repo-map", about = descriptions::REPO_MAP_SHORT)]
+    #[command(
+        long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
+                      Scoped to the current commit; if it is not indexed, prints the index \
+                      command and exits. Use `overview` first, then drill down with `tree`, \
+                      `api`, `class`, `extends`, and `imports`."
+    )]
+    RepoMap {
+        /// Repository path (default: current directory).
+        #[arg(long, value_name = "PATH")]
+        repo: Option<PathBuf>,
+
+        /// Limit output to source files with these extensions (repeat or
+        /// comma-separate; a leading dot is optional).
+        #[arg(long = "ext", value_name = "EXT")]
+        extensions: Vec<String>,
+
+        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
+
+        #[command(subcommand)]
+        command: repo_map::RepoMapCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -300,6 +325,12 @@ async fn main() -> Result<()> {
             mcp::serve().await
         }
         Commands::Skill { path } => skill::run(path),
+        Commands::RepoMap {
+            repo,
+            extensions,
+            db,
+            command,
+        } => repo_map::run(repo, extensions, db, command),
     }
 }
 

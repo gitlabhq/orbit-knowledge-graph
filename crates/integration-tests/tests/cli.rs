@@ -662,3 +662,67 @@ fn skill_rejects_unknown_and_escaping_paths() {
         );
     }
 }
+
+fn repo_map(repo: &std::path::Path, data_dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+    let mut cmd = orbit_cmd();
+    cmd.arg("repo-map").args(["--repo", repo.to_str().unwrap()]);
+    cmd.args(args).env("ORBIT_DATA_DIR", data_dir);
+    cmd.output().unwrap()
+}
+
+#[test]
+fn repo_map_serves_native_subcommands() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    let overview = repo_map(&repo.path, dd, &["overview"]);
+    assert!(overview.status.success());
+    let text = String::from_utf8(overview.stdout).unwrap();
+    assert!(text.contains("REPO MAP"));
+    assert!(text.contains("Languages") && text.contains("python"));
+
+    let tree = String::from_utf8(repo_map(&repo.path, dd, &["tree", "src"]).stdout).unwrap();
+    assert!(tree.contains("TREE") && tree.contains("App"));
+
+    // `api` extracts a signature line via read_text, so it exercises the
+    // relative-glob resolution against the repo-rooted CWD.
+    let api = String::from_utf8(repo_map(&repo.path, dd, &["api", "src"]).stdout).unwrap();
+    assert!(api.contains("class App") && api.contains("def run"));
+
+    let class = String::from_utf8(repo_map(&repo.path, dd, &["class", "App"]).stdout).unwrap();
+    assert!(class.contains("CLASS — App") && class.contains("run"));
+
+    let missing = String::from_utf8(repo_map(&repo.path, dd, &["class", "NoSuchThing"]).stdout).unwrap();
+    assert!(missing.contains("no class/module/trait named NoSuchThing"));
+}
+
+#[test]
+fn repo_map_ext_filter_scopes_languages() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    let rust_only = String::from_utf8(repo_map(&repo.path, dd, &["--ext", "rs", "overview"]).stdout).unwrap();
+    assert!(rust_only.contains("REPO MAP"));
+    assert!(!rust_only.contains("python"), "rs filter must drop python files");
+}
+
+#[test]
+fn repo_map_reports_unindexed_commit() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    std::fs::write(repo.path.join("src/extra.py"), "def added(): pass\n").unwrap();
+    git(&repo.path, &["add", "-A"]);
+    git(&repo.path, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "second"]);
+
+    let out = repo_map(&repo.path, dd, &["overview"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains("is not indexed") && err.contains("orbit index"));
+}

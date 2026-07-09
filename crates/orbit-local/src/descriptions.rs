@@ -35,6 +35,9 @@ pub(crate) const MCP_SERVE_SHORT: &str = "Serve the local graph to MCP-compatibl
 pub(crate) const SKILL_SHORT: &str =
     "Print the bundled orbit-local skill content (SKILL.md or a file path)";
 
+pub(crate) const REPO_MAP_SHORT: &str =
+    "Produce a high-level, LLM-oriented map of a locally indexed repository";
+
 #[cfg(test)]
 mod tests {
     use super::*;
