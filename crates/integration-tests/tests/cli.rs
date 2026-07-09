@@ -616,7 +616,7 @@ fn skill_serves_bundled_content() {
         "the discovery hint must be manifest-only, not appended to subfiles"
     );
 
-    for path in ["SKILL.md", "references/sql.md", "scripts/repo_map.py"] {
+    for path in ["SKILL.md", "references/sql.md", "references/repo_map.md"] {
         let out = orbit_cmd().args(["skill", path]).output().unwrap();
         assert!(out.status.success(), "`orbit skill {path}` failed");
         assert!(
@@ -633,12 +633,16 @@ fn skill_serves_bundled_content() {
         .stdout;
     assert_eq!(no_arg, explicit, "no-arg must equal `skill SKILL.md`");
 
-    let repo_map = orbit_cmd()
-        .args(["skill", "scripts/repo_map.py"])
+    let repo_map_ref = orbit_cmd()
+        .args(["skill", "references/repo_map.md"])
         .output()
         .unwrap()
         .stdout;
-    assert!(String::from_utf8(repo_map).unwrap().contains("ORBIT_CMD"));
+    assert!(
+        String::from_utf8(repo_map_ref)
+            .unwrap()
+            .contains("orbit repo-map")
+    );
 }
 
 #[test]
@@ -663,7 +667,11 @@ fn skill_rejects_unknown_and_escaping_paths() {
     }
 }
 
-fn repo_map(repo: &std::path::Path, data_dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+fn repo_map(
+    repo: &std::path::Path,
+    data_dir: &std::path::Path,
+    args: &[&str],
+) -> std::process::Output {
     let mut cmd = orbit_cmd();
     cmd.arg("repo-map").args(["--repo", repo.to_str().unwrap()]);
     cmd.args(args).env("ORBIT_DATA_DIR", data_dir);
@@ -694,7 +702,8 @@ fn repo_map_serves_native_subcommands() {
     let class = String::from_utf8(repo_map(&repo.path, dd, &["class", "App"]).stdout).unwrap();
     assert!(class.contains("CLASS — App") && class.contains("run"));
 
-    let missing = String::from_utf8(repo_map(&repo.path, dd, &["class", "NoSuchThing"]).stdout).unwrap();
+    let missing =
+        String::from_utf8(repo_map(&repo.path, dd, &["class", "NoSuchThing"]).stdout).unwrap();
     assert!(missing.contains("no class/module/trait named NoSuchThing"));
 }
 
@@ -705,9 +714,13 @@ fn repo_map_ext_filter_scopes_languages() {
     let dd = data_dir.path();
     assert!(orbit_index(&repo.path, dd));
 
-    let rust_only = String::from_utf8(repo_map(&repo.path, dd, &["--ext", "rs", "overview"]).stdout).unwrap();
+    let rust_only =
+        String::from_utf8(repo_map(&repo.path, dd, &["--ext", "rs", "overview"]).stdout).unwrap();
     assert!(rust_only.contains("REPO MAP"));
-    assert!(!rust_only.contains("python"), "rs filter must drop python files");
+    assert!(
+        !rust_only.contains("python"),
+        "rs filter must drop python files"
+    );
 }
 
 #[test]
@@ -719,7 +732,18 @@ fn repo_map_reports_unindexed_commit() {
 
     std::fs::write(repo.path.join("src/extra.py"), "def added(): pass\n").unwrap();
     git(&repo.path, &["add", "-A"]);
-    git(&repo.path, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "second"]);
+    git(
+        &repo.path,
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-m",
+            "second",
+        ],
+    );
 
     let out = repo_map(&repo.path, dd, &["overview"]);
     assert!(!out.status.success());

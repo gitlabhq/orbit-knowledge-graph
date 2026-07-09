@@ -82,17 +82,12 @@ database (default `~/.orbit/graph.duckdb`).
 | `schema [TABLE…]` | optional table names to scope output, `--raw` (JSON instead of table), `--db` |
 | `list` | `-F/--format …`, `--db` |
 | `mcp serve` | stateless MCP server over stdio (`run_sql`, `get_graph_schema`, `index`) |
+| `repo-map <SUBCOMMAND>` | high-level repo map; `--repo <PATH>` (default `.`), `--ext <EXT>`, `--db`; subcommands `overview`, `tree [PREFIX]`, `api PREFIX`, `class NAME`, `extends NAME`, `imports PATTERN` |
 | `skill [PATH]` | print the bundled, version-matched skill content; no arg prints `SKILL.md`, else a relative path such as `references/sql.md` |
 | `version` | prints the version string |
 
 The skill content is embedded in the binary, so `orbit skill` serves a copy that
-matches the binary version regardless of how it was installed. To run the bundled
-`repo_map.py`, write it to a file first:
-
-```bash
-orbit skill scripts/repo_map.py > /tmp/repo_map.py
-ORBIT_CMD=orbit python3 /tmp/repo_map.py ~/path/to/repo
-```
+matches the binary version regardless of how it was installed.
 
 `orbit help` shows the binary's top-level help; `orbit <cmd> --help` shows a
 subcommand's. Through the wrapper, `glab orbit local help` reaches the binary

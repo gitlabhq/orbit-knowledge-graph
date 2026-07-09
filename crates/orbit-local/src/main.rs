@@ -225,9 +225,7 @@ enum Commands {
     #[command(
         long_about = "Print the bundled, version-matched orbit-local skill content.\n\n\
                       With no argument, prints SKILL.md (the manifest). Pass a relative path \
-                      such as `references/sql.md` or `scripts/repo_map.py` to print that file. \
-                      Write `scripts/repo_map.py` to a file to execute it: \
-                      `orbit skill scripts/repo_map.py > /tmp/repo_map.py`."
+                      such as `references/sql.md` or `references/repo_map.md` to print that file."
     )]
     Skill {
         /// Skill file to print, relative to the skill root (default: SKILL.md).

@@ -12,7 +12,7 @@ description: >
   production data in GitLab (a project such as gitlab-org/gitlab, cross-project
   blast radius, contributor or merge-request aggregation) use the `orbit` skill;
   for single-entity GitLab lookups or write operations use `glab`.
-version: 0.2.0
+version: 0.3.0
 license: MIT
 metadata:
   audience: developers
@@ -75,6 +75,7 @@ wrapper flags, config keys, and pass-through rules:
 | `orbit schema [TABLE…] [--raw]` | Describe tables/columns; scope to table names to trim output |
 | `orbit list [-F …]` | List indexed repositories, branch, commit, status |
 | `orbit mcp serve` | Serve the local graph to MCP agents (`run_sql`, `get_graph_schema`, `index`) |
+| `orbit repo-map <SUBCOMMAND> [--repo P] [--ext E]` | High-level, LLM-oriented repo map (`overview`, `tree`, `api`, `class`, `extends`, `imports`) |
 | `orbit skill [PATH]` | Print the bundled, version-matched skill content; no arg prints `SKILL.md`, else a relative path like `references/sql.md` |
 
 ## Quick start
@@ -91,11 +92,17 @@ Paste-ready SQL for callers, definitions-in-file, subclasses, and imports:
 ## Repository map
 
 For a hierarchical orientation pass over a local checkout (languages, structure,
-key abstractions, per-file APIs) instead of ad-hoc SQL, use the bundled helper
-(`scripts/repo_map.py`, path relative to this skill root). When you only have the
-`orbit` binary, get a version-matched copy with
-`orbit skill scripts/repo_map.py > /tmp/repo_map.py`. Full workflow and
-subcommands: [`references/repo_map.md`](references/repo_map.md).
+key abstractions, per-file APIs) instead of ad-hoc SQL, use the native
+`orbit repo-map` command:
+
+```bash
+orbit repo-map overview                 # start here
+orbit repo-map tree crates              # types grouped by file under a subtree
+orbit repo-map api crates/orbit-local   # types + callables + signatures
+```
+
+It is scoped to the current commit; index first if the commit is not indexed.
+Full workflow and subcommands: [`references/repo_map.md`](references/repo_map.md).
 
 ## References
 
@@ -103,4 +110,4 @@ subcommands: [`references/repo_map.md`](references/repo_map.md).
 |---|---|
 | CLI wrapper flags, config keys, pass-through args | [`references/cli.md`](references/cli.md) |
 | DuckDB tables and paste-ready SQL recipes | [`references/sql.md`](references/sql.md) |
-| Local repository-map helper | [`references/repo_map.md`](references/repo_map.md) |
+| Repository-map command (`orbit repo-map`) | [`references/repo_map.md`](references/repo_map.md) |

@@ -3,9 +3,6 @@
 //! ontology and named-queries crates use), so the content is always matched to
 //! the binary version and present for every install method — `glab orbit
 //! local`, a release-tarball download, or a dev build — with no packaging step.
-//! `repo_map.py` still needs a filesystem path to run; `orbit skill
-//! scripts/repo_map.py > /tmp/repo_map.py` reconstitutes one anywhere the binary
-//! is.
 
 use anyhow::{Result, bail};
 use rust_embed::Embed;
@@ -67,9 +64,9 @@ mod tests {
     }
 
     #[test]
-    fn reference_and_script_files_are_embedded() {
+    fn reference_files_are_embedded() {
         assert!(lookup("references/sql.md").is_some());
-        assert!(lookup("scripts/repo_map.py").is_some());
+        assert!(lookup("references/repo_map.md").is_some());
     }
 
     #[test]
@@ -95,7 +92,7 @@ mod tests {
     fn embedded_set_is_non_trivial() {
         assert!(
             SkillAssets::iter().count() >= 3,
-            "expected the manifest plus at least references/ and scripts/ content"
+            "expected the manifest plus at least references/ content"
         );
     }
 
@@ -111,7 +108,7 @@ mod tests {
                 .contains("orbit skill <path>")
         );
         assert!(
-            !render("scripts/repo_map.py")
+            !render("references/repo_map.md")
                 .unwrap()
                 .contains("orbit skill <path>")
         );

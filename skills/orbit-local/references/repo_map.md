@@ -1,11 +1,12 @@
 # Orbit repo map reference
 
-`repo_map.py` builds a fast, hierarchical picture of a locally checked-out
+`orbit repo-map` builds a fast, hierarchical picture of a locally checked-out
 repository from the Orbit Local DuckDB property graph. Use it before planning a
 large code change, when first opening an unfamiliar repository, or when a
 directory-level map is more useful than reading files one by one.
 
-The script summarizes languages, top-level structure, key abstractions,
+It is a native subcommand of the `orbit` binary — no Python runtime and no
+sidecar script. It summarizes languages, top-level structure, key abstractions,
 definitions, per-file APIs, inheritance edges, and imports using Orbit Local's
 indexed `gl_file`, `gl_definition`, `gl_imported_symbol`, and `gl_edge` tables.
 
@@ -31,58 +32,45 @@ Skip it when:
 ## Prerequisites
 
 The target repository must be indexed by Orbit Local at the current commit.
-The script preflights this and prints the indexing command if the commit is
+`repo-map` preflights this and prints the indexing command if the commit is
 missing:
 
 ```bash
-glab orbit local index .
+orbit index .
 ```
 
-Orbit Local stores the graph in the local DuckDB database managed by
-`glab orbit local`. See [`cli.md`](cli.md) for installation,
-configuration, and pass-through argument details.
+Orbit Local stores the graph in the local DuckDB database (default
+`~/.orbit/graph.duckdb`, override with `--db`). See [`cli.md`](cli.md) for
+installation, configuration, and pass-through argument details.
 
 ## Invocation
 
-From the Orbit skill root (the directory containing `SKILL.md`), the script is
-at:
-
-```text
-./scripts/repo_map.py
-```
-
-Resolve that path relative to the skill root, not the user's current repository.
-When running from another directory, either `cd` to the skill root first or use
-the absolute path to the loaded skill directory.
-
-If you only have the `orbit` binary (no skill directory on disk), get a
-version-matched copy of the script from the binary itself and point `ORBIT_CMD`
-at that same binary:
+The map is scoped to the current commit of the repository. By default it uses
+the current directory; pass `--repo PATH` to point at another checkout:
 
 ```bash
-orbit skill scripts/repo_map.py > /tmp/repo_map.py
-ORBIT_CMD=orbit python3 /tmp/repo_map.py ~/workspace/knowledge-graph
+orbit repo-map overview
+orbit repo-map --repo ~/workspace/knowledge-graph overview
+orbit repo-map --repo ~/workspace/knowledge-graph tree crates
+orbit repo-map --repo ~/workspace/knowledge-graph api crates/orbit-local
+orbit repo-map --repo ~/workspace/knowledge-graph class Workspace
+orbit repo-map --repo ~/workspace/knowledge-graph extends QueryCompiler
+orbit repo-map --repo ~/workspace/knowledge-graph imports Workspace
 ```
 
-Pass the target repository path as the first argument:
+Reached through glab, prefix with `glab orbit local --yes`:
 
 ```bash
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph tree crates
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph api crates/orbit-local
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph class Workspace
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph extends QueryCompiler
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph imports Workspace
+glab orbit local --yes repo-map overview
 ```
 
-To focus on one or more file extensions, pass `--ext` before the subcommand.
-Extensions may include or omit the leading dot and can be repeated or
-comma-separated:
+To focus on one or more file extensions, pass `--ext`. Extensions may include
+or omit the leading dot and can be repeated or comma-separated:
 
 ```bash
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph --ext .rs
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph --ext rs api crates/orbit-local
-python3 ./scripts/repo_map.py ~/workspace/knowledge-graph --ext rs,toml tree crates
+orbit repo-map --ext .rs overview
+orbit repo-map --ext rs api crates/orbit-local
+orbit repo-map --ext rs,toml tree crates
 ```
 
 ## Recommended workflow
@@ -92,16 +80,16 @@ task usually means the investigation has become enumeration instead of design.
 
 | Phase | Call | What it tells you |
 |---|---|---|
-| 1. Orient | `repo_map.py REPO overview` | Languages, top directories, definition totals, key abstractions, most-imported defined symbols, and most-called callables |
-| 2. Locate | `repo_map.py REPO tree PATH_PREFIX` | Types grouped by file under a subtree, without method-level noise |
-| 3. Drill in | `repo_map.py REPO api PATH_PREFIX` | Types, callables, and extracted signature lines under a subtree |
-| 4. Focus | `repo_map.py REPO class NAME` | One class/module/trait and its members, including same-named overrides |
-| 5. Check inheritance | `repo_map.py REPO extends NAME` | Descendants of a base type through `EXTENDS` edges, up to depth 6 |
-| 6. Check imports | `repo_map.py REPO imports PATTERN` | Files importing matching symbols or paths |
+| 1. Orient | `orbit repo-map overview` | Languages, top directories, definition totals, key abstractions, most-imported defined symbols, and most-called callables |
+| 2. Locate | `orbit repo-map tree PATH_PREFIX` | Types grouped by file under a subtree, without method-level noise |
+| 3. Drill in | `orbit repo-map api PATH_PREFIX` | Types, callables, and extracted signature lines under a subtree |
+| 4. Focus | `orbit repo-map class NAME` | One class/module/trait and its members, including same-named overrides |
+| 5. Check inheritance | `orbit repo-map extends NAME` | Descendants of a base type through `EXTENDS` edges, up to depth 6 |
+| 6. Check imports | `orbit repo-map imports PATTERN` | Files importing matching symbols or paths |
 
 ## Subcommands
 
-### `overview` (default)
+### `overview`
 
 Always run this first for a new repository or planning session. It emits:
 
@@ -162,7 +150,7 @@ directly to file-reading tools.
 
 Signatures are extracted by reading source files and applying a language-neutral
 regular expression to a small window starting at the indexed `start_line`. If a
-signature cannot be extracted, the script prints the bare definition name.
+signature cannot be extracted, the bare definition name is printed.
 
 The repo map is a planning aid over Orbit Local's Code Graph coverage.
 
