@@ -1,0 +1,36 @@
+# Daily milestone sweeper.
+#
+# Setup:
+#   1. Create a project access token (Settings → Access Tokens) with `api`
+#      scope and the Developer role — it needs to update merge requests. Its
+#      bot user (project_<id>_bot) becomes the sweeper's identity. Reuse the
+#      same token value as the stale-MR sweeper; the name is decoupled so it
+#      can be rotated or scoped independently later.
+#   2. Store it as a masked + protected CI/CD variable
+#      MILESTONE_BOT_GITLAB_TOKEN. Protected is required so scheduled pipelines
+#      on the default branch can read it.
+#   3. Create a pipeline schedule (Project → CI/CD → Schedules, daily) with a
+#      variable SCHEDULE_ONLY=milestone-sweep. That marker makes the schedule
+#      run only this job (see .skip-on-solo-schedule in .gitlab-ci.yml).
+#   4. To rehearse without side effects, run the schedule once with DRY_RUN=true
+#      set on the schedule; remove it to go live.
+milestone-mr-sweep:
+  stage: review
+  image: registry.gitlab.com/gitlab-org/cli:v1.102.0
+  tags:
+    - saas-linux-small-amd64
+  # Run independently of stage order so the blocking manual release job can't
+  # gate it; on the solo schedule this is the only job anyway.
+  needs: []
+  variables:
+    DRY_RUN: "false"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "milestone-sweep"
+  before_script:
+    - test -n "${MILESTONE_BOT_GITLAB_TOKEN}" || (echo "Missing MILESTONE_BOT_GITLAB_TOKEN" && exit 1)
+    - apk add --no-cache bash jq coreutils
+    - glab auth login --hostname "$CI_SERVER_HOST" --token "$MILESTONE_BOT_GITLAB_TOKEN"
+  script:
+    - bash scripts/ci/set-mr-milestone.sh

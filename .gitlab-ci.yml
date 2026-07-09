@@ -50,6 +50,7 @@ include:
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
+  - local: .gitlab/ci/milestone-mr.yml
   - local: .gitlab/ci/comment-guard.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
