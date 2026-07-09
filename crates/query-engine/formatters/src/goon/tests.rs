@@ -49,7 +49,7 @@ fn empty_response_emits_section_markers() {
 #[test]
 fn pagination_offset_emits_has_more_and_total() {
     let mut r = response("traversal", vec![node("User", 1, &[])], vec![]);
-    r.pagination = Some(pagination(true, 50));
+    r.pagination = Some(pagination(true, 50, true));
     let out = enc(&r);
     assert!(out.contains("has_more:true"));
     assert!(out.contains("total_rows:50"));
@@ -58,7 +58,7 @@ fn pagination_offset_emits_has_more_and_total() {
 #[test]
 fn pagination_no_more_omits_has_more() {
     let mut r = response("traversal", vec![node("User", 1, &[])], vec![]);
-    r.pagination = Some(pagination(false, 1));
+    r.pagination = Some(pagination(false, 1, false));
     let out = enc(&r);
     assert!(!out.contains("has_more"));
     assert!(out.contains("total_rows:1"));

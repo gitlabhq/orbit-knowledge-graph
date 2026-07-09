@@ -70,7 +70,7 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
         nodes: HashMap::new(),
         hops: vec![],
         strategy: Strategy::SingleNode,
-        limit: input.fetch_limit(),
+        limit: input.limit,
         order_by: None,
         cursor: None,
         node_edge_mappings: HashMap::new(),

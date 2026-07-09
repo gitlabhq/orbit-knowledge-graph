@@ -43,7 +43,7 @@
       "items": { "$ref": "#/$defs/row" }
     },
     "pagination": {
-      "description": "Pagination metadata for the materialized result window. Tells the agent whether more rows were detected beyond the returned page/window.",
+      "description": "Pagination metadata for the materialized result window. Always present in responses from the keyset pagination pipeline; clients should not use its absence to detect a non-paginated response. Tells the agent whether more rows were detected beyond the returned page/window.",
       "$ref": "#/$defs/pagination"
     }
   },
