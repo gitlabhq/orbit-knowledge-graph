@@ -16,6 +16,8 @@ const IGLU_CENTRAL: &str = "https://iglucentral.com";
 const GITLAB_IGLU: &str = "https://gitlab-org.gitlab.io/iglu";
 const EMBEDDED_IGLU_ROOT: &str = "/config/iglu-client-embedded";
 
+// Must match the envelope schema versions the pinned labkit-events rev emits
+// (they are pub(crate) there); revisit on every labkit-rs bump.
 const ENVELOPE_SCHEMAS: [&str; 3] = [
     "iglu:com.snowplowanalytics.snowplow/payload_data/jsonschema/1-0-4",
     "iglu:com.snowplowanalytics.snowplow/contexts/jsonschema/1-0-1",
@@ -57,6 +59,7 @@ async fn fetch_schema(http: &reqwest::Client, uri: &str) -> Vec<u8> {
     let url = format!("{registry}/schemas/{path}");
     let response = http
         .get(&url)
+        .timeout(Duration::from_secs(30))
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
