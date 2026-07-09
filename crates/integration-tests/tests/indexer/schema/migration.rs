@@ -772,9 +772,7 @@ fn sdlc(entities: &[&str]) -> MigrationScope {
     MigrationScope::Sdlc(entities.iter().map(|s| s.to_string()).collect())
 }
 
-/// Stateful harness for a clone-based schema migration: it owns the active (old-prefix) version and
-/// the embedded target (`*SCHEMA_VERSION`), hides table prefixes and seed timestamps, and drives
-/// `clone_unchanged_migration_tables` plus the promotion gate over one graph database.
+/// Drives a clone-based migration and its promotion gate, hiding table prefixes and seed timestamps.
 struct MigrationScenario {
     ctx: TestContext,
     ontology: ontology::Ontology,
