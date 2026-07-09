@@ -599,6 +599,22 @@ fn skill_serves_bundled_content() {
     let manifest = String::from_utf8(manifest.stdout).unwrap();
     assert!(manifest.contains("name: orbit-local"));
     assert!(manifest.contains("references/sql.md"));
+    assert!(
+        manifest.contains("orbit skill references/sql.md"),
+        "served manifest must tell binary users the version-matched access path"
+    );
+
+    let sql_ref = orbit_cmd()
+        .args(["skill", "references/sql.md"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert!(
+        !String::from_utf8(sql_ref)
+            .unwrap()
+            .contains("orbit skill <path>"),
+        "the discovery hint must be manifest-only, not appended to subfiles"
+    );
 
     for path in ["SKILL.md", "references/sql.md", "scripts/repo_map.py"] {
         let out = orbit_cmd().args(["skill", path]).output().unwrap();

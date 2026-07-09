@@ -12,18 +12,33 @@ include!(concat!(env!("OUT_DIR"), "/skill_files.rs"));
 
 const MANIFEST: &str = "SKILL.md";
 
+/// Appended (never prepended, so the YAML frontmatter stays first) to the
+/// served manifest. The on-disk SKILL.md links to `references/*.md` with
+/// working-tree-relative paths that do not resolve when the only artifact is
+/// the binary; this tells the reader the version-matched access path instead.
+const MANIFEST_BINARY_HINT: &str = "\n\n---\n\nYou are viewing this via the `orbit` binary; the links above are relative to the on-disk skill tree. Fetch referenced files with `orbit skill <path>` (e.g. `orbit skill references/sql.md`).\n";
+
 pub(crate) fn run(path: Option<String>) -> Result<()> {
     let requested = path.as_deref().unwrap_or(MANIFEST);
 
-    let Some(contents) = lookup(requested) else {
+    let Some(rendered) = render(requested) else {
         bail!(
             "unknown skill file {requested:?}. Available files:\n{}",
             available_list()
         );
     };
 
-    print!("{contents}");
+    print!("{rendered}");
     Ok(())
+}
+
+fn render(requested: &str) -> Option<String> {
+    let contents = lookup(requested)?;
+    if requested == MANIFEST {
+        Some(format!("{contents}{MANIFEST_BINARY_HINT}"))
+    } else {
+        Some(contents.to_string())
+    }
 }
 
 fn lookup(requested: &str) -> Option<&'static str> {
@@ -98,6 +113,24 @@ mod tests {
         assert!(
             SKILL_FILES.len() >= 3,
             "expected the manifest plus at least references/ and scripts/ content"
+        );
+    }
+
+    #[test]
+    fn served_manifest_carries_binary_hint_but_subfiles_do_not() {
+        let manifest = render(MANIFEST).unwrap();
+        assert!(manifest.starts_with("---"), "frontmatter must stay first");
+        assert!(manifest.contains("orbit skill references/sql.md"));
+
+        assert!(
+            !render("references/sql.md")
+                .unwrap()
+                .contains("orbit skill <path>")
+        );
+        assert!(
+            !render("scripts/repo_map.py")
+                .unwrap()
+                .contains("orbit skill <path>")
         );
     }
 }
