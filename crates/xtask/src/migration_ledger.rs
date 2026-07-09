@@ -126,7 +126,7 @@ fn parse_explicit_scope(
 }
 
 /// Lowers a [`MigrationScope`] into the wire `scope:` + `entities:` fields of a ledger entry.
-fn ledger_entry_fields(scope: MigrationScope) -> (LedgerScope, BTreeSet<String>) {
+fn split_scope_into_ledger_fields(scope: MigrationScope) -> (LedgerScope, BTreeSet<String>) {
     match scope {
         MigrationScope::Full => (LedgerScope::All, BTreeSet::new()),
         MigrationScope::Code => (LedgerScope::Code, BTreeSet::new()),
@@ -291,7 +291,7 @@ pub fn bump(
         if ledger.migrations.iter().any(|e| e.version == new_version) {
             bail!("ledger already has an entry for version {new_version}");
         }
-        let (scope, entities) = ledger_entry_fields(entry_declaration);
+        let (scope, entities) = split_scope_into_ledger_fields(entry_declaration);
         ledger.migrations.insert(
             0,
             MigrationEntry {
@@ -308,7 +308,7 @@ pub fn bump(
             .first_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
         let widened = latest.migration_scope().widened_with(&entry_declaration);
-        let (scope, entities) = ledger_entry_fields(widened);
+        let (scope, entities) = split_scope_into_ledger_fields(widened);
         latest.scope = scope;
         latest.entities = entities;
         if note.is_some() {
