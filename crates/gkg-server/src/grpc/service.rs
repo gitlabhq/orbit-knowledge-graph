@@ -26,11 +26,12 @@ use crate::proto::{
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
     GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
     InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
-    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, QueryType,
-    ResponseFormat, ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode,
-    SchemaNodeStyle, SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition,
-    execute_query_message, get_graph_schema_response, get_query_dsl_response,
-    get_response_format_response, invoke_agent_command_response,
+    ListAgentCommandsResponse, ListNamedQueriesRequest, ListNamedQueriesResponse, ListToolsRequest,
+    ListToolsResponse, NamedQueryDefinition, QueryMetadata, QueryType, ResponseFormat,
+    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
+    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
+    invoke_agent_command_response,
 };
 use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
 use gkg_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
@@ -517,6 +518,27 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         skip(self, request),
         fields(user_id, source_type, ai_session_id, coding_agent)
     )]
+    async fn list_named_queries(
+        &self,
+        request: Request<ListNamedQueriesRequest>,
+    ) -> Result<Response<ListNamedQueriesResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+
+        let values = named_queries::BindingValues {
+            current_user_id: ctx.claims.user_id,
+        };
+        let queries = named_query_definitions(&self.named_queries, &values)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(count = queries.len(), "Listing named queries");
+        Ok(Response::new(ListNamedQueriesResponse { queries }))
+    }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn get_cluster_health(
         &self,
         request: Request<GetClusterHealthRequest>,
@@ -699,6 +721,23 @@ impl KnowledgeGraphServiceImpl {
 
         (outgoing, incoming)
     }
+}
+
+fn named_query_definitions(
+    named_queries: &named_queries::NamedQueries,
+    values: &named_queries::BindingValues,
+) -> Result<Vec<NamedQueryDefinition>, named_queries::NamedQueryError> {
+    named_queries
+        .iter()
+        .map(|query| {
+            let query_dsl = query.render(values, &query.example_parameters())?;
+            Ok(NamedQueryDefinition {
+                name: query.name.clone(),
+                description: query.description.clone(),
+                query_dsl,
+            })
+        })
+        .collect()
 }
 
 fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(), Status> {
@@ -1146,6 +1185,49 @@ mod tests {
             mr.properties.is_empty(),
             "MergeRequest should not be expanded"
         );
+    }
+
+    #[tokio::test]
+    async fn list_named_queries_returns_rendered_catalog() {
+        let service = test_service();
+        let response = service
+            .list_named_queries(authed_request(ListNamedQueriesRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.queries.is_empty());
+        for query in &response.queries {
+            assert!(!query.name.is_empty());
+            assert!(!query.description.is_empty());
+            let dsl: serde_json::Value = serde_json::from_str(&query.query_dsl)
+                .unwrap_or_else(|e| panic!("`{}` DSL must be valid JSON: {e}", query.name));
+            assert!(dsl.is_object(), "`{}` DSL must be an object", query.name);
+            assert!(
+                !query.query_dsl.contains("$binding") && !query.query_dsl.contains("$param"),
+                "`{}` DSL must have all placeholders resolved: {}",
+                query.name,
+                query.query_dsl
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn list_named_queries_substitutes_caller_user_id() {
+        let service = test_service();
+        let response = service
+            .list_named_queries(authed_request(ListNamedQueriesRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let my_neighbors = response
+            .queries
+            .iter()
+            .find(|q| q.name == "my_neighbors")
+            .expect("my_neighbors is an embedded named query");
+        let dsl: serde_json::Value = serde_json::from_str(&my_neighbors.query_dsl).unwrap();
+        assert_eq!(dsl["node"]["node_ids"], serde_json::json!([1]));
     }
 
     fn test_claims() -> Claims {
