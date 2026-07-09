@@ -32,8 +32,9 @@ use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::invalidation::find_invalidated_pipelines;
+use crate::schema::invalidation::{CODE_INDEXING_CHECKPOINT_TABLE, find_invalidated_pipelines};
 use crate::schema::metrics::CompletionMetrics;
+use crate::schema::migration::CHECKPOINT_TABLE;
 use crate::schema::version::{
     SCHEMA_VERSION, drop_kind_for_engine, mark_version_active, mark_version_dropped,
     mark_version_retired, read_active_version, read_all_versions, read_migrating_version,
@@ -124,6 +125,7 @@ SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
 FROM gkg_schema_version FINAL \
 WHERE status = 'migrating' AND version = {version:UInt32}";
 
+/// Counts namespaces whose checkpoint marks every one of the given plans complete (null cursor).
 const COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS: &str = "\
 SELECT count() AS ns_count FROM ( \
     SELECT splitByChar('.', key)[2] AS ns \
@@ -137,6 +139,7 @@ SELECT count() AS ns_count FROM ( \
     HAVING uniqExact(splitByChar('.', key)[3]) = {plan_count:UInt64} \
 )";
 
+/// Counts how many of the given global plans have a completed checkpoint (null cursor).
 const COUNT_COMPLETE_GLOBAL_PLANS: &str = "\
 SELECT count(DISTINCT splitByChar('.', key)[2]) AS ns_count \
 FROM {table:Identifier} FINAL \
@@ -387,7 +390,7 @@ impl MigrationCompletionChecker {
         // `v{N}_code_indexing_checkpoint` after promotion until coverage
         // approaches 100%, and operators watch the `code_coverage` field on
         // the "migration completion status" log line to track progress.
-        let code_table = format!("{prefix}code_indexing_checkpoint");
+        let code_table = format!("{prefix}{CODE_INDEXING_CHECKPOINT_TABLE}");
         let (eligible_projects, indexed_projects, coverage) = self
             .compute_code_coverage(&code_table, &enabled_paths)
             .await
@@ -396,7 +399,7 @@ impl MigrationCompletionChecker {
         let scope = self.resolve_migration_scope(version).await?;
         let sdlc_progress = match &scope {
             MigrationScope::Full | MigrationScope::Code => {
-                let sdlc_table = format!("{prefix}checkpoint");
+                let sdlc_table = format!("{prefix}{CHECKPOINT_TABLE}");
                 let count = self
                     .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
                     .await
@@ -407,7 +410,7 @@ impl MigrationCompletionChecker {
                 }
             }
             MigrationScope::Sdlc(_) => {
-                let checkpoint_table = format!("{prefix}checkpoint");
+                let checkpoint_table = format!("{prefix}{CHECKPOINT_TABLE}");
                 get_sdlc_reindex_progress(
                     &self.graph,
                     &self.ontology,

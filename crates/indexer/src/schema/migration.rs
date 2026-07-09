@@ -59,7 +59,7 @@ const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 
-const CHECKPOINT_TABLE: &str = "checkpoint";
+pub(crate) const CHECKPOINT_TABLE: &str = "checkpoint";
 
 #[derive(Debug, Error)]
 pub enum MigrationError {

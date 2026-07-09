@@ -8,7 +8,7 @@ use ontology::{EtlScope, Ontology};
 use query_engine::compiler::generate_graph_tables_with_prefix;
 use tracing::warn;
 
-const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+pub(crate) const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableMigrationAction {
