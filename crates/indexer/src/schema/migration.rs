@@ -148,7 +148,7 @@ pub async fn run_if_needed(
     }
 }
 
-pub async fn prepare_narrowed_tables(
+pub async fn clone_unchanged_migration_tables(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,
     ontology: &ontology::Ontology,
@@ -198,7 +198,7 @@ pub async fn prepare_narrowed_tables(
         }
     }
 
-    info!(cloned, rebuilt, seeded, prefix = %new_prefix, "narrowed migration tables prepared");
+    info!(cloned, rebuilt, seeded, prefix = %new_prefix, "clone-based migration tables prepared");
 
     create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
     metrics.record("create_tables", "success");
@@ -412,8 +412,9 @@ async fn run_migration_locked(
     let create_result = if scope.scope == Scope::All {
         create_prefixed_tables(graph, source, ontology, metrics).await
     } else {
-        info!(version = *SCHEMA_VERSION, %scope, "narrowed migration — cloning unchanged tables");
-        prepare_narrowed_tables(graph, source, ontology, metrics, &scope, active_version).await
+        info!(version = *SCHEMA_VERSION, %scope, "clone-based migration — cloning unchanged tables");
+        clone_unchanged_migration_tables(graph, source, ontology, metrics, &scope, active_version)
+            .await
     };
     if let Err(ref e) = create_result {
         warn!(error = %e, "failed to create new-prefix tables — releasing lock");

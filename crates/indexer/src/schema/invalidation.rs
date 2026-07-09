@@ -1,4 +1,4 @@
-//! Narrowed schema migration invalidation. Entity edge-key changes must be in
+//! Clone-based schema migration invalidation. Entity edge-key changes must be in
 //! the ledger, or cloned shared edge tables can retain old-key rows.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,7 +22,6 @@ pub struct InvalidatedPipelines {
     pub global: Vec<String>,
 }
 
-#[must_use]
 pub fn classify_tables_for_scope(
     ontology: &Ontology,
     scope: &ScopeDeclaration,
@@ -38,7 +37,6 @@ pub fn classify_tables_for_scope(
 }
 
 /// FK-derived edge kinds invalidate the pipelines that emit them.
-#[must_use]
 pub fn find_invalidated_pipelines(
     ontology: &Ontology,
     scope: &ScopeDeclaration,
@@ -219,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn narrowed_note_scope_rebuilds_only_its_node_table() {
+    fn note_scope_migration_rebuilds_only_its_node_table() {
         let map = classify(ScopeDeclaration {
             scope: Scope::Sdlc,
             entities: entities(&["Note"]),

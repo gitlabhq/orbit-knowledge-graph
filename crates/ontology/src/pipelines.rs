@@ -13,7 +13,6 @@ pub struct PipelineDescriptor {
     pub reindex_targets: BTreeSet<String>,
 }
 
-#[must_use]
 pub fn standalone_edge_pipeline_name(
     relationship_kind: &str,
     config: &EdgeSourceEtlConfig,
@@ -26,7 +25,6 @@ pub fn standalone_edge_pipeline_name(
 }
 
 impl Ontology {
-    #[must_use]
     pub fn pipeline_descriptors(&self) -> Vec<PipelineDescriptor> {
         let mut descriptors = Vec::new();
         for node in self.nodes() {

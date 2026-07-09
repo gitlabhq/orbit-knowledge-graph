@@ -766,7 +766,7 @@ async fn wait_until_ready_ready_when_rebuilding_below_active() {
 }
 
 #[tokio::test]
-async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidated_plan() {
+async fn sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidated_plan() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
     let active_version = *SCHEMA_VERSION - 1;
@@ -812,7 +812,7 @@ async fn narrowed_sdlc_migration_clones_seeds_checkpoint_and_gates_on_invalidate
         scope: Scope::Sdlc,
         entities: ["Note".to_string()].into_iter().collect(),
     };
-    migration::prepare_narrowed_tables(
+    migration::clone_unchanged_migration_tables(
         &client,
         &dictionary_source(&ctx.config),
         &ontology,
@@ -972,7 +972,7 @@ async fn fk_edge_scope_reindexes_note_without_wiping_its_table() {
     )
     .await;
 
-    migration::prepare_narrowed_tables(
+    migration::clone_unchanged_migration_tables(
         &client,
         &dictionary_source(&ctx.config),
         &ontology,
@@ -1038,7 +1038,7 @@ async fn fk_edge_scope_reindexes_note_without_wiping_its_table() {
     assert!(after.ready);
 }
 #[tokio::test]
-async fn narrowed_migration_survives_interruption_rerun_and_edge_reemission() {
+async fn clone_based_migration_survives_interruption_rerun_and_edge_reemission() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
     let active_version = *SCHEMA_VERSION - 1;
@@ -1080,7 +1080,7 @@ async fn narrowed_migration_survives_interruption_rerun_and_edge_reemission() {
         .unwrap();
 
     for _ in 0..2 {
-        migration::prepare_narrowed_tables(
+        migration::clone_unchanged_migration_tables(
             &client,
             &dictionary_source(&ctx.config),
             &ontology,
@@ -1264,7 +1264,7 @@ async fn whole_sdlc_scope_seeds_empty_checkpoint_and_rebuilds_sdlc_tables() {
     )
     .await;
 
-    migration::prepare_narrowed_tables(
+    migration::clone_unchanged_migration_tables(
         &client,
         &dictionary_source(&ctx.config),
         &ontology,
@@ -1326,7 +1326,7 @@ async fn code_scope_clones_sdlc_state_intact_and_rebuilds_code_checkpoint() {
     ))
     .await;
 
-    migration::prepare_narrowed_tables(
+    migration::clone_unchanged_migration_tables(
         &client,
         &dictionary_source(&ctx.config),
         &ontology,
