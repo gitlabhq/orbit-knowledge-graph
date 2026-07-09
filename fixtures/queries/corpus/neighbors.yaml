@@ -11,7 +11,7 @@ nb_group_both_many_ids:
     {
       "query_type": "neighbors",
       "node": {"id": "g", "entity": "Group", "node_ids": "$sample:20", "columns": ["id", "full_path"]},
-      "neighbors": {"node": "g", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 500
     }
 
@@ -23,7 +23,7 @@ nb_group_incoming:
     {
       "query_type": "neighbors",
       "node": {"id": "g", "entity": "Group", "node_ids": "$sample:20"},
-      "neighbors": {"node": "g", "direction": "incoming"},
+      "neighbors": {"direction": "incoming"},
       "limit": 500
     }
 
@@ -35,7 +35,7 @@ nb_group_outgoing:
     {
       "query_type": "neighbors",
       "node": {"id": "g", "entity": "Group", "node_ids": "$sample:20"},
-      "neighbors": {"node": "g", "direction": "outgoing"},
+      "neighbors": {"direction": "outgoing"},
       "limit": 500
     }
 
@@ -47,7 +47,7 @@ nb_group_single_both:
     {
       "query_type": "neighbors",
       "node": {"id": "g", "entity": "Group", "node_ids": "$sample"},
-      "neighbors": {"node": "g", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 500
     }
 
@@ -59,7 +59,7 @@ nb_project_both:
     {
       "query_type": "neighbors",
       "node": {"id": "p", "entity": "Project", "node_ids": "$sample:5"},
-      "neighbors": {"node": "p", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 500
     }
 
@@ -71,7 +71,7 @@ nb_project_incoming:
     {
       "query_type": "neighbors",
       "node": {"id": "p", "entity": "Project", "node_ids": "$sample:5"},
-      "neighbors": {"node": "p", "direction": "incoming"},
+      "neighbors": {"direction": "incoming"},
       "limit": 500
     }
 
@@ -83,7 +83,7 @@ nb_project_outgoing:
     {
       "query_type": "neighbors",
       "node": {"id": "p", "entity": "Project", "node_ids": "$sample:5"},
-      "neighbors": {"node": "p", "direction": "outgoing"},
+      "neighbors": {"direction": "outgoing"},
       "limit": 500
     }
 
@@ -95,7 +95,7 @@ nb_file_both:
     {
       "query_type": "neighbors",
       "node": {"id": "f", "entity": "File", "node_ids": "$sample:5"},
-      "neighbors": {"node": "f", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 200
     }
 
@@ -107,7 +107,7 @@ nb_file_outgoing_defines:
     {
       "query_type": "neighbors",
       "node": {"id": "f", "entity": "File", "node_ids": "$sample:5"},
-      "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]},
+      "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]},
       "limit": 200
     }
 
@@ -119,7 +119,7 @@ nb_definition_both:
     {
       "query_type": "neighbors",
       "node": {"id": "d", "entity": "Definition", "node_ids": "$sample:5"},
-      "neighbors": {"node": "d", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 200
     }
 
@@ -131,7 +131,7 @@ nb_definition_calls_outgoing:
     {
       "query_type": "neighbors",
       "node": {"id": "d", "entity": "Definition", "node_ids": "$sample:5"},
-      "neighbors": {"node": "d", "direction": "outgoing", "rel_types": ["CALLS"]},
+      "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]},
       "limit": 200
     }
 
@@ -143,7 +143,7 @@ nb_definition_callers_incoming:
     {
       "query_type": "neighbors",
       "node": {"id": "d", "entity": "Definition", "node_ids": "$sample:5"},
-      "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["CALLS"]},
+      "neighbors": {"direction": "incoming", "rel_types": ["CALLS"]},
       "limit": 200
     }
 
@@ -155,7 +155,7 @@ nb_merge_request_both:
     {
       "query_type": "neighbors",
       "node": {"id": "mr", "entity": "MergeRequest", "node_ids": "$sample:5"},
-      "neighbors": {"node": "mr", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 200
     }
 
@@ -167,6 +167,6 @@ nb_work_item_both:
     {
       "query_type": "neighbors",
       "node": {"id": "wi", "entity": "WorkItem", "node_ids": "$sample:5"},
-      "neighbors": {"node": "wi", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 200
     }

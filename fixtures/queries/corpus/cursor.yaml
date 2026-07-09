@@ -109,9 +109,7 @@
         "entity": "MergeRequest",
         "node_ids": "$sample:3"
       },
-      "neighbors": {
-        "node": "mr",
-        "direction": "both"
+      "neighbors": {"direction": "both"
       },
       "cursor": {
         "page_size": 20
@@ -130,9 +128,7 @@
         "entity": "Project",
         "node_ids": "$sample"
       },
-      "neighbors": {
-        "node": "p",
-        "direction": "outgoing",
+      "neighbors": {"direction": "outgoing",
         "rel_types": [
           "CONTAINS"
         ]

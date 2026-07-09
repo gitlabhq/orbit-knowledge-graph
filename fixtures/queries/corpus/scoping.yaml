@@ -670,7 +670,7 @@ neighbors_project_center_outgoing:
     {
       "query_type": "neighbors",
       "node": {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}], "columns": ["id", "full_path"]},
-      "neighbors": {"node": "p", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 100
     }
 
@@ -683,7 +683,7 @@ unknown_id_neighbors_no_widen:
     {
       "query_type": "neighbors",
       "node": {"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}], "columns": ["id", "full_path"]},
-      "neighbors": {"node": "p", "direction": "both"},
+      "neighbors": {"direction": "both"},
       "limit": 100
     }
 
@@ -695,7 +695,7 @@ neighbors_group_center_contains_rel_filter:
     {
       "query_type": "neighbors",
       "node": {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}], "columns": ["id", "full_path"]},
-      "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
+      "neighbors": {"direction": "outgoing", "rel_types": ["CONTAINS"]},
       "limit": 100
     }
 
@@ -1017,7 +1017,7 @@ scoped_group_full_path_neighbors_authz_and:
     {
       "query_type": "neighbors",
       "node": {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}, "columns": ["name", "full_path"]},
-      "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
+      "neighbors": {"direction": "outgoing", "rel_types": ["CONTAINS"]},
       "limit": 50,
       "options": {"include_debug_sql": true}
     }

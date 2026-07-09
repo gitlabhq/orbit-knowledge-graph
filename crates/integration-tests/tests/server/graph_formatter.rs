@@ -785,7 +785,7 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing"}
+            "neighbors": {"direction": "outgoing"}
         }"#,
         &allow_all(),
     )
@@ -847,7 +847,7 @@ async fn neighbors_incoming_exact(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "g", "entity": "Group", "node_ids": [101]},
-            "neighbors": {"node": "g", "direction": "incoming"}
+            "neighbors": {"direction": "incoming"}
         }"#,
         &allow_all(),
     )
@@ -891,7 +891,7 @@ async fn neighbors_both_exact(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
     )
@@ -957,7 +957,7 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
     )
@@ -980,7 +980,7 @@ async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
-            "neighbors": {"node": "mr", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
     )
@@ -1027,7 +1027,7 @@ async fn neighbors_redaction(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing"}
+            "neighbors": {"direction": "outgoing"}
         }"#,
         &svc,
     )
@@ -1738,7 +1738,7 @@ async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["AUTHORED"]}
+            "neighbors": {"direction": "outgoing", "rel_types": ["AUTHORED"]}
         }"#,
         &allow_all(),
     )
@@ -1783,7 +1783,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),

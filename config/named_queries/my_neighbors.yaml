@@ -9,6 +9,5 @@ query:
     node_ids:
       - { $binding: current_user_id }
   neighbors:
-    node: me
     direction: both
   limit: 100

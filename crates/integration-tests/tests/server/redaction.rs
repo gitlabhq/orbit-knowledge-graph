@@ -2565,7 +2565,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2687,7 +2687,7 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2713,7 +2713,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1, 3]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2752,7 +2752,7 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-        "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]}
+        "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2850,7 +2850,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "f", "entity": "File", "node_ids": [3000]},
-        "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
+        "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3035,7 +3035,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "f", "entity": "File", "node_ids": [3000, 3002]},
-        "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
+        "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3366,7 +3366,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();

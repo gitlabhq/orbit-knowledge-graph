@@ -591,7 +591,7 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin
         r#"{
             "query_type": "neighbors",
             "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]},
+            "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
@@ -635,7 +635,7 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_center_node_strips_ad
         r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
@@ -716,7 +716,7 @@ pub(super) async fn admin_only_admin_neighbors_dynamic_wildcard_includes_admin_f
         r#"{
             "query_type": "neighbors",
             "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]},
+            "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
@@ -1558,7 +1558,7 @@ pub(super) async fn aggregation_user_only_neighbors_query_is_not_blocked(ctx: &T
         r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "limit": 10
         }"#,
         &ontology,

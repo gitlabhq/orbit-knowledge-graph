@@ -402,7 +402,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Neighbors));
@@ -629,7 +629,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -642,7 +642,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -708,7 +708,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -721,7 +721,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -812,7 +812,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_ids("User", &[1]);

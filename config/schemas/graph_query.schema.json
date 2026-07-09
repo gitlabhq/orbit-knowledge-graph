@@ -55,7 +55,7 @@
     },
     "neighbors": {
       "$ref": "#/$defs/NeighborsConfig",
-      "description": "Neighbors configuration. Required when query_type is 'neighbors'."
+      "description": "Neighbors configuration. Required when query_type is 'neighbors'. The center is the query's single 'node' selector."
     },
     "limit": {
       "type": "integer",
@@ -723,13 +723,8 @@
     },
     "NeighborsConfig": {
       "type": "object",
-      "description": "Configuration for neighbors queries",
-      "required": ["node"],
+      "description": "Configuration for neighbors queries. The center node is inferred from the query's single 'node' selector.",
       "properties": {
-        "node": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Node variable ID to find neighbors for"
-        },
         "direction": {
           "$ref": "#/$defs/Direction",
           "description": "Direction to traverse relationships (outgoing, incoming, or both)",

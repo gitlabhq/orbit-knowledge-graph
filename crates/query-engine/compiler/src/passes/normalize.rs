@@ -357,8 +357,12 @@ fn infer_wildcard_relationship_kinds(input: &mut Input, ontology: &Ontology) {
         );
     }
 
+    let center_entity = input
+        .nodes
+        .first()
+        .and_then(|n| entity_for.get(n.id.as_str()).copied());
     if let Some(neighbors) = input.neighbors.as_mut()
-        && let Some(center_entity) = entity_for.get(neighbors.node.as_str()).copied()
+        && let Some(center_entity) = center_entity
     {
         specialize_wildcard(
             &mut neighbors.rel_types,

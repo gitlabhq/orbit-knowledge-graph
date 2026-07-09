@@ -95,9 +95,7 @@ q3_bidirectional_neighbors_on_project:
         "entity": "Project",
         "node_ids": "$sample"
       },
-      "neighbors": {
-        "node": "p",
-        "direction": "both",
+      "neighbors": {"direction": "both",
         "rel_types": [
           "CONTAINS",
           "IN_PROJECT"
@@ -622,9 +620,7 @@ q15_neighbors_many_rel_types:
         "entity": "User",
         "node_ids": "$sample"
       },
-      "neighbors": {
-        "node": "u",
-        "direction": "both",
+      "neighbors": {"direction": "both",
         "rel_types": [
           "AUTHORED",
           "REVIEWER",
@@ -1673,9 +1669,7 @@ b2_bidirectional_neighbors_group:
         "entity": "Group",
         "node_ids": "$sample"
       },
-      "neighbors": {
-        "node": "g",
-        "direction": "both"
+      "neighbors": {"direction": "both"
       },
       "limit": 20
     }

@@ -621,16 +621,14 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            QueryType::Neighbors => {
-                if let Some(ref nb) = input.neighbors {
-                    let node = input.nodes.iter().find(|n| n.id == nb.node);
-                    if node.is_none_or(|n| !node_has_selectivity(n)) {
-                        return Err(QueryError::Validation(
-                            "neighbors requires node_ids or filters on the center node \
-                             to avoid scanning all edges"
-                                .into(),
-                        ));
-                    }
+            QueryType::Neighbors if input.neighbors.is_some() => {
+                let node = input.nodes.first();
+                if node.is_none_or(|n| !node_has_selectivity(n)) {
+                    return Err(QueryError::Validation(
+                        "neighbors requires node_ids or filters on the center node \
+                         to avoid scanning all edges"
+                            .into(),
+                    ));
                 }
             }
             QueryType::Traversal | QueryType::Aggregation
@@ -955,19 +953,16 @@ impl<'a> Validator<'a> {
             return Ok(());
         }
 
-        let neighbors = input.neighbors.as_ref().ok_or_else(|| {
-            QueryError::ReferenceError(
+        if input.neighbors.is_none() {
+            return Err(QueryError::ReferenceError(
                 "neighbors query requires a 'neighbors' configuration".into(),
-            )
-        })?;
+            ));
+        }
 
-        let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
-
-        if !node_ids.contains(&neighbors.node.as_str()) {
-            return Err(QueryError::ReferenceError(format!(
-                "neighbors 'node' references undefined node \"{}\"",
-                neighbors.node
-            )));
+        if input.nodes.len() != 1 {
+            return Err(QueryError::ReferenceError(
+                "neighbors query requires exactly one node selector".into(),
+            ));
         }
 
         Ok(())
@@ -1216,7 +1211,7 @@ mod tests {
             r#"{
                 "query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
         );
 
@@ -1384,15 +1379,6 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "ghost", "max_depth": 2,
                          "rel_types": ["CONTAINS"]}
-            }"#,
-            "undefined node \"ghost\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "ghost", "direction": "both"}
             }"#,
             "undefined node \"ghost\"",
         );
@@ -2205,21 +2191,21 @@ mod tests {
             r#"{
                 "query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
         );
         assert_ok(
             r#"{
                 "query_type": "neighbors",
                 "node": {"id": "u", "entity": "User", "filters": {"username": "root"}},
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
         );
         assert_rejects(
             r#"{
                 "query_type": "neighbors",
                 "node": {"id": "u", "entity": "User"},
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
             "center node",
         );

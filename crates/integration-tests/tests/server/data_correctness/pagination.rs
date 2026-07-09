@@ -211,7 +211,7 @@ pub(super) async fn cursor_neighbors_pages_cover_all_edges(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "both"},
+            "neighbors": {"direction": "both"},
             "limit": 100
         }"#,
         &allow_all(),
@@ -227,7 +227,7 @@ pub(super) async fn cursor_neighbors_pages_cover_all_edges(ctx: &TestContext) {
     let json = r#"{
         "query_type": "neighbors",
         "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-        "neighbors": {"node": "g", "direction": "both"},
+        "neighbors": {"direction": "both"},
         "cursor": {"page_size": 2}
     }"#;
 
