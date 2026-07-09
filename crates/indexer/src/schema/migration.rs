@@ -401,7 +401,7 @@ async fn run_migration_locked(
     metrics.record("drain", "success");
 
     let scope = match MigrationLedger::load_embedded() {
-        Ok(ledger) => ledger.invalidation_scope_between(active_version, *SCHEMA_VERSION),
+        Ok(ledger) => ledger.resolve_migration_scope_between(active_version, *SCHEMA_VERSION),
         Err(e) => {
             warn!(error = %e, "failed to load migration ledger — releasing lock");
             let _ = lock_service.release(MIGRATION_LOCK_KEY).await;

@@ -465,7 +465,7 @@ impl MigrationCompletionChecker {
             .map_err(|e| format!("read active version: {e}"))?
             .unwrap_or(0);
         let ledger = MigrationLedger::load_embedded()?;
-        Ok(ledger.invalidation_scope_between(active, migrating_version))
+        Ok(ledger.resolve_migration_scope_between(active, migrating_version))
     }
 
     /// Reads the wall-clock age (in seconds) of the row that marked the

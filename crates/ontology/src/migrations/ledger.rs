@@ -43,7 +43,7 @@ impl MigrationLedger {
 
     /// Union of ledger scopes between versions; gaps and rollbacks widen to [`MigrationScope::Full`].
     #[must_use]
-    pub fn invalidation_scope_between(
+    pub fn resolve_migration_scope_between(
         &self,
         active_version: u32,
         target_version: u32,
@@ -257,7 +257,7 @@ mod tests {
     fn invalidation_scope_single_entry_in_range() {
         let ledger = ledger(vec![entry(81, LedgerScope::Sdlc, &["Note"])]);
         assert_eq!(
-            ledger.invalidation_scope_between(80, 81),
+            ledger.resolve_migration_scope_between(80, 81),
             MigrationScope::Sdlc(entities(&["Note"]))
         );
     }
@@ -269,7 +269,7 @@ mod tests {
             entry(82, LedgerScope::Sdlc, &["Note"]),
         ]);
         assert_eq!(
-            ledger.invalidation_scope_between(81, 83),
+            ledger.resolve_migration_scope_between(81, 83),
             MigrationScope::Sdlc(entities(&["Issue", "Note"]))
         );
     }
@@ -278,7 +278,7 @@ mod tests {
     fn invalidation_scope_gap_in_range_widens_to_all() {
         let ledger = ledger(vec![entry(83, LedgerScope::Sdlc, &["Note"])]);
         assert_eq!(
-            ledger.invalidation_scope_between(81, 83),
+            ledger.resolve_migration_scope_between(81, 83),
             MigrationScope::Full
         );
     }
@@ -287,11 +287,11 @@ mod tests {
     fn invalidation_scope_rollback_direction_is_all() {
         let ledger = ledger(vec![entry(82, LedgerScope::Sdlc, &["Note"])]);
         assert_eq!(
-            ledger.invalidation_scope_between(83, 82),
+            ledger.resolve_migration_scope_between(83, 82),
             MigrationScope::Full
         );
         assert_eq!(
-            ledger.invalidation_scope_between(82, 82),
+            ledger.resolve_migration_scope_between(82, 82),
             MigrationScope::Full
         );
     }
@@ -303,7 +303,7 @@ mod tests {
             entry(81, LedgerScope::Sdlc, &["Note"]),
         ]);
         assert_eq!(
-            ledger.invalidation_scope_between(80, 82),
+            ledger.resolve_migration_scope_between(80, 82),
             MigrationScope::Full
         );
     }
