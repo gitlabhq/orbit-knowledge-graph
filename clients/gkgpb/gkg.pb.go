@@ -1755,7 +1755,7 @@ type NamedQueryDefinition struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                         // stable identifier, e.g. "recent_merges"
 	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`           // human-readable summary from the template YAML
-	QueryDsl      string                 `protobuf:"bytes,3,opt,name=query_dsl,json=queryDsl,proto3" json:"query_dsl,omitempty"` // rendered query DSL as a JSON string, executable as-is
+	RawQuery      string                 `protobuf:"bytes,3,opt,name=raw_query,json=rawQuery,proto3" json:"raw_query,omitempty"` // rendered query DSL as a JSON string, executable as-is
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1804,9 +1804,9 @@ func (x *NamedQueryDefinition) GetDescription() string {
 	return ""
 }
 
-func (x *NamedQueryDefinition) GetQueryDsl() string {
+func (x *NamedQueryDefinition) GetRawQuery() string {
 	if x != nil {
-		return x.QueryDsl
+		return x.RawQuery
 	}
 	return ""
 }
@@ -3366,7 +3366,7 @@ const file_gkg_proto_rawDesc = "" +
 	"\x14NamedQueryDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1b\n" +
-	"\tquery_dsl\x18\x03 \x01(\tR\bqueryDsl\"\x90\x01\n" +
+	"\traw_query\x18\x03 \x01(\tR\brawQuery\"\x90\x01\n" +
 	"\x11RedactionExchange\x127\n" +
 	"\brequired\x18\x01 \x01(\v2\x19.gkg.v1.RedactionRequiredH\x00R\brequired\x127\n" +
 	"\bresponse\x18\x02 \x01(\v2\x19.gkg.v1.RedactionResponseH\x00R\bresponseB\t\n" +

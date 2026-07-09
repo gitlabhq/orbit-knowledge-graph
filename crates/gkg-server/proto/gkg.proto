@@ -262,7 +262,7 @@ message ListNamedQueriesResponse {
 message NamedQueryDefinition {
   string name = 1;         // stable identifier, e.g. "recent_merges"
   string description = 2;  // human-readable summary from the template YAML
-  string query_dsl = 3;    // rendered query DSL as a JSON string, executable as-is
+  string raw_query = 3;    // rendered query DSL as a JSON string, executable as-is
 }
 
 // ---------------------------------------------------------------------------

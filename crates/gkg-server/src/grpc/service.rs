@@ -730,11 +730,11 @@ fn named_query_definitions(
     named_queries
         .iter()
         .map(|query| {
-            let query_dsl = query.render(values, &query.example_parameters())?;
+            let raw_query = query.render(values, &query.example_parameters())?;
             Ok(NamedQueryDefinition {
                 name: query.name.clone(),
                 description: query.description.clone(),
-                query_dsl,
+                raw_query,
             })
         })
         .collect()
@@ -795,10 +795,15 @@ mod tests {
     }
 
     fn authed_request<T>(message: T) -> Request<T> {
+        authed_request_for_user(message, 1)
+    }
+
+    fn authed_request_for_user<T>(message: T, user_id: u64) -> Request<T> {
         let now = chrono::Utc::now().timestamp();
         let claims = Claims {
             iat: now,
             exp: now + 3600,
+            user_id,
             ..test_claims()
         };
         let token = encode(
@@ -1200,23 +1205,25 @@ mod tests {
         for query in &response.queries {
             assert!(!query.name.is_empty());
             assert!(!query.description.is_empty());
-            let dsl: serde_json::Value = serde_json::from_str(&query.query_dsl)
+            let dsl: serde_json::Value = serde_json::from_str(&query.raw_query)
                 .unwrap_or_else(|e| panic!("`{}` DSL must be valid JSON: {e}", query.name));
             assert!(dsl.is_object(), "`{}` DSL must be an object", query.name);
             assert!(
-                !query.query_dsl.contains("$binding") && !query.query_dsl.contains("$param"),
+                !query.raw_query.contains("$binding") && !query.raw_query.contains("$param"),
                 "`{}` DSL must have all placeholders resolved: {}",
                 query.name,
-                query.query_dsl
+                query.raw_query
             );
         }
     }
 
     #[tokio::test]
     async fn list_named_queries_substitutes_caller_user_id() {
+        let user_id = 424_242;
+
         let service = test_service();
         let response = service
-            .list_named_queries(authed_request(ListNamedQueriesRequest {}))
+            .list_named_queries(authed_request_for_user(ListNamedQueriesRequest {}, user_id))
             .await
             .unwrap()
             .into_inner();
@@ -1227,9 +1234,9 @@ mod tests {
             .find(|q| q.name == "my_neighbors")
             .expect("my_neighbors is an embedded named query");
         assert!(
-            my_neighbors.query_dsl.contains("\"1\"") || my_neighbors.query_dsl.contains(": 1") || my_neighbors.query_dsl.contains(":1"),
-            "my_neighbors DSL should contain the caller's user_id (1): {}",
-            my_neighbors.query_dsl
+            my_neighbors.raw_query.contains("424242"),
+            "my_neighbors DSL should contain the caller's user_id: {}",
+            my_neighbors.raw_query
         );
     }
 

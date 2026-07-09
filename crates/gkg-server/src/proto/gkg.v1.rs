@@ -287,7 +287,7 @@ pub struct NamedQueryDefinition {
     pub description: ::prost::alloc::string::String,
     /// rendered query DSL as a JSON string, executable as-is
     #[prost(string, tag = "3")]
-    pub query_dsl: ::prost::alloc::string::String,
+    pub raw_query: ::prost::alloc::string::String,
 }
 /// Wrapper for the redaction handshake within a streaming query.
 /// Server sends `required` with resources to check, client responds with decisions.
