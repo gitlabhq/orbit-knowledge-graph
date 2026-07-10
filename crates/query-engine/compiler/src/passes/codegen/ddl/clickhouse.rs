@@ -177,6 +177,10 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         }
     }
 
+    if let Some(ttl) = &table.ttl {
+        parts.push(format!("TTL {ttl}"));
+    }
+
     if !table.settings.is_empty() {
         let settings: Vec<String> = table
             .settings
@@ -184,10 +188,6 @@ pub fn emit_create_table(table: &CreateTable) -> String {
             .map(|s| format!("{} = {}", s.key, s.value))
             .collect();
         parts.push(format!("SETTINGS {}", settings.join(", ")));
-    }
-
-    if let Some(ttl) = &table.ttl {
-        parts.push(format!("TTL {ttl}"));
     }
 
     parts.join("\n")
@@ -410,6 +410,32 @@ mod tests {
         assert!(sql.contains("ORDER BY (key)"));
         assert!(sql.contains("SETTINGS allow_experimental_replacing_merge_with_cleanup = 1"));
         assert!(!sql.contains("PRIMARY KEY"));
+    }
+
+    #[test]
+    fn emit_table_ttl_before_settings() {
+        let table = CreateTable {
+            name: "snapshot".into(),
+            columns: vec![ColumnDef::new("snapshot_date", ColumnType::Date32)],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "ReplacingMergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec!["snapshot_date".into()],
+            partition_by: vec![],
+            primary_key: None,
+            settings: vec![TableSetting {
+                key: "index_granularity".into(),
+                value: "8192".into(),
+            }],
+            ttl: Some("snapshot_date + INTERVAL 400 DAY".into()),
+        };
+
+        let sql = emit_create_table(&table);
+        assert!(sql.find("ORDER BY").unwrap() < sql.find("TTL").unwrap());
+        assert!(sql.find("TTL").unwrap() < sql.find("SETTINGS").unwrap());
     }
 
     #[test]
