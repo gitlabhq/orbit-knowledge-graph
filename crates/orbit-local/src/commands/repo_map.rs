@@ -375,9 +375,9 @@ LIMIT 30",
        COUNT(DISTINCT child.id) AS descendants
 FROM gl_definition parent
 JOIN gl_edge e ON e.target_id = parent.id AND e.relationship_kind='EXTENDS'
-JOIN gl_definition child ON child.id = e.source_id
-WHERE parent.project_id={pid} AND parent.commit_sha={sha}
-  AND child.project_id={pid}
+ JOIN gl_definition child ON child.id = e.source_id
+ WHERE parent.project_id={pid} AND parent.commit_sha={sha}
+   AND child.project_id={pid} AND child.commit_sha={sha}
   AND parent.definition_type IN {abstractions}{exclude_parent}{exclude_child}
 GROUP BY 1, 2, 3
 HAVING descendants >= 2
@@ -738,7 +738,7 @@ LIMIT 300",
   FROM gl_edge e
   JOIN chain c ON e.target_id = c.id AND e.relationship_kind='EXTENDS'
   JOIN gl_definition s ON s.id = e.source_id
-  WHERE s.project_id={pid} AND c.depth < 6{exclude_s}
+   WHERE s.project_id={pid} AND s.commit_sha={sha} AND c.depth < 6{exclude_s}
 )
 SELECT depth, fqn, file_path || ':' || start_line AS loc
 FROM chain

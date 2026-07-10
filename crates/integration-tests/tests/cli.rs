@@ -845,9 +845,9 @@ fn repo_map_same_sha_isolates_projects() {
         &[
             (
                 "src/main.py",
-                "class Alpha:\n    def run(self):\n        pass\n",
+                "from alpha_utils import helper\n\nclass Base:\n    pass\n\nclass AlphaChild(Base):\n    def run(self):\n        return helper()\n",
             ),
-            ("src/helper.py", "def alpha_helper():\n    pass\n"),
+            ("src/alpha_utils.py", "def helper():\n    return 'alpha'\n"),
         ],
     );
     let sha_a = git(&repo_a, &["rev-parse", "HEAD"]);
@@ -864,6 +864,17 @@ fn repo_map_same_sha_isolates_projects() {
         .unwrap();
     let sha_b = git(&repo_b, &["rev-parse", "HEAD"]);
     assert_eq!(sha_a, sha_b, "clones must share the same commit SHA");
+    std::fs::remove_file(repo_b.join("src/alpha_utils.py")).unwrap();
+    std::fs::write(
+        repo_b.join("src/main.py"),
+        "from beta_utils import helper\n\nclass Base:\n    pass\n\nclass BetaChild(Base):\n    def run(self):\n        return helper()\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo_b.join("src/beta_utils.py"),
+        "def helper():\n    return 'beta'\n",
+    )
+    .unwrap();
 
     assert!(orbit_index(&repo_a, dd));
     assert!(orbit_index(&repo_b, dd));
@@ -899,32 +910,48 @@ fn repo_map_same_sha_isolates_projects() {
 
     let tree_a = String::from_utf8(repo_map(&repo_a, dd, &["tree", "src"]).stdout).unwrap();
     let tree_b = String::from_utf8(repo_map(&repo_b, dd, &["tree", "src"]).stdout).unwrap();
-    assert!(tree_a.contains("Alpha"), "alpha tree must contain Alpha");
-    assert!(tree_b.contains("Alpha"), "beta tree must contain Alpha");
+    assert!(
+        tree_a.contains("AlphaChild") && !tree_a.contains("BetaChild"),
+        "alpha tree must exclude beta definitions: {tree_a}"
+    );
+    assert!(
+        tree_b.contains("BetaChild") && !tree_b.contains("AlphaChild"),
+        "beta tree must exclude alpha definitions: {tree_b}"
+    );
 
-    let extends_a = String::from_utf8(repo_map(&repo_a, dd, &["extends", "Alpha"]).stdout).unwrap();
-    let extends_b = String::from_utf8(repo_map(&repo_b, dd, &["extends", "Alpha"]).stdout).unwrap();
+    let extends_a = String::from_utf8(repo_map(&repo_a, dd, &["extends", "Base"]).stdout).unwrap();
+    let extends_b = String::from_utf8(repo_map(&repo_b, dd, &["extends", "Base"]).stdout).unwrap();
     assert!(
-        extends_a.contains("Alpha"),
-        "alpha extends must show Alpha: {extends_a}"
+        extends_a.contains("AlphaChild") && !extends_a.contains("BetaChild"),
+        "alpha descendants must exclude beta definitions: {extends_a}"
     );
     assert!(
-        extends_b.contains("Alpha"),
-        "beta extends must show Alpha: {extends_b}"
+        extends_b.contains("BetaChild") && !extends_b.contains("AlphaChild"),
+        "beta descendants must exclude alpha definitions: {extends_b}"
     );
+    let table_data_rows = |output: &str, header: &str| {
+        output
+            .lines()
+            .filter(|line| line.starts_with("| ") && !line.starts_with(header))
+            .count()
+    };
+    assert_eq!(table_data_rows(&extends_a, "| depth"), 2, "{extends_a}");
+    assert_eq!(table_data_rows(&extends_b, "| depth"), 2, "{extends_b}");
 
     let imports_a =
-        String::from_utf8(repo_map(&repo_a, dd, &["imports", "alpha_helper"]).stdout).unwrap();
+        String::from_utf8(repo_map(&repo_a, dd, &["imports", "helper"]).stdout).unwrap();
     let imports_b =
-        String::from_utf8(repo_map(&repo_b, dd, &["imports", "alpha_helper"]).stdout).unwrap();
+        String::from_utf8(repo_map(&repo_b, dd, &["imports", "helper"]).stdout).unwrap();
     assert!(
-        imports_a.contains("IMPORTERS"),
-        "alpha imports header must appear: {imports_a}"
+        imports_a.contains("alpha_utils") && !imports_a.contains("beta_utils"),
+        "alpha importers must exclude beta paths: {imports_a}"
     );
     assert!(
-        imports_b.contains("IMPORTERS"),
-        "beta imports header must appear: {imports_b}"
+        imports_b.contains("beta_utils") && !imports_b.contains("alpha_utils"),
+        "beta importers must exclude alpha paths: {imports_b}"
     );
+    assert_eq!(table_data_rows(&imports_a, "| symbol"), 1, "{imports_a}");
+    assert_eq!(table_data_rows(&imports_b, "| symbol"), 1, "{imports_b}");
 }
 
 /// Preflight must reject a checkout whose project_id is not indexed, even
