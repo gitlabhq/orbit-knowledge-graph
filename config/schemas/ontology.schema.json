@@ -802,6 +802,10 @@
             "type": "object",
             "properties": {
               "name": { "type": "string" },
+              "versioned": {
+                "type": "boolean",
+                "description": "Whether the schema-version prefix is applied to the table name. Defaults to true."
+              },
               "columns": {
                 "type": "array",
                 "items": {
@@ -820,7 +824,11 @@
               "order_by": { "type": "array", "items": { "type": "string" } },
               "version_only_engine": { "type": "boolean" },
               "version_type": { "type": "string" },
-              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } },
+              "include_system_columns": { "type": "boolean" },
+              "engine": { "type": "string" },
+              "engine_args": { "type": "array", "items": { "type": "string" } },
+              "ttl": { "type": "string" }
             },
             "required": ["name", "columns", "order_by"],
             "additionalProperties": false
@@ -828,21 +836,23 @@
         },
         "materialized_views": {
           "type": "array",
-          "description": "ClickHouse materialized views created after all graph tables. Views act as insert triggers that transform incoming data and write to a destination table or implicit storage. Each view must use exactly one storage mode: either to_table (TO-table mode) or engine (implicit-storage mode).",
+          "description": "ClickHouse materialized views whose SELECT body is loaded from an ontology-relative SQL template file.",
           "items": {
             "type": "object",
             "properties": {
               "name": {
                 "type": "string",
-                "description": "Materialized view name. Receives the schema-version prefix during migration."
+                "description": "Materialized view name."
+              },
+              "versioned": { "type": "boolean" },
+              "kind": { "enum": ["insert_trigger", "refreshable"] },
+              "select_file": {
+                "type": "string",
+                "description": "Ontology-relative SQL template containing the SELECT body."
               },
               "to_table": {
                 "type": "string",
                 "description": "Target table for the TO clause. The table must be an ontology-tracked table (auxiliary, node, or edge) so it is created and dropped alongside other graph tables during schema migration. Receives the schema-version prefix during migration."
-              },
-              "select_query": {
-                "type": "string",
-                "description": "The SELECT query for the view body. Table references use {table_name} placeholder syntax so that schema-version prefixes are resolved at DDL generation time."
               },
               "engine": {
                 "type": "string",
@@ -861,19 +871,29 @@
               "populate": {
                 "type": "boolean",
                 "description": "When true, emit POPULATE to backfill the view with existing data on creation. Defaults to false."
-              }
+              },
+              "append_to": { "type": "string" },
+              "refresh": { "type": "string" }
             },
-            "required": ["name", "select_query"],
+            "required": ["name", "kind", "select_file"],
             "oneOf": [
               {
-                "required": ["to_table"],
-                "properties": { "engine": false, "engine_args": false, "order_by": false },
-                "description": "TO-table mode: the view writes into a pre-existing ontology-tracked table."
+                "properties": { "kind": { "const": "insert_trigger" }, "append_to": false, "refresh": false },
+                "oneOf": [
+                  { "required": ["to_table"], "properties": { "engine": false, "engine_args": false, "order_by": false } },
+                  { "required": ["engine"], "properties": { "to_table": false } }
+                ]
               },
               {
-                "required": ["engine"],
-                "properties": { "to_table": false },
-                "description": "Implicit-storage mode: ClickHouse creates backing storage with the given engine."
+                "required": ["append_to", "refresh"],
+                "properties": {
+                  "kind": { "const": "refreshable" },
+                  "to_table": false,
+                  "engine": false,
+                  "engine_args": false,
+                  "order_by": false,
+                  "populate": false
+                }
               }
             ],
             "additionalProperties": false

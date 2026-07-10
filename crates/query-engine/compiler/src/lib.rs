@@ -67,9 +67,9 @@ pub use passes::codegen::{
     codegen,
     ddl::clickhouse::emit_create_materialized_view,
     ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
-    ddl::ddl_fingerprints,
     ddl::duckdb::emit_create_table as emit_duckdb_create_table,
     ddl::duckdb::generate_local_ddl,
+    ddl::generate_active_graph_materialized_views,
     ddl::generate_graph_dictionaries,
     ddl::generate_graph_dictionaries_with_prefix,
     ddl::generate_graph_materialized_views,
@@ -77,6 +77,8 @@ pub use passes::codegen::{
     ddl::generate_graph_tables,
     ddl::generate_graph_tables_with_prefix,
     ddl::generate_local_tables,
+    ddl::generate_unversioned_graph_tables,
+    ddl::{active_object_fingerprints, ddl_fingerprints},
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::hydrate::{

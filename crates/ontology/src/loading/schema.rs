@@ -75,16 +75,31 @@ pub(super) struct SettingsYaml {
 pub(super) struct MaterializedViewYaml {
     pub name: String,
     #[serde(default)]
-    pub to_table: Option<String>,
-    pub select_query: String,
-    #[serde(default)]
-    pub engine: Option<String>,
-    #[serde(default)]
-    pub engine_args: Vec<String>,
-    #[serde(default)]
-    pub order_by: Vec<String>,
-    #[serde(default)]
-    pub populate: bool,
+    pub versioned: bool,
+    pub select_file: String,
+    #[serde(flatten)]
+    pub kind: MaterializedViewKindYaml,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum MaterializedViewKindYaml {
+    InsertTrigger {
+        #[serde(default)]
+        to_table: Option<String>,
+        #[serde(default)]
+        engine: Option<String>,
+        #[serde(default)]
+        engine_args: Vec<String>,
+        #[serde(default)]
+        order_by: Vec<String>,
+        #[serde(default)]
+        populate: bool,
+    },
+    Refreshable {
+        append_to: String,
+        refresh: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -146,6 +161,8 @@ pub(super) struct DenormalizationEntryYaml {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct AuxiliaryTableYaml {
     pub name: String,
+    #[serde(default = "default_true")]
+    pub versioned: bool,
     pub columns: Vec<AuxiliaryColumnYaml>,
     pub order_by: Vec<String>,
     #[serde(default)]
@@ -154,6 +171,18 @@ pub(super) struct AuxiliaryTableYaml {
     pub version_type: Option<String>,
     #[serde(default)]
     pub projections: Vec<StorageProjectionYaml>,
+    #[serde(default = "default_true")]
+    pub include_system_columns: bool,
+    #[serde(default)]
+    pub engine: Option<String>,
+    #[serde(default)]
+    pub engine_args: Vec<String>,
+    #[serde(default)]
+    pub ttl: Option<String>,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]

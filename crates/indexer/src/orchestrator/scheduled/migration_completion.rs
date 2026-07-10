@@ -281,22 +281,25 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
-        // Each outgoing version's refreshable MV still targets that version's
-        // tables; left running it error-loops once GC drops them. Drop it
-        // before recreating the MV for the promoted version. Best-effort: an
-        // ops artifact must not fail the promotion it rides behind.
         for old_version in retired_versions {
-            if let Err(e) =
-                crate::schema::migration::drop_unversioned_refresh_mv(&self.graph, old_version)
-                    .await
+            if let Err(e) = crate::schema::migration::drop_active_schema_views(
+                &self.graph,
+                &self.ontology,
+                old_version,
+            )
+            .await
             {
-                warn!(version = old_version, error = %e, "failed to drop outgoing unversioned MV after promotion");
+                warn!(version = old_version, error = %e, "failed to drop outgoing active-schema views after promotion");
             }
         }
-        if let Err(e) =
-            crate::schema::migration::apply_unversioned_ddl(&self.graph, migrating_version).await
+        if let Err(e) = crate::schema::migration::apply_active_schema_objects(
+            &self.graph,
+            &self.ontology,
+            migrating_version,
+        )
+        .await
         {
-            warn!(version = migrating_version, error = %e, "failed to apply unversioned objects after promotion");
+            warn!(version = migrating_version, error = %e, "failed to apply active-schema objects after promotion");
         }
 
         // Campaign ends when its migration completes.

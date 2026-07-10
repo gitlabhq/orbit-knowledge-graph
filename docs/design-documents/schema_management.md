@@ -57,6 +57,13 @@ the Webserver only reads from it (it runs as a read-only ClickHouse user). On a 
 the Indexer also creates all graph tables from the ontology DDL generator and records the
 embedded version as active:
 
+The ontology may also declare unversioned auxiliary tables and refreshable materialized views.
+Unversioned tables keep the same name across schema migrations. Refreshable views are rendered
+from SQL templates under `config/ontology/sql/` using the active schema version and ontology table
+metadata. The dispatcher recreates them at startup when its embedded version is active and after
+migration promotion; outgoing version-prefixed refreshable views are dropped before their source
+tables become eligible for garbage collection.
+
 ```sql
 CREATE TABLE IF NOT EXISTS gkg_schema_version (
     version UInt32,
@@ -178,19 +185,20 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-The migration ledger is the single version-bump gate. `gkg-server`'s build script
-fails if the ontology or its generated DDL drift from the committed fingerprint
-snapshot (`config/schema-migrations.fingerprint.yaml`), or if the ledger is
-malformed, so drift fails every local and CI build. The CI job
-`migration-ledger-check` (lint stage, MR-only) additionally requires, when the
-snapshot changed, that `config/SCHEMA_VERSION` is bumped to exactly base + 1 and
-that the new `config/schema-migrations.yaml` entry covers the detected drift.
+The migration ledger is the versioned-schema gate. `gkg-server`'s build script
+fails if generated versioned DDL or active schema objects drift from the committed
+fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`), or if the
+ledger is malformed. Versioned drift requires `mise schema:bump`. Unversioned
+tables and refreshable materialized views are active schema objects; their drift
+requires `mise schema:snapshot` and does not advance `SCHEMA_VERSION` or re-index
+graph data. The CI job `migration-ledger-check` additionally requires versioned
+snapshot changes to bump `config/SCHEMA_VERSION` to exactly base + 1 and add a
+covering `config/schema-migrations.yaml` entry.
 Local (DuckDB) DDL is generated from the ontology at runtime, so `config/ontology/`
 changes automatically affect both ClickHouse and DuckDB schemas.
 
 Because the snapshot hashes the canonicalized ontology, comment- and formatting-only
-edits do not require a bump. A genuinely non-invalidating change can bypass the gate
-with `[skip migration-ledger-check]` in the MR description.
+edits do not require a bump.
 
 ## Zero-downtime migration orchestrator
 

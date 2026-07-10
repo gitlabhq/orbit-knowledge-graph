@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clickhouse_client::FromArrowColumn;
-use indexer::schema::migration::{apply_unversioned_ddl, drop_unversioned_refresh_mv};
+use indexer::schema::migration::{apply_active_schema_objects, drop_active_schema_views};
 use indexer::schema::version::{SCHEMA_VERSION, ensure_version_table, write_schema_version};
 use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, t};
 
@@ -10,32 +10,16 @@ use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, t};
 /// row, so the sum can lag the total by at most one byte per namespace.
 const ROUNDING_TOLERANCE_BYTES: i64 = 8;
 
-fn object_names() -> [String; 2] {
-    [
-        "namespace_storage_snapshot".to_string(),
-        t("namespace_storage_snapshot_refresh"),
-    ]
-}
-
-async fn setup_with_graph() -> TestContext {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, &GRAPH_SCHEMA_SQL]).await;
-    let client = ctx.create_client();
-    ensure_version_table(&client).await.unwrap();
-    write_schema_version(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
-    ctx
-}
-
 #[tokio::test]
 async fn applies_all_declared_objects() {
-    let ctx = setup_with_graph().await;
-    apply_unversioned_ddl(&ctx.create_client(), *SCHEMA_VERSION)
+    let ctx = create_test_context_with_graph_tables().await;
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    apply_active_schema_objects(&ctx.create_client(), &ontology, *SCHEMA_VERSION)
         .await
         .unwrap();
 
-    for name in object_names() {
-        let exists = scalar_i64(
+    for name in get_namespace_storage_object_names() {
+        let exists = query_first_i64_or_zero(
             &ctx,
             &format!(
                 "SELECT toInt64(count()) FROM system.tables \
@@ -49,10 +33,11 @@ async fn applies_all_declared_objects() {
 
 #[tokio::test]
 async fn second_apply_is_a_clean_noop() {
-    let ctx = setup_with_graph().await;
+    let ctx = create_test_context_with_graph_tables().await;
     let client = ctx.create_client();
+    let ontology = ontology::Ontology::load_embedded().unwrap();
 
-    apply_unversioned_ddl(&client, *SCHEMA_VERSION)
+    apply_active_schema_objects(&client, &ontology, *SCHEMA_VERSION)
         .await
         .unwrap();
     ctx.execute(
@@ -62,12 +47,12 @@ async fn second_apply_is_a_clean_noop() {
     )
     .await;
 
-    apply_unversioned_ddl(&client, *SCHEMA_VERSION)
+    apply_active_schema_objects(&client, &ontology, *SCHEMA_VERSION)
         .await
         .unwrap();
 
-    for name in object_names() {
-        let exists = scalar_i64(
+    for name in get_namespace_storage_object_names() {
+        let exists = query_first_i64_or_zero(
             &ctx,
             &format!(
                 "SELECT toInt64(count()) FROM system.tables \
@@ -78,7 +63,7 @@ async fn second_apply_is_a_clean_noop() {
         assert_eq!(exists, 1, "{name} must still exist after re-apply");
     }
 
-    let preserved = scalar_i64(
+    let preserved = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(compressed_bytes) FROM namespace_storage_snapshot WHERE compressed_bytes = 42",
     )
@@ -88,29 +73,34 @@ async fn second_apply_is_a_clean_noop() {
 
 #[tokio::test]
 async fn promotion_hook_drops_outgoing_mv_and_reapplies() {
-    let ctx = setup_with_graph().await;
+    let ctx = create_test_context_with_graph_tables().await;
     let client = ctx.create_client();
+    let ontology = ontology::Ontology::load_embedded().unwrap();
     let mv = t("namespace_storage_snapshot_refresh");
 
-    apply_unversioned_ddl(&client, *SCHEMA_VERSION)
-        .await
-        .unwrap();
-    assert_eq!(table_count(&ctx, &mv).await, 1, "MV created on apply");
-
-    drop_unversioned_refresh_mv(&client, *SCHEMA_VERSION)
+    apply_active_schema_objects(&client, &ontology, *SCHEMA_VERSION)
         .await
         .unwrap();
     assert_eq!(
-        table_count(&ctx, &mv).await,
+        get_clickhouse_object_count_by_name(&ctx, &mv).await,
+        1,
+        "MV created on apply"
+    );
+
+    drop_active_schema_views(&client, &ontology, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_clickhouse_object_count_by_name(&ctx, &mv).await,
         0,
         "outgoing MV dropped by the promotion hook's drop step"
     );
 
-    apply_unversioned_ddl(&client, *SCHEMA_VERSION)
+    apply_active_schema_objects(&client, &ontology, *SCHEMA_VERSION)
         .await
         .unwrap();
     assert_eq!(
-        table_count(&ctx, &mv).await,
+        get_clickhouse_object_count_by_name(&ctx, &mv).await,
         1,
         "MV recreated by the promotion hook's apply step"
     );
@@ -118,17 +108,18 @@ async fn promotion_hook_drops_outgoing_mv_and_reapplies() {
 
 #[tokio::test]
 async fn snapshot_attributes_bytes_per_namespace() {
-    let ctx = setup_with_graph().await;
-    apply_unversioned_ddl(&ctx.create_client(), *SCHEMA_VERSION)
+    let ctx = create_test_context_with_graph_tables().await;
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    apply_active_schema_objects(&ctx.create_client(), &ontology, *SCHEMA_VERSION)
         .await
         .unwrap();
 
-    seed_all_attributable_tables(&ctx).await;
-    seed_two_namespace_data(&ctx).await;
+    insert_rows_into_all_namespace_attributable_tables(&ctx).await;
+    insert_note_and_edge_rows_for_two_namespaces(&ctx).await;
     ctx.optimize_all().await;
-    refresh_and_wait(&ctx).await;
+    refresh_namespace_storage_snapshot_and_wait(&ctx).await;
 
-    let zero_rows = scalar_i64(
+    let zero_rows = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(count()) FROM namespace_storage_snapshot WHERE compressed_bytes = 0",
     )
@@ -136,7 +127,7 @@ async fn snapshot_attributes_bytes_per_namespace() {
     assert_eq!(zero_rows, 0, "snapshot must not contain zero-byte rows");
 
     for table in ["gl_note", "gl_edge"] {
-        let attributed = scalar_i64(
+        let attributed = query_first_i64_or_zero(
             &ctx,
             &format!(
                 "SELECT toInt64(sum(compressed_bytes)) FROM namespace_storage_snapshot \
@@ -150,7 +141,7 @@ async fn snapshot_attributes_bytes_per_namespace() {
             "{table}: attributed {attributed} bytes vs actual {actual} bytes exceeds tolerance"
         );
 
-        let namespaces = scalar_i64(
+        let namespaces = query_first_i64_or_zero(
             &ctx,
             &format!(
                 "SELECT toInt64(count(DISTINCT top_level_namespace)) FROM namespace_storage_snapshot \
@@ -161,7 +152,7 @@ async fn snapshot_attributes_bytes_per_namespace() {
         assert_eq!(namespaces, 2, "{table} spans two top-level namespaces");
     }
 
-    let global_users = scalar_i64(
+    let global_users = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(sum(compressed_bytes)) FROM namespace_storage_snapshot \
          WHERE top_level_namespace = '__global' AND logical_table = 'gl_user'",
@@ -169,12 +160,12 @@ async fn snapshot_attributes_bytes_per_namespace() {
     .await;
     assert!(global_users > 0, "gl_user must be booked under __global");
 
-    let rows_before = scalar_i64(
+    let rows_before = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(count()) FROM namespace_storage_snapshot",
     )
     .await;
-    let bytes_before = scalar_i64(
+    let bytes_before = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(sum(compressed_bytes)) FROM namespace_storage_snapshot",
     )
@@ -182,16 +173,16 @@ async fn snapshot_attributes_bytes_per_namespace() {
 
     ctx.execute("OPTIMIZE TABLE namespace_storage_snapshot FINAL")
         .await;
-    refresh_and_wait(&ctx).await;
+    refresh_namespace_storage_snapshot_and_wait(&ctx).await;
     ctx.execute("OPTIMIZE TABLE namespace_storage_snapshot FINAL")
         .await;
 
-    let rows_after = scalar_i64(
+    let rows_after = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(count()) FROM namespace_storage_snapshot",
     )
     .await;
-    let bytes_after = scalar_i64(
+    let bytes_after = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(sum(compressed_bytes)) FROM namespace_storage_snapshot",
     )
@@ -211,8 +202,6 @@ async fn startup_guard_holds_apply_during_pending_migration() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
     ensure_version_table(&client).await.unwrap();
-    // Active version is one ahead of this binary: a migration this binary has
-    // not caught up to. The startup guard keys off this disagreement.
     write_schema_version(&client, *SCHEMA_VERSION + 1)
         .await
         .unwrap();
@@ -226,7 +215,7 @@ async fn startup_guard_holds_apply_during_pending_migration() {
         "startup apply must be held while the active version disagrees with the binary"
     );
 
-    let mv_exists = scalar_i64(
+    let mv_exists = query_first_i64_or_zero(
         &ctx,
         "SELECT toInt64(count()) FROM system.tables \
          WHERE name LIKE '%namespace_storage_snapshot_refresh'",
@@ -238,7 +227,7 @@ async fn startup_guard_holds_apply_during_pending_migration() {
     );
 }
 
-async fn seed_all_attributable_tables(ctx: &TestContext) {
+async fn insert_rows_into_all_namespace_attributable_tables(ctx: &TestContext) {
     let tables = ctx
         .query(
             "SELECT t.name FROM system.tables t \
@@ -263,7 +252,7 @@ async fn seed_all_attributable_tables(ctx: &TestContext) {
     }
 }
 
-async fn seed_two_namespace_data(ctx: &TestContext) {
+async fn insert_note_and_edge_rows_for_two_namespaces(ctx: &TestContext) {
     let note = t("gl_note");
     ctx.execute(&format!(
         "INSERT INTO {note} (traversal_path, id, note) \
@@ -287,7 +276,7 @@ async fn seed_two_namespace_data(ctx: &TestContext) {
     }
 }
 
-async fn refresh_and_wait(ctx: &TestContext) {
+async fn refresh_namespace_storage_snapshot_and_wait(ctx: &TestContext) {
     let mv = t("namespace_storage_snapshot_refresh");
     ctx.execute(&format!("SYSTEM REFRESH VIEW {mv}")).await;
 
@@ -311,8 +300,8 @@ async fn refresh_and_wait(ctx: &TestContext) {
     panic!("{mv} refresh did not finish");
 }
 
-async fn table_count(ctx: &TestContext, name: &str) -> i64 {
-    scalar_i64(
+async fn get_clickhouse_object_count_by_name(ctx: &TestContext, name: &str) -> i64 {
+    query_first_i64_or_zero(
         ctx,
         &format!(
             "SELECT toInt64(count()) FROM system.tables \
@@ -323,7 +312,7 @@ async fn table_count(ctx: &TestContext, name: &str) -> i64 {
 }
 
 async fn table_compressed_bytes(ctx: &TestContext, physical_table: &str) -> i64 {
-    scalar_i64(
+    query_first_i64_or_zero(
         ctx,
         &format!(
             "SELECT toInt64(sum(data_compressed_bytes)) FROM system.parts \
@@ -333,11 +322,28 @@ async fn table_compressed_bytes(ctx: &TestContext, physical_table: &str) -> i64 
     .await
 }
 
-async fn scalar_i64(ctx: &TestContext, sql: &str) -> i64 {
+async fn query_first_i64_or_zero(ctx: &TestContext, sql: &str) -> i64 {
     let batches = ctx.query(sql).await;
     i64::extract_column(&batches, 0)
         .unwrap()
         .first()
         .copied()
         .unwrap_or(0)
+}
+
+fn get_namespace_storage_object_names() -> [String; 2] {
+    [
+        "namespace_storage_snapshot".to_string(),
+        t("namespace_storage_snapshot_refresh"),
+    ]
+}
+
+async fn create_test_context_with_graph_tables() -> TestContext {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, &GRAPH_SCHEMA_SQL]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+    ctx
 }

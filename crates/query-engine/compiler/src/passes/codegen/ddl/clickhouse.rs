@@ -1,7 +1,7 @@
 use crate::ast::Expr;
 use crate::ast::ddl::{
     Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
-    ProjectionDef,
+    MaterializedViewKind, ProjectionDef,
 };
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use serde_json::Value;
@@ -177,6 +177,10 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         }
     }
 
+    if let Some(ttl) = &table.ttl {
+        parts.push(format!("TTL {ttl}"));
+    }
+
     if !table.settings.is_empty() {
         let settings: Vec<String> = table
             .settings
@@ -189,42 +193,41 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     parts.join("\n")
 }
 
-/// The `select_query` must already have `{table_name}` placeholders resolved
-/// (see [`CreateMaterializedView::with_prefix`]).
 pub fn emit_create_materialized_view(mv: &CreateMaterializedView) -> String {
-    let mut parts = Vec::new();
+    let mut ddl = format!("CREATE MATERIALIZED VIEW IF NOT EXISTS {}", mv.name);
 
-    let mut header = format!("CREATE MATERIALIZED VIEW IF NOT EXISTS {}", mv.name);
-
-    if let Some(ref to_table) = mv.to_table {
-        header.push_str(&format!("\nTO {to_table}"));
-    } else {
-        let engine = mv.engine.as_ref().unwrap_or_else(|| {
-            panic!(
-                "materialized view '{}' uses implicit storage but has no engine; \
-                 either set `to_table` or `engine`",
-                mv.name
-            )
-        });
-        let engine_args = if engine.args.is_empty() {
-            String::new()
-        } else {
-            format!("({})", engine.args.join(", "))
-        };
-        header.push_str(&format!("\nENGINE = {}{engine_args}", engine.name));
-        if !mv.order_by.is_empty() {
-            header.push_str(&format!("\nORDER BY ({})", mv.order_by.join(", ")));
+    match &mv.kind {
+        MaterializedViewKind::InsertTrigger {
+            to_table,
+            engine,
+            order_by,
+            populate,
+        } => {
+            if let Some(to_table) = to_table {
+                ddl.push_str(&format!("\nTO {to_table}"));
+            } else {
+                let engine = engine.as_ref().expect("validated insert-trigger engine");
+                let engine_args = if engine.args.is_empty() {
+                    String::new()
+                } else {
+                    format!("({})", engine.args.join(", "))
+                };
+                ddl.push_str(&format!("\nENGINE = {}{engine_args}", engine.name));
+                if !order_by.is_empty() {
+                    ddl.push_str(&format!("\nORDER BY ({})", order_by.join(", ")));
+                }
+            }
+            if *populate {
+                ddl.push_str("\nPOPULATE");
+            }
+        }
+        MaterializedViewKind::Refreshable { append_to, refresh } => {
+            ddl.push_str(&format!("\nREFRESH {refresh}\nAPPEND TO {append_to}"));
         }
     }
 
-    if mv.populate {
-        header.push_str("\nPOPULATE");
-    }
-
-    parts.push(header);
-    parts.push(format!("AS {}", mv.select_query));
-
-    parts.join("\n")
+    ddl.push_str(&format!("\nAS {}", mv.select_query));
+    ddl
 }
 
 /// Connection identity for a dictionary's local `CLICKHOUSE` source. ClickHouse
@@ -385,6 +388,7 @@ mod tests {
                 key: "allow_experimental_replacing_merge_with_cleanup".into(),
                 value: "1".into(),
             }],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -433,6 +437,7 @@ mod tests {
                     value: "'rebuild'".into(),
                 },
             ],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -476,6 +481,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -517,6 +523,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -539,6 +546,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -563,6 +571,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -587,6 +596,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -611,6 +621,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -646,6 +657,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -659,12 +671,14 @@ mod tests {
     fn emit_materialized_view_with_to_table() {
         let mv = CreateMaterializedView {
             name: "mv_edge_summary".into(),
-            to_table: Some("gl_edge_summary".into()),
             select_query:
                 "SELECT traversal_path, count() AS cnt FROM gl_edge GROUP BY traversal_path".into(),
-            engine: None,
-            order_by: vec![],
-            populate: false,
+            kind: MaterializedViewKind::InsertTrigger {
+                to_table: Some("gl_edge_summary".into()),
+                engine: None,
+                order_by: vec![],
+                populate: false,
+            },
         };
         let sql = emit_create_materialized_view(&mv);
         assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_edge_summary"));
@@ -678,15 +692,17 @@ mod tests {
     fn emit_materialized_view_with_implicit_storage() {
         let mv = CreateMaterializedView {
             name: "mv_counts".into(),
-            to_table: None,
             select_query: "SELECT source_kind, count() AS cnt FROM gl_edge GROUP BY source_kind"
                 .into(),
-            engine: Some(Engine {
-                name: "AggregatingMergeTree".into(),
-                args: vec![],
-            }),
-            order_by: vec!["source_kind".into()],
-            populate: true,
+            kind: MaterializedViewKind::InsertTrigger {
+                to_table: None,
+                engine: Some(Engine {
+                    name: "AggregatingMergeTree".into(),
+                    args: vec![],
+                }),
+                order_by: vec!["source_kind".into()],
+                populate: true,
+            },
         };
         let sql = emit_create_materialized_view(&mv);
         assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_counts"));
@@ -698,17 +714,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "implicit storage but has no engine")]
-    fn emit_materialized_view_panics_without_engine_or_to_table() {
+    fn emits_refreshable_materialized_view() {
         let mv = CreateMaterializedView {
-            name: "mv_bad".into(),
-            to_table: None,
+            name: "v5_namespace_storage_snapshot_refresh".into(),
             select_query: "SELECT 1".into(),
-            engine: None,
-            order_by: vec![],
-            populate: false,
+            kind: MaterializedViewKind::Refreshable {
+                append_to: "namespace_storage_snapshot".into(),
+                refresh: "EVERY 1 DAY OFFSET 2 HOUR".into(),
+            },
         };
-        emit_create_materialized_view(&mv);
+        let sql = emit_create_materialized_view(&mv);
+        assert!(sql.contains("REFRESH EVERY 1 DAY OFFSET 2 HOUR"));
+        assert!(sql.contains("APPEND TO namespace_storage_snapshot"));
     }
 
     fn dict() -> CreateDictionary {

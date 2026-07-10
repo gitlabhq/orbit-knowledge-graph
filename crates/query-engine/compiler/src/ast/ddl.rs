@@ -14,6 +14,7 @@ pub struct CreateTable {
     /// When absent, PRIMARY KEY defaults to ORDER BY.
     pub primary_key: Option<Vec<String>>,
     pub settings: Vec<TableSetting>,
+    pub ttl: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,56 +119,25 @@ pub enum ProjectionDef {
     },
 }
 
-/// A `CREATE MATERIALIZED VIEW IF NOT EXISTS` statement.
-///
-/// ClickHouse materialized views act as insert triggers: every batch inserted
-/// into the source table is transformed by the `AS SELECT` query and written
-/// to the destination. Two storage modes are supported:
-///
-/// - **Explicit target** (`to_table` is `Some`): the view writes into a
-///   pre-existing table. The engine/order_by on this struct are ignored.
-/// - **Implicit storage** (`to_table` is `None`): ClickHouse creates a
-///   hidden table using the supplied `engine` and `order_by`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateMaterializedView {
     pub name: String,
-    /// Target table for the `TO` clause. When present the view inserts into
-    /// this table instead of creating implicit backing storage.
-    pub to_table: Option<String>,
-    /// The `AS SELECT ...` query. Table references use `{table_name}` template
-    /// syntax (e.g. `{gl_edge}`) so that schema-version prefixes can be
-    /// resolved at generation time.
     pub select_query: String,
-    /// Engine for implicit storage (ignored when `to_table` is set).
-    pub engine: Option<Engine>,
-    /// ORDER BY for implicit storage (ignored when `to_table` is set).
-    pub order_by: Vec<String>,
-    /// When true, emit `POPULATE` to backfill the view with existing data.
-    pub populate: bool,
+    pub kind: MaterializedViewKind,
 }
 
-impl CreateMaterializedView {
-    /// Applies a schema-version prefix to the view name, the optional
-    /// `to_table`, and every `{table_name}` placeholder in the SELECT query.
-    pub fn with_prefix(mut self, prefix: &str, known_tables: &[String]) -> Self {
-        self.name = format!("{prefix}{}", self.name);
-        assert!(
-            self.name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_'),
-            "materialized view name must be a valid identifier: {}",
-            self.name
-        );
-        if let Some(ref mut to) = self.to_table {
-            *to = format!("{prefix}{to}");
-        }
-        for table in known_tables {
-            let placeholder = format!("{{{table}}}");
-            let replacement = format!("{prefix}{table}");
-            self.select_query = self.select_query.replace(&placeholder, &replacement);
-        }
-        self
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub enum MaterializedViewKind {
+    InsertTrigger {
+        to_table: Option<String>,
+        engine: Option<Engine>,
+        order_by: Vec<String>,
+        populate: bool,
+    },
+    Refreshable {
+        append_to: String,
+        refresh: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -215,6 +185,7 @@ impl CreateTable {
             order_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         }
     }
 
@@ -280,45 +251,6 @@ mod tests {
         )
         .with_prefix("");
         assert_eq!(table.name, "gl_project");
-    }
-
-    #[test]
-    fn materialized_view_with_prefix() {
-        let mv = CreateMaterializedView {
-            name: "mv_summary".into(),
-            to_table: Some("gl_summary".into()),
-            select_query: "SELECT count() FROM {gl_edge} WHERE relationship_kind = 'CONTAINS'"
-                .into(),
-            engine: None,
-            order_by: vec![],
-            populate: false,
-        };
-        let prefixed = mv.with_prefix(
-            "v2_",
-            &["gl_edge".into(), "gl_project".into(), "gl_summary".into()],
-        );
-        assert_eq!(prefixed.name, "v2_mv_summary");
-        assert_eq!(prefixed.to_table, Some("v2_gl_summary".into()));
-        assert!(prefixed.select_query.contains("v2_gl_edge"));
-        assert!(!prefixed.select_query.contains("{gl_edge}"));
-    }
-
-    #[test]
-    fn materialized_view_empty_prefix() {
-        let mv = CreateMaterializedView {
-            name: "mv_test".into(),
-            to_table: None,
-            select_query: "SELECT * FROM {gl_edge}".into(),
-            engine: Some(Engine {
-                name: "AggregatingMergeTree".into(),
-                args: vec![],
-            }),
-            order_by: vec!["traversal_path".into()],
-            populate: false,
-        };
-        let prefixed = mv.with_prefix("", &["gl_edge".into()]);
-        assert_eq!(prefixed.name, "mv_test");
-        assert_eq!(prefixed.select_query, "SELECT * FROM gl_edge");
     }
 
     #[test]

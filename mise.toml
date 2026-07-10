@@ -383,7 +383,7 @@ description = "Bump SCHEMA_VERSION, append a migration ledger entry, and re-snap
 
 [tasks."schema:snapshot"]
 run = "cargo xtask migration-ledger snapshot"
-description = "Regenerate the fingerprint snapshot without bumping SCHEMA_VERSION or the ledger (no-op ontology drift only)"
+description = "Snapshot active schema objects without bumping SCHEMA_VERSION or the ledger"
 
 [tasks."schema:ledger:check"]
 run = "cargo xtask migration-ledger check"
@@ -417,9 +417,8 @@ description = "Fail if the query-language.md text-indexed properties table is ou
 depends = [
     "schema:generate:ddl:remote",
     "schema:generate:ddl:local",
-    "schema:generate:ddl:unversioned",
 ]
-description = "Regenerate ClickHouse, DuckDB, and unversioned DDL from ontology"
+description = "Regenerate ClickHouse and DuckDB DDL from ontology"
 
 [tasks."schema:generate:ddl:remote"]
 run = "cargo xtask ddl --target remote 2>/dev/null > config/graph.sql.tmp && mv config/graph.sql.tmp config/graph.sql"
@@ -428,10 +427,6 @@ description = "Regenerate config/graph.sql (ClickHouse) from ontology"
 [tasks."schema:generate:ddl:local"]
 run = "cargo xtask ddl --target local 2>/dev/null > config/graph_local.sql.tmp && mv config/graph_local.sql.tmp config/graph_local.sql"
 description = "Regenerate config/graph_local.sql (DuckDB) from ontology"
-
-[tasks."schema:generate:ddl:unversioned"]
-run = "cargo xtask ddl --target unversioned 2>/dev/null > config/graph_unversioned.sql.tmp && mv config/graph_unversioned.sql.tmp config/graph_unversioned.sql"
-description = "Regenerate config/graph_unversioned.sql (unversioned ClickHouse objects) from ontology"
 
 [tasks."lint:markdown"]
 run = "markdownlint-cli2 '*.md' 'docs/**/*.md' 'docs-locale/**/*.md'"

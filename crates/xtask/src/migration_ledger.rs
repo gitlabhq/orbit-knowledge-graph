@@ -17,7 +17,7 @@ const DEFAULT_BASE: &str = "origin/main";
 const FINGERPRINT_REPO_PATH: &str = "config/schema-migrations.fingerprint.yaml";
 const SCHEMA_VERSION_REPO_PATH: &str = "config/SCHEMA_VERSION";
 
-const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
+const REMEDIATION: &str = "Run `mise schema:bump` to record versioned schema changes.";
 
 fn config_dir() -> PathBuf {
     PathBuf::from(env!("CONFIG_DIR"))
@@ -39,6 +39,7 @@ fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
     Fingerprints {
         sources: migrations::source_fingerprints(),
         ddl: query_engine::compiler::ddl_fingerprints(ontology),
+        active_objects: query_engine::compiler::active_object_fingerprints(ontology),
     }
 }
 
@@ -149,8 +150,6 @@ pub fn check(base: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Enforce that a fingerprint change in this MR carries a `base + 1` bump and a
-/// ledger entry covering the derived drift.
 fn check_under_declaration(
     ontology: &Ontology,
     committed: &Fingerprints,
@@ -162,7 +161,7 @@ fn check_under_declaration(
         return Ok(());
     };
     let base_fps = Fingerprints::parse(&base_content).map_err(|e| anyhow!(e))?;
-    if &base_fps == committed {
+    if committed.has_same_versioned_fingerprints_as(&base_fps) {
         return Ok(());
     }
 
@@ -187,7 +186,7 @@ fn check_under_declaration(
             anyhow!("no ledger entry for the bumped version {schema_version}. {REMEDIATION}")
         })?;
 
-    let (changed_sources, changed_tables) = committed.diff(&base_fps);
+    let (changed_sources, changed_tables) = committed.get_versioned_diff_keys_between(&base_fps);
     let source_contents = migrations::embedded_sources();
     if let Some(required) = derive_scope(
         ontology,
@@ -225,7 +224,7 @@ pub fn bump(
     };
 
     let explicit = parse_explicit_scope(scope, entities)?;
-    let (changed_sources, changed_tables) = current.diff(&committed);
+    let (changed_sources, changed_tables) = current.get_versioned_diff_keys_between(&committed);
     let source_contents = migrations::embedded_sources();
     let derived = derive_scope(
         &ontology,
@@ -324,6 +323,11 @@ pub fn bump(
 pub fn snapshot() -> Result<()> {
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
     let current = current_fingerprints(&ontology);
+    if let Some(committed) = read_committed_fingerprints()?
+        && !current.has_same_versioned_fingerprints_as(&committed)
+    {
+        bail!("versioned schema drift detected. {REMEDIATION}");
+    }
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!(
         "regenerated fingerprint snapshot at {}",

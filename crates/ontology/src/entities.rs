@@ -90,17 +90,24 @@ pub struct EdgeTableStorage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaterializedViewDefinition {
     pub name: String,
-    /// Target table for the `TO` clause. When set, the view writes into this
-    /// pre-existing table. Table name uses the logical name (without prefix).
-    pub to_table: Option<String>,
-    /// The `SELECT ...` query. Table references use `{table_name}` placeholders.
+    pub versioned: bool,
     pub select_query: String,
-    /// Ignored when `to_table` is set.
-    pub engine: Option<String>,
-    pub engine_args: Vec<String>,
-    /// Ignored when `to_table` is set.
-    pub order_by: Vec<String>,
-    pub populate: bool,
+    pub kind: MaterializedViewKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MaterializedViewKind {
+    InsertTrigger {
+        to_table: Option<String>,
+        engine: Option<String>,
+        engine_args: Vec<String>,
+        order_by: Vec<String>,
+        populate: bool,
+    },
+    Refreshable {
+        append_to: String,
+        refresh: String,
+    },
 }
 
 /// Configuration for automated column statistics collection.
@@ -170,6 +177,7 @@ impl PartitionConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryTable {
     pub name: String,
+    pub versioned: bool,
     pub columns: Vec<AuxiliaryColumn>,
     pub order_by: Vec<String>,
     /// When true, engine is `ReplacingMergeTree(_version)` without `_deleted`.
@@ -177,6 +185,10 @@ pub struct AuxiliaryTable {
     /// Override version column type (e.g. `"uint64"` for code_indexing_checkpoint).
     pub version_type: Option<String>,
     pub projections: Vec<StorageProjection>,
+    pub include_system_columns: bool,
+    pub engine: Option<String>,
+    pub engine_args: Vec<String>,
+    pub ttl: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

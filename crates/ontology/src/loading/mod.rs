@@ -489,6 +489,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .collect();
             crate::entities::AuxiliaryTable {
                 name: t.name,
+                versioned: t.versioned,
                 columns: t
                     .columns
                     .into_iter()
@@ -504,6 +505,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 version_only_engine: t.version_only_engine,
                 version_type: t.version_type,
                 projections,
+                include_system_columns: t.include_system_columns,
+                engine: t.engine,
+                engine_args: t.engine_args,
+                ttl: t.ttl,
             }
         })
         .collect();
@@ -521,38 +526,90 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .materialized_views
         .into_iter()
         .map(|mv| {
-            match (&mv.to_table, &mv.engine) {
-                (None, None) => {
-                    return Err(OntologyError::Validation(format!(
-                        "materialized_view '{}': must set either `to_table` or `engine`",
-                        mv.name
-                    )));
-                }
-                (Some(_), Some(_)) => {
-                    return Err(OntologyError::Validation(format!(
-                        "materialized_view '{}': `to_table` and `engine` are mutually exclusive",
-                        mv.name
-                    )));
-                }
-                _ => {}
-            }
-            if let Some(ref to_table) = mv.to_table
-                && !all_table_names.contains(to_table)
+            let select_path = Path::new(&mv.select_file);
+            if select_path.is_absolute()
+                || select_path.components().any(|component| {
+                    matches!(component, std::path::Component::ParentDir)
+                })
             {
                 return Err(OntologyError::Validation(format!(
-                    "materialized_view '{}': to_table '{}' is not an ontology-tracked table; \
-                     it would be orphaned during schema version cleanup",
-                    mv.name, to_table
+                    "materialized_view '{}': select_file '{}' must stay within the ontology directory",
+                    mv.name, mv.select_file
                 )));
             }
+            let select_query = reader.read(&mv.select_file)?;
+            if select_query.trim().is_empty() {
+                return Err(OntologyError::Validation(format!(
+                    "materialized_view '{}': select_file '{}' is empty",
+                    mv.name, mv.select_file
+                )));
+            }
+            let mut environment = minijinja::Environment::new();
+            environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+            environment
+                .add_template("select.sql", &select_query)
+                .map_err(|error| {
+                    OntologyError::Validation(format!(
+                        "materialized_view '{}': invalid template '{}': {error}",
+                        mv.name, mv.select_file
+                    ))
+                })?;
+
+            let kind = match mv.kind {
+                schema::MaterializedViewKindYaml::InsertTrigger {
+                    to_table,
+                    engine,
+                    engine_args,
+                    order_by,
+                    populate,
+                } => {
+                    match (&to_table, &engine) {
+                        (None, None) => {
+                            return Err(OntologyError::Validation(format!(
+                                "materialized_view '{}': insert_trigger must set either `to_table` or `engine`",
+                                mv.name
+                            )));
+                        }
+                        (Some(_), Some(_)) => {
+                            return Err(OntologyError::Validation(format!(
+                                "materialized_view '{}': `to_table` and `engine` are mutually exclusive",
+                                mv.name
+                            )));
+                        }
+                        _ => {}
+                    }
+                    if let Some(ref target) = to_table
+                        && !all_table_names.contains(target)
+                    {
+                        return Err(OntologyError::Validation(format!(
+                            "materialized_view '{}': to_table '{}' is not an ontology-tracked table",
+                            mv.name, target
+                        )));
+                    }
+                    crate::entities::MaterializedViewKind::InsertTrigger {
+                        to_table,
+                        engine,
+                        engine_args,
+                        order_by,
+                        populate,
+                    }
+                }
+                schema::MaterializedViewKindYaml::Refreshable { append_to, refresh } => {
+                    if !all_table_names.contains(&append_to) {
+                        return Err(OntologyError::Validation(format!(
+                            "materialized_view '{}': append_to '{}' is not an ontology-tracked table",
+                            mv.name, append_to
+                        )));
+                    }
+                    crate::entities::MaterializedViewKind::Refreshable { append_to, refresh }
+                }
+            };
+
             Ok(crate::entities::MaterializedViewDefinition {
                 name: mv.name,
-                to_table: mv.to_table,
-                select_query: mv.select_query,
-                engine: mv.engine,
-                engine_args: mv.engine_args,
-                order_by: mv.order_by,
-                populate: mv.populate,
+                versioned: mv.versioned,
+                select_query,
+                kind,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

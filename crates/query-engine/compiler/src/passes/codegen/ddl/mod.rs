@@ -8,37 +8,68 @@ pub mod duckdb;
 
 use std::collections::BTreeMap;
 
+use minijinja::{Environment, UndefinedBehavior, context};
 use ontology::{
-    AuxiliaryTable, MaterializedViewDefinition, Ontology, PartitionConfig, StorageColumn,
-    StorageIndex, StorageProjection,
+    AuxiliaryTable, MaterializedViewDefinition, MaterializedViewKind as OntologyViewKind, Ontology,
+    PartitionConfig, StorageColumn, StorageIndex, StorageProjection,
 };
+use serde::Serialize;
 
 use crate::ast::ddl::*;
 
-/// Tables are returned unprefixed. Call `.with_prefix()` on each to apply
-/// a schema version prefix before codegen.
 pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
     generate_graph_tables_with_prefix(ontology, "")
 }
 
-/// Per-table hash of the emitted (unprefixed) `CREATE TABLE` DDL, keyed by table name.
 pub fn ddl_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
-    generate_graph_tables(ontology)
+    let mut fingerprints = BTreeMap::new();
+    for table in generate_graph_tables(ontology) {
+        fingerprints.insert(
+            table.name.clone(),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_table(&table)),
+        );
+    }
+    for view in generate_graph_materialized_views(ontology) {
+        fingerprints.insert(
+            format!("materialized_view/{}", view.name),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_materialized_view(&view)),
+        );
+    }
+    fingerprints
+}
+
+pub fn active_object_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
+    let mut fingerprints = BTreeMap::new();
+    for table in generate_unversioned_graph_tables(ontology) {
+        fingerprints.insert(
+            format!("table/{}", table.name),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_table(&table)),
+        );
+    }
+    let active_views = generate_active_graph_materialized_views(ontology, 1);
+    for (definition, view) in ontology
+        .materialized_views()
         .iter()
-        .map(|table| {
-            (
-                table.name.clone(),
-                ontology::migrations::sha256_hex(&clickhouse::emit_create_table(table)),
-            )
-        })
-        .collect()
+        .filter(|view| matches!(view.kind, OntologyViewKind::Refreshable { .. }))
+        .zip(active_views)
+    {
+        fingerprints.insert(
+            format!("materialized_view/{}", definition.name),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_materialized_view(&view)),
+        );
+    }
+    fingerprints
 }
 
 pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> Vec<CreateTable> {
     let mut tables: Vec<CreateTable> = Vec::new();
 
     let partition = ontology.partition();
-    for aux in ontology.auxiliary_tables() {
+    for aux in ontology
+        .auxiliary_tables()
+        .iter()
+        .filter(|table| table.versioned)
+    {
         tables.push(build_auxiliary_table(aux).with_prefix(prefix));
     }
     for node in ontology.nodes() {
@@ -53,48 +84,115 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
     tables
 }
 
-/// Views are returned unprefixed. Call
-/// [`generate_graph_materialized_views_with_prefix`] to apply a schema
-/// version prefix to view names, `TO` targets, and table references inside
-/// the `SELECT` query.
+pub fn generate_unversioned_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
+    ontology
+        .auxiliary_tables()
+        .iter()
+        .filter(|table| !table.versioned)
+        .map(build_auxiliary_table)
+        .collect()
+}
+
 pub fn generate_graph_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     generate_graph_materialized_views_with_prefix(ontology, "")
 }
 
-/// Generates all materialized view DDL with a schema-version prefix applied
-/// to view names, `TO` targets, and `{table_name}` placeholders in the
-/// `SELECT` query.
-///
-/// The prefix is also applied to every known graph table name found inside
-/// placeholders, so `{gl_edge}` becomes `v54_gl_edge` when `prefix` is
-/// `"v54_"`.
 pub fn generate_graph_materialized_views_with_prefix(
     ontology: &Ontology,
     prefix: &str,
 ) -> Vec<CreateMaterializedView> {
-    let known_tables = collect_table_names(ontology);
-
     ontology
         .materialized_views()
         .iter()
-        .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
+        .filter(|view| {
+            view.versioned && matches!(view.kind, OntologyViewKind::InsertTrigger { .. })
+        })
+        .map(|view| build_materialized_view(ontology, view, prefix))
         .collect()
 }
 
-/// Collects table names so `{table_name}` placeholders in materialized view
-/// queries can be resolved.
-fn collect_table_names(ontology: &Ontology) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for aux in ontology.auxiliary_tables() {
-        names.push(aux.name.clone());
+pub fn generate_active_graph_materialized_views(
+    ontology: &Ontology,
+    active_version: u32,
+) -> Vec<CreateMaterializedView> {
+    let prefix = if active_version == 0 {
+        String::new()
+    } else {
+        format!("v{active_version}_")
+    };
+    ontology
+        .materialized_views()
+        .iter()
+        .filter(|view| matches!(view.kind, OntologyViewKind::Refreshable { .. }))
+        .map(|view| build_materialized_view(ontology, view, &prefix))
+        .collect()
+}
+
+#[derive(Serialize)]
+struct MaterializedViewTemplateTable {
+    logical_name: String,
+    physical_name: String,
+    kind: &'static str,
+    global: bool,
+    has_traversal_path: bool,
+}
+
+fn materialized_view_template_tables(
+    ontology: &Ontology,
+    prefix: &str,
+) -> Vec<MaterializedViewTemplateTable> {
+    let mut tables = Vec::new();
+    for table in ontology
+        .auxiliary_tables()
+        .iter()
+        .filter(|table| table.versioned)
+    {
+        tables.push(MaterializedViewTemplateTable {
+            logical_name: table.name.clone(),
+            physical_name: format!("{prefix}{}", table.name),
+            kind: "auxiliary",
+            global: false,
+            has_traversal_path: table
+                .columns
+                .iter()
+                .any(|column| column.name == "traversal_path"),
+        });
     }
     for node in ontology.nodes() {
-        names.push(node.destination_table.clone());
+        tables.push(MaterializedViewTemplateTable {
+            logical_name: node.destination_table.clone(),
+            physical_name: format!("{prefix}{}", node.destination_table),
+            kind: "node",
+            global: node.global,
+            has_traversal_path: node
+                .storage
+                .columns
+                .iter()
+                .any(|column| column.name == "traversal_path"),
+        });
     }
-    for table_name in ontology.edge_tables() {
-        names.push(table_name.to_string());
+    for table in ontology.edge_tables() {
+        let has_traversal_path = ontology.edge_table_config(table).is_some_and(|config| {
+            config
+                .storage
+                .columns
+                .iter()
+                .any(|column| column.name == "traversal_path")
+                || config
+                    .columns
+                    .iter()
+                    .any(|column| column.name == "traversal_path")
+        });
+        tables.push(MaterializedViewTemplateTable {
+            logical_name: table.to_string(),
+            physical_name: format!("{prefix}{table}"),
+            kind: "edge",
+            global: false,
+            has_traversal_path,
+        });
     }
-    names
+    tables.sort_by(|left, right| left.logical_name.cmp(&right.logical_name));
+    tables
 }
 
 pub fn generate_graph_dictionaries(ontology: &Ontology) -> Vec<CreateDictionary> {
@@ -416,6 +514,7 @@ fn build_node_table(
         partition_by,
         order_by: node.sort_key.clone(),
         primary_key: node.storage.primary_key.clone(),
+        ttl: None,
     }
 }
 
@@ -472,6 +571,7 @@ fn build_edge_table(
             partitioned,
             &config.storage.settings,
         ),
+        ttl: None,
     }
 }
 
@@ -492,9 +592,16 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
         })
         .collect();
 
-    columns.extend(system_columns(aux.version_type.as_deref()));
+    if aux.include_system_columns {
+        columns.extend(system_columns(aux.version_type.as_deref()));
+    }
 
-    let engine = if aux.version_only_engine {
+    let engine = if let Some(name) = &aux.engine {
+        Engine {
+            name: name.clone(),
+            args: aux.engine_args.clone(),
+        }
+    } else if aux.version_only_engine {
         Engine::replacing_merge_tree_version_only("_version")
     } else {
         Engine::replacing_merge_tree("_version", "_deleted")
@@ -513,6 +620,7 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
         order_by: aux.order_by.clone(),
         primary_key: None,
         settings: table_settings(None, !projections.is_empty(), false, &empty_settings),
+        ttl: aux.ttl.clone(),
     }
 }
 
@@ -534,17 +642,60 @@ fn aux_col_ch_type(dt: &ontology::DataType, nullable: bool) -> String {
     }
 }
 
-fn build_materialized_view(mv: &MaterializedViewDefinition) -> CreateMaterializedView {
+fn build_materialized_view(
+    ontology: &Ontology,
+    mv: &MaterializedViewDefinition,
+    prefix: &str,
+) -> CreateMaterializedView {
+    let schema_version = prefix
+        .strip_prefix('v')
+        .and_then(|value| value.strip_suffix('_'))
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    let mut environment = Environment::new();
+    environment.set_undefined_behavior(UndefinedBehavior::Strict);
+    environment
+        .add_template("select.sql", &mv.select_query)
+        .expect("materialized view template validated by ontology tests");
+    let select_query = environment
+        .get_template("select.sql")
+        .expect("registered materialized view template")
+        .render(context! {
+            schema => context! { version => schema_version, table_prefix => prefix },
+            graph => context! { tables => materialized_view_template_tables(ontology, prefix) },
+        })
+        .expect("materialized view template renders from the documented context");
+
+    let kind = match &mv.kind {
+        OntologyViewKind::InsertTrigger {
+            to_table,
+            engine,
+            engine_args,
+            order_by,
+            populate,
+        } => MaterializedViewKind::InsertTrigger {
+            to_table: to_table.as_ref().map(|table| format!("{prefix}{table}")),
+            engine: engine.as_ref().map(|name| Engine {
+                name: name.clone(),
+                args: engine_args.clone(),
+            }),
+            order_by: order_by.clone(),
+            populate: *populate,
+        },
+        OntologyViewKind::Refreshable { append_to, refresh } => MaterializedViewKind::Refreshable {
+            append_to: append_to.clone(),
+            refresh: refresh.clone(),
+        },
+    };
+
     CreateMaterializedView {
-        name: mv.name.clone(),
-        to_table: mv.to_table.clone(),
-        select_query: mv.select_query.clone(),
-        engine: mv.engine.as_ref().map(|name| Engine {
-            name: name.clone(),
-            args: mv.engine_args.clone(),
-        }),
-        order_by: mv.order_by.clone(),
-        populate: mv.populate,
+        name: if mv.versioned {
+            format!("{prefix}{}", mv.name)
+        } else {
+            mv.name.clone()
+        },
+        select_query,
+        kind,
     }
 }
 
@@ -579,6 +730,7 @@ fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<Crea
             .collect(),
         primary_key: None,
         settings: vec![],
+        ttl: None,
     })
 }
 
@@ -610,6 +762,7 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
             .collect(),
         primary_key: None,
         settings: vec![],
+        ttl: None,
     })
 }
 
@@ -786,40 +939,31 @@ mod tests {
     }
 
     #[test]
-    fn generates_no_materialized_views_by_default() {
+    fn excludes_refreshable_views_from_versioned_migration_objects() {
         let views = generate_graph_materialized_views(&ontology());
-        assert!(
-            views.is_empty(),
-            "default ontology should have no materialized views"
-        );
+        assert!(views.is_empty());
     }
 
     #[test]
-    fn materialized_view_prefix_resolves_table_placeholders() {
+    fn active_materialized_view_template_uses_schema_and_table_context() {
         use super::clickhouse::emit_create_materialized_view;
 
-        let mv_def = ontology::MaterializedViewDefinition {
-            name: "mv_edge_summary".into(),
-            to_table: None,
-            select_query:
-                "SELECT traversal_path, count() AS cnt FROM {gl_edge} GROUP BY traversal_path"
-                    .into(),
-            engine: Some("SummingMergeTree".into()),
-            engine_args: vec![],
-            order_by: vec!["traversal_path".into()],
-            populate: false,
-        };
-        let known_tables = vec!["gl_edge".into(), "gl_project".into()];
-        let mv = build_materialized_view(&mv_def).with_prefix("v5_", &known_tables);
+        let ontology = ontology();
+        let mv = generate_active_graph_materialized_views(&ontology, 5)
+            .into_iter()
+            .next()
+            .unwrap();
 
-        assert_eq!(mv.name, "v5_mv_edge_summary");
+        assert_eq!(mv.name, "v5_namespace_storage_snapshot_refresh");
         assert!(mv.select_query.contains("v5_gl_edge"));
-        assert!(!mv.select_query.contains("{gl_edge}"));
+        assert!(mv.select_query.contains("5 AS schema_version"));
+        assert!(!mv.select_query.contains("{{"));
 
         let sql = emit_create_materialized_view(&mv);
-        assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS v5_mv_edge_summary"));
-        assert!(sql.contains("ENGINE = SummingMergeTree"));
-        assert!(sql.contains("ORDER BY (traversal_path)"));
+        assert!(sql.contains(
+            "CREATE MATERIALIZED VIEW IF NOT EXISTS v5_namespace_storage_snapshot_refresh"
+        ));
+        assert!(sql.contains("APPEND TO namespace_storage_snapshot"));
     }
 
     #[test]

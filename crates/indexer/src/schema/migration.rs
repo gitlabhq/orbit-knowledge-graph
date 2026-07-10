@@ -26,8 +26,9 @@ use std::time::Duration;
 
 use query_engine::compiler::{
     DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
-    generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
-    generate_graph_tables_with_prefix,
+    generate_active_graph_materialized_views, generate_graph_dictionaries_with_prefix,
+    generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
+    generate_unversioned_graph_tables,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -42,17 +43,6 @@ use crate::schema::version::{
     mark_version_active, mark_version_retired, read_active_version, read_all_versions,
     table_prefix, version_tables_complete, write_migrating_version, write_schema_version,
 };
-
-/// The generated DDL for the namespace-storage snapshot table and its
-/// refreshable MV. Same relative-include pattern as
-/// `schema::version::SCHEMA_VERSION`. Carries `__ACTIVE_PREFIX__` and
-/// `__ACTIVE_VERSION__` placeholders resolved per-apply in [`apply_unversioned_ddl`].
-const UNVERSIONED_DDL: &str = include_str!("../../../../config/graph_unversioned.sql");
-
-/// Base (unprefixed) name of the refreshable MV in [`UNVERSIONED_DDL`]. The
-/// generated file always writes it as `__ACTIVE_PREFIX__` + this name; a unit
-/// test guards against the two drifting apart.
-const UNVERSIONED_REFRESH_MV_BASE_NAME: &str = "namespace_storage_snapshot_refresh";
 
 /// NATS KV key used to serialize schema migrations across pods.
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
@@ -148,102 +138,34 @@ pub async fn run_if_needed(
     }
 }
 
-/// Applies the generated namespace-storage DDL (`config/graph_unversioned.sql`)
-/// for schema version `version`, in file order. Idempotent: every statement is
-/// `CREATE ... IF NOT EXISTS` or `DROP ... IF EXISTS` followed by `CREATE`.
-///
-/// `version` must be the active schema version: the refreshable MV reads that
-/// version's physical tables (`v<version>_gl_edge`, …), so applying it against
-/// tables that do not yet exist would leave the nightly refresh erroring.
-pub async fn apply_unversioned_ddl(
+pub async fn apply_active_schema_objects(
     graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
-    let ddl = resolve_active_placeholders(UNVERSIONED_DDL, version);
-    for statement in split_sql_statements(&ddl) {
-        graph.execute(statement).await?;
+    for table in generate_unversioned_graph_tables(ontology) {
+        graph.execute(&emit_create_table(&table)).await?;
+    }
+    for view in generate_active_graph_materialized_views(ontology, version) {
+        graph
+            .execute(&format!("DROP VIEW IF EXISTS {}", view.name))
+            .await?;
+        graph.execute(&emit_create_materialized_view(&view)).await?;
     }
     Ok(())
 }
 
-/// Drops a specific schema version's refreshable MV. Called on the outgoing
-/// active version after a promotion so it stops refreshing against the tables
-/// GC is about to drop.
-pub async fn drop_unversioned_refresh_mv(
+pub async fn drop_active_schema_views(
     graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
-    let name = format!(
-        "{}{UNVERSIONED_REFRESH_MV_BASE_NAME}",
-        table_prefix(version)
-    );
-    graph
-        .execute(&format!("DROP VIEW IF EXISTS {name}"))
-        .await?;
+    for view in generate_active_graph_materialized_views(ontology, version) {
+        graph
+            .execute(&format!("DROP VIEW IF EXISTS {}", view.name))
+            .await?;
+    }
     Ok(())
-}
-
-/// Substitutes the two apply-time placeholders in the generated DDL:
-/// `__ACTIVE_PREFIX__` with the version's table prefix (empty at version 0,
-/// else `v<N>_`) and `__ACTIVE_VERSION__` with the version number.
-fn resolve_active_placeholders(ddl: &str, version: u32) -> String {
-    ddl.replace("__ACTIVE_PREFIX__", &table_prefix(version))
-        .replace("__ACTIVE_VERSION__", &version.to_string())
-}
-
-/// Splits a SQL script into individual statements on top-level `;`, ignoring
-/// semicolons inside string literals, inside parentheses, and inside `--` line
-/// comments. Each returned statement has its leading comment and blank lines
-/// stripped so it starts at the SQL keyword.
-fn split_sql_statements(sql: &str) -> Vec<&str> {
-    let mut statements = Vec::new();
-    let mut in_string = false;
-    let mut in_line_comment = false;
-    let mut depth = 0i32;
-    let mut start = 0;
-    let bytes = sql.as_bytes();
-
-    for (i, c) in sql.char_indices() {
-        if in_line_comment {
-            if c == '\n' {
-                in_line_comment = false;
-            }
-            continue;
-        }
-        match c {
-            '\'' if i == 0 || bytes[i - 1] != b'\\' => in_string = !in_string,
-            '-' if !in_string && bytes.get(i + 1) == Some(&b'-') => in_line_comment = true,
-            '(' if !in_string => depth += 1,
-            ')' if !in_string => depth -= 1,
-            ';' if !in_string && depth == 0 => {
-                let statement = strip_leading_comment_lines(sql[start..i].trim());
-                if !statement.is_empty() {
-                    statements.push(statement);
-                }
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-
-    let tail = strip_leading_comment_lines(sql[start..].trim());
-    if !tail.is_empty() {
-        statements.push(tail);
-    }
-    statements
-}
-
-fn strip_leading_comment_lines(statement: &str) -> &str {
-    let mut offset = 0;
-    for line in statement.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("--") {
-            offset += line.len() + 1;
-        } else {
-            break;
-        }
-    }
-    statement[offset.min(statement.len())..].trim()
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer
@@ -632,90 +554,5 @@ mod tests {
     #[test]
     fn lock_key_is_stable() {
         assert_eq!(MIGRATION_LOCK_KEY, "schema_migration");
-    }
-
-    #[test]
-    fn split_sql_statements_separates_on_top_level_semicolons() {
-        let sql = "CREATE TABLE a (id Int64);\nDROP VIEW IF EXISTS b;\nCREATE VIEW b AS SELECT 1;";
-        let statements = split_sql_statements(sql);
-        assert_eq!(
-            statements,
-            vec![
-                "CREATE TABLE a (id Int64)",
-                "DROP VIEW IF EXISTS b",
-                "CREATE VIEW b AS SELECT 1",
-            ]
-        );
-    }
-
-    #[test]
-    fn split_sql_statements_ignores_semicolons_in_string_literals() {
-        let sql = "CREATE VIEW v AS SELECT 'a;b' AS s;\nCREATE VIEW w AS SELECT 1;";
-        let statements = split_sql_statements(sql);
-        assert_eq!(
-            statements,
-            vec![
-                "CREATE VIEW v AS SELECT 'a;b' AS s",
-                "CREATE VIEW w AS SELECT 1",
-            ]
-        );
-    }
-
-    #[test]
-    fn split_sql_statements_ignores_semicolons_in_line_comments() {
-        let sql = "-- one; two; three\nCREATE TABLE a (id Int64);";
-        let statements = split_sql_statements(sql);
-        assert_eq!(statements, vec!["CREATE TABLE a (id Int64)"]);
-    }
-
-    #[test]
-    fn split_sql_statements_keeps_a_trailing_statement_without_semicolon() {
-        let sql = "CREATE TABLE a (id Int64);\nCREATE TABLE b (id Int64)";
-        let statements = split_sql_statements(sql);
-        assert_eq!(
-            statements,
-            vec!["CREATE TABLE a (id Int64)", "CREATE TABLE b (id Int64)"]
-        );
-    }
-
-    #[test]
-    fn generated_unversioned_ddl_splits_into_the_three_expected_statements() {
-        let statements = split_sql_statements(UNVERSIONED_DDL);
-        assert_eq!(statements.len(), 3, "expected three unversioned statements");
-        assert!(statements[0].starts_with("CREATE TABLE IF NOT EXISTS namespace_storage_snapshot"));
-        assert!(statements[1].starts_with(
-            "DROP VIEW IF EXISTS __ACTIVE_PREFIX__namespace_storage_snapshot_refresh"
-        ));
-        assert!(statements[2].starts_with(
-            "CREATE MATERIALIZED VIEW __ACTIVE_PREFIX__namespace_storage_snapshot_refresh"
-        ));
-    }
-
-    #[test]
-    fn generated_ddl_writes_the_refresh_mv_with_the_expected_base_name() {
-        assert!(
-            UNVERSIONED_DDL.contains(&format!(
-                "__ACTIVE_PREFIX__{UNVERSIONED_REFRESH_MV_BASE_NAME}"
-            )),
-            "generated DDL and UNVERSIONED_REFRESH_MV_BASE_NAME have drifted"
-        );
-    }
-
-    #[test]
-    fn resolve_active_placeholders_prefixes_names_at_a_nonzero_version() {
-        let resolved = resolve_active_placeholders(UNVERSIONED_DDL, 5);
-        assert!(resolved.contains("v5_namespace_storage_snapshot_refresh"));
-        assert!(resolved.contains("5 AS schema_version"));
-        assert!(!resolved.contains("__ACTIVE_PREFIX__"));
-        assert!(!resolved.contains("__ACTIVE_VERSION__"));
-    }
-
-    #[test]
-    fn resolve_active_placeholders_drops_the_prefix_at_version_zero() {
-        let resolved = resolve_active_placeholders(UNVERSIONED_DDL, 0);
-        assert!(resolved.contains("CREATE MATERIALIZED VIEW namespace_storage_snapshot_refresh"));
-        assert!(!resolved.contains("v0_namespace_storage_snapshot_refresh"));
-        assert!(!resolved.contains("__ACTIVE_PREFIX__"));
-        assert!(!resolved.contains("__ACTIVE_VERSION__"));
     }
 }

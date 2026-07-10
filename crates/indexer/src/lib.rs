@@ -310,23 +310,20 @@ pub async fn run_dispatcher(
     .await?;
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
-    // Apply the unversioned objects only when this binary's embedded version is
-    // the active one. Mid-migration the active version is still the OLD schema,
-    // so applying a new-ontology MV would leave branches resolving tables that
-    // do not yet exist under the active version, and the nightly refresh would
-    // hard-error for the whole migration window. The promotion hook in the
-    // completion checker covers the just-migrated case.
     match schema::version::read_active_version(&graph).await {
         Ok(active) if active == Some(*schema::version::SCHEMA_VERSION) => {
-            if let Err(error) =
-                schema::migration::apply_unversioned_ddl(&graph, *schema::version::SCHEMA_VERSION)
-                    .await
+            if let Err(error) = schema::migration::apply_active_schema_objects(
+                &graph,
+                ontology,
+                *schema::version::SCHEMA_VERSION,
+            )
+            .await
             {
-                warn!(%error, "failed to apply unversioned objects at startup");
+                warn!(%error, "failed to apply active-schema objects at startup");
             }
         }
         Ok(_) => {}
-        Err(error) => warn!(%error, "failed to read active version for unversioned apply"),
+        Err(error) => warn!(%error, "failed to read active version for active-schema apply"),
     }
 
     let deletion_graph = Arc::new(config.graph.build_client());

@@ -36,10 +36,10 @@ pub use entities::{
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
-    NodeEntity, NodeStorage, NodeStyle, PartitionConfig, PartitionStrategy, RedactionConfig,
-    RequiredRole, StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex,
-    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
-    VirtualSource,
+    MaterializedViewKind, NodeEntity, NodeStorage, NodeStyle, PartitionConfig, PartitionStrategy,
+    RedactionConfig, RequiredRole, StatisticsConfig, StatisticsExclude, StorageColumn,
+    StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookup,
+    TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
