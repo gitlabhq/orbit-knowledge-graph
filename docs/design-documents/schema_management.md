@@ -214,11 +214,18 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
 3. **Drain** — A no-op: the dispatcher runs no engine, so no in-flight NATS messages exist.
    Reserved for future dual-write scenarios.
 
-4. **Create new-prefix tables** — Generate DDL from the ontology via
-   `generate_graph_tables_with_prefix()` and execute `CREATE TABLE IF NOT EXISTS vN_<table>`
-   for each graph table. The table list is derived from the ontology: node tables, edge tables,
-   and auxiliary tables (`checkpoint`, `code_indexing_checkpoint`,
-   `namespace_deletion_schedule`). Control tables (`gkg_schema_version`) are not prefixed.
+4. **Prepare new-prefix tables** — Read the requested scope from
+   `config/schema-migrations.yaml`, then compare it with the writers of each affected table. A
+   table-local SDLC change rebuilds that table and clones unaffected tables from the active
+   version. If an affected table also has writers outside the requested scope, the migration
+   widens to a full rebuild. This prevents a shared edge table from keeping an old row when the
+   corrected row has a different sort-key identity. Code migrations currently widen to a full
+   rebuild because code indexing writes some relationships to the shared `gl_edge` table.
+
+   A selective SDLC migration copies completed checkpoints for unchanged pipelines into the new
+   checkpoint table. It leaves out the pipelines that must run again and drops dispatch cursors so
+   the sweep starts a fresh pass. Control tables such as `gkg_schema_version` are never prefixed or
+   cloned.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
    This signals indexers that the new-prefix tables exist. A newly deployed webserver whose
@@ -230,10 +237,10 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
 6. **Release lock** — Allow other pods to proceed.
 
 The namespace sweep task periodically re-dispatches every enabled namespace regardless of recent
-Siphon changes. Because new-prefix per-namespace checkpoints are empty, each re-dispatched namespace
-backfills from the beginning of the Siphon window into the new-prefix tables; no explicit trigger is
-needed. (The change-detection dispatcher alone would miss namespaces with no recent source changes,
-since its checkpoint is global, not per-prefix.)
+Siphon changes. A full rebuild starts with an empty checkpoint table. A selective migration keeps
+checkpoints for unchanged pipelines and removes only the pipelines that need to run again. In both
+cases, missing checkpoints make the required pipelines backfill from the beginning of their Siphon
+window.
 
 On a dispatcher boot with no namespace-change checkpoint, the change-detection dispatcher
 dispatches every enabled namespace once and records a checkpoint; later ticks query Siphon changes
@@ -300,18 +307,14 @@ Implemented in `crates/indexer/src/migration_completion.rs`.
 
 ### Completion criteria
 
-The checker compares checkpoint state in the new-prefix tables against the set of enabled
-namespaces from the datalake. Both SDLC and code indexing must be complete:
+The checker reads the IDs of currently enabled top-level namespaces from the datalake. An SDLC
+namespace counts as complete only when that exact ID has completed checkpoints for every required
+namespaced pipeline. A checkpoint left by a namespace that has since been disabled does not count.
+Every required global pipeline must also have a completed checkpoint.
 
-1. **SDLC namespaces** — count distinct namespace IDs with checkpoint entries (keys matching
-   `ns.<id>.*`) in the `vN_checkpoint` table, compared against the count of enabled namespaces
-   in `siphon_knowledge_graph_enabled_namespaces`.
-2. **Code indexing namespaces** — count distinct namespace IDs (extracted from the
-   `traversal_path` column) in `vN_code_indexing_checkpoint`, compared against the same enabled
-   namespace count.
-
-When all enabled namespaces have checkpoint entries in both new-prefix tables, the migration is
-considered complete.
+Code indexing coverage is reported for operators but does not block promotion. Code indexing can
+take much longer than SDLC indexing because it downloads and processes repository archives, and a
+single project failure must not hold a schema migration open indefinitely.
 
 #### Known trade-off: checkpoint-based validation
 

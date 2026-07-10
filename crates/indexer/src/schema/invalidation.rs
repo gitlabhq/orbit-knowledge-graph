@@ -23,6 +23,37 @@ pub struct InvalidatedPipelines {
     pub global: Vec<String>,
 }
 
+pub fn get_migration_scope_for_table_writers(
+    ontology: &Ontology,
+    requested_scope: &MigrationScope,
+) -> MigrationScope {
+    if matches!(requested_scope, MigrationScope::Full) {
+        return MigrationScope::Full;
+    }
+    // Code indexing writes some relationships to the default edge table, outside the ontology's
+    // SDLC pipeline descriptors, so a code-only rebuild cannot preserve that table safely.
+    if matches!(requested_scope, MigrationScope::Code) {
+        return MigrationScope::Full;
+    }
+
+    let invalidated = invalidated_entities(ontology, requested_scope);
+    for table in generate_graph_tables_with_prefix(ontology, "") {
+        let writers = entities_writing_to_table(ontology, &table.name);
+        let requested_scope_writes_to_table =
+            writers.iter().any(|writer| invalidated.contains(writer));
+        if table.name == ontology.edge_table() && requested_scope_writes_to_table {
+            return MigrationScope::Full;
+        }
+        let table_has_writer_outside_requested_scope =
+            writers.iter().any(|writer| !invalidated.contains(writer));
+        if requested_scope_writes_to_table && table_has_writer_outside_requested_scope {
+            return MigrationScope::Full;
+        }
+    }
+
+    requested_scope.clone()
+}
+
 pub fn classify_tables_for_scope(
     ontology: &Ontology,
     scope: &MigrationScope,
@@ -154,6 +185,47 @@ mod tests {
 
     fn sdlc_scope(names: &[&str]) -> MigrationScope {
         MigrationScope::Sdlc(entities(names))
+    }
+
+    #[test]
+    fn table_local_entity_keeps_requested_migration_scope() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let requested_scope = sdlc_scope(&["User"]);
+
+        assert_eq!(
+            get_migration_scope_for_table_writers(&ontology, &requested_scope),
+            requested_scope
+        );
+    }
+
+    #[test]
+    fn shared_edge_writer_widens_migration_scope_to_full() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        assert_eq!(
+            get_migration_scope_for_table_writers(&ontology, &sdlc_scope(&["SystemNote"])),
+            MigrationScope::Full
+        );
+    }
+
+    #[test]
+    fn whole_sdlc_scope_widens_to_full_because_code_writes_default_edge_table() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        assert_eq!(
+            get_migration_scope_for_table_writers(&ontology, &sdlc_scope(&[])),
+            MigrationScope::Full
+        );
+    }
+
+    #[test]
+    fn code_scope_widens_to_full_because_code_writes_shared_edges() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        assert_eq!(
+            get_migration_scope_for_table_writers(&ontology, &MigrationScope::Code),
+            MigrationScope::Full
+        );
     }
 
     #[test]

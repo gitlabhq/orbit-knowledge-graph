@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
+use gkg_utils::traversal_path::TopLevelSplit;
 use ontology::migrations::{MigrationLedger, MigrationScope};
 use query_engine::compiler::{
     generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
@@ -32,7 +33,10 @@ use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::invalidation::{CODE_INDEXING_CHECKPOINT_TABLE, find_invalidated_pipelines};
+use crate::schema::invalidation::{
+    CODE_INDEXING_CHECKPOINT_TABLE, find_invalidated_pipelines,
+    get_migration_scope_for_table_writers,
+};
 use crate::schema::metrics::CompletionMetrics;
 use crate::schema::migration::CHECKPOINT_TABLE;
 use crate::schema::version::{
@@ -50,13 +54,6 @@ const MIGRATION_LOCK_KEY: &str = "schema_migration";
 
 /// NATS KV lock TTL for the completion check.
 const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(120);
-
-/// SQL to count distinct namespace prefixes in the new-prefix SDLC checkpoint table.
-/// A completed namespace has at least one checkpoint key starting with `ns.`.
-const COUNT_SDLC_CHECKPOINT_NAMESPACES: &str = "\
-SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
-FROM {table:Identifier} FINAL \
-WHERE key LIKE 'ns.%' AND _deleted = false";
 
 /// Enabled namespaces (id + traversal path) from the datalake.
 static FETCH_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
@@ -125,19 +122,18 @@ SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
 FROM gkg_schema_version FINAL \
 WHERE status = 'migrating' AND version = {version:UInt32}";
 
-/// Counts namespaces whose checkpoint marks every one of the given plans complete (null cursor).
-const COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS: &str = "\
-SELECT count() AS ns_count FROM ( \
-    SELECT splitByChar('.', key)[2] AS ns \
-    FROM {table:Identifier} FINAL \
-    WHERE _deleted = false \
-      AND cursor_values IN ('null', '') \
-      AND length(splitByChar('.', key)) = 3 \
-      AND splitByChar('.', key)[1] = 'ns' \
-      AND splitByChar('.', key)[3] IN {plans:Array(String)} \
-    GROUP BY ns \
-    HAVING uniqExact(splitByChar('.', key)[3]) = {plan_count:UInt64} \
-)";
+/// Returns namespace IDs whose checkpoint marks every given plan complete (null cursor).
+const GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS: &str = "\
+SELECT toInt64(splitByChar('.', key)[2]) AS namespace_id \
+FROM {table:Identifier} FINAL \
+WHERE _deleted = false \
+  AND cursor_values IN ('null', '') \
+  AND length(splitByChar('.', key)) = 3 \
+  AND splitByChar('.', key)[1] = 'ns' \
+  AND match(splitByChar('.', key)[2], '^[0-9]+$') \
+  AND splitByChar('.', key)[3] IN {plans:Array(String)} \
+GROUP BY namespace_id \
+HAVING uniqExact(splitByChar('.', key)[3]) = {plan_count:UInt64}";
 
 /// Counts how many of the given global plans have a completed checkpoint (null cursor).
 const COUNT_COMPLETE_GLOBAL_PLANS: &str = "\
@@ -229,18 +225,24 @@ pub struct SdlcReindexProgress {
     pub ready: bool,
 }
 
-pub async fn get_sdlc_reindex_progress(
+pub async fn get_sdlc_reindex_progress_for_enabled_namespaces(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
     scope: &MigrationScope,
     checkpoint_table: &str,
-    enabled_count: u64,
+    enabled_namespace_ids: &[i64],
 ) -> Result<SdlcReindexProgress, String> {
     let pipelines = find_invalidated_pipelines(ontology, scope);
 
-    let completed_namespaces =
-        count_completed_namespaces(graph, checkpoint_table, &pipelines.namespaced).await?;
-    let namespaced_ready = pipelines.namespaced.is_empty() || completed_namespaces >= enabled_count;
+    let namespace_ids_with_completed_plans =
+        get_namespace_ids_with_completed_plans(graph, checkpoint_table, &pipelines.namespaced)
+            .await?;
+    let completed_namespaces = enabled_namespace_ids
+        .iter()
+        .filter(|namespace_id| namespace_ids_with_completed_plans.contains(namespace_id))
+        .count() as u64;
+    let namespaced_ready = pipelines.namespaced.is_empty()
+        || completed_namespaces == enabled_namespace_ids.len() as u64;
 
     let completed_global =
         count_completed_global_plans(graph, checkpoint_table, &pipelines.global).await?;
@@ -368,12 +370,13 @@ impl MigrationCompletionChecker {
         let prefix = table_prefix(version);
 
         // Enabled top-level namespaces (the reference set). Subgroup paths are
-        // dropped and logged in fetch_top_level_enabled; they are never
+        // dropped and logged in fetch_enabled_top_level_namespaces; they are never
         // dispatched, so counting them would wedge the gate forever.
-        let (enabled_count, enabled_paths) = self
-            .fetch_top_level_enabled()
+        let enabled_namespaces = self
+            .fetch_enabled_top_level_namespaces()
             .await
             .map_err(|e| format!("fetch enabled namespaces: {e}"))?;
+        let enabled_count = enabled_namespaces.ids.len() as u64;
 
         if enabled_count == 0 {
             warn!(
@@ -392,35 +395,20 @@ impl MigrationCompletionChecker {
         // the "migration completion status" log line to track progress.
         let code_table = format!("{prefix}{CODE_INDEXING_CHECKPOINT_TABLE}");
         let (eligible_projects, indexed_projects, coverage) = self
-            .compute_code_coverage(&code_table, &enabled_paths)
+            .compute_code_coverage(&code_table, &enabled_namespaces.paths)
             .await
             .map_err(|e| format!("compute code coverage: {e}"))?;
 
         let scope = self.resolve_migration_scope(version).await?;
-        let sdlc_progress = match &scope {
-            MigrationScope::Full | MigrationScope::Code => {
-                let sdlc_table = format!("{prefix}{CHECKPOINT_TABLE}");
-                let count = self
-                    .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
-                    .await
-                    .map_err(|e| format!("count SDLC checkpoint namespaces: {e}"))?;
-                SdlcReindexProgress {
-                    completed_namespaces: count,
-                    ready: count >= enabled_count,
-                }
-            }
-            MigrationScope::Sdlc(_) => {
-                let checkpoint_table = format!("{prefix}{CHECKPOINT_TABLE}");
-                get_sdlc_reindex_progress(
-                    &self.graph,
-                    &self.ontology,
-                    &scope,
-                    &checkpoint_table,
-                    enabled_count,
-                )
-                .await?
-            }
-        };
+        let checkpoint_table = format!("{prefix}{CHECKPOINT_TABLE}");
+        let sdlc_progress = get_sdlc_reindex_progress_for_enabled_namespaces(
+            &self.graph,
+            &self.ontology,
+            &scope,
+            &checkpoint_table,
+            &enabled_namespaces.ids,
+        )
+        .await?;
 
         info!(
             version,
@@ -465,7 +453,11 @@ impl MigrationCompletionChecker {
             .map_err(|e| format!("read active version: {e}"))?
             .unwrap_or(0);
         let ledger = MigrationLedger::load_embedded()?;
-        Ok(ledger.resolve_migration_scope_between(active, migrating_version))
+        let requested_scope = ledger.resolve_migration_scope_between(active, migrating_version);
+        Ok(get_migration_scope_for_table_writers(
+            &self.ontology,
+            &requested_scope,
+        ))
     }
 
     /// Reads the wall-clock age (in seconds) of the row that marked the
@@ -514,22 +506,7 @@ impl MigrationCompletionChecker {
     }
 
     /// Counts distinct namespaces in a checkpoint table using the given query.
-    async fn count_table_namespaces(&self, query: &str, table: &str) -> Result<u64, String> {
-        let batches = self
-            .graph
-            .query(query)
-            .param("table", table)
-            .fetch_arrow()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        batches
-            .first()
-            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
-            .ok_or_else(|| "no ns_count in result".to_string())
-    }
-
-    async fn fetch_top_level_enabled(&self) -> Result<(u64, Vec<String>), String> {
+    async fn fetch_enabled_top_level_namespaces(&self) -> Result<TopLevelSplit, String> {
         let batches = self
             .datalake
             .query(&FETCH_ENABLED_NAMESPACES)
@@ -548,7 +525,7 @@ impl MigrationCompletionChecker {
                 "excluding enabled namespaces from migration completion gate"
             );
         }
-        Ok((split.count, split.paths))
+        Ok(split)
     }
 
     async fn count_eligible_projects(&self) -> Result<u64, String> {
@@ -719,26 +696,26 @@ impl MigrationCompletionChecker {
     }
 }
 
-async fn count_completed_namespaces(
+async fn get_namespace_ids_with_completed_plans(
     graph: &ArrowClickHouseClient,
     checkpoint_table: &str,
-    namespaced_plans: &[String],
-) -> Result<u64, String> {
-    if namespaced_plans.is_empty() {
-        return Ok(0);
+    required_plan_names: &[String],
+) -> Result<HashSet<i64>, String> {
+    if required_plan_names.is_empty() {
+        return Ok(HashSet::new());
     }
     let batches = graph
-        .query(COUNT_NAMESPACES_COMPLETE_FOR_ALL_PLANS)
+        .query(GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS)
         .param("table", checkpoint_table)
-        .param("plans", namespaced_plans)
-        .param("plan_count", namespaced_plans.len() as u64)
+        .param("plans", required_plan_names)
+        .param("plan_count", required_plan_names.len() as u64)
         .fetch_arrow()
         .await
         .map_err(|e| e.to_string())?;
-    batches
-        .first()
-        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
-        .ok_or_else(|| "no ns_count in result".to_string())
+    Ok(i64::extract_column(&batches, 0)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect())
 }
 
 async fn count_completed_global_plans(
@@ -815,16 +792,18 @@ mod tests {
     }
 
     #[test]
-    fn sdlc_checkpoint_query_uses_identifier_param() {
+    fn completed_namespace_id_query_uses_identifier_param() {
         assert!(
-            COUNT_SDLC_CHECKPOINT_NAMESPACES.contains("{table:Identifier}"),
+            GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("{table:Identifier}"),
             "SDLC checkpoint query must use Identifier param for table name"
         );
     }
 
     #[test]
-    fn sdlc_checkpoint_query_filters_deleted() {
-        assert!(COUNT_SDLC_CHECKPOINT_NAMESPACES.contains("_deleted = false"));
+    fn completed_namespace_id_query_filters_deleted_and_malformed_keys() {
+        assert!(GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("_deleted = false"));
+        assert!(GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("match(splitByChar"));
+        assert!(!GET_NAMESPACE_IDS_WITH_COMPLETED_PLANS.contains("enabled_namespace_ids"));
     }
 
     #[test]

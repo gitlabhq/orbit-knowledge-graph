@@ -372,7 +372,19 @@ ALTER TABLE database_b.<table_name> DROP COLUMN <column_name>;
 
 For changes to a table that are not backward compatible or may cause downtime, the system uses a prefix-based multi-step migration process handled by the dispatcher.
 
-The dispatcher creates new-prefix tables (e.g. `v59_gl_issue`) with the updated schema. The previous-prefix tables remain available to serve queries. The namespace sweep task re-indexes every enabled namespace into the new-prefix tables. Once `MigrationCompletionChecker` confirms all namespaces are re-indexed, the new version is promoted to `active`, the old version is retired, and dead-version GC drops the obsolete tables.
+The dispatcher prepares a new set of prefixed tables, such as `v59_gl_issue`, while the previous
+version keeps serving queries. For a table-local SDLC change, it clones unaffected tables and
+rebuilds only the affected table. It also copies checkpoints for unchanged pipelines, so the
+namespace sweep reruns only the work required by the migration.
+
+Shared tables need a stricter rule. If the requested scope touches a table that has writers outside
+that scope, the dispatcher performs a full rebuild instead. Without that widening, a changed edge
+identity could leave the old row beside the corrected row in a `ReplacingMergeTree` table. Code
+migrations also use the full path because code indexing writes some relationships to `gl_edge`.
+
+`MigrationCompletionChecker` promotes the new version only after every currently enabled top-level
+namespace ID has completed all required namespaced pipelines and every required global pipeline is
+complete. A checkpoint from a namespace that has since been disabled does not satisfy the gate.
 
 **Initial schema creation**
 
@@ -380,7 +392,9 @@ The initial schema creation is handled by the dispatcher at boot. When no active
 
 **Schema updates**
 
-Schema updates are handled by the dispatcher at boot via `schema::migration::run_if_needed()`, which creates new-prefix tables and marks the new version as `migrating`. The indexer then backfills the data to the new schema on the next indexing job for each namespace.
+Schema updates are handled by the dispatcher at boot via `schema::migration::run_if_needed()`. It
+prepares the new-prefix tables, marks the new version as `migrating`, and opens a migration campaign.
+Indexers then fill the rebuilt tables through the normal global and namespace sweep paths.
 
 **Schema update coordination**
 

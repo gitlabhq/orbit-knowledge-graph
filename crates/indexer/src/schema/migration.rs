@@ -42,7 +42,9 @@ use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
 use crate::schema::invalidation::find_invalidated_pipelines;
-use crate::schema::invalidation::{TableMigrationAction, classify_tables_for_scope};
+use crate::schema::invalidation::{
+    TableMigrationAction, classify_tables_for_scope, get_migration_scope_for_table_writers,
+};
 use crate::schema::version::{
     SCHEMA_VERSION, SchemaVersionError, drop_kind_for_engine, list_version_objects,
     mark_version_active, mark_version_retired, read_active_version, read_all_versions,
@@ -161,17 +163,25 @@ pub async fn run_if_needed(
     }
 }
 
-pub async fn clone_unchanged_migration_tables(
+pub async fn prepare_tables_for_migration(
     graph: &ArrowClickHouseClient,
     source: &DictionarySource<'_>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
-    scope: &MigrationScope,
+    requested_scope: &MigrationScope,
     active_version: u32,
 ) -> Result<(), MigrationError> {
+    let scope = get_migration_scope_for_table_writers(ontology, requested_scope);
+    if &scope != requested_scope {
+        warn!(%requested_scope, %scope, "migration scope widened because a changed table has writers outside the requested scope");
+    }
+    if matches!(scope, MigrationScope::Full) {
+        return create_prefixed_tables(graph, source, ontology, metrics).await;
+    }
+
     let new_prefix = table_prefix(*SCHEMA_VERSION);
     let old_prefix = table_prefix(active_version);
-    let actions = classify_tables_for_scope(ontology, scope);
+    let actions = classify_tables_for_scope(ontology, &scope);
 
     let existing_old = get_existing_tables(graph, active_version).await?;
     let existing_new = get_existing_tables(graph, *SCHEMA_VERSION).await?;
@@ -185,7 +195,7 @@ pub async fn clone_unchanged_migration_tables(
         let old_name = format!("{old_prefix}{base_table_name}");
 
         if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Sdlc(_)) {
-            seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, scope).await?;
+            seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, &scope).await?;
             seeded += 1;
         } else if should_clone(base_table_name, &old_name, &actions, &existing_old) {
             clone_table(graph, &old_name, &table.name, &existing_new).await?;
@@ -424,7 +434,7 @@ async fn run_migration_locked(
     // exist. Reserved for future dual-write scenarios.
     metrics.record("drain", "success");
 
-    let scope = match MigrationLedger::load_embedded() {
+    let requested_scope = match MigrationLedger::load_embedded() {
         Ok(ledger) => ledger.resolve_migration_scope_between(active_version, *SCHEMA_VERSION),
         Err(e) => {
             warn!(error = %e, "failed to load migration ledger — releasing lock");
@@ -432,14 +442,16 @@ async fn run_migration_locked(
             return Err(MigrationError::Ledger(e));
         }
     };
-
-    let create_result = if matches!(scope, MigrationScope::Full) {
-        create_prefixed_tables(graph, source, ontology, metrics).await
-    } else {
-        info!(version = *SCHEMA_VERSION, %scope, "clone-based migration — cloning unchanged tables");
-        clone_unchanged_migration_tables(graph, source, ontology, metrics, &scope, active_version)
-            .await
-    };
+    info!(version = *SCHEMA_VERSION, %requested_scope, "preparing tables for schema migration");
+    let create_result = prepare_tables_for_migration(
+        graph,
+        source,
+        ontology,
+        metrics,
+        &requested_scope,
+        active_version,
+    )
+    .await;
     if let Err(ref e) = create_result {
         warn!(error = %e, "failed to create new-prefix tables — releasing lock");
         let _ = lock_service.release(MIGRATION_LOCK_KEY).await;

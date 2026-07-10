@@ -38,10 +38,17 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 The **dispatcher** owns schema migration. At boot, `schema::migration::run_if_needed()` compares
 the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
-NATS KV distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
-creates new-prefix ClickHouse tables, and marks the new version as `migrating`. Marking
-`migrating` also opens a re-index **campaign** (`campaign::CampaignState`, in-memory) that
-dispatchers stamp onto every request as `campaign_id` until completion clears it.
+NATS KV distributed lock and reads the requested scope from the migration ledger. A table-local
+SDLC change rebuilds the affected table and clones unaffected tables from the active version. If an
+affected table has writers outside the requested scope, the dispatcher widens the migration to a
+full rebuild. Code migrations currently take the full path because code indexing writes some
+relationships to the shared `gl_edge` table.
+
+Selective migrations seed the new checkpoint table with completed checkpoints for unchanged
+pipelines. Required pipelines are left out so the normal sweep tasks run them again. The dispatcher
+then marks the version as `migrating` and opens a re-index **campaign**
+(`campaign::CampaignState`, in-memory) that it stamps onto requests as `campaign_id` until
+completion clears it.
 
 Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`,
 which polls `gkg_schema_version` with backoff until its version is `active`/`migrating`, exiting
@@ -53,9 +60,10 @@ table-set.
 ### Migration completion and dead-version GC
 
 `migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
-mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
-comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
-`active`, and retires the old active version. After promotion it clears the re-index campaign.
+mode. It checks the IDs of currently enabled top-level namespaces against completed checkpoints for
+every required namespaced pipeline. Disabled namespace checkpoints do not count. Required global
+pipelines must also be complete. The checker then promotes the `migrating` version to `active`,
+retires the old active version, and clears the re-index campaign.
 
 A single SQL query then enumerates all `v<N>_*` objects in `system.tables` whose version falls
 outside a keep-set computed in the same query (active + newest retired within

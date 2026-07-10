@@ -816,6 +816,16 @@ impl MigrationScenario {
             .await;
     }
 
+    async fn seed_user(&self) {
+        let prefix = table_prefix(self.active_version);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {prefix}gl_user (id, username, name, state, _version) \
+                 VALUES (9, 'user9', 'User Nine', 'active', '{SEED_VERSION}')"
+            ))
+            .await;
+    }
+
     async fn seed_merge_request(&self) {
         let prefix = table_prefix(self.active_version);
         self.ctx
@@ -869,7 +879,7 @@ impl MigrationScenario {
     }
 
     async fn migrate(&self, scope: MigrationScope) {
-        migration::clone_unchanged_migration_tables(
+        migration::prepare_tables_for_migration(
             &self.ctx.create_client(),
             &dictionary_source(&self.ctx.config),
             &self.ontology,
@@ -892,18 +902,6 @@ impl MigrationScenario {
             .execute(&format!(
                 "INSERT INTO {table} (key, watermark, cursor_values, _version) \
                  VALUES ('{key}', '{SEED_VERSION}', '{cursor}', '{SEED_VERSION}')"
-            ))
-            .await;
-    }
-
-    async fn emit_edge(&self, kind: &str, source: (u64, &str), target: (u64, &str)) {
-        let table = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
-        self.ctx
-            .execute(&format!(
-                "INSERT INTO {table} \
-                 (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version) \
-                 VALUES ('1/100/', '{kind}', {}, '{}', {}, '{}', '{REINDEX_VERSION}')",
-                source.0, source.1, target.0, target.1
             ))
             .await;
     }
@@ -963,14 +961,14 @@ impl MigrationScenario {
     async fn gate(
         &self,
         scope: MigrationScope,
-        enabled_count: u64,
+        enabled_namespace_ids: &[i64],
     ) -> migration_completion::SdlcReindexProgress {
-        migration_completion::get_sdlc_reindex_progress(
+        migration_completion::get_sdlc_reindex_progress_for_enabled_namespaces(
             &self.ctx.create_client(),
             &self.ontology,
             &scope,
             &prefixed_table_name("checkpoint", *SCHEMA_VERSION),
-            enabled_count,
+            enabled_namespace_ids,
         )
         .await
         .unwrap()
@@ -1003,23 +1001,25 @@ async fn insert_completed_checkpoint(ctx: &TestContext, table: &str, key: &str, 
 }
 
 #[tokio::test]
-async fn sdlc_scope_clones_unchanged_and_rebuilds_invalidated_tables() {
+async fn table_local_sdlc_scope_clones_unchanged_and_rebuilds_invalidated_table() {
     let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_user().await;
     scenario.seed_note().await;
     scenario.seed_merge_request().await;
     scenario
         .seed_edge("MENTIONS", (1, "User"), (2, "Note"))
         .await;
 
-    scenario.migrate(sdlc(&["Note"])).await;
+    scenario.migrate(sdlc(&["User"])).await;
 
     scenario.assert_table_row_count("gl_edge", 1).await;
-    scenario.assert_table_empty("gl_note").await;
+    scenario.assert_table_empty("gl_user").await;
+    scenario.assert_table_row_count("gl_note", 1).await;
     scenario.assert_table_row_count("gl_merge_request", 1).await;
 }
 
 #[tokio::test]
-async fn sdlc_scope_seeds_only_unchanged_checkpoints() {
+async fn table_local_sdlc_scope_seeds_only_unchanged_checkpoints() {
     let scenario = MigrationScenario::migrating_from_active().await;
     scenario.seed_checkpoint("global.User").await;
     scenario.seed_checkpoint("ns.100.Job.p1of2").await;
@@ -1029,34 +1029,34 @@ async fn sdlc_scope_seeds_only_unchanged_checkpoints() {
         .seed_checkpoint("dispatch.sdlc.namespace.sweep")
         .await;
 
-    scenario.migrate(sdlc(&["Note"])).await;
+    scenario.migrate(sdlc(&["User"])).await;
 
     scenario
-        .assert_surviving_checkpoints(&["global.User", "ns.100.Job.p1of2", "ns.100.Job.p2of2"])
+        .assert_surviving_checkpoints(&["ns.100.Job.p1of2", "ns.100.Job.p2of2", "ns.100.Note"])
         .await;
 }
 
 #[tokio::test]
-async fn sdlc_gate_blocks_until_the_invalidated_plan_reindexes() {
+async fn global_sdlc_gate_blocks_until_the_invalidated_plan_reindexes() {
     let scenario = MigrationScenario::migrating_from_active().await;
-    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario.seed_checkpoint("global.User").await;
 
-    scenario.migrate(sdlc(&["Note"])).await;
+    scenario.migrate(sdlc(&["User"])).await;
 
     assert!(
-        !scenario.gate(sdlc(&["Note"]), 1).await.ready,
+        !scenario.gate(sdlc(&["User"]), &[100]).await.ready,
         "the gate must block until the invalidated plan has a completed checkpoint"
     );
 
-    scenario.complete_reindex("ns.100.Note").await;
+    scenario.complete_reindex("global.User").await;
     assert!(
-        scenario.gate(sdlc(&["Note"]), 1).await.ready,
-        "the gate must promote once every enabled namespace has the invalidated plan's completed checkpoint"
+        scenario.gate(sdlc(&["User"]), &[100]).await.ready,
+        "the gate must promote once the invalidated global plan has a completed checkpoint"
     );
 }
 
 #[tokio::test]
-async fn fk_edge_scope_keeps_the_node_table_and_drops_its_pipeline_checkpoint() {
+async fn shared_edge_scope_rebuilds_every_table() {
     let scenario = MigrationScenario::migrating_from_active().await;
     scenario.seed_note().await;
     scenario.seed_checkpoint("ns.100.Note").await;
@@ -1064,41 +1064,27 @@ async fn fk_edge_scope_keeps_the_node_table_and_drops_its_pipeline_checkpoint() 
 
     scenario.migrate(sdlc(&["HAS_NOTE"])).await;
 
-    scenario.assert_table_row_count("gl_note", 1).await;
-    scenario
-        .assert_surviving_checkpoints(&["ns.100.User"])
-        .await;
-
-    assert!(
-        !scenario.gate(sdlc(&["HAS_NOTE"]), 1).await.ready,
-        "the gate must wait on the Note pipeline that HAS_NOTE expands to"
-    );
-    scenario.complete_reindex("ns.100.Note").await;
-    assert!(scenario.gate(sdlc(&["HAS_NOTE"]), 1).await.ready);
+    scenario.assert_table_empty("gl_note").await;
+    scenario.assert_table_empty("gl_edge").await;
+    scenario.assert_checkpoint_empty().await;
 }
 
 #[tokio::test]
 async fn interrupted_clone_is_recloned_without_duplicates_on_rerun() {
     let scenario = MigrationScenario::migrating_from_active().await;
-    scenario
-        .seed_edge("HAS_NOTE", (7, "MergeRequest"), (5, "Note"))
-        .await;
+    scenario.seed_note().await;
+    scenario.seed_user().await;
     scenario.seed_checkpoint("ns.100.User").await;
-    scenario.seed_checkpoint("ns.100.Note").await;
-    scenario.precreate_empty_target("gl_edge").await;
+    scenario.seed_checkpoint("global.User").await;
+    scenario.precreate_empty_target("gl_note").await;
 
-    scenario.migrate(sdlc(&["Note"])).await;
-    scenario.migrate(sdlc(&["Note"])).await;
+    scenario.migrate(sdlc(&["User"])).await;
+    scenario.migrate(sdlc(&["User"])).await;
 
-    scenario.assert_table_row_count("gl_edge", 1).await;
+    scenario.assert_table_row_count("gl_note", 1).await;
     scenario
         .assert_surviving_checkpoints(&["ns.100.User"])
         .await;
-
-    scenario
-        .emit_edge("HAS_NOTE", (7, "MergeRequest"), (5, "Note"))
-        .await;
-    scenario.assert_table_row_count("gl_edge", 1).await;
 }
 
 #[tokio::test]
@@ -1115,7 +1101,7 @@ async fn whole_sdlc_scope_rebuilds_tables_and_seeds_no_checkpoints() {
 }
 
 #[tokio::test]
-async fn code_scope_keeps_sdlc_state_and_rebuilds_the_code_checkpoint() {
+async fn code_scope_rebuilds_every_table_because_code_writes_shared_edges() {
     let scenario = MigrationScenario::migrating_from_active().await;
     scenario.seed_note().await;
     scenario.seed_checkpoint("ns.100.Note").await;
@@ -1126,10 +1112,8 @@ async fn code_scope_keeps_sdlc_state_and_rebuilds_the_code_checkpoint() {
 
     scenario.migrate(MigrationScope::Code).await;
 
-    scenario.assert_table_row_count("gl_note", 1).await;
-    scenario
-        .assert_surviving_checkpoints(&["dispatch.sdlc.namespace.sweep", "ns.100.Note"])
-        .await;
+    scenario.assert_table_empty("gl_note").await;
+    scenario.assert_checkpoint_empty().await;
     scenario.assert_code_checkpoint_empty().await;
 }
 
@@ -1141,17 +1125,17 @@ async fn gate_requires_every_enabled_namespace_to_complete() {
         .mark_reindexing("ns.100.Note", r#"{"c":["1/100/","5"]}"#)
         .await;
     assert!(
-        !scenario.gate(sdlc(&["Note"]), 1).await.ready,
+        !scenario.gate(sdlc(&["Note"]), &[100]).await.ready,
         "an in-progress cursor is not a completed pipeline"
     );
 
     scenario.complete_reindex("ns.100.Note").await;
     assert!(
-        scenario.gate(sdlc(&["Note"]), 1).await.ready,
+        scenario.gate(sdlc(&["Note"]), &[100]).await.ready,
         "the newer completed row must replace the in-progress cursor under FINAL"
     );
 
-    let one_of_two = scenario.gate(sdlc(&["Note"]), 2).await;
+    let one_of_two = scenario.gate(sdlc(&["Note"]), &[100, 200]).await;
     assert_eq!(one_of_two.completed_namespaces, 1);
     assert!(
         !one_of_two.ready,
@@ -1159,7 +1143,18 @@ async fn gate_requires_every_enabled_namespace_to_complete() {
     );
 
     scenario.complete_reindex("ns.200.Note").await;
-    assert!(scenario.gate(sdlc(&["Note"]), 2).await.ready);
+    assert!(scenario.gate(sdlc(&["Note"]), &[100, 200]).await.ready);
+}
+
+#[tokio::test]
+async fn gate_ignores_completed_checkpoints_for_disabled_namespaces() {
+    let scenario = MigrationScenario::at_new_version().await;
+    scenario.complete_reindex("ns.100.Note").await;
+
+    let progress = scenario.gate(sdlc(&["Note"]), &[200]).await;
+
+    assert_eq!(progress.completed_namespaces, 0);
+    assert!(!progress.ready);
 }
 
 #[tokio::test]
@@ -1168,7 +1163,9 @@ async fn gate_requires_every_invalidated_pipeline_including_global() {
     scenario.complete_reindex("ns.100.Note").await;
     scenario.complete_reindex("ns.200.Note").await;
 
-    let missing_pipeline = scenario.gate(sdlc(&["Note", "MergeRequest"]), 2).await;
+    let missing_pipeline = scenario
+        .gate(sdlc(&["Note", "MergeRequest"]), &[100, 200])
+        .await;
     assert_eq!(missing_pipeline.completed_namespaces, 0);
     assert!(
         !missing_pipeline.ready,
@@ -1179,12 +1176,12 @@ async fn gate_requires_every_invalidated_pipeline_including_global() {
     scenario.complete_reindex("ns.200.MergeRequest").await;
     assert!(
         scenario
-            .gate(sdlc(&["Note", "MergeRequest"]), 2)
+            .gate(sdlc(&["Note", "MergeRequest"]), &[100, 200])
             .await
             .ready
     );
 
-    let global_pending = scenario.gate(sdlc(&["User"]), 2).await;
+    let global_pending = scenario.gate(sdlc(&["User"]), &[100, 200]).await;
     assert_eq!(
         global_pending.completed_namespaces, 0,
         "a global-only scope has no namespaced pipelines to count"
@@ -1195,5 +1192,5 @@ async fn gate_requires_every_invalidated_pipeline_including_global() {
     );
 
     scenario.complete_reindex("global.User").await;
-    assert!(scenario.gate(sdlc(&["User"]), 2).await.ready);
+    assert!(scenario.gate(sdlc(&["User"]), &[100, 200]).await.ready);
 }
