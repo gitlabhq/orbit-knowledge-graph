@@ -1,5 +1,5 @@
 name: top_mr_authors
-description: Users ranked by number of merged merge requests they authored.
+description: Top authors of merged merge requests
 query:
   query_type: aggregation
   nodes:

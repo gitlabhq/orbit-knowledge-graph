@@ -1,5 +1,5 @@
 name: my_mrs_with_pipelines
-description: Merge requests authored by the current user and their head pipelines.
+description: My merge requests and their head pipelines
 bindings: [current_user_id]
 query:
   query_type: traversal

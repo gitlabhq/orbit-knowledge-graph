@@ -1,5 +1,5 @@
 name: recent_merges
-description: Recently merged merge requests and the users who merged them.
+description: Recently merged merge requests and the people who merged them
 query:
   query_type: traversal
   nodes:

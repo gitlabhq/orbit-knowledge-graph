@@ -727,8 +727,14 @@ fn named_query_definitions(
     named_queries: &named_queries::NamedQueries,
     values: &named_queries::BindingValues,
 ) -> Result<Vec<NamedQueryDefinition>, named_queries::NamedQueryError> {
-    named_queries
+    let mut queries: Vec<_> = named_queries
         .iter()
+        .filter(|query| query.example_parameters().is_empty())
+        .collect();
+    queries.sort_by_key(|query| !query.default);
+
+    queries
+        .into_iter()
         .map(|query| {
             let raw_query = query.render(values, &query.example_parameters())?;
             Ok(NamedQueryDefinition {
@@ -1215,6 +1221,17 @@ mod tests {
                 query.raw_query
             );
         }
+
+        let names: Vec<_> = response.queries.iter().map(|q| q.name.as_str()).collect();
+        assert!(
+            !names.contains(&"expand_neighbors"),
+            "parameter-driven queries must be excluded from the catalog, got {names:?}"
+        );
+        assert_eq!(
+            names.first(),
+            Some(&"my_neighbors"),
+            "the default query must lead the catalog, got {names:?}"
+        );
     }
 
     #[tokio::test]

@@ -17,6 +17,10 @@
       "maxLength": 200,
       "description": "One-sentence, introspection-facing summary of what the query returns."
     },
+    "default": {
+      "type": "boolean",
+      "description": "When true, this query leads the catalog returned by ListNamedQueries so clients can preselect it. At most one query may set this."
+    },
     "bindings": {
       "type": "array",
       "uniqueItems": true,

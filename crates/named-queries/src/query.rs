@@ -67,6 +67,8 @@ struct NamedQueryYaml {
     name: String,
     description: String,
     #[serde(default)]
+    default: bool,
+    #[serde(default)]
     bindings: Vec<String>,
     #[serde(default)]
     parameters: BTreeMap<String, ParameterSpecYaml>,
@@ -129,6 +131,7 @@ impl Substitution {
 pub struct NamedQuery {
     pub name: String,
     pub description: String,
+    pub default: bool,
     bindings: Vec<String>,
     parameters: BTreeMap<String, ParameterSpec>,
     query: Value,
@@ -174,6 +177,7 @@ impl NamedQuery {
         let query = Self {
             name: yaml.name,
             description: yaml.description,
+            default: yaml.default,
             bindings: yaml.bindings,
             parameters,
             query: yaml.query,

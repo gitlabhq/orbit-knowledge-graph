@@ -1,5 +1,6 @@
 name: my_neighbors
-description: Immediate graph neighborhood of the current user.
+description: My neighbors in the graph
+default: true
 bindings: [current_user_id]
 query:
   query_type: neighbors

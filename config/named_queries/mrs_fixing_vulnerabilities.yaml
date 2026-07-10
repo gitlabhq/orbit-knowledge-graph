@@ -1,5 +1,5 @@
 name: mrs_fixing_vulnerabilities
-description: Merge requests that fix open vulnerabilities.
+description: Merge requests fixing open vulnerabilities
 query:
   query_type: traversal
   nodes:
