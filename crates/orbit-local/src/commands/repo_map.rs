@@ -172,6 +172,7 @@ pub(crate) enum RepoMapCommand {
 /// The graph-shape facts a query needs, resolved once per invocation.
 struct RepoMap {
     sha: String,
+    project_id: i64,
     repo_display: String,
     /// Extension filter from `--ext` (empty means no restriction).
     ext_filter: Vec<String>,
@@ -215,6 +216,7 @@ pub(crate) fn run(
 
     let map = RepoMap {
         sha: git.commit_sha.clone(),
+        project_id: git.project_id,
         repo_display: git.repo_path.display().to_string(),
         ext_filter,
         source_exts,
@@ -239,7 +241,8 @@ impl RepoMap {
         let batches = sql::query(
             client,
             &format!(
-                "SELECT COUNT(*) AS n FROM gl_file WHERE commit_sha = {}",
+                "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = {} AND commit_sha = {}",
+                self.project_id,
                 sql_lit(&self.sha)
             ),
         )?;
@@ -286,6 +289,7 @@ impl RepoMap {
 
     fn overview<W: Write>(&self, client: &duckdb_client::DuckDbClient, out: &mut W) -> Result<()> {
         let sha = sql_lit(&self.sha);
+        let pid = self.project_id;
         writeln!(out, "REPO MAP — {} @ {}", self.repo_display, self.sha)?;
         writeln!(out, "{}", "=".repeat(78))?;
 
@@ -296,7 +300,7 @@ impl RepoMap {
             &format!(
                 "SELECT language, COUNT(*) AS files
 FROM gl_file
-WHERE commit_sha={sha}{exclude}
+WHERE project_id={pid} AND commit_sha={sha}{exclude}
 GROUP BY 1 ORDER BY files DESC",
                 exclude = self.exclude("path")
             ),
@@ -309,7 +313,7 @@ GROUP BY 1 ORDER BY files DESC",
             &format!(
                 "SELECT definition_type, COUNT(*) AS n
 FROM gl_definition
-WHERE commit_sha={sha}{exclude}
+WHERE project_id={pid} AND commit_sha={sha}{exclude}
 GROUP BY 1
 HAVING n >= 5
 ORDER BY n DESC",
@@ -341,7 +345,7 @@ ORDER BY n DESC",
     END AS dir,
     file_path, definition_type
   FROM gl_definition
-  WHERE commit_sha={sha}{exclude}
+  WHERE project_id={pid} AND commit_sha={sha}{exclude}
 )
 SELECT
   dir,
@@ -372,7 +376,8 @@ LIMIT 30",
 FROM gl_definition parent
 JOIN gl_edge e ON e.target_id = parent.id AND e.relationship_kind='EXTENDS'
 JOIN gl_definition child ON child.id = e.source_id
-WHERE parent.commit_sha={sha}
+WHERE parent.project_id={pid} AND parent.commit_sha={sha}
+  AND child.project_id={pid}
   AND parent.definition_type IN {abstractions}{exclude_parent}{exclude_child}
 GROUP BY 1, 2, 3
 HAVING descendants >= 2
@@ -402,9 +407,10 @@ LIMIT 20",
        any_value(d.file_path || ':' || d.start_line) AS defined_at
 FROM gl_imported_symbol i
 JOIN gl_definition d
-  ON d.commit_sha = i.commit_sha
+  ON d.project_id = i.project_id
+ AND d.commit_sha = i.commit_sha
  AND d.name = i.identifier_name{exclude_d}
-WHERE i.commit_sha={sha}{exclude_i}
+WHERE i.project_id={pid} AND i.commit_sha={sha}{exclude_i}
   AND i.identifier_name NOT IN ('default', '_', 'self', 'this', 'super', 'Self')
   AND length(i.identifier_name) >= 3
   AND d.definition_type IN {anchors}
@@ -432,7 +438,7 @@ LIMIT 25",
   FROM gl_edge e
   JOIN gl_definition d ON d.id = e.target_id
   WHERE e.relationship_kind='CALLS'
-    AND d.commit_sha={sha}
+    AND d.project_id={pid} AND d.commit_sha={sha}
     AND d.definition_type IN {called_kinds}{exclude}
     AND length(d.name) >= 3
     AND d.name NOT IN ('new', 'init', 'main', 'String', 'Error', 'Return', 'Get', 'Set', 'Call', 'Run')
@@ -490,7 +496,7 @@ LIMIT 20",
                 "WITH t AS (
   SELECT file_path, fqn, name, definition_type, start_line
   FROM gl_definition
-  WHERE commit_sha={sha}
+  WHERE project_id={pid} AND commit_sha={sha}
     AND definition_type IN {types}
     {prefix_filter}{exclude}
 )
@@ -504,6 +510,7 @@ FROM t
 GROUP BY file_path
 ORDER BY file_path
 LIMIT 200",
+                pid = self.project_id,
                 sha = sql_lit(&self.sha),
                 types = kind_list(TYPE_KINDS),
                 exclude = self.exclude("file_path"),
@@ -533,7 +540,7 @@ LIMIT 200",
   SELECT DISTINCT ON (file_path, name, definition_type, start_line)
          file_path, fqn, name, definition_type, start_line, end_line
   FROM gl_definition
-  WHERE commit_sha={sha}
+  WHERE project_id={pid} AND commit_sha={sha}
     AND file_path LIKE {prefix_like}
     AND start_line > 0
     AND definition_type IN {api_kinds}{exclude}
@@ -575,6 +582,7 @@ FROM sigs
 GROUP BY file_path
 ORDER BY file_path
 LIMIT 300",
+                pid = self.project_id,
                 sha = sql_lit(&self.sha),
                 prefix_like = sql_lit(&format!("{prefix}/%")),
                 api_kinds = kind_list(&api_kinds),
@@ -592,6 +600,7 @@ LIMIT 300",
         target: &str,
     ) -> Result<()> {
         let sha = sql_lit(&self.sha);
+        let pid = self.project_id;
         let t = sql_lit(target);
         let containers = kind_list(CONTAINER_KINDS);
         writeln!(out, "CLASS — {target}")?;
@@ -604,7 +613,7 @@ LIMIT 300",
                 "SELECT fqn, definition_type, file_path || ':' || start_line AS loc,
        (end_line - start_line) AS lines
 FROM gl_definition
-WHERE commit_sha={sha}
+WHERE project_id={pid} AND commit_sha={sha}
   AND (fqn={t} OR name={t})
   AND definition_type IN {containers}{exclude}
 ORDER BY loc
@@ -618,7 +627,7 @@ LIMIT 10",
             &format!(
                 "SELECT DISTINCT file_path
 FROM gl_definition
-WHERE commit_sha={sha}
+WHERE project_id={pid} AND commit_sha={sha}
   AND (fqn={t} OR name={t})
   AND definition_type IN {containers}{exclude}",
                 exclude = self.exclude("file_path"),
@@ -652,7 +661,7 @@ WHERE commit_sha={sha}
                 "WITH parent AS (
   SELECT id, fqn, file_path, start_line, end_line
   FROM gl_definition
-  WHERE commit_sha={sha}
+  WHERE project_id={pid} AND commit_sha={sha}
     AND (fqn={t} OR name={t})
     AND definition_type IN {containers}
 ),
@@ -660,7 +669,7 @@ contained AS (
   SELECT DISTINCT ON (file_path, name, definition_type, start_line)
          d.fqn, d.name, d.definition_type, d.file_path, d.start_line, d.end_line
   FROM gl_definition d, parent p
-  WHERE d.commit_sha={sha}
+  WHERE d.project_id={pid} AND d.commit_sha={sha}
     AND d.start_line > 0
     AND d.definition_type IN {members}{exclude}
     AND (
@@ -721,7 +730,7 @@ LIMIT 300",
                 "WITH RECURSIVE chain AS (
   SELECT id, fqn, file_path, start_line, 0 AS depth
   FROM gl_definition
-  WHERE commit_sha={sha}
+  WHERE project_id={pid} AND commit_sha={sha}
     AND (fqn={t} OR name={t})
     AND definition_type IN {abstractions}{exclude}
   UNION ALL
@@ -729,12 +738,13 @@ LIMIT 300",
   FROM gl_edge e
   JOIN chain c ON e.target_id = c.id AND e.relationship_kind='EXTENDS'
   JOIN gl_definition s ON s.id = e.source_id
-  WHERE c.depth < 6{exclude_s}
+  WHERE s.project_id={pid} AND c.depth < 6{exclude_s}
 )
 SELECT depth, fqn, file_path || ':' || start_line AS loc
 FROM chain
 ORDER BY depth, fqn
 LIMIT 200",
+                pid = self.project_id,
                 sha = sql_lit(&self.sha),
                 t = sql_lit(target),
                 abstractions = kind_list(ABSTRACTION_KINDS),
@@ -760,11 +770,12 @@ LIMIT 200",
                 "SELECT identifier_name AS symbol, import_path,
        COUNT(DISTINCT file_path) AS importers
 FROM gl_imported_symbol
-WHERE commit_sha={sha}{exclude}
+WHERE project_id={pid} AND commit_sha={sha}{exclude}
   AND (identifier_name LIKE {like} OR import_path LIKE {like})
 GROUP BY 1, 2
 ORDER BY importers DESC
 LIMIT 50",
+                pid = self.project_id,
                 sha = sql_lit(&self.sha),
                 exclude = self.exclude("file_path"),
             ),
@@ -888,6 +899,7 @@ mod tests {
     fn exclude_renders_for_the_given_column() {
         let map = RepoMap {
             sha: "abc".into(),
+            project_id: 1,
             repo_display: "/repo".into(),
             ext_filter: vec![],
             source_exts: DEFAULT_SOURCE_EXTS.iter().map(|s| s.to_string()).collect(),
@@ -902,6 +914,7 @@ mod tests {
     fn exclude_appends_extension_filter_when_present() {
         let map = RepoMap {
             sha: "abc".into(),
+            project_id: 1,
             repo_display: "/repo".into(),
             ext_filter: vec!["rs".into()],
             source_exts: vec!["rs".into()],
@@ -914,6 +927,7 @@ mod tests {
     fn glob_list_covers_each_source_extension() {
         let map = RepoMap {
             sha: "abc".into(),
+            project_id: 1,
             repo_display: "/repo".into(),
             ext_filter: vec!["rs".into(), "toml".into()],
             source_exts: vec!["rs".into(), "toml".into()],
