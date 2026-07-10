@@ -219,13 +219,16 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
    table-local SDLC change rebuilds that table and clones unaffected tables from the active
    version. If an affected table also has writers outside the requested scope, the migration
    widens to a full rebuild. This prevents a shared edge table from keeping an old row when the
-   corrected row has a different sort-key identity. Code migrations currently widen to a full
-   rebuild because code indexing writes some relationships to the shared `gl_edge` table.
+   corrected row has a different sort-key identity. A code migration is the exception for `gl_edge`:
+   it clones the table intact and relies on the code stale sweep to tombstone its own rows as the
+   re-index drains, so a code bump re-indexes only code without re-pulling SDLC.
 
    A selective SDLC migration copies completed checkpoints for unchanged pipelines into the new
    checkpoint table. It leaves out the pipelines that must run again and drops dispatch cursors so
-   the sweep starts a fresh pass. Control tables such as `gkg_schema_version` are never prefixed or
-   cloned.
+   the sweep starts a fresh pass. A code migration instead clones the checkpoint intact (keeping the
+   `dispatch.*` cursors so SDLC does not re-sweep) and drops only `maintenance.code_stale_sweep` so
+   the sweep re-runs against the clone. Control tables such as `gkg_schema_version` are never
+   prefixed or cloned.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
    This signals indexers that the new-prefix tables exist. A newly deployed webserver whose

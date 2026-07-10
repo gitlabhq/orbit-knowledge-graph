@@ -41,6 +41,7 @@ use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
+use crate::orchestrator::scheduled::code_stale_sweep::CHECKPOINT_KEY as CODE_STALE_SWEEP_CHECKPOINT_KEY;
 use crate::schema::invalidation::find_invalidated_pipelines;
 use crate::schema::invalidation::{
     TableMigrationAction, classify_tables_for_scope, get_migration_scope_for_table_writers,
@@ -75,6 +76,14 @@ WHERE _deleted = false \
     (splitByChar('.', key)[1] = 'ns' AND splitByChar('.', key)[3] IN {ns_plans:Array(String)}) \
     OR (splitByChar('.', key)[1] = 'global' AND splitByChar('.', key)[2] IN {global_plans:Array(String)}) \
   )";
+
+/// Clones the active checkpoint for a code migration: SDLC cursors (including `dispatch.%`) are
+/// kept so SDLC does not re-sweep, but the code stale-sweep gate is dropped so the sweep re-fires
+/// and tombstones the cloned shared-edge code rows once the code backfill drains.
+const SEED_CODE_CHECKPOINT_SQL: &str = "\
+INSERT INTO {new_table:Identifier} \
+SELECT * FROM {old_table:Identifier} FINAL \
+WHERE _deleted = false AND key != {sweep_gate_key:String}";
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -196,6 +205,9 @@ pub async fn prepare_tables_for_migration(
 
         if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Sdlc(_)) {
             seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, &scope).await?;
+            seeded += 1;
+        } else if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Code) {
+            seed_code_scope_checkpoint(graph, table, &old_prefix).await?;
             seeded += 1;
         } else if should_clone(base_table_name, &old_name, &actions, &existing_old) {
             clone_table(graph, &old_name, &table.name, &existing_new).await?;
@@ -566,6 +578,34 @@ async fn seed_sdlc_checkpoint(
         .param("old_table", &old_table)
         .param("ns_plans", &pipelines.namespaced)
         .param("global_plans", &pipelines.global)
+        .execute()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })
+}
+
+async fn seed_code_scope_checkpoint(
+    graph: &ArrowClickHouseClient,
+    new_table: &query_engine::compiler::ast::ddl::CreateTable,
+    old_prefix: &str,
+) -> Result<(), MigrationError> {
+    graph
+        .execute(&emit_create_table(new_table))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })?;
+
+    let old_table = format!("{old_prefix}{CHECKPOINT_TABLE}");
+    info!(from = %old_table, to = %new_table.name, "cloning checkpoint for code migration, dropping code stale-sweep gate");
+    graph
+        .query(SEED_CODE_CHECKPOINT_SQL)
+        .param("new_table", &new_table.name)
+        .param("old_table", &old_table)
+        .param("sweep_gate_key", CODE_STALE_SWEEP_CHECKPOINT_KEY)
         .execute()
         .await
         .map_err(|e| MigrationError::Ddl {

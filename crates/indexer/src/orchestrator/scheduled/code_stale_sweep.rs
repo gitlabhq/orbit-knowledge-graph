@@ -22,7 +22,7 @@ use crate::orchestrator::dispatch::DispatchOutcome;
 use crate::orchestrator::scheduled::TaskError;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
-const CHECKPOINT_KEY: &str = "maintenance.code_stale_sweep";
+pub(crate) const CHECKPOINT_KEY: &str = "maintenance.code_stale_sweep";
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 

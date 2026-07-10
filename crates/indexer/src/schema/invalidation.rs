@@ -30,14 +30,15 @@ pub fn get_migration_scope_for_table_writers(
     if matches!(requested_scope, MigrationScope::Full) {
         return MigrationScope::Full;
     }
-    // Code indexing writes some relationships to the default edge table, outside the ontology's
-    // SDLC pipeline descriptors, so a code-only rebuild cannot preserve that table safely.
-    if matches!(requested_scope, MigrationScope::Code) {
-        return MigrationScope::Full;
-    }
 
     let invalidated = invalidated_entities(ontology, requested_scope);
     for table in generate_graph_tables_with_prefix(ontology, "") {
+        // A code migration clones the shared edge table intact and lets the code stale sweep
+        // tombstone its own rows as the re-index drains, so its SDLC writers do not force a
+        // rebuild. SDLC scopes cannot: they have no equivalent per-row cleanup for shared edges.
+        if matches!(requested_scope, MigrationScope::Code) && table.name == ontology.edge_table() {
+            continue;
+        }
         let writers = entities_writing_to_table(ontology, &table.name);
         let requested_scope_writes_to_table =
             writers.iter().any(|writer| invalidated.contains(writer));
@@ -219,12 +220,12 @@ mod tests {
     }
 
     #[test]
-    fn code_scope_widens_to_full_because_code_writes_shared_edges() {
+    fn code_scope_stays_narrow_and_clones_the_shared_edge_table() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
 
         assert_eq!(
             get_migration_scope_for_table_writers(&ontology, &MigrationScope::Code),
-            MigrationScope::Full
+            MigrationScope::Code
         );
     }
 

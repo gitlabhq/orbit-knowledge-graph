@@ -1101,19 +1101,31 @@ async fn whole_sdlc_scope_rebuilds_tables_and_seeds_no_checkpoints() {
 }
 
 #[tokio::test]
-async fn code_scope_rebuilds_every_table_because_code_writes_shared_edges() {
+async fn code_scope_clones_sdlc_intact_and_drops_only_the_code_stale_sweep_gate() {
     let scenario = MigrationScenario::migrating_from_active().await;
     scenario.seed_note().await;
     scenario.seed_checkpoint("ns.100.Note").await;
     scenario
         .seed_checkpoint("dispatch.sdlc.namespace.sweep")
         .await;
+    scenario
+        .seed_checkpoint("maintenance.code_stale_sweep")
+        .await;
     scenario.seed_code_checkpoint(42).await;
+    scenario
+        .seed_edge("MENTIONS", (9, "User"), (5, "Note"))
+        .await;
+    scenario
+        .seed_edge("CONTAINS", (1, "Directory"), (2, "File"))
+        .await;
 
     scenario.migrate(MigrationScope::Code).await;
 
-    scenario.assert_table_empty("gl_note").await;
-    scenario.assert_checkpoint_empty().await;
+    scenario.assert_table_row_count("gl_note", 1).await;
+    scenario.assert_table_row_count("gl_edge", 2).await;
+    scenario
+        .assert_surviving_checkpoints(&["dispatch.sdlc.namespace.sweep", "ns.100.Note"])
+        .await;
     scenario.assert_code_checkpoint_empty().await;
 }
 
