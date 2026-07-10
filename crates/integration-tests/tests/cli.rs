@@ -4,6 +4,7 @@ use integration_testkit::cli::{
     create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd,
     orbit_index, orbit_sql, rows, rows_where, sorted_ids,
 };
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 const FILES_FULL: &str = "SELECT id, name, path, branch, commit_sha FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
@@ -678,72 +679,69 @@ fn repo_map(
     cmd.output().unwrap()
 }
 
-#[test]
-fn repo_map_serves_native_subcommands() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
+#[derive(Deserialize)]
+struct RepoMapFixture {
+    files: std::collections::BTreeMap<String, String>,
+    commands: Vec<RepoMapFixtureCommand>,
+}
 
-    let overview = repo_map(&repo.path, dd, &["overview"]);
-    assert!(overview.status.success());
-    let text = String::from_utf8(overview.stdout).unwrap();
-    assert!(text.contains("REPO MAP"));
-    assert!(text.contains("Languages") && text.contains("python"));
+#[derive(Deserialize)]
+struct RepoMapFixtureCommand {
+    args: Vec<String>,
+    contains: Vec<String>,
+    #[serde(default)]
+    not_contains: Vec<String>,
+}
 
-    let tree = String::from_utf8(repo_map(&repo.path, dd, &["tree", "src"]).stdout).unwrap();
-    assert!(tree.contains("TREE") && tree.contains("App"));
-
-    // `api` extracts a signature line via read_text, so it exercises the
-    // relative-glob resolution against the repo-rooted CWD.
-    let api = String::from_utf8(repo_map(&repo.path, dd, &["api", "src"]).stdout).unwrap();
-    assert!(api.contains("class App") && api.contains("def run"));
-
-    let class = String::from_utf8(repo_map(&repo.path, dd, &["class", "App"]).stdout).unwrap();
-    assert!(class.contains("CLASS — App") && class.contains("run"));
-
-    let missing =
-        String::from_utf8(repo_map(&repo.path, dd, &["class", "NoSuchThing"]).stdout).unwrap();
-    assert!(missing.contains("no class/module/trait named NoSuchThing"));
+fn load_fixture<T: DeserializeOwned>(path: &str) -> T {
+    serde_yaml::from_str(include_str!("fixtures/repo_map.yaml"))
+        .unwrap_or_else(|error| panic!("invalid {path}: {error}"))
 }
 
 #[test]
-fn repo_map_ext_filter_scopes_languages() {
+fn repo_map_yaml_fixture_suite() {
+    let fixture: RepoMapFixture = load_fixture("fixtures/repo_map.yaml");
     let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let files: Vec<_> = fixture
+        .files
+        .iter()
+        .map(|(path, content)| (path.as_str(), content.as_str()))
+        .collect();
+    init_repo_at(repo_dir.path(), &files);
+    let repo_path = repo_dir.path().display().to_string();
+    let sha = git(repo_dir.path(), &["rev-parse", "HEAD"]);
     let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
+    assert!(orbit_index(repo_dir.path(), dd));
 
-    let rust_only =
-        String::from_utf8(repo_map(&repo.path, dd, &["--ext", "rs", "overview"]).stdout).unwrap();
-    assert!(rust_only.contains("REPO MAP"));
-    assert!(
-        !rust_only.contains("python"),
-        "rs filter must drop python files"
-    );
-}
-
-#[test]
-fn repo_map_extends_and_imports_render_rows() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
-
-    let extends = String::from_utf8(repo_map(&repo.path, dd, &["extends", "Base"]).stdout).unwrap();
-    assert!(extends.contains("DESCENDANTS — Base"));
-    assert!(
-        extends.contains("Base") && extends.contains("App"),
-        "EXTENDS chain must list the base and its descendant: {extends}"
-    );
-
-    let imports =
-        String::from_utf8(repo_map(&repo.path, dd, &["imports", "read_file"]).stdout).unwrap();
-    assert!(imports.contains("IMPORTERS — pattern 'read_file'"));
-    assert!(
-        imports.contains("read_file") && imports.contains("src.utils"),
-        "IMPORTERS must resolve the imported symbol and its source path: {imports}"
-    );
+    for command in fixture.commands {
+        let args: Vec<_> = command.args.iter().map(String::as_str).collect();
+        let out = repo_map(repo_dir.path(), dd, &args);
+        assert!(
+            out.status.success(),
+            "repo-map {:?} failed: {}",
+            command.args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8(out.stdout)
+            .unwrap()
+            .replace(&repo_path, "<repo>")
+            .replace(&sha, "<sha>");
+        for expected in &command.contains {
+            assert!(
+                text.contains(expected),
+                "repo-map {:?} must contain {expected:?}: {text}",
+                command.args
+            );
+        }
+        for unexpected in &command.not_contains {
+            assert!(
+                !text.contains(unexpected),
+                "repo-map {:?} must not contain {unexpected:?}: {text}",
+                command.args
+            );
+        }
+    }
 }
 
 #[test]
@@ -1009,83 +1007,5 @@ fn repo_map_relative_orbit_data_dir() {
     assert!(
         text.contains("REPO MAP") && text.contains("Languages"),
         "overview output must contain expected sections: {text}"
-    );
-}
-
-/// All six subcommands must emit their section header and a separator line,
-/// and non-empty subcommands must produce at least one tabular row.
-#[test]
-fn repo_map_output_shape() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
-
-    let overview = String::from_utf8(repo_map(&repo.path, dd, &["overview"]).stdout).unwrap();
-    for section in [
-        "Languages",
-        "Top-level structure",
-        "Key abstractions",
-        "Most-imported defined symbols",
-        "Most-called callables",
-    ] {
-        assert!(
-            overview.contains(section),
-            "overview missing section '{section}': {overview}"
-        );
-    }
-    assert!(
-        overview.contains("=="),
-        "overview missing separator: {overview}"
-    );
-    assert!(
-        overview.lines().any(|l| l.contains("python")),
-        "overview must contain at least one data row with 'python': {overview}"
-    );
-
-    let tree = String::from_utf8(repo_map(&repo.path, dd, &["tree", "src"]).stdout).unwrap();
-    assert!(tree.starts_with("TREE"), "tree must start with header");
-    assert!(
-        tree.lines().any(|l| l.contains("src/")),
-        "tree must list files under src/: {tree}"
-    );
-
-    let api = String::from_utf8(repo_map(&repo.path, dd, &["api", "src"]).stdout).unwrap();
-    assert!(api.starts_with("API MAP"), "api must start with header");
-    assert!(
-        api.lines().any(|l| l.contains("[L")),
-        "api must contain at least one line-number reference: {api}"
-    );
-
-    let class = String::from_utf8(repo_map(&repo.path, dd, &["class", "App"]).stdout).unwrap();
-    assert!(class.starts_with("CLASS"), "class must start with header");
-    assert!(
-        class.contains("Members + signatures"),
-        "class must have members section: {class}"
-    );
-
-    let extends = String::from_utf8(repo_map(&repo.path, dd, &["extends", "Base"]).stdout).unwrap();
-    assert!(
-        extends.starts_with("DESCENDANTS"),
-        "extends must start with header"
-    );
-    let depth_rows: Vec<&str> = extends
-        .lines()
-        .filter(|l| l.starts_with("| ") && !l.starts_with("| depth"))
-        .collect();
-    assert!(
-        depth_rows.len() >= 2,
-        "extends must have at least 2 data rows (Base + App): {extends}"
-    );
-
-    let imports =
-        String::from_utf8(repo_map(&repo.path, dd, &["imports", "read_file"]).stdout).unwrap();
-    assert!(
-        imports.starts_with("IMPORTERS"),
-        "imports must start with header"
-    );
-    assert!(
-        imports.lines().any(|l| l.contains("read_file")),
-        "imports must list the matched symbol: {imports}"
     );
 }

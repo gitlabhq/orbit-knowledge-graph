@@ -1,0 +1,36 @@
+files:
+  src/main.py: |
+    from utils import read_file
+
+    class Base:
+        def setup(self):
+            pass
+
+    class App(Base):
+        def run(self):
+            return read_file("config")
+  src/utils.py: |
+    def read_file(path):
+        return path
+  src/tool.rs: |
+    pub struct Tool;
+  tests/ignored.py: |
+    class Ignored:
+        pass
+commands:
+  - args: [overview]
+    contains: ["REPO MAP — <repo> @ <sha>", "Languages (non-test source files):", "| python   | 2", "Definition totals:", "Top-level structure", src, "read_file"]
+  - args: ["--ext", rs, overview]
+    contains: [rust]
+    not_contains: [python]
+  - args: [tree, src]
+    contains: ["TREE — under src/", "src/main.py", "Class Base", "Class App"]
+    not_contains: [Ignored]
+  - args: [api, src]
+    contains: ["API MAP — under src/", "class App(Base):", "def read_file(path):", "[L"]
+  - args: [class, App]
+    contains: ["CLASS — App", "src/main.py", "Members + signatures:", "def run(self):"]
+  - args: [extends, Base]
+    contains: ["DESCENDANTS — Base", Base, App, "src/main.py"]
+  - args: [imports, read_file]
+    contains: ["IMPORTERS — pattern 'read_file'", read_file, "utils"]
