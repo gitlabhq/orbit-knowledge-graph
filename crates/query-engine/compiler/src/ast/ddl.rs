@@ -14,6 +14,7 @@ pub struct CreateTable {
     /// When absent, PRIMARY KEY defaults to ORDER BY.
     pub primary_key: Option<Vec<String>>,
     pub settings: Vec<TableSetting>,
+    pub ttl: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,6 +147,14 @@ pub struct CreateMaterializedView {
     pub populate: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateRefreshableMaterializedView {
+    pub name: String,
+    pub select_query: String,
+    pub append_to: String,
+    pub refresh: String,
+}
+
 impl CreateMaterializedView {
     /// Applies a schema-version prefix to the view name, the optional
     /// `to_table`, and every `{table_name}` placeholder in the SELECT query.
@@ -215,6 +224,7 @@ impl CreateTable {
             order_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         }
     }
 

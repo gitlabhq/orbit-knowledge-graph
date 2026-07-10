@@ -103,6 +103,15 @@ pub struct MaterializedViewDefinition {
     pub populate: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshableMaterializedViewDefinition {
+    pub name: String,
+    pub versioned: bool,
+    pub select_query: String,
+    pub append_to: String,
+    pub refresh: String,
+}
+
 /// Configuration for automated column statistics collection.
 ///
 /// Column categorization is auto-derived from ontology property types:
@@ -170,6 +179,7 @@ impl PartitionConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryTable {
     pub name: String,
+    pub versioned: bool,
     pub columns: Vec<AuxiliaryColumn>,
     pub order_by: Vec<String>,
     /// When true, engine is `ReplacingMergeTree(_version)` without `_deleted`.
@@ -177,6 +187,9 @@ pub struct AuxiliaryTable {
     /// Override version column type (e.g. `"uint64"` for code_indexing_checkpoint).
     pub version_type: Option<String>,
     pub projections: Vec<StorageProjection>,
+    pub include_system_columns: bool,
+    pub engine: Option<String>,
+    pub ttl: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

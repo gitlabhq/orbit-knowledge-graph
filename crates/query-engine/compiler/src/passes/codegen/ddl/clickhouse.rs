@@ -1,7 +1,7 @@
 use crate::ast::Expr;
 use crate::ast::ddl::{
-    Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
-    ProjectionDef,
+    Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateRefreshableMaterializedView,
+    CreateTable, IndexType, ProjectionDef,
 };
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use serde_json::Value;
@@ -186,6 +186,10 @@ pub fn emit_create_table(table: &CreateTable) -> String {
         parts.push(format!("SETTINGS {}", settings.join(", ")));
     }
 
+    if let Some(ttl) = &table.ttl {
+        parts.push(format!("TTL {ttl}"));
+    }
+
     parts.join("\n")
 }
 
@@ -225,6 +229,15 @@ pub fn emit_create_materialized_view(mv: &CreateMaterializedView) -> String {
     parts.push(format!("AS {}", mv.select_query));
 
     parts.join("\n")
+}
+
+pub fn emit_create_refreshable_materialized_view(
+    view: &CreateRefreshableMaterializedView,
+) -> String {
+    format!(
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS {}\nREFRESH {} APPEND TO {}\nAS {}",
+        view.name, view.refresh, view.append_to, view.select_query
+    )
 }
 
 /// Connection identity for a dictionary's local `CLICKHOUSE` source. ClickHouse
@@ -385,6 +398,7 @@ mod tests {
                 key: "allow_experimental_replacing_merge_with_cleanup".into(),
                 value: "1".into(),
             }],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -433,6 +447,7 @@ mod tests {
                     value: "'rebuild'".into(),
                 },
             ],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -476,6 +491,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -517,6 +533,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -539,6 +556,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -563,6 +581,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -587,6 +606,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -611,6 +631,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -646,6 +667,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -672,6 +694,21 @@ mod tests {
         assert!(sql.contains("AS SELECT traversal_path, count()"));
         assert!(!sql.contains("ENGINE"));
         assert!(!sql.contains("POPULATE"));
+    }
+
+    #[test]
+    fn emit_refreshable_materialized_view() {
+        let view = CreateRefreshableMaterializedView {
+            name: "v7_daily_summary".into(),
+            select_query: "SELECT 1".into(),
+            append_to: "summary_snapshots".into(),
+            refresh: "EVERY 1 DAY OFFSET 2 HOUR".into(),
+        };
+
+        assert_eq!(
+            emit_create_refreshable_materialized_view(&view),
+            "CREATE MATERIALIZED VIEW IF NOT EXISTS v7_daily_summary\nREFRESH EVERY 1 DAY OFFSET 2 HOUR APPEND TO summary_snapshots\nAS SELECT 1"
+        );
     }
 
     #[test]

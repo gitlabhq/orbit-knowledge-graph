@@ -38,9 +38,9 @@ pub use entities::{
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
     NodeEntity, NodeStorage, NodeStyle, PartitionConfig, PartitionStrategy, RedactionConfig,
-    RequiredRole, StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex,
-    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
-    VirtualSource,
+    RefreshableMaterializedViewDefinition, RequiredRole, StatisticsConfig, StatisticsExclude,
+    StorageColumn, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookup,
+    TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
@@ -109,6 +109,20 @@ pub struct EdgeTableConfig {
     pub storage: EdgeTableStorage,
 }
 
+impl EdgeTableConfig {
+    #[must_use]
+    pub fn has_traversal_path(&self) -> bool {
+        self.storage
+            .columns
+            .iter()
+            .any(|column| column.name == TRAVERSAL_PATH_COLUMN)
+            || self
+                .columns
+                .iter()
+                .any(|column| column.name == TRAVERSAL_PATH_COLUMN)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
     schema_version: String,
@@ -138,6 +152,7 @@ pub struct Ontology {
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
     pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
+    pub(crate) refreshable_materialized_views: Vec<RefreshableMaterializedViewDefinition>,
     pub(crate) statistics: Option<StatisticsConfig>,
     pub(crate) partition: Option<PartitionConfig>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
@@ -196,6 +211,7 @@ impl Ontology {
             denormalized_properties: Vec::new(),
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
+            refreshable_materialized_views: Vec::new(),
             statistics: None,
             partition: None,
             traversal_path_lookups: Vec::new(),
@@ -1158,6 +1174,11 @@ impl Ontology {
     #[must_use]
     pub fn materialized_views(&self) -> &[MaterializedViewDefinition] {
         &self.materialized_views
+    }
+
+    #[must_use]
+    pub fn refreshable_materialized_views(&self) -> &[RefreshableMaterializedViewDefinition] {
+        &self.refreshable_materialized_views
     }
 
     #[must_use]

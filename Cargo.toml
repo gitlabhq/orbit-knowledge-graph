@@ -162,6 +162,7 @@ tower = "0.5.3"
 triomphe = "0.1.15"
 base64 = "0.22.1"
 moka = { version = "0.12", features = ["future"] }
+minijinja = "2.21.0"
 
 # Server dependencies
 axum = { version = "0.8.8", features = ["macros"] }

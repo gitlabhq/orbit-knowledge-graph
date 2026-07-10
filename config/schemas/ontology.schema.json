@@ -802,6 +802,10 @@
             "type": "object",
             "properties": {
               "name": { "type": "string" },
+              "versioned": {
+                "type": "boolean",
+                "description": "Whether the table receives the active schema-version prefix. Defaults to true."
+              },
               "columns": {
                 "type": "array",
                 "items": {
@@ -820,7 +824,19 @@
               "order_by": { "type": "array", "items": { "type": "string" } },
               "version_only_engine": { "type": "boolean" },
               "version_type": { "type": "string" },
-              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } },
+              "include_system_columns": {
+                "type": "boolean",
+                "description": "Whether _version and _deleted columns are generated. Defaults to true."
+              },
+              "engine": {
+                "type": "string",
+                "description": "Optional ClickHouse table engine override."
+              },
+              "ttl": {
+                "type": "string",
+                "description": "Optional ClickHouse TTL expression."
+              }
             },
             "required": ["name", "columns", "order_by"],
             "additionalProperties": false
@@ -876,6 +892,37 @@
                 "description": "Implicit-storage mode: ClickHouse creates backing storage with the given engine."
               }
             ],
+            "additionalProperties": false
+          }
+        },
+        "refreshable_materialized_views": {
+          "type": "array",
+          "description": "ClickHouse refreshable materialized views whose SELECT bodies are stored in ontology SQL files.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Materialized view name. Receives the active schema-version prefix."
+              },
+              "versioned": {
+                "type": "boolean",
+                "description": "Whether the materialized view receives the active schema-version prefix."
+              },
+              "append_to": {
+                "type": "string",
+                "description": "Ontology-tracked table receiving refreshed rows."
+              },
+              "refresh": {
+                "type": "string",
+                "description": "ClickHouse refresh schedule expression."
+              },
+              "select_file": {
+                "type": "string",
+                "description": "SELECT template path relative to the ontology directory."
+              }
+            },
+            "required": ["name", "versioned", "append_to", "refresh", "select_file"],
             "additionalProperties": false
           }
         },
