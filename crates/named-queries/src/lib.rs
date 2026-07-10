@@ -123,6 +123,21 @@ impl NamedQueries {
                 location: location.to_string(),
             });
         }
+        let defaults: Vec<&str> = queries
+            .values()
+            .filter(|q| q.default)
+            .map(|q| q.name.as_str())
+            .collect();
+        if defaults.len() > 1 {
+            return Err(invalid(
+                defaults[0],
+                format!(
+                    "at most one named query may set `default: true`, but {} do: {}",
+                    defaults.len(),
+                    defaults.join(", ")
+                ),
+            ));
+        }
         Ok(Self { queries })
     }
 
@@ -277,6 +292,25 @@ query:
         )
         .unwrap_err();
         assert!(err.to_string().contains("duplicate"), "{err}");
+    }
+
+    #[test]
+    fn multiple_defaults_are_rejected() {
+        let default_yaml = |name: &str| {
+            format!(
+                "name: {name}\ndescription: A query.\ndefault: true\nbindings: [current_user_id]\nquery:\n  node_ids:\n    - {{ $binding: current_user_id }}\n"
+            )
+        };
+        let err = NamedQueries::from_files(
+            "test",
+            [
+                ("first.yaml".to_string(), default_yaml("first")),
+                ("second.yaml".to_string(), default_yaml("second")),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("at most one"), "{err}");
+        assert!(err.to_string().contains("first, second"), "{err}");
     }
 
     #[test]
