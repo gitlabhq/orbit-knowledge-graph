@@ -38,8 +38,7 @@ entity lookup or a cross-domain SDLC query.
 ## Invocation
 
 The script is at `./scripts/remote_repo_map.py` relative to the Orbit skill
-root. Path resolution rules are the same as for the local helper — see
-[Invocation in `local_repo_map.md`](local_repo_map.md#invocation).
+root.
 
 The default target is `gitlab-org/gitlab` (`project_id = 278964`) on `master`:
 
