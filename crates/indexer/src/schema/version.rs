@@ -66,6 +66,7 @@ fn version_table_ddl() -> CreateTable {
         order_by: vec!["version".into()],
         primary_key: None,
         settings: vec![],
+        ttl: None,
     }
 }
 

@@ -9,11 +9,12 @@ pub mod duckdb;
 use std::collections::BTreeMap;
 
 use ontology::{
-    AuxiliaryTable, MaterializedViewDefinition, Ontology, PartitionConfig, StorageColumn,
-    StorageIndex, StorageProjection,
+    AuxiliaryTable, MaterializedViewDefinition, Ontology, PartitionConfig,
+    RefreshableMaterializedViewDefinition, StorageColumn, StorageIndex, StorageProjection,
 };
 
 use crate::ast::ddl::*;
+use crate::schema_templates::render_refreshable_materialized_view_select;
 
 /// Tables are returned unprefixed. Call `.with_prefix()` on each to apply
 /// a schema version prefix before codegen.
@@ -38,7 +39,11 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
     let mut tables: Vec<CreateTable> = Vec::new();
 
     let partition = ontology.partition();
-    for aux in ontology.auxiliary_tables() {
+    for aux in ontology
+        .auxiliary_tables()
+        .iter()
+        .filter(|table| table.versioned)
+    {
         tables.push(build_auxiliary_table(aux).with_prefix(prefix));
     }
     for node in ontology.nodes() {
@@ -51,6 +56,31 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
     }
 
     tables
+}
+
+pub fn generate_unversioned_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
+    ontology
+        .auxiliary_tables()
+        .iter()
+        .filter(|table| !table.versioned)
+        .map(build_auxiliary_table)
+        .collect()
+}
+
+pub fn generate_refreshable_materialized_views(
+    ontology: &Ontology,
+    version: u32,
+) -> Vec<CreateRefreshableMaterializedView> {
+    let prefix = if version == 0 {
+        String::new()
+    } else {
+        format!("v{version}_")
+    };
+    ontology
+        .refreshable_materialized_views()
+        .iter()
+        .map(|view| build_refreshable_materialized_view(ontology, view, version, &prefix))
+        .collect()
 }
 
 /// Views are returned unprefixed. Call
@@ -416,6 +446,7 @@ fn build_node_table(
         partition_by,
         order_by: node.sort_key.clone(),
         primary_key: node.storage.primary_key.clone(),
+        ttl: None,
     }
 }
 
@@ -472,6 +503,7 @@ fn build_edge_table(
             partitioned,
             &config.storage.settings,
         ),
+        ttl: None,
     }
 }
 
@@ -492,9 +524,16 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
         })
         .collect();
 
-    columns.extend(system_columns(aux.version_type.as_deref()));
+    if aux.include_system_columns {
+        columns.extend(system_columns(aux.version_type.as_deref()));
+    }
 
-    let engine = if aux.version_only_engine {
+    let engine = if let Some(name) = &aux.engine {
+        Engine {
+            name: name.clone(),
+            args: vec![],
+        }
+    } else if aux.version_only_engine {
         Engine::replacing_merge_tree_version_only("_version")
     } else {
         Engine::replacing_merge_tree("_version", "_deleted")
@@ -513,6 +552,7 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
         order_by: aux.order_by.clone(),
         primary_key: None,
         settings: table_settings(None, !projections.is_empty(), false, &empty_settings),
+        ttl: aux.ttl.clone(),
     }
 }
 
@@ -548,6 +588,30 @@ fn build_materialized_view(mv: &MaterializedViewDefinition) -> CreateMaterialize
     }
 }
 
+fn build_refreshable_materialized_view(
+    ontology: &Ontology,
+    view: &RefreshableMaterializedViewDefinition,
+    version: u32,
+    prefix: &str,
+) -> CreateRefreshableMaterializedView {
+    CreateRefreshableMaterializedView {
+        name: if view.versioned {
+            format!("{prefix}{}", view.name)
+        } else {
+            view.name.clone()
+        },
+        select_query: render_refreshable_materialized_view_select(
+            &view.select_query,
+            ontology,
+            version,
+            prefix,
+        )
+        .expect("refreshable materialized view SELECT template must render"),
+        append_to: view.append_to.clone(),
+        refresh: view.refresh.clone(),
+    }
+}
+
 /// Filters out properties listed in the entity's `exclude_properties`.
 fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<CreateTable> {
     let exclude = ontology.local_entity_excludes(entity_name)?;
@@ -579,6 +643,7 @@ fn build_local_node_table(ontology: &Ontology, entity_name: &str) -> Option<Crea
             .collect(),
         primary_key: None,
         settings: vec![],
+        ttl: None,
     })
 }
 
@@ -610,6 +675,7 @@ fn build_local_edge_table(ontology: &Ontology) -> Option<CreateTable> {
             .collect(),
         primary_key: None,
         settings: vec![],
+        ttl: None,
     })
 }
 
@@ -820,6 +886,57 @@ mod tests {
         assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS v5_mv_edge_summary"));
         assert!(sql.contains("ENGINE = SummingMergeTree"));
         assert!(sql.contains("ORDER BY (traversal_path)"));
+    }
+
+    #[test]
+    fn refreshable_materialized_view_uses_versioned_name() {
+        let view = ontology::RefreshableMaterializedViewDefinition {
+            name: "daily_summary".into(),
+            versioned: true,
+            select_query: "SELECT 1".into(),
+            append_to: "summary_snapshots".into(),
+            refresh: "EVERY 1 DAY".into(),
+        };
+
+        let generated = build_refreshable_materialized_view(&ontology(), &view, 7, "v7_");
+
+        assert_eq!(generated.name, "v7_daily_summary");
+        assert_eq!(generated.select_query, "SELECT 1");
+        assert_eq!(generated.append_to, "summary_snapshots");
+    }
+
+    #[test]
+    fn auxiliary_table_supports_unversioned_snapshot_storage() {
+        let table = build_auxiliary_table(&ontology::AuxiliaryTable {
+            name: "daily_snapshots".into(),
+            versioned: false,
+            columns: vec![ontology::AuxiliaryColumn {
+                name: "snapshot_date".into(),
+                data_type: ontology::DataType::Date,
+                nullable: false,
+                codec: None,
+                default: None,
+            }],
+            order_by: vec!["snapshot_date".into()],
+            version_only_engine: false,
+            version_type: None,
+            projections: vec![],
+            include_system_columns: false,
+            engine: Some("ReplacingMergeTree".into()),
+            ttl: Some("snapshot_date + INTERVAL 400 DAY".into()),
+        });
+
+        assert_eq!(table.engine.name, "ReplacingMergeTree");
+        assert_eq!(
+            table.ttl.as_deref(),
+            Some("snapshot_date + INTERVAL 400 DAY")
+        );
+        assert!(
+            table
+                .columns
+                .iter()
+                .all(|column| !column.name.starts_with('_'))
+        );
     }
 
     #[test]

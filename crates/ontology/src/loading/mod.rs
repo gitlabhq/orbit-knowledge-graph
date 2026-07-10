@@ -489,6 +489,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .collect();
             crate::entities::AuxiliaryTable {
                 name: t.name,
+                versioned: t.versioned,
                 columns: t
                     .columns
                     .into_iter()
@@ -504,6 +505,9 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 version_only_engine: t.version_only_engine,
                 version_type: t.version_type,
                 projections,
+                include_system_columns: t.include_system_columns,
+                engine: t.engine,
+                ttl: t.ttl,
             }
         })
         .collect();
@@ -553,6 +557,45 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 engine_args: mv.engine_args,
                 order_by: mv.order_by,
                 populate: mv.populate,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    ontology.refreshable_materialized_views = schema
+        .settings
+        .refreshable_materialized_views
+        .into_iter()
+        .map(|view| {
+            let select_path = Path::new(&view.select_file);
+            if select_path.is_absolute()
+                || select_path
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                return Err(OntologyError::Validation(format!(
+                    "refreshable_materialized_view '{}': select_file '{}' must stay within the ontology directory",
+                    view.name, view.select_file
+                )));
+            }
+            if !all_table_names.contains(&view.append_to) {
+                return Err(OntologyError::Validation(format!(
+                    "refreshable_materialized_view '{}': append_to '{}' is not an ontology-tracked table",
+                    view.name, view.append_to
+                )));
+            }
+            let select_query = reader.read(&view.select_file)?;
+            if select_query.trim().is_empty() {
+                return Err(OntologyError::Validation(format!(
+                    "refreshable_materialized_view '{}': select_file '{}' is empty",
+                    view.name, view.select_file
+                )));
+            }
+            Ok(crate::entities::RefreshableMaterializedViewDefinition {
+                name: view.name,
+                versioned: view.versioned,
+                select_query,
+                append_to: view.append_to,
+                refresh: view.refresh,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

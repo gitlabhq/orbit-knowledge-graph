@@ -38,6 +38,7 @@ pub mod error;
 pub mod input;
 pub mod metrics;
 pub(crate) mod schema_limits;
+mod schema_templates;
 pub mod scope;
 pub mod types;
 
@@ -66,6 +67,7 @@ pub use passes::codegen::{
     clickhouse::emit_simple_query,
     codegen,
     ddl::clickhouse::emit_create_materialized_view,
+    ddl::clickhouse::emit_create_refreshable_materialized_view,
     ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
     ddl::ddl_fingerprints,
     ddl::duckdb::emit_create_table as emit_duckdb_create_table,
@@ -77,6 +79,8 @@ pub use passes::codegen::{
     ddl::generate_graph_tables,
     ddl::generate_graph_tables_with_prefix,
     ddl::generate_local_tables,
+    ddl::generate_refreshable_materialized_views,
+    ddl::generate_unversioned_graph_tables,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::hydrate::{
