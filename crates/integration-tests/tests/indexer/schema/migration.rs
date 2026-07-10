@@ -1,10 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use clickhouse_client::FromArrowColumn;
+use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
+use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
-use indexer::orchestrator::scheduled::migration_completion;
+use indexer::modules::code::config::CodeTableNames;
+use indexer::orchestrator::dispatch::DispatchOutcome;
+use indexer::orchestrator::scheduled::{CodeStaleSweep, migration_completion};
 use indexer::schema::migration;
 use indexer::schema::version::{
     SCHEMA_VERSION, SchemaWaitError, ensure_version_table, prefixed_table_name,
@@ -990,6 +993,43 @@ impl MigrationScenario {
             .await;
         i64::extract_column(&batches, 0).unwrap()[0]
     }
+
+    async fn seed_new_code_checkpoint_watermark(&self, project_id: u64, indexed_at: &str) {
+        let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {table} (traversal_path, project_id, branch, last_task_id, indexed_at) \
+                 VALUES ('1/100/', {project_id}, 'main', 1, '{indexed_at}')"
+            ))
+            .await;
+    }
+
+    async fn run_code_stale_sweep(&self) {
+        let table_names =
+            CodeTableNames::from_ontology(&self.ontology).expect("code tables must resolve");
+        let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
+            self.ctx.config.build_client(),
+        )));
+        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store)
+            .run_after_drain(&DispatchOutcome {
+                dispatched: 0,
+                skipped: 0,
+            })
+            .await
+            .expect("sweep failed");
+    }
+
+    async fn live_edge_exists(&self, kind: &str, source_id: u64) -> bool {
+        let table = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+        let rows = self
+            .ctx
+            .query(&format!(
+                "SELECT source_id FROM {table} FINAL \
+                 WHERE relationship_kind = '{kind}' AND source_id = {source_id} AND _deleted = false"
+            ))
+            .await;
+        rows.first().is_some_and(|b| b.num_rows() > 0)
+    }
 }
 
 async fn insert_completed_checkpoint(ctx: &TestContext, table: &str, key: &str, version: &str) {
@@ -1127,6 +1167,39 @@ async fn code_scope_clones_sdlc_intact_and_drops_only_the_code_stale_sweep_gate(
         .assert_surviving_checkpoints(&["dispatch.sdlc.namespace.sweep", "ns.100.Note"])
         .await;
     scenario.assert_code_checkpoint_empty().await;
+}
+
+#[tokio::test]
+async fn code_migration_clone_converges_after_reindex_and_sweep() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario
+        .seed_edge("CONTAINS", (10, "Directory"), (20, "File"))
+        .await;
+    scenario
+        .seed_edge("CONTAINS", (1, "Branch"), (30, "Directory"))
+        .await;
+    scenario
+        .seed_edge("MENTIONS", (9, "User"), (5, "Note"))
+        .await;
+
+    scenario.migrate(MigrationScope::Code).await;
+    scenario
+        .seed_new_code_checkpoint_watermark(40, REINDEX_VERSION)
+        .await;
+    scenario.run_code_stale_sweep().await;
+
+    assert!(
+        !scenario.live_edge_exists("CONTAINS", 10).await,
+        "the cloned Directory-source code edge must be tombstoned once its project re-indexes"
+    );
+    assert!(
+        scenario.live_edge_exists("MENTIONS", 9).await,
+        "SDLC edges must never be touched by the code stale sweep"
+    );
+    assert!(
+        scenario.live_edge_exists("CONTAINS", 1).await,
+        "known gap: Branch-source code edges are not swept until the sweep covers Branch/Project"
+    );
 }
 
 #[tokio::test]
