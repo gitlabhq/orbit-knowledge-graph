@@ -831,3 +831,261 @@ fn repo_map_reports_unindexed_commit() {
     let err = String::from_utf8(out.stderr).unwrap();
     assert!(err.contains("is not indexed") && err.contains("orbit index"));
 }
+
+/// Two clones at the same commit SHA indexed into one DB must be completely
+/// isolated: each repo-map must see only its own project's data. Without
+/// `project_id` scoping, the queries would combine rows from both.
+#[test]
+fn repo_map_same_sha_isolates_projects() {
+    let workspace = tempfile::TempDir::new().unwrap();
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let dd = data_dir.path();
+
+    let repo_a = workspace.path().join("alpha");
+    init_repo_at(
+        &repo_a,
+        &[
+            (
+                "src/main.py",
+                "class Alpha:\n    def run(self):\n        pass\n",
+            ),
+            ("src/helper.py", "def alpha_helper():\n    pass\n"),
+        ],
+    );
+    let sha_a = git(&repo_a, &["rev-parse", "HEAD"]);
+
+    let repo_b = workspace.path().join("beta");
+    std::process::Command::new("git")
+        .args([
+            "clone",
+            "--local",
+            repo_a.to_str().unwrap(),
+            repo_b.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let sha_b = git(&repo_b, &["rev-parse", "HEAD"]);
+    assert_eq!(sha_a, sha_b, "clones must share the same commit SHA");
+
+    assert!(orbit_index(&repo_a, dd));
+    assert!(orbit_index(&repo_b, dd));
+
+    let files = orbit_sql("SELECT project_id, path FROM gl_file ORDER BY path", dd);
+    let file_rows = rows(&files);
+    let project_ids: BTreeSet<i64> = file_rows
+        .iter()
+        .filter_map(|r| r["project_id"].as_i64())
+        .collect();
+    assert_eq!(
+        project_ids.len(),
+        2,
+        "two distinct project_ids must exist: {file_rows:?}"
+    );
+
+    // Without project_id scoping, the overview file count would double (4
+    // instead of 2) because both projects share the same SHA.
+    let count_files = |repo: &std::path::Path, label: &str| -> usize {
+        let text = String::from_utf8(repo_map(repo, dd, &["overview"]).stdout).unwrap();
+        let files_line = text
+            .lines()
+            .find(|l| l.contains("python"))
+            .unwrap_or_else(|| panic!("{label} overview must contain a python row:\n{text}"));
+        files_line
+            .split('|')
+            .filter_map(|cell| cell.trim().parse().ok())
+            .next()
+            .unwrap_or_else(|| panic!("{label} python row has no count:\n{files_line}"))
+    };
+    assert_eq!(count_files(&repo_a, "alpha"), 2);
+    assert_eq!(count_files(&repo_b, "beta"), 2);
+
+    let tree_a = String::from_utf8(repo_map(&repo_a, dd, &["tree", "src"]).stdout).unwrap();
+    let tree_b = String::from_utf8(repo_map(&repo_b, dd, &["tree", "src"]).stdout).unwrap();
+    assert!(tree_a.contains("Alpha"), "alpha tree must contain Alpha");
+    assert!(tree_b.contains("Alpha"), "beta tree must contain Alpha");
+
+    let extends_a = String::from_utf8(repo_map(&repo_a, dd, &["extends", "Alpha"]).stdout).unwrap();
+    let extends_b = String::from_utf8(repo_map(&repo_b, dd, &["extends", "Alpha"]).stdout).unwrap();
+    assert!(
+        extends_a.contains("Alpha"),
+        "alpha extends must show Alpha: {extends_a}"
+    );
+    assert!(
+        extends_b.contains("Alpha"),
+        "beta extends must show Alpha: {extends_b}"
+    );
+
+    let imports_a =
+        String::from_utf8(repo_map(&repo_a, dd, &["imports", "alpha_helper"]).stdout).unwrap();
+    let imports_b =
+        String::from_utf8(repo_map(&repo_b, dd, &["imports", "alpha_helper"]).stdout).unwrap();
+    assert!(
+        imports_a.contains("IMPORTERS"),
+        "alpha imports header must appear: {imports_a}"
+    );
+    assert!(
+        imports_b.contains("IMPORTERS"),
+        "beta imports header must appear: {imports_b}"
+    );
+}
+
+/// Preflight must reject a checkout whose project_id is not indexed, even
+/// when a different project at the same SHA exists in the DB.
+#[test]
+fn repo_map_preflight_rejects_unindexed_project_at_same_sha() {
+    let workspace = tempfile::TempDir::new().unwrap();
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let dd = data_dir.path();
+
+    let repo_a = workspace.path().join("indexed");
+    init_repo_at(&repo_a, &[("lib.py", "x = 1\n")]);
+
+    let repo_b = workspace.path().join("not-indexed");
+    std::process::Command::new("git")
+        .args([
+            "clone",
+            "--local",
+            repo_a.to_str().unwrap(),
+            repo_b.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        git(&repo_a, &["rev-parse", "HEAD"]),
+        git(&repo_b, &["rev-parse", "HEAD"]),
+    );
+
+    assert!(orbit_index(&repo_a, dd));
+
+    let out = repo_map(&repo_b, dd, &["overview"]);
+    assert!(
+        !out.status.success(),
+        "preflight must fail for the unindexed clone even though the SHA exists"
+    );
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        err.contains("is not indexed"),
+        "error must mention unindexed commit: {err}"
+    );
+}
+
+/// `ORBIT_DATA_DIR` set to a relative path must resolve against the caller's
+/// CWD, not the repo root that `repo-map` internally changes to.
+#[test]
+fn repo_map_relative_orbit_data_dir() {
+    let repo = create_test_repo();
+    let caller_dir = tempfile::TempDir::new().unwrap();
+
+    let idx = orbit_cmd()
+        .args(["index", repo.path.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", "orbit-data")
+        .current_dir(caller_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        idx.status.success(),
+        "index with relative ORBIT_DATA_DIR failed: {}",
+        String::from_utf8_lossy(&idx.stderr)
+    );
+    assert!(caller_dir.path().join("orbit-data/graph.duckdb").exists());
+
+    let out = orbit_cmd()
+        .args([
+            "repo-map",
+            "--repo",
+            repo.path.to_str().unwrap(),
+            "overview",
+        ])
+        .env("ORBIT_DATA_DIR", "orbit-data")
+        .current_dir(caller_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "relative ORBIT_DATA_DIR must resolve before the repo-root chdir: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains("REPO MAP") && text.contains("Languages"),
+        "overview output must contain expected sections: {text}"
+    );
+}
+
+/// All six subcommands must emit their section header and a separator line,
+/// and non-empty subcommands must produce at least one tabular row.
+#[test]
+fn repo_map_output_shape() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    let overview = String::from_utf8(repo_map(&repo.path, dd, &["overview"]).stdout).unwrap();
+    for section in [
+        "Languages",
+        "Top-level structure",
+        "Key abstractions",
+        "Most-imported defined symbols",
+        "Most-called callables",
+    ] {
+        assert!(
+            overview.contains(section),
+            "overview missing section '{section}': {overview}"
+        );
+    }
+    assert!(
+        overview.contains("=="),
+        "overview missing separator: {overview}"
+    );
+    assert!(
+        overview.lines().any(|l| l.contains("python")),
+        "overview must contain at least one data row with 'python': {overview}"
+    );
+
+    let tree = String::from_utf8(repo_map(&repo.path, dd, &["tree", "src"]).stdout).unwrap();
+    assert!(tree.starts_with("TREE"), "tree must start with header");
+    assert!(
+        tree.lines().any(|l| l.contains("src/")),
+        "tree must list files under src/: {tree}"
+    );
+
+    let api = String::from_utf8(repo_map(&repo.path, dd, &["api", "src"]).stdout).unwrap();
+    assert!(api.starts_with("API MAP"), "api must start with header");
+    assert!(
+        api.lines().any(|l| l.contains("[L")),
+        "api must contain at least one line-number reference: {api}"
+    );
+
+    let class = String::from_utf8(repo_map(&repo.path, dd, &["class", "App"]).stdout).unwrap();
+    assert!(class.starts_with("CLASS"), "class must start with header");
+    assert!(
+        class.contains("Members + signatures"),
+        "class must have members section: {class}"
+    );
+
+    let extends = String::from_utf8(repo_map(&repo.path, dd, &["extends", "Base"]).stdout).unwrap();
+    assert!(
+        extends.starts_with("DESCENDANTS"),
+        "extends must start with header"
+    );
+    let depth_rows: Vec<&str> = extends
+        .lines()
+        .filter(|l| l.starts_with("| ") && !l.starts_with("| depth"))
+        .collect();
+    assert!(
+        depth_rows.len() >= 2,
+        "extends must have at least 2 data rows (Base + App): {extends}"
+    );
+
+    let imports =
+        String::from_utf8(repo_map(&repo.path, dd, &["imports", "read_file"]).stdout).unwrap();
+    assert!(
+        imports.starts_with("IMPORTERS"),
+        "imports must start with header"
+    );
+    assert!(
+        imports.lines().any(|l| l.contains("read_file")),
+        "imports must list the matched symbol: {imports}"
+    );
+}
