@@ -24,15 +24,43 @@ pub fn generate_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
 
 /// Per-table hash of the emitted (unprefixed) `CREATE TABLE` DDL, keyed by table name.
 pub fn ddl_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
-    generate_graph_tables(ontology)
+    let mut fingerprints = BTreeMap::new();
+    for table in generate_graph_tables(ontology) {
+        fingerprints.insert(
+            table.name.clone(),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_table(&table)),
+        );
+    }
+    for view in generate_graph_materialized_views(ontology) {
+        fingerprints.insert(
+            format!("materialized_view/{}", view.name),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_materialized_view(&view)),
+        );
+    }
+    fingerprints
+}
+
+pub fn auxiliary_schema_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
+    let mut fingerprints = BTreeMap::new();
+    for table in generate_unversioned_graph_tables(ontology) {
+        fingerprints.insert(
+            format!("table/{}", table.name),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_table(&table)),
+        );
+    }
+    for (definition, view) in ontology
+        .refreshable_materialized_views()
         .iter()
-        .map(|table| {
-            (
-                table.name.clone(),
-                ontology::migrations::sha256_hex(&clickhouse::emit_create_table(table)),
-            )
-        })
-        .collect()
+        .zip(generate_refreshable_materialized_views(ontology, 1))
+    {
+        fingerprints.insert(
+            format!("materialized_view/{}", definition.name),
+            ontology::migrations::sha256_hex(
+                &clickhouse::emit_create_refreshable_materialized_view(&view),
+            ),
+        );
+    }
+    fingerprints
 }
 
 pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> Vec<CreateTable> {

@@ -383,7 +383,7 @@ description = "Bump SCHEMA_VERSION, append a migration ledger entry, and re-snap
 
 [tasks."schema:snapshot"]
 run = "cargo xtask migration-ledger snapshot"
-description = "Regenerate the fingerprint snapshot without bumping SCHEMA_VERSION or the ledger (no-op ontology drift only)"
+description = "Snapshot auxiliary tables and refreshable views without bumping SCHEMA_VERSION or the ledger"
 
 [tasks."schema:ledger:check"]
 run = "cargo xtask migration-ledger check"

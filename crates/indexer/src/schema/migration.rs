@@ -29,9 +29,11 @@ use arrow::datatypes::UInt64Type;
 use gkg_utils::arrow::ArrowUtils;
 use ontology::migrations::{MigrationLedger, MigrationScope};
 use query_engine::compiler::{
-    DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
+    DictionarySource, emit_create_dictionary, emit_create_materialized_view,
+    emit_create_refreshable_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
-    generate_graph_tables_with_prefix,
+    generate_graph_tables_with_prefix, generate_refreshable_materialized_views,
+    generate_unversioned_graph_tables,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -249,6 +251,68 @@ async fn rebuild_empty_table(
             table: table.name.clone(),
             reason: e.to_string(),
         })
+}
+
+pub async fn create_unversioned_tables(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+) -> Result<(), MigrationError> {
+    for table in generate_unversioned_graph_tables(ontology) {
+        graph
+            .execute(&emit_create_table(&table))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: table.name,
+                reason: error.to_string(),
+            })?;
+    }
+    Ok(())
+}
+
+pub async fn replace_refreshable_views_for_version(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    version: u32,
+) -> Result<(), MigrationError> {
+    for view in generate_refreshable_materialized_views(ontology, version) {
+        graph
+            .execute(&format!("DROP VIEW IF EXISTS {}", view.name))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: view.name.clone(),
+                reason: error.to_string(),
+            })?;
+        graph
+            .execute(&emit_create_refreshable_materialized_view(&view))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: view.name,
+                reason: error.to_string(),
+            })?;
+    }
+    Ok(())
+}
+
+pub async fn drop_refreshable_views_for_version(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    version: u32,
+) -> Result<(), MigrationError> {
+    for (definition, view) in ontology
+        .refreshable_materialized_views()
+        .iter()
+        .zip(generate_refreshable_materialized_views(ontology, version))
+        .filter(|(definition, _)| definition.versioned)
+    {
+        graph
+            .execute(&format!("DROP VIEW IF EXISTS {}", view.name))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: definition.name.clone(),
+                reason: error.to_string(),
+            })?;
+    }
+    Ok(())
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer

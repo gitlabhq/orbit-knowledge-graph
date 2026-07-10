@@ -24,6 +24,7 @@ fn validate_migration_ledger() {
     let current = ontology::migrations::Fingerprints {
         sources: ontology::migrations::source_fingerprints(),
         ddl: compiler::ddl_fingerprints(&ontology),
+        auxiliary_schema: compiler::auxiliary_schema_fingerprints(&ontology),
     };
 
     let committed_text = std::fs::read_to_string(&fingerprint_path).unwrap_or_else(|e| {

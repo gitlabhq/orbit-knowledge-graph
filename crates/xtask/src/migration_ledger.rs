@@ -39,6 +39,7 @@ fn current_fingerprints(ontology: &Ontology) -> Fingerprints {
     Fingerprints {
         sources: migrations::source_fingerprints(),
         ddl: query_engine::compiler::ddl_fingerprints(ontology),
+        auxiliary_schema: query_engine::compiler::auxiliary_schema_fingerprints(ontology),
     }
 }
 
@@ -175,7 +176,7 @@ fn check_under_declaration(
         return Ok(());
     };
     let base_fps = Fingerprints::parse(&base_content).map_err(|e| anyhow!(e))?;
-    if &base_fps == committed {
+    if committed.has_same_versioned_fingerprints_as(&base_fps) {
         return Ok(());
     }
 
@@ -200,7 +201,7 @@ fn check_under_declaration(
             anyhow!("no ledger entry for the bumped version {schema_version}. {REMEDIATION}")
         })?;
 
-    let (changed_sources, changed_tables) = committed.diff(&base_fps);
+    let (changed_sources, changed_tables) = committed.get_versioned_diff_keys_between(&base_fps);
     let source_contents = migrations::embedded_sources();
     if let Some(required) = derive_scope(
         ontology,
@@ -238,7 +239,7 @@ pub fn bump(
     };
 
     let explicit = parse_explicit_scope(scope, entities)?;
-    let (changed_sources, changed_tables) = current.diff(&committed);
+    let (changed_sources, changed_tables) = current.get_versioned_diff_keys_between(&committed);
     let source_contents = migrations::embedded_sources();
     let derived = derive_scope(
         &ontology,
@@ -339,12 +340,34 @@ pub fn bump(
 pub fn snapshot() -> Result<()> {
     let ontology = Ontology::load_embedded().map_err(|e| anyhow!(e.to_string()))?;
     let current = current_fingerprints(&ontology);
+    let committed = read_committed_fingerprints()?.ok_or_else(|| {
+        anyhow!(
+            "fingerprint snapshot {} is missing. Run `mise schema:bump` to create it.",
+            fingerprint_path().display()
+        )
+    })?;
+    if !current.has_same_versioned_fingerprints_as(&committed) {
+        let (changed_sources, changed_tables) = current.get_versioned_diff_keys_between(&committed);
+        bail!(
+            "schema:snapshot cannot record versioned schema drift.\n  changed sources: {}\n  changed tables: {}\nRun `mise schema:bump` instead.",
+            format_set(&changed_sources),
+            format_set(&changed_tables),
+        );
+    }
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!(
         "regenerated fingerprint snapshot at {}",
         fingerprint_path().display()
     );
     Ok(())
+}
+
+fn format_set(values: &BTreeSet<String>) -> String {
+    if values.is_empty() {
+        "(none)".to_string()
+    } else {
+        values.iter().cloned().collect::<Vec<_>>().join(", ")
+    }
 }
 
 /// First-time snapshot: write the fingerprint file without bumping.
