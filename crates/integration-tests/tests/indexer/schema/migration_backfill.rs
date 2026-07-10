@@ -282,13 +282,29 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
         .unwrap();
 
     let checkpoint_table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
-    context
-        .clickhouse
-        .execute(&format!(
-            "INSERT INTO {checkpoint_table} (key, watermark) \
-             VALUES ('ns.100.sdlc', now())"
-        ))
-        .await;
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let invalidated = indexer::schema::invalidation::find_invalidated_pipelines(
+        &ontology,
+        &ontology::migrations::MigrationScope::Full,
+    );
+    for plan in &invalidated.namespaced {
+        context
+            .clickhouse
+            .execute(&format!(
+                "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
+                 VALUES ('ns.100.{plan}', now(), 'null')"
+            ))
+            .await;
+    }
+    for plan in &invalidated.global {
+        context
+            .clickhouse
+            .execute(&format!(
+                "INSERT INTO {checkpoint_table} (key, watermark, cursor_values) \
+                 VALUES ('global.{plan}', now(), 'null')"
+            ))
+            .await;
+    }
 
     let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
