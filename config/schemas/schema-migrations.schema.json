@@ -19,8 +19,8 @@
             "description": "The SCHEMA_VERSION this entry describes."
           },
           "scope": {
-            "enum": ["*", "sdlc", "code"],
-            "description": "'*' = full rebuild; 'sdlc' = SDLC-sourced tables (optionally narrowed by entities); 'code' = code-graph tables."
+            "enum": ["*", "sdlc", "code", "none"],
+            "description": "'*' = full rebuild; 'sdlc' = SDLC-sourced tables (optionally narrowed by entities); 'code' = code-graph tables; 'none' = re-index nothing (certified output-neutral change; requires a note)."
           },
           "entities": {
             "type": "array",

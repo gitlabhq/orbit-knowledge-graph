@@ -112,6 +112,7 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
         MigrationScope::Sdlc(entities) if entities.is_empty() => sdlc_entity_names(ontology),
         MigrationScope::Sdlc(entities) => entities.clone(),
         MigrationScope::Code => code_entity_names(ontology),
+        MigrationScope::None => BTreeSet::new(),
     }
 }
 
@@ -354,5 +355,32 @@ mod tests {
             action(&map, "checkpoint"),
             TableMigrationAction::CloneFromActive
         );
+    }
+
+    #[test]
+    fn none_scope_clones_every_table_and_invalidates_nothing() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let map = classify(MigrationScope::None);
+        for (table, table_action) in &map {
+            assert_eq!(
+                *table_action,
+                TableMigrationAction::CloneFromActive,
+                "{table} should clone under none scope"
+            );
+        }
+
+        assert_eq!(
+            get_migration_scope_for_table_writers(&ontology, &MigrationScope::None),
+            MigrationScope::None
+        );
+
+        let pipelines = find_invalidated_pipelines(&ontology, &MigrationScope::None);
+        assert!(
+            pipelines.namespaced.is_empty(),
+            "{:?}",
+            pipelines.namespaced
+        );
+        assert!(pipelines.global.is_empty(), "{:?}", pipelines.global);
     }
 }
