@@ -3,10 +3,10 @@
 # CI can override GKG image via E2E_GKG_IMAGE / E2E_GKG_TAG env vars.
 
 siphon:
-  chart: "1.14.0"
+  chart: "1.15.0"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.108-beta"
+    tag: "0.0.113-beta"
 gitlab:
   # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
   # gitlab-org/gitlab ref, and CNG image digests below are all bumped
@@ -14,12 +14,12 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "10.1.1-2649861115"
+  chart: "10.1.2-2673524754"
   # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "be9a91bccefab9f657cbf4bbc2e8073c9c47167b"
+  ref: "83fb47b58ac8e0ec9110a41712411f3de6427e61"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
@@ -28,20 +28,20 @@ gitlab:
   # an empty Authorization header and silently 502.
   images:
     webservice:
-      digest: "sha256:7b2ff528240a1e8b394b38e76fb230c6d66fb08d40989aa6f72e8857768c5476"
+      digest: "sha256:0320dc0a5481d6bea1466c0399a180d065f5dc3f8618bc0bd2e87cfa49782768"
     workhorse:
-      digest: "sha256:d372f332f883c216799ab12148c7bfebf292f17adc8483c304c3dbf294b9b9d4"
+      digest: "sha256:c83a06df3b5629d0ed36417176873e73d1fb7e7c5be568d2fde45803614a427c"
     sidekiq:
-      digest: "sha256:12aed4a16d54d34062314db1b67a6b7603b2fdbd9c23adf3181fa0ccbc5b671a"
+      digest: "sha256:0c3e72022fd91662483ef29b9190bf3611fd6f374854f46d235bc16907894c09"
     toolbox:
-      digest: "sha256:6495d5cd9214c303f93f160c74c0b3991672ee52616c99ffc5f72613e2aef72a"
+      digest: "sha256:5b41eb57905fadbedca5728f3d32d3e16dd129ebe8d54c29b16b37013f2dd96d"
 gkg:
   chart: "0.24.0"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
-    tag: "0.84.1"
+    tag: "0.87.0"
 nats:
-  chart: "2.12.6"
+  chart: "2.14.2"
 postgresql:
   # bitnami/postgresql chart line that ships PG 17 (the version GitLab 19.0
   # will require — releasing 2026-05-21).
@@ -55,4 +55,4 @@ redis:
   chart: "25.4.1"
   image:
     repository: bitnamilegacy/redis
-    tag: "8.0.3-debian-12-r3"
+    tag: "8.2.1-debian-12-r0"

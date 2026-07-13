@@ -204,8 +204,13 @@ Open Closing Merge Request
 Merge The MR
     [Arguments]    ${project_id}    ${iid}
     ${headers}=    GitLab Auth Headers
-    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests/${iid}/merge
+    # gitlab@master requires the sha guard on the merge API (400 "SHA must be
+    # provided when merging" without it), so pass the current head sha.
+    ${mr}=    GET    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests/${iid}
     ...    headers=${headers}    expected_status=200
+    ${body}=    Create Dictionary    sha=${mr.json()["sha"]}
+    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests/${iid}/merge
+    ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
 Create Epic
