@@ -102,6 +102,37 @@ The gate is checkpoint-based, not row-count-based; full correctness validation
 stays in staging E2E (see
 [`schema_management.md`](../schema_management.md#known-trade-off-checkpoint-based-validation)).
 
+## Relationship to blue-green deployment
+
+GKG already runs blue-green at the data layer: the active version keeps serving
+queries and streaming incremental updates from its `v<N>_` table set while the
+migrating version populates its own set, then promotion flips reads atomically.
+The two releases run fully side by side — `/ready` keeps migrating-version pods
+out of Kubernetes rotation until their version is `active`, and every gkg-owned
+NATS stream, subject, and KV bucket carries a version segment so the releases
+have independent work queues and locks
+([`schema_management.md`](../schema_management.md),
+[`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md)).
+
+Clone-based migration is what makes that cutover cheap and non-blocking. Without
+it the green set starts empty and is only promotable after a full re-index from
+epoch — a multi-hour window in which blue alone carries fresh data under heavy
+Siphon and Gitaly load. Cloning stands the green set up near-complete in
+milliseconds and re-indexes only the invalidated delta, so:
+
+- Blue serves and streams uninterrupted throughout; nothing in the clone or
+  force-backfill path touches the active set.
+- The window shrinks from re-indexing the whole graph to re-indexing what
+  changed, a small fraction of it for a narrow bump.
+- Promotion — the cutover trigger — gates on exactly the plan the scope produced
+  ([Promotion gates on the plan](#promotion-gates-on-the-plan)), so green goes
+  `active` as soon as the delta is complete.
+
+The deployment machinery that runs the two versions side by side is owned by
+[`schema_management.md`](../schema_management.md) and
+[`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md); this ADR covers only
+the migration mechanism that populates the green set.
+
 ## Consequences
 
 What improves:
@@ -143,3 +174,4 @@ What gets harder:
 - Promotion gate: `crates/indexer/src/migration_completion.rs`
 - Related: [ADR 014](014_entity_level_indexing.md),
   [ADR 015](015_pluggable_entity_pipelines.md)
+- Blue-green deployment epic: [Non-blocking migrations and blue/green deployment](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/7)
