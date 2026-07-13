@@ -554,7 +554,7 @@ fn lower_extract_column(column: &ExtractColumn) -> String {
 #[cfg(test)]
 mod tests {
     use super::super::input;
-    use super::super::{Cursor, CursorFilter, TraversalPathFilter, WatermarkFilter};
+    use super::super::{Cursor, CursorFilter, DeletedFilter, TraversalPathFilter, WatermarkFilter};
     use super::*;
     use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
     use chrono::Utc;
@@ -1292,6 +1292,111 @@ mod tests {
         assert!(
             sql.contains("startsWith(snm.traversal_path, {traversal_path:String})"),
             "sql: {sql}"
+        );
+    }
+
+    fn normalize(sql: &str) -> String {
+        sql.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn timestamp(value: &str) -> chrono::DateTime<Utc> {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .expect("timestamp literal should parse")
+            .with_timezone(&Utc)
+    }
+
+    fn runtime_extract_sql(scope: EtlScope, plan: &Plan) -> String {
+        plan.prepare()
+            .with(WatermarkFilter {
+                column: &plan.watermark_column,
+                last: timestamp("2024-01-01T00:00:00Z"),
+                current: timestamp("2024-01-02T00:00:00Z"),
+            })
+            .with((scope == EtlScope::Namespaced).then_some(TraversalPathFilter { path: "1/" }))
+            .with(Some(DeletedFilter {
+                column: &plan.deleted_column,
+            }))
+            .with(CursorFilter {
+                sort_key: &plan.sort_key,
+                values: Cursor::first_page().values(),
+            })
+            .to_sql()
+    }
+
+    fn sorted_plans(plans: &Plans) -> Vec<(EtlScope, &Plan)> {
+        let mut cases: Vec<_> = plans
+            .global
+            .iter()
+            .map(|plan| (EtlScope::Global, plan))
+            .chain(
+                plans
+                    .namespaced
+                    .iter()
+                    .map(|plan| (EtlScope::Namespaced, plan)),
+            )
+            .collect();
+        cases.sort_by(|(_, left), (_, right)| left.name.cmp(&right.name));
+        cases
+    }
+
+    fn assert_matches_golden(actual: &str, golden_path: &str, expected: &str) {
+        if std::env::var("UPDATE_GOLDEN").is_ok() {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(golden_path);
+            std::fs::write(path, actual).expect("golden file should be writable");
+            return;
+        }
+        assert_eq!(
+            normalize(actual),
+            normalize(expected),
+            "golden snapshot drifted; run with UPDATE_GOLDEN=1 to regenerate {golden_path}"
+        );
+    }
+
+    #[test]
+    fn embedded_extract_sql_matches_golden_snapshot() {
+        let plans = build_plans(&test_ontology(), 1000);
+
+        let mut actual = String::new();
+        for (scope, plan) in sorted_plans(&plans) {
+            actual.push_str(&format!("=== {} ===\n", plan.name));
+            actual.push_str(&runtime_extract_sql(scope, plan));
+            actual.push_str("\n\n");
+        }
+
+        assert_matches_golden(
+            &actual,
+            "tests/golden/extract_sql.txt",
+            include_str!("../../../../tests/golden/extract_sql.txt"),
+        );
+    }
+
+    #[test]
+    fn embedded_transform_sql_matches_golden_snapshot() {
+        let plans = build_plans(&test_ontology(), 1000);
+
+        let mut actual = String::new();
+        for (_, plan) in sorted_plans(&plans) {
+            match &plan.transform {
+                TransformSpec::DataFusion(transformations) => {
+                    for transformation in transformations {
+                        actual.push_str(&format!(
+                            "=== {} -> {} ===\n",
+                            plan.name, transformation.destination_table
+                        ));
+                        actual.push_str(&transformation.sql);
+                        actual.push_str("\n\n");
+                    }
+                }
+                TransformSpec::Rust(name) => {
+                    actual.push_str(&format!("=== {} -> rust:{} ===\n\n", plan.name, name));
+                }
+            }
+        }
+
+        assert_matches_golden(
+            &actual,
+            "tests/golden/transform_sql.txt",
+            include_str!("../../../../tests/golden/transform_sql.txt"),
         );
     }
 }
