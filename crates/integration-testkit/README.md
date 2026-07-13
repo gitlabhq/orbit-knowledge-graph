@@ -209,7 +209,7 @@ async fn search_filter_eq(ctx: &TestContext) {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User",
                  "filters": {"state": "blocked"}},
-        "order_by": {"node": "u", "property": "id"},
+        "order_by": "u.id",
         "limit": 10
     }"#, &allow_all()).await;
 

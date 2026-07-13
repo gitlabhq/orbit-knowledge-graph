@@ -19,11 +19,7 @@ q1:
         }
       },
       "limit": 30,
-      "order_by": {
-        "node": "u",
-        "property": "created_at",
-        "direction": "DESC"
-      }
+      "order_by": "-u.created_at"
     }
 
 q2:
@@ -55,11 +51,7 @@ q2:
         }
       ],
       "limit": 25,
-      "order_by": {
-        "node": "mr",
-        "property": "created_at",
-        "direction": "DESC"
-      }
+      "order_by": "-mr.created_at"
     }
 
 q3:
@@ -122,11 +114,7 @@ q4:
         }
       ],
       "limit": 30,
-      "order_by": {
-        "node": "mr",
-        "property": "updated_at",
-        "direction": "DESC"
-      }
+      "order_by": "-mr.updated_at"
     }
 
 q5:
@@ -211,11 +199,7 @@ q6:
         }
       ],
       "limit": 30,
-      "order_by": {
-        "node": "pipe",
-        "property": "created_at",
-        "direction": "DESC"
-      }
+      "order_by": "-pipe.created_at"
     }
 
 q7:
@@ -286,11 +270,7 @@ q8:
         }
       },
       "limit": 20,
-      "order_by": {
-        "node": "pipe",
-        "property": "duration",
-        "direction": "DESC"
-      }
+      "order_by": "-pipe.duration"
     }
 
 q9:
@@ -322,11 +302,7 @@ q9:
         }
       ],
       "limit": 30,
-      "order_by": {
-        "node": "v",
-        "property": "detected_at",
-        "direction": "DESC"
-      }
+      "order_by": "-v.detected_at"
     }
 
 q10:
@@ -442,11 +418,7 @@ q13:
         }
       },
       "limit": 30,
-      "order_by": {
-        "node": "wi",
-        "property": "due_date",
-        "direction": "ASC"
-      }
+      "order_by": "wi.due_date"
     }
 
 q14:
@@ -544,11 +516,7 @@ q16:
         }
       ],
       "limit": 30,
-      "order_by": {
-        "node": "note",
-        "property": "created_at",
-        "direction": "DESC"
-      }
+      "order_by": "-note.created_at"
     }
   expect: empty  # most sampled users have no MR-noteable_type notes in gitlab-org; verified rows for hand-picked MR commenters only
 
@@ -628,11 +596,7 @@ q18:
         }
       ],
       "limit": 30,
-      "order_by": {
-        "node": "p",
-        "property": "last_activity_at",
-        "direction": "DESC"
-      }
+      "order_by": "-p.last_activity_at"
     }
 
 q19:
@@ -651,11 +615,7 @@ q19:
         }
       },
       "limit": 20,
-      "order_by": {
-        "node": "p",
-        "property": "star_count",
-        "direction": "DESC"
-      }
+      "order_by": "-p.star_count"
     }
 
 q20:
@@ -862,11 +822,7 @@ q24:
         }
       ],
       "limit": 10,
-      "order_by": {
-        "node": "pipe",
-        "property": "created_at",
-        "direction": "DESC"
-      }
+      "order_by": "-pipe.created_at"
     }
   expect: empty  # random sampled MRs in gitlab-org rarely have a TRIGGERED Pipeline edge; structurally verified against a known MR
 
@@ -938,11 +894,7 @@ q27:
         }
       },
       "limit": 30,
-      "order_by": {
-        "node": "u",
-        "property": "created_at",
-        "direction": "DESC"
-      }
+      "order_by": "-u.created_at"
     }
 
 q28:

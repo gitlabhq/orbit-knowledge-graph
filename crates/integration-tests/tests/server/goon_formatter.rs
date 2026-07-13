@@ -151,7 +151,7 @@ async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
 async fn pagination_header_carries_cursor_and_pages_forward(ctx: &TestContext) {
     let json = r#"{"query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}}"#;
 
     let output = run_pipeline(ctx, json, &allow_all(), test_security_context()).await;

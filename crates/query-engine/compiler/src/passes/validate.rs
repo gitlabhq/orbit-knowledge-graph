@@ -31,6 +31,18 @@ fn base_validator() -> &'static jsonschema::Validator {
     })
 }
 
+pub(crate) fn order_by_regex() -> &'static regex::Regex {
+    static ORDER_BY_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    ORDER_BY_REGEX.get_or_init(|| {
+        let schema: serde_json::Value =
+            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
+        let pattern = schema["properties"]["order_by"]["pattern"]
+            .as_str()
+            .expect("schema.json must define an order_by pattern");
+        regex::Regex::new(pattern).expect("order_by pattern must be a valid regex")
+    })
+}
+
 fn collect_schema_errors(
     validator: &jsonschema::Validator,
     value: &serde_json::Value,
@@ -1196,7 +1208,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                "order_by": {"node": "u", "property": "username", "direction": "ASC"}
+                "order_by": "u.username"
             }"#,
         );
 
@@ -1348,7 +1360,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "order_by": {"node": "missing", "property": "username", "direction": "ASC"}
+                "order_by": "missing.username"
             }"#,
             "undefined node \"missing\"",
         );
@@ -1357,7 +1369,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "order_by": {"node": "u", "property": "nonexistent", "direction": "ASC"}
+                "order_by": "u.nonexistent"
             }"#,
             "does not exist",
         );

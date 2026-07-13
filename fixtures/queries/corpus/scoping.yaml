@@ -38,7 +38,7 @@ proj_id_mr_in_project_eq:
         {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "limit": 100
     }
 
@@ -54,7 +54,7 @@ proj_full_path_mr_in_project_eq:
         {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "limit": 100
     }
 
@@ -115,7 +115,7 @@ proj_id_pipeline_in_project_eq:
         {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
-      "order_by": {"node": "pipe", "property": "created_at", "direction": "DESC"},
+      "order_by": "-pipe.created_at",
       "limit": 100
     }
 
@@ -229,7 +229,7 @@ grp_id_workitem_in_group:
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
       "limit": 50,
-      "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"}
+      "order_by": "-wi.created_at"
     }
 
 grp_fullpath_workitem_in_group:
@@ -245,7 +245,7 @@ grp_fullpath_workitem_in_group:
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
       "limit": 50,
-      "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"}
+      "order_by": "-wi.created_at"
     }
 
 grp_id_label_in_group:
@@ -313,7 +313,7 @@ grp_id_mr_in_project_contains:
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
       "limit": 50,
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"}
+      "order_by": "-mr.created_at"
     }
 
 grp_id_count_mrs_aggregation_MOTIVATING:
@@ -534,7 +534,7 @@ proj_id_mr_in_project_scoped_traversal:
         {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "limit": 50
     }
 
@@ -808,7 +808,7 @@ proj_id_mr_orderby_limit_page:
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "cursor": {"page_size": 20},
       "options": {"include_debug_sql": true}
     }
@@ -825,7 +825,7 @@ proj_id_mr_orderby_limit_page2:
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "cursor": {"page_size": 40},
       "options": {"include_debug_sql": true}
     }

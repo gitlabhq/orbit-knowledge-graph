@@ -38,7 +38,7 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
@@ -55,7 +55,7 @@ pub(super) async fn cursor_follows_next_cursor_to_exhaustion(ctx: &TestContext) 
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -98,7 +98,7 @@ pub(super) async fn cursor_with_filter(ctx: &TestContext) {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                  "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -122,7 +122,7 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -159,12 +159,12 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
 }
 
 pub(super) async fn cursor_pages_across_null_sort_keys(ctx: &TestContext) {
-    for direction in ["ASC", "DESC"] {
+    for direction in ["mr.merged_at", "-mr.merged_at"] {
         let json = format!(
             r#"{{
             "query_type": "traversal",
             "node": {{"id": "mr", "entity": "MergeRequest", "id_range": {{"start": 1, "end": 10000}}, "columns": ["title"]}},
-            "order_by": {{"node": "mr", "property": "merged_at", "direction": "{direction}"}},
+            "order_by": "{direction}",
             "cursor": {{"page_size": 2}}
         }}"#
         );
@@ -755,7 +755,7 @@ pub(super) async fn cursor_traversal_with_filters_desc_pages_return_exact_matche
                          "weight": {"op": "gte", "value": 3}}}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "wi"}],
-        "order_by": {"node": "wi", "property": "id", "direction": "DESC"},
+        "order_by": "-wi.id",
         "cursor": {"page_size": 1}
     }"#;
 
@@ -1017,7 +1017,7 @@ pub(super) async fn cursor_after_token_with_sql_metacharacters_is_parameterized(
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-        "order_by": {"node": "u", "property": "username", "direction": "DESC"},
+        "order_by": "-u.username",
         "cursor": {"page_size": 2}
     }"#;
 

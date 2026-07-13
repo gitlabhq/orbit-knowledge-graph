@@ -223,7 +223,7 @@ mod tests {
     fn requirements_from_search_with_order_by() {
         let input = parse_test_input(
             r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+                "order_by": "u.id", "limit": 10}"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::OrderBy));
@@ -439,7 +439,7 @@ mod tests {
     fn for_query_order_satisfied_by_assert_node_order() {
         let input = parse_test_input(
             r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+                "order_by": "u.id", "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -759,7 +759,7 @@ mod tests {
     fn for_query_panics_on_unsatisfied_order() {
         let input = parse_test_input(
             r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+                "order_by": "u.id", "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         drop(view);
@@ -887,7 +887,7 @@ mod tests {
             r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2],
                          "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}},
-                "order_by": {"node": "u", "property": "id"},
+                "order_by": "u.id",
                 "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
@@ -903,7 +903,7 @@ mod tests {
     fn skip_requirement_prevents_panic() {
         let input = parse_test_input(
             r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+                "order_by": "u.id", "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);

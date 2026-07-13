@@ -62,7 +62,7 @@ The JSON query schema supports four query types through a single unified structu
 | `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
 | `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
 | `limit` | `integer` | Max results (1-1000, default: 30) |
-| `order_by` | `object` | Result ordering specification |
+| `order_by` | `string` | Result ordering: `"node.property"` (asc) or `"-node.property"` (desc). |
 | `aggregation_sort` | `object` | Ordering for aggregation outputs |
 | `cursor` | `object` | Keyset pagination cursor `{ page_size, after? }`. `after` is the previous response's `pagination.next_cursor`. |
 | `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
@@ -167,7 +167,7 @@ Match nodes and relationships, return matching entities.
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
   "limit": 25,
-  "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"}
+  "order_by": "-mr.merged_at"
 }
 ```
 

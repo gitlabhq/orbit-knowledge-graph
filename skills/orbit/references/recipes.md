@@ -115,7 +115,7 @@ project-scoped `iid`); look it up first with the
       },
       "columns": ["id", "status", "source", "sha", "ref", "created_at"]
     },
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -137,7 +137,7 @@ pipelines for this MR":
       },
       "columns": ["id", "status", "sha", "ref", "failure_reason", "duration", "created_at"]
     },
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -183,7 +183,7 @@ Pipeline node:
        "columns": ["id", "status", "sha", "created_at"]}
     ],
     "relationships": [{"type": "TRIGGERED", "from": "mr", "to": "p"}],
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -287,8 +287,8 @@ one relationship:
 
 ## `order_by` — sort traversal results
 
-Add `order_by` to any traversal. Fields are `node` (the node `id`), `property`,
-and `direction` (`ASC` or `DESC`):
+Add `order_by` to any traversal. It is a string, `"node.property"` for ascending
+or `"-node.property"` (leading `-`) for descending, where `node` is the node `id`:
 
 ```json orbit-query
 {
@@ -301,7 +301,7 @@ and `direction` (`ASC` or `DESC`):
     "relationships": [
       {"type": "AUTHORED", "from": "u", "to": "mr"}
     ],
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "order_by": "-mr.created_at",
     "limit": 10
   }
 }
@@ -326,7 +326,7 @@ is no `Issue` node. List the work items in a project via the `IN_PROJECT`
     "relationships": [
       {"type": "IN_PROJECT", "from": "wi", "to": "p"}
     ],
-    "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"},
+    "order_by": "-wi.created_at",
     "limit": 50
   }
 }
@@ -463,7 +463,7 @@ only properties listed in the text-indexed properties table in
       },
       "columns": ["iid", "title", "state"]
     },
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "order_by": "-mr.created_at",
     "limit": 10
   }
 }

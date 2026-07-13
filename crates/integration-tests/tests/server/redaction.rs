@@ -1453,7 +1453,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
                 "username": {"op": "in", "value": ["alice", "bob", "charlie", "diana"]}
             }
         },
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+        "order_by": "u.username",
         "limit": 100
     }"#;
 
@@ -1506,7 +1506,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
                 "visibility_level": {"op": "in", "value": ["public", "internal"]}
             }
         },
-        "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+        "order_by": "p.id",
         "limit": 50
     }"#;
 
@@ -2170,7 +2170,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
             "columns": ["username", "name", "state"],
             "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
         },
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+        "order_by": "u.username",
         "limit": 10
     }"#;
 
@@ -3627,7 +3627,7 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -3669,7 +3669,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -3715,13 +3715,13 @@ async fn cursor_pagination_rejects_foreign_token(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
     let other = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 5000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -3746,7 +3746,7 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
 
@@ -3809,7 +3809,7 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "order_by": "u.id",
             "limit": 10
         }"#,
     )
@@ -3842,7 +3842,7 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "order_by": "-u.id",
             "limit": 10
         }"#,
     )

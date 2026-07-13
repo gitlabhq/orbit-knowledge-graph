@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v4",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v5",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -83,8 +83,9 @@
       "additionalProperties": false
     },
     "order_by": {
-      "$ref": "#/$defs/OrderBy",
-      "description": "Result ordering specification"
+      "type": "string",
+      "pattern": "^(?<descending>-)?(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63})$",
+      "description": "Result ordering as \"node.property\" (ascending) or \"-node.property\" (descending)."
     },
     "aggregation_sort": {
       "$ref": "#/$defs/AggregationSort",
@@ -743,27 +744,6 @@
           },
           "maxItems": 10,
           "default": []
-        }
-      },
-      "additionalProperties": false
-    },
-    "OrderBy": {
-      "type": "object",
-      "description": "Result ordering specification",
-      "required": ["node", "property"],
-      "properties": {
-        "node": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Node variable to order by"
-        },
-        "property": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Property name to order by"
-        },
-        "direction": {
-          "$ref": "#/$defs/OrderDirection",
-          "description": "Sort direction",
-          "default": "ASC"
         }
       },
       "additionalProperties": false

@@ -342,7 +342,7 @@ pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
+            "order_by": "-u.is_admin",
             "limit": 10
         }"#,
         &ontology,
@@ -517,7 +517,7 @@ pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]},
-            "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
+            "order_by": "-u.is_admin",
             "limit": 10
         }"#,
         &ontology,

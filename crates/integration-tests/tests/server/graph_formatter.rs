@@ -1951,7 +1951,7 @@ async fn search_with_order_by(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "username", "direction": "DESC"},
+            "order_by": "-u.username",
             "limit": 10
         }"#,
         &allow_all(),
@@ -2204,7 +2204,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,
         &allow_all(),
@@ -2272,7 +2272,7 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "order_by": "u.id",
         "cursor": {"page_size": 4}
     }"#;
 
@@ -2309,7 +2309,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,
         &svc,

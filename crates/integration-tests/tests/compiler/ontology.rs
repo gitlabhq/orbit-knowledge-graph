@@ -12,7 +12,7 @@ fn valid_column_in_order_by() {
         "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
         "limit": 10,
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"}
+        "order_by": "u.username"
     }"#;
     assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
 }
@@ -24,7 +24,7 @@ fn invalid_column_in_order_by() {
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "limit": 10,
-            "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
+            "order_by": "u.nonexistent_column"
         }"#,
         &embedded_ontology(),
         &test_ctx(),
@@ -248,7 +248,7 @@ fn full_pipeline() {
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25,
-        "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
+        "order_by": "-n.created_at"
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
@@ -330,7 +330,7 @@ fn complex_search_query() {
             }
         },
         "limit": 50,
-        "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
+        "order_by": "-u.created_at"
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
