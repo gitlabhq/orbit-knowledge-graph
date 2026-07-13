@@ -112,7 +112,7 @@ pipelines:
       type: clickhouse
       tables: [siphon_security_findings]
       order_by: [traversal_path, id, partition_number]
-      query: finding.sql
+      query: finding.sql.j2
     transform:
       type: datafusion
       edges:

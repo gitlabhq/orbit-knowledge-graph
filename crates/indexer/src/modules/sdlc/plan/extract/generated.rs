@@ -1,11 +1,12 @@
 //! Generated-extract SQL rendering; all `DataType` → ClickHouse dialect rendering lives here.
 
+use ontology::sql_template;
 use ontology::{DataType, EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::super::build::PlanError;
 use super::super::schema::{BatchSchema, EnrichedColumn};
 use super::enrichment::EnrichmentJoin;
-use super::{ExtractDecl, ExtractSpec, SourceColumn, double_brace_markers};
+use super::{ExtractDecl, ExtractSpec, SourceColumn};
 
 pub(in crate::modules::sdlc) enum Shape<'a> {
     Node {
@@ -55,15 +56,14 @@ fn resolve_filter(
     let Some(filter) = filter else {
         return Ok(None);
     };
-    let rendered = filter
-        .replace("{{watermark_column}}", decl.watermark)
-        .replace("{{deleted_column}}", decl.deleted);
-    if let Some(marker) = double_brace_markers(&rendered).into_iter().next() {
-        return Err(PlanError::MalformedTemplate(format!(
-            "filter for '{}' has unresolved marker {{{{{marker}}}}}",
-            decl.entity
-        )));
-    }
+    let rendered = sql_template::render(
+        filter,
+        sql_template::context! {
+            watermark_column => decl.watermark,
+            deleted_column => decl.deleted,
+        },
+    )
+    .map_err(|e| PlanError::MalformedTemplate(format!("filter for '{}': {e}", decl.entity)))?;
     Ok(Some(rendered))
 }
 

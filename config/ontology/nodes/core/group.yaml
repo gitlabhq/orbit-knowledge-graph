@@ -102,7 +102,7 @@ pipelines:
       # namespace_traversal_paths leads.
       tables: [namespace_traversal_paths, siphon_namespaces, siphon_namespace_details, siphon_routes]
       order_by: [traversal_path, id]
-      query: group.sql
+      query: group.sql.j2
     transform:
       type: datafusion
       edges:

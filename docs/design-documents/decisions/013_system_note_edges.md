@@ -77,7 +77,7 @@ Resolve targets with two batched IN-list queries against `siphon_routes` and the
 > event-history semantics, dedupe/tombstone) is deferred — see
 > `gitlab-org/orbit/knowledge-graph#883` and its follow-up.
 >
-> **Update (2026-06-29): ontology ETL now uses unified pipelines.** The system-note path is a derived entity at `config/ontology/derived/core/system_note.yaml` with a `SystemNote` pipeline, `extract.query: SystemNote.sql`, and `transform.type: system_notes`. The standalone `REOPENED` edge uses two `pipelines:` entries in `config/ontology/edges/reopened.yaml`; the `state = 5` predicate now lives inside sibling SQL files next to the edge YAML, not in a `where:` YAML field.
+> **Update (2026-06-29): ontology ETL now uses unified pipelines.** The system-note path is a derived entity at `config/ontology/derived/core/system_note.yaml` with a `SystemNote` pipeline, `extract.query: system_note.sql.j2`, and `transform.type: system_notes`. The standalone `REOPENED` edge uses two `pipelines:` entries in `config/ontology/edges/reopened.yaml`; the `state = 5` predicate now lives inside sibling SQL files next to the edge YAML, not in a `where:` YAML field.
 
 Vendor Rails' `ICON_TYPES` constant with a CI drift check modeled on `scripts/check-goon-format-version.sh`. Ship behind a feature flag with staging benchmarks 2–5 (lookup latency, end-to-end pass, edge-density gain) as the gate to GA.
 
@@ -121,7 +121,7 @@ ADR 013's `SystemNotesPipeline` is that custom impl. It receives an `EntityIndex
 This is a custom `BlockTransform` selected by an ontology-driven derived-entity pipeline, not a custom `EntityPipeline`. The transform-stage extension point is the intended path for entities whose row-to-edge shape cannot be expressed as a DataFusion projection. The departure from the built-in `datafusion` transform is deliberate and bounded:
 
 - `config/ontology/derived/core/system_note.yaml` declares the `SystemNote` pipeline and names the `system_notes` Rust transform.
-- `config/ontology/derived/core/SystemNote.sql` owns the `siphon_notes` / `siphon_system_note_metadata` extract, including page-bounded enrichment and runtime `{{filters}}`.
+- `config/ontology/derived/core/system_note.sql.j2` owns the `siphon_notes` / `siphon_system_note_metadata` extract, including page-bounded enrichment and runtime `{{filters}}`.
 - A single source table needs to dispatch into ~9 edge variants whose target type depends on body parsing, not on a fixed source-column enum.
 - The 10-cross-reference-action × 3-noteable-type expansion through per-action ClickHouse views (MR !1109's pattern) would land ~30 redundant projections in `fixtures/siphon.sql`. Adam's guidance on the Siphon side ("skip indexes, not projections") argues against that shape generally.
 

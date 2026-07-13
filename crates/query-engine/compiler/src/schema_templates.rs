@@ -1,7 +1,7 @@
 // TODO: Move schema template rendering into a dedicated schema compiler crate with DDL generation.
 
-use minijinja::{Environment, Error, UndefinedBehavior, context};
 use ontology::Ontology;
+use ontology::sql_template::{self, Error, context};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -18,9 +18,7 @@ pub(crate) fn render_refreshable_materialized_view_select(
     schema_version: u32,
     table_prefix: &str,
 ) -> Result<String, Error> {
-    let mut environment = Environment::new();
-    environment.set_undefined_behavior(UndefinedBehavior::Strict);
-    environment.render_str(
+    sql_template::render(
         template,
         context! {
             schema => context! { version => schema_version },

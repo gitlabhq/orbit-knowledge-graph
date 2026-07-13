@@ -129,7 +129,7 @@ batching can buffer internally.
 
 SystemNote needs no bespoke extractor: its source is the `SystemNote` pipeline in
 `config/ontology/derived/core/system_note.yaml`, whose extract is an authored
-`system_note.sql` — a `_batch` scan of `siphon_notes` plus a page-bounded join over
+`system_note.sql.j2` — a `_batch` scan of `siphon_notes` plus a page-bounded join over
 `siphon_system_note_metadata` for the note action. It rides the same keyset
 pagination, watermark window, retry, read-ahead, checkpoint, and streaming-write
 path as every other entity. The only Rust-specific code is the transform body. This
@@ -166,10 +166,10 @@ derived entity pipeline gets `Rust(<transform.type>)`.
 The ontology crate (`crates/ontology`) is a dumb YAML → declarative model: it holds
 no ClickHouse SQL and no knowledge of runtime markers. `ExtractQuery` is either
 `Generated { filter }` (the indexer builds the SQL from the declaration) or
-`Sql(String)` (the raw content of a co-located `.sql` escape-hatch file, carried
+`Sql(String)` (the raw content of a co-located `.sql.j2` MiniJinja template, carried
 verbatim — markers unresolved). Derived-entity pipelines are always `Sql`: their rows
 are neither node properties nor edge endpoints, so the indexer has nothing to generate
-a projection from. Seven `.sql` files exist — the six genuinely complex nodes (Group,
+a projection from. Seven `.sql.j2` files exist — the six genuinely complex nodes (Group,
 Project, MergeRequest, Commit, MergeRequestDiffFile, Finding) and the SystemNote
 derived entity; every other node and edge is `generated`.
 
@@ -203,7 +203,7 @@ and hands each stage exactly its inputs so data flows top-down:
 `ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
 unvalidated template cannot reach the runtime. A unit test in the `ontology` crate
 (`authored_sql_uses_lifecycle_markers_and_aliases`) enforces that every authored
-`.sql` file projects `AS _version`/`AS _deleted` and uses
+`.sql.j2` file projects `AS _version`/`AS _deleted` and uses
 `{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
 names; projection completeness (order_by and enrich columns) is exercised end-to-end
 by the indexer's Docker integration scenarios.
@@ -312,7 +312,7 @@ unaffected.
   `DataFusionTransform`, `TransformRegistry`)
 - Ontology pipeline model: `crates/ontology/src/etl.rs` (`Pipeline`, `Extract`,
   `ExtractQuery`, `Transform`, `EdgeMapping`); YAML loading in
-  `crates/ontology/src/loading/node.rs`; authored `.sql` marker/alias check in
+  `crates/ontology/src/loading/node.rs`; authored `.sql.j2` marker/alias check in
   `crates/ontology/src/lib.rs` (`authored_sql_uses_lifecycle_markers_and_aliases`)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
   `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; enrichment

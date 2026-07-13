@@ -3,8 +3,9 @@
 use super::super::build::PlanError;
 use super::super::schema::BatchSchema;
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
+use ontology::sql_template;
 
-use super::{ExtractDecl, ExtractSpec, ExtractTemplate};
+use super::{BATCH_SIZE_MARKER, ExtractDecl, ExtractSpec, ExtractTemplate, FILTERS_MARKER};
 
 const WATERMARK_MARKER: &str = "{{watermark_column}}";
 const DELETED_MARKER: &str = "{{deleted_column}}";
@@ -25,9 +26,19 @@ pub(in crate::modules::sdlc) fn build(
         }
     }
 
-    let rendered = raw
-        .replace(WATERMARK_MARKER, decl.watermark)
-        .replace(DELETED_MARKER, decl.deleted);
+    let rendered = sql_template::render(
+        raw,
+        sql_template::context! {
+            watermark_column => decl.watermark,
+            deleted_column => decl.deleted,
+            // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
+            filters => FILTERS_MARKER,
+            batch_size => BATCH_SIZE_MARKER,
+        },
+    )
+    .map_err(|e| {
+        PlanError::MalformedTemplate(format!("authored SQL for '{}': {e}", decl.entity))
+    })?;
 
     let watermark =
         aliased_expression(&rendered, VERSION_COLUMN).unwrap_or_else(|| decl.watermark.to_string());
@@ -118,6 +129,9 @@ mod tests {
             "SELECT {{typo_column}} AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
         .expect_err("unresolved marker should be rejected");
-        assert!(err.to_string().contains("unresolved marker"), "got: {err}");
+        assert!(
+            err.to_string().contains("authored SQL for 'Group'"),
+            "got: {err}"
+        );
     }
 }

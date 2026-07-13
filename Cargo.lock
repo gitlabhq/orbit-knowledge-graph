@@ -2223,7 +2223,6 @@ dependencies = [
  "gkg-server-config",
  "gkg-utils",
  "jsonschema",
- "minijinja",
  "ontology",
  "opentelemetry",
  "regex",
@@ -8145,6 +8144,7 @@ version = "0.1.0"
 dependencies = [
  "const_format",
  "indexmap 2.14.0",
+ "minijinja",
  "rust-embed",
  "serde",
  "serde_json",

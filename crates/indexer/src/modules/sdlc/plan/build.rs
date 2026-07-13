@@ -347,6 +347,7 @@ mod tests {
             })
             .with(TraversalPathFilter { path })
             .to_sql()
+            .expect("renders extract SQL")
     }
 
     fn render_global(plan: &Plan) -> String {
@@ -357,6 +358,7 @@ mod tests {
                 current: Utc::now(),
             })
             .to_sql()
+            .expect("renders extract SQL")
     }
 
     #[test]
@@ -659,7 +661,8 @@ mod tests {
                 sort_key: &user.sort_key,
                 values: cursor.values(),
             })
-            .to_sql();
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(sql.contains("(id > '42')"), "sql: {sql}");
         assert!(
             sql.contains("_siphon_watermark > {last_watermark:String}"),
@@ -764,5 +767,6 @@ mod tests {
                 values: Cursor::first_page().values(),
             })
             .to_sql()
+            .expect("renders extract SQL")
     }
 }

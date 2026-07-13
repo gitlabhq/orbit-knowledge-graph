@@ -20,7 +20,6 @@ pub(crate) const ONTOLOGY_SCHEMA_FILE: &str = "schema.yaml";
 #[derive(Embed)]
 #[folder = "$ONTOLOGY_DIR"]
 #[include = "**/*.yaml"]
-#[include = "**/*.sql"]
 #[include = "**/*.sql.j2"]
 struct EmbeddedOntology;
 

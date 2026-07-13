@@ -4,6 +4,9 @@ mod enrichment;
 pub(super) mod generated;
 pub(super) mod sql;
 
+use std::collections::HashSet;
+
+use ontology::sql_template;
 use ontology::{
     DataType, EtlScope, Extract, NodeEntity, Pipeline,
     constants::{DELETED_COLUMN, VERSION_COLUMN},
@@ -31,12 +34,16 @@ pub(in crate::modules::sdlc) struct ExtractTemplate(String);
 
 impl ExtractTemplate {
     pub fn new(sql: String) -> Result<Self, PlanError> {
-        for marker in double_brace_markers(&sql) {
-            if marker != "filters" && marker != "batch_size" {
-                return Err(PlanError::MalformedTemplate(format!(
-                    "unresolved marker {{{{{marker}}}}}"
-                )));
-            }
+        let undeclared = sql_template::undeclared_variables(&sql)
+            .map_err(|e| PlanError::MalformedTemplate(format!("template parse failed: {e}")))?;
+        let expected: HashSet<String> = [FILTERS_MARKER, BATCH_SIZE_MARKER]
+            .iter()
+            .map(|marker| marker.trim_matches(|c| c == '{' || c == '}').to_string())
+            .collect();
+        if undeclared != expected {
+            return Err(PlanError::MalformedTemplate(format!(
+                "template variables must be exactly {{{{filters}}}} and {{{{batch_size}}}}, found {undeclared:?}"
+            )));
         }
         for (marker, name) in [
             (FILTERS_MARKER, "filters"),
@@ -138,19 +145,4 @@ impl<'a> ExtractDecl<'a> {
             order_by: self.order_by.to_vec(),
         })
     }
-}
-
-fn double_brace_markers(raw: &str) -> Vec<&str> {
-    let mut markers = Vec::new();
-    let mut rest = raw;
-    while let Some(start) = rest.find("{{") {
-        let after_start = &rest[start + 2..];
-        let Some(end) = after_start.find("}}") else {
-            markers.push(after_start.trim());
-            break;
-        };
-        markers.push(after_start[..end].trim());
-        rest = &after_start[end + 2..];
-    }
-    markers
 }

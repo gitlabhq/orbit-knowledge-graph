@@ -14,6 +14,6 @@ pipelines:
       type: clickhouse
       tables: [siphon_notes, siphon_system_note_metadata]
       order_by: [traversal_path, id]
-      query: system_note.sql
+      query: system_note.sql.j2
     transform:
       type: system_notes

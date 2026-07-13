@@ -13,6 +13,7 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use gkg_utils::arrow::ArrowUtils;
 use ontology::EtlScope;
+use ontology::sql_template;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;
@@ -277,7 +278,7 @@ impl PreparedQuery {
         self
     }
 
-    pub fn to_sql(&self) -> String {
+    pub fn to_sql(&self) -> Result<String, HandlerError> {
         let filters_sql = if self.filters.is_empty() {
             String::new()
         } else {
@@ -289,9 +290,14 @@ impl PreparedQuery {
                 .join(" AND ");
             format!("AND {joined}")
         };
-        self.template
-            .replace("{{filters}}", &filters_sql)
-            .replace("{{batch_size}}", &self.batch_size.to_string())
+        sql_template::render(
+            &self.template,
+            sql_template::context! {
+                filters => filters_sql,
+                batch_size => self.batch_size,
+            },
+        )
+        .map_err(|e| HandlerError::Processing(format!("rendering extract SQL: {e}")))
     }
 
     pub fn params(&self) -> Value {
@@ -492,7 +498,7 @@ mod tests {
     #[test]
     fn first_page_sql_replaces_template_markers() {
         let plan = test_plan(vec!["traversal_path", "id"], 1000);
-        let sql = plan.prepare().to_sql();
+        let sql = plan.prepare().to_sql().expect("renders extract SQL");
         assert!(sql.contains("ORDER BY traversal_path, id"), "sql: {sql}");
         assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
         assert!(!sql.contains("{{filters}}"), "sql: {sql}");
@@ -508,7 +514,7 @@ mod tests {
             last: Utc::now(),
             current: Utc::now(),
         });
-        let sql = prepared.to_sql();
+        let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(
             sql.contains("_siphon_watermark > {last_watermark:String}"),
             "sql: {sql}"
@@ -531,14 +537,19 @@ mod tests {
             .with(Some(DeletedFilter {
                 column: &plan.deleted_column,
             }))
-            .to_sql();
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(sql.contains("_siphon_deleted = false"), "sql: {sql}");
     }
 
     #[test]
     fn deleted_filter_omitted_on_incremental() {
         let plan = test_plan(vec!["id"], 1000);
-        let sql = plan.prepare().with(None::<DeletedFilter>).to_sql();
+        let sql = plan
+            .prepare()
+            .with(None::<DeletedFilter>)
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(!sql.contains("_siphon_deleted = false"), "sql: {sql}");
     }
 
@@ -546,7 +557,7 @@ mod tests {
     fn traversal_path_filter_adds_starts_with_and_param() {
         let plan = test_plan(vec!["id"], 1000);
         let prepared = plan.prepare().with(TraversalPathFilter { path: "1/2/" });
-        let sql = prepared.to_sql();
+        let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(
             sql.contains("startsWith(traversal_path, {traversal_path:String})"),
             "sql: {sql}"
@@ -569,7 +580,8 @@ mod tests {
                 sort_key: &sort_key,
                 values: &values,
             })
-            .to_sql();
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
         assert!(
             sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
@@ -588,7 +600,8 @@ mod tests {
                 current: Utc::now(),
             })
             .with(TraversalPathFilter { path: "1/2/" })
-            .to_sql();
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(sql.contains(" AND ("), "sql: {sql}");
         assert!(sql.contains("startsWith(traversal_path,"), "sql: {sql}");
         assert!(sql.contains("_siphon_watermark >"), "sql: {sql}");

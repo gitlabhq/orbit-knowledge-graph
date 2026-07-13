@@ -26,6 +26,7 @@ mod loading;
 pub mod migrations;
 pub mod pipelines;
 pub mod query_dsl;
+pub mod sql_template;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
@@ -1578,8 +1579,15 @@ mod tests {
         for entry in std::fs::read_dir(dir).expect("ontology directory should read") {
             let path = entry.expect("ontology entry should read").path();
             if path.is_dir() {
-                collect_sql_contents(&path, out);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("sql") {
+                // `sql/` holds refreshable-view select templates, not extract pipelines.
+                if path.file_name().and_then(|name| name.to_str()) != Some("sql") {
+                    collect_sql_contents(&path, out);
+                }
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".sql.j2"))
+            {
                 let contents = std::fs::read_to_string(&path).expect("query file should read");
                 out.insert(contents, path);
             }
@@ -1676,7 +1684,7 @@ mod tests {
         }
     }
 
-    /// The ontology is declarative: it carries authored `.sql` verbatim and marks
+    /// The ontology is declarative: it carries authored `.sql.j2` verbatim and marks
     /// everything else `Generated` (no inline SQL). The generated SQL itself is the
     /// indexer's concern, checked by its golden snapshot — not here.
     #[test]
@@ -1692,7 +1700,7 @@ mod tests {
                 ExtractQuery::Sql(sql) => {
                     assert!(
                         sql_files.remove(sql).is_some(),
-                        "{} authored SQL does not match any committed .sql file",
+                        "{} authored SQL does not match any committed .sql.j2 file",
                         pipeline.name
                     );
                 }
@@ -1702,7 +1710,7 @@ mod tests {
 
         assert!(
             sql_files.is_empty(),
-            "committed .sql files are not loaded by any pipeline: {:?}",
+            "committed .sql.j2 files are not loaded by any pipeline: {:?}",
             sql_files.values().collect::<Vec<_>>()
         );
     }

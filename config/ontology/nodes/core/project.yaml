@@ -120,7 +120,7 @@ pipelines:
       # project_namespace_traversal_paths leads.
       tables: [project_namespace_traversal_paths, siphon_projects, siphon_routes]
       order_by: [traversal_path, id]
-      query: project.sql
+      query: project.sql.j2
     transform:
       type: datafusion
       edges:

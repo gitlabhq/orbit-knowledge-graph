@@ -85,7 +85,7 @@ pipelines:
       type: clickhouse
       tables: [siphon_packages_package_files]
       order_by: [traversal_path, id]
-      query: package_file.sql
+      query: package_file.sql.j2
     transform:
       type: datafusion
       edges:

@@ -143,7 +143,7 @@ pipelines:
       type: clickhouse
       tables: [siphon_merge_request_diff_files, siphon_merge_request_diffs]
       order_by: [traversal_path, merge_request_diff_id, relative_order]
-      query: merge_request_diff_file.sql
+      query: merge_request_diff_file.sql.j2
     transform:
       type: datafusion
       edges:

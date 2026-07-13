@@ -318,7 +318,7 @@ pipelines:
       type: clickhouse
       tables: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
       order_by: [traversal_path, id]
-      query: merge_request.sql
+      query: merge_request.sql.j2
     transform:
       type: datafusion
       edges:

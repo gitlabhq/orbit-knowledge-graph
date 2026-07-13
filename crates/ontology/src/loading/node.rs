@@ -695,7 +695,7 @@ struct BuildPipeline<'a, R: ReadOntologyFile> {
 
 /// Builds the declarative `Pipeline` shared by node and edge construction. The
 /// extract SQL itself is not produced here — the indexer generates it from this
-/// model; only authored `.sql` files are resolved (verbatim) at load time.
+/// model; only authored `.sql.j2` files are resolved (verbatim) at load time.
 fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeline, OntologyError> {
     if b.extract.order_by.is_empty() {
         return Err(OntologyError::Validation(format!(
@@ -714,13 +714,13 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
     // indexer has nothing to project them from; they must carry authored SQL.
     if b.is_derived && generated {
         return Err(OntologyError::Validation(format!(
-            "pipeline '{}': derived entities require an authored .sql extract, not query: generated",
+            "pipeline '{}': derived entities require an authored .sql.j2 extract, not query: generated",
             b.name
         )));
     }
     if b.extract.filter.is_some() && !generated {
         return Err(OntologyError::Validation(format!(
-            "pipeline '{}': extract.filter requires query: generated (authored .sql ignores it)",
+            "pipeline '{}': extract.filter requires query: generated (authored .sql.j2 ignores it)",
             b.name
         )));
     }
@@ -728,7 +728,7 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
         b.extract
             .resolve_query(b.reader, &b.name, b.yaml_path, b.extract.filter.clone())?;
     // Sql pipelines recover their effective watermark/deleted from the authored
-    // `.sql` in the indexer; here both are always the settings defaults.
+    // `.sql.j2` in the indexer; here both are always the settings defaults.
     let watermark = b.etl_settings.watermark.clone();
     let deleted = b.etl_settings.deleted.clone();
     let extract = match b.extract.source_type {
@@ -809,7 +809,7 @@ fn convert_path_resolution(
 
 impl ExtractYaml {
     /// Classifies the `query:` field. `generated` builds `ExtractQuery::Generated`
-    /// (the indexer produces the SQL); a `.sql` file is read and carried verbatim.
+    /// (the indexer produces the SQL); a `.sql.j2` file is read and carried verbatim.
     /// No substitution or parsing happens here — that is the indexer's concern.
     fn resolve_query(
         &self,
@@ -820,7 +820,7 @@ impl ExtractYaml {
     ) -> Result<ExtractQuery, OntologyError> {
         match self.query.as_str() {
             GENERATED_QUERY => Ok(ExtractQuery::Generated { filter }),
-            file if file.ends_with(".sql") => {
+            file if file.ends_with(".sql.j2") => {
                 let sql_path = Path::new(yaml_path)
                     .parent()
                     .map(|dir| dir.join(file))

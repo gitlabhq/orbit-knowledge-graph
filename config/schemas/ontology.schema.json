@@ -1716,10 +1716,10 @@
             },
             {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_]+\\.sql$"
+              "pattern": "^[A-Za-z0-9_]+\\.sql\\.j2$"
             }
           ],
-          "description": "'generated' lets the loader build the extract SQL from the pipeline declaration (a single-table projection for nodes and non-enriching edges, or a batch + endpoint-enrichment join for enriching edges); otherwise a SQL file next to the YAML that references it. Derived-entity pipelines must use a SQL file."
+          "description": "'generated' lets the loader build the extract SQL from the pipeline declaration (a single-table projection for nodes and non-enriching edges, or a batch + endpoint-enrichment join for enriching edges); otherwise a MiniJinja .sql.j2 template next to the YAML that references it. Derived-entity pipelines must use a .sql.j2 template."
         },
         "filter": {
           "type": "string",
