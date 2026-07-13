@@ -50,7 +50,21 @@ fn build_aggregation(
                 let col = Expr::col(node, property);
                 let expr = match transform {
                     Some(crate::input::PropertyTransform::Truncate { unit }) => {
-                        Expr::func(unit.ch_function(), vec![col])
+                        // Without the cast, `Date`/`DateTime` keys cross Arrow
+                        // as bare integers on some server versions.
+                        let truncated = Expr::func(unit.ch_function(), vec![col]);
+                        match unit {
+                            TruncateUnit::Minute | TruncateUnit::Hour => {
+                                // Ident, not lit: toDateTime64 rejects a
+                                // parameterized scale argument.
+                                Expr::func("toDateTime64", vec![truncated, Expr::ident("0")])
+                            }
+                            TruncateUnit::Day
+                            | TruncateUnit::Week
+                            | TruncateUnit::Month
+                            | TruncateUnit::Quarter
+                            | TruncateUnit::Year => Expr::func("toDate32", vec![truncated]),
+                        }
                     }
                     None => col,
                 };
