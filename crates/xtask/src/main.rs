@@ -118,10 +118,7 @@ enum MigrationLedgerCommand {
         #[arg(long)]
         base: Option<String>,
     },
-    /// Regenerate the fingerprint snapshot without touching SCHEMA_VERSION or
-    /// the ledger. For no-op ontology drift (e.g. removing a declaration that
-    /// never emitted DDL) where `mise schema:bump` would wrongly imply a
-    /// version bump is needed.
+    /// Snapshot auxiliary tables and refreshable views without changing SCHEMA_VERSION.
     Snapshot,
 }
 

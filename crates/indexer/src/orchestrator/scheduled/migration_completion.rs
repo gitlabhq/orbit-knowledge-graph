@@ -305,10 +305,30 @@ impl MigrationCompletionChecker {
             return Ok(());
         }
 
+        crate::schema::migration::create_unversioned_tables(&self.graph, &self.ontology)
+            .await
+            .map_err(|error| {
+                TaskError::new(format!(
+                    "create unversioned ontology tables before promotion: {error}"
+                ))
+            })?;
+        crate::schema::migration::replace_refreshable_views_for_version(
+            &self.graph,
+            &self.ontology,
+            migrating_version,
+        )
+        .await
+        .map_err(|error| {
+            TaskError::new(format!(
+                "replace refreshable ontology views for v{migrating_version} before promotion: {error}"
+            ))
+        })?;
+
         let versions = read_all_versions(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
 
+        let mut retired_versions = Vec::new();
         for entry in &versions {
             if entry.status == "active" && entry.version != migrating_version {
                 info!(
@@ -323,6 +343,7 @@ impl MigrationCompletionChecker {
                 ) {
                     self.stop_merges_for_version(entry.version).await;
                 }
+                retired_versions.push(entry.version);
             }
         }
 
@@ -334,6 +355,17 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
+        for version in retired_versions {
+            if let Err(error) = crate::schema::migration::drop_refreshable_views_for_version(
+                &self.graph,
+                &self.ontology,
+                version,
+            )
+            .await
+            {
+                warn!(version, %error, "failed to drop refreshable views for retired schema");
+            }
+        }
         self.campaign.clear();
 
         self.metrics.record_migration_completed();

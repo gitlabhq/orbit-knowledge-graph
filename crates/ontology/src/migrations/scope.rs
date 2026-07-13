@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::Ontology;
+use crate::{Ontology, loading::ONTOLOGY_SCHEMA_FILE};
 
 /// The ledger YAML `scope:` value; an `entities:` subset narrows `Sdlc` only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +93,7 @@ pub fn derive_scope(
     let mut code_changed = false;
 
     for path in changed_sources {
-        if path == "schema.yaml" || path == "reference.yaml" {
+        if path == ONTOLOGY_SCHEMA_FILE || path == "reference.yaml" {
             return Some(MigrationScope::Full);
         }
         if path.starts_with("nodes/") {

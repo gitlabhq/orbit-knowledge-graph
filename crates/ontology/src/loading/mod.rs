@@ -15,6 +15,8 @@ pub(crate) use edge::EdgeYaml;
 pub(crate) use node::NodeYaml;
 use schema::SchemaYaml;
 
+pub(crate) const ONTOLOGY_SCHEMA_FILE: &str = "schema.yaml";
+
 #[derive(Embed)]
 #[folder = "$ONTOLOGY_DIR"]
 struct EmbeddedOntology;
@@ -93,8 +95,8 @@ pub(super) fn load_embedded() -> Result<Ontology, OntologyError> {
 }
 
 pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, OntologyError> {
-    let schema_content = reader.read("schema.yaml")?;
-    let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
+    let schema_content = reader.read(ONTOLOGY_SCHEMA_FILE)?;
+    let schema: SchemaYaml = parse_yaml(&schema_content, ONTOLOGY_SCHEMA_FILE)?;
 
     let denormalization_entries = schema.settings.denormalization.clone();
 

@@ -310,6 +310,28 @@ pub async fn run_dispatcher(
     .await?;
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
+    match schema::version::read_active_version(&graph).await {
+        Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
+            if let Err(error) = schema::migration::create_unversioned_tables(&graph, ontology).await
+            {
+                warn!(%error, "failed to create unversioned ontology tables at startup");
+            }
+            if let Err(error) = schema::migration::replace_refreshable_views_for_version(
+                &graph,
+                ontology,
+                active_version,
+            )
+            .await
+            {
+                warn!(%error, "failed to replace refreshable ontology views at startup");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => {
+            warn!(%error, "failed to read active version for auxiliary tables and refreshable views")
+        }
+    }
+
     let deletion_graph = Arc::new(config.graph.build_client());
     let deletion_datalake = Arc::new(config.datalake.build_client());
     let deletion_store: Arc<dyn NamespaceDeletionStore> =
