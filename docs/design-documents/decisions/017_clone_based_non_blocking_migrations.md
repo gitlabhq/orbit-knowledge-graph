@@ -102,36 +102,24 @@ The gate is checkpoint-based, not row-count-based; full correctness validation
 stays in staging E2E (see
 [`schema_management.md`](../schema_management.md#known-trade-off-checkpoint-based-validation)).
 
-## Relationship to blue-green deployment
+## Enabling blue-green deployment
 
-GKG already runs blue-green at the data layer: the active version keeps serving
-queries and streaming incremental updates from its `v<N>_` table set while the
-migrating version populates its own set, then promotion flips reads atomically.
-The two releases run fully side by side — `/ready` keeps migrating-version pods
-out of Kubernetes rotation until their version is `active`, and every gkg-owned
-NATS stream, subject, and KV bucket carries a version segment so the releases
-have independent work queues and locks
-([`schema_management.md`](../schema_management.md),
+The prefix layout is already a blue-green split. The active version keeps serving
+queries and streaming updates from its `v<N>_` tables while the migrating version
+fills its own set, and promotion flips reads over in one step. The two run side by
+side down to their NATS streams and locks, which are version-segmented, and
+`/ready` holds the new pods out of rotation until their version is active (see
+[`schema_management.md`](../schema_management.md) and
 [`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md)).
 
-Clone-based migration is what makes that cutover cheap and non-blocking. Without
-it the green set starts empty and is only promotable after a full re-index from
-epoch — a multi-hour window in which blue alone carries fresh data under heavy
-Siphon and Gitaly load. Cloning stands the green set up near-complete in
-milliseconds and re-indexes only the invalidated delta, so:
-
-- Blue serves and streams uninterrupted throughout; nothing in the clone or
-  force-backfill path touches the active set.
-- The window shrinks from re-indexing the whole graph to re-indexing what
-  changed, a small fraction of it for a narrow bump.
-- Promotion — the cutover trigger — gates on exactly the plan the scope produced
-  ([Promotion gates on the plan](#promotion-gates-on-the-plan)), so green goes
-  `active` as soon as the delta is complete.
-
-The deployment machinery that runs the two versions side by side is owned by
-[`schema_management.md`](../schema_management.md) and
-[`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md); this ADR covers only
-the migration mechanism that populates the green set.
+What clone-based migration buys is a green side that is cheap to stand up. A full
+rebuild has to re-index from epoch before it can promote, so for hours the blue
+side alone carries fresh data under heavy Siphon and Gitaly load. Cloning brings
+the green tables up near-complete at once and re-indexes only what changed, so the
+blue side is never disturbed and the window shrinks to the size of the delta.
+Promotion is the trigger: it gates on the plan the scope produced
+([Promotion gates on the plan](#promotion-gates-on-the-plan)), so the switch
+happens the moment that delta is done.
 
 ## Consequences
 
