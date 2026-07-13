@@ -4,7 +4,7 @@ SELECT
     {{ schema.version }} AS schema_version,
     '{{ table.logical_name }}' AS logical_table,
     top_level_namespace,
-    toUInt64(sum(attributed)) AS compressed_bytes
+    toInt64(sum(attributed)) AS compressed_bytes
 FROM (
   SELECT top_level_namespace,
          data_compressed_bytes * (w_eff / sum(w_eff) OVER (PARTITION BY part_name)) AS attributed
@@ -50,8 +50,8 @@ SELECT
     today() AS snapshot_date,
     {{ schema.version }} AS schema_version,
     replaceRegexpOne(table, '^v\\d+_', '') AS logical_table,
-    '__global' AS top_level_namespace,
-    sum(data_compressed_bytes) AS compressed_bytes
+    '0/' AS top_level_namespace,
+    toInt64(sum(data_compressed_bytes)) AS compressed_bytes
 FROM system.parts
 WHERE database = currentDatabase() AND active
   AND table IN (
