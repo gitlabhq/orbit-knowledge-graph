@@ -278,39 +278,74 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_p_ci_builds
-  order_by: [traversal_path, id, partition_id]
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    stage_id:
-      to: Stage
-      as: HAS_JOB
-      direction: incoming
-    user_id:
-      to: User
-      as: TRIGGERED
-      direction: incoming
-    commit_id:
-      - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
-      - { to: Pipeline, as: HAS_JOB, direction: incoming }
-    runner_id:
-      to: Runner
-      as: RUNS_ON
-      direction: outgoing
-    upstream_pipeline_id:
-      to: Pipeline
-      as: TRIGGERED_BY_PIPELINE
-      direction: outgoing
-    auto_canceled_by_id:
-      to: Pipeline
-      as: AUTO_CANCELED_BY
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: Job
+    extract:
+      type: clickhouse
+      tables: [siphon_p_ci_builds]
+      order_by: [traversal_path, id, partition_id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: Job
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: stage_id
+            kind: Stage
+          to:
+            field: id
+            kind: Job
+          label: HAS_JOB
+        - from:
+            field: user_id
+            kind: User
+          to:
+            field: id
+            kind: Job
+          label: TRIGGERED
+        - from:
+            field: id
+            kind: Job
+          to:
+            field: commit_id
+            kind: Pipeline
+          label: IN_PIPELINE
+        - from:
+            field: commit_id
+            kind: Pipeline
+          to:
+            field: id
+            kind: Job
+          label: HAS_JOB
+        - from:
+            field: id
+            kind: Job
+          to:
+            field: runner_id
+            kind: Runner
+          label: RUNS_ON
+        - from:
+            field: id
+            kind: Job
+          to:
+            field: upstream_pipeline_id
+            kind: Pipeline
+          label: TRIGGERED_BY_PIPELINE
+        - from:
+            field: id
+            kind: Job
+          to:
+            field: auto_canceled_by_id
+            kind: Pipeline
+          label: AUTO_CANCELED_BY
 storage:
   primary_key: [traversal_path, id]
   settings:

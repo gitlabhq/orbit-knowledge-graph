@@ -213,28 +213,46 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_p_ci_pipelines
-  order_by: [traversal_path, id, partition_id]
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    user_id:
-      to: User
-      as: TRIGGERED
-      direction: incoming
-    merge_request_id:
-      to: MergeRequest
-      as: TRIGGERED
-      direction: incoming
-    auto_canceled_by_id:
-      to: Pipeline
-      as: AUTO_CANCELED_BY
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: Pipeline
+    extract:
+      type: clickhouse
+      tables: [siphon_p_ci_pipelines]
+      order_by: [traversal_path, id, partition_id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: Pipeline
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: user_id
+            kind: User
+          to:
+            field: id
+            kind: Pipeline
+          label: TRIGGERED
+        - from:
+            field: merge_request_id
+            kind: MergeRequest
+          to:
+            field: id
+            kind: Pipeline
+          label: TRIGGERED
+        - from:
+            field: id
+            kind: Pipeline
+          to:
+            field: auto_canceled_by_id
+            kind: Pipeline
+          label: AUTO_CANCELED_BY
 storage:
   primary_key: [traversal_path, id]
   settings:

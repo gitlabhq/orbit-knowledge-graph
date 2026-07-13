@@ -77,26 +77,39 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: query
-  source: siphon_packages_package_files
-  select: >-
-    id, package_id, file_name, size,
-    if(match(file_sha256, '^\\\\x[0-9a-fA-F]{128}$'),
-    unhex(substring(file_sha256, 3)), NULL) AS file_sha256,
-    status, created_at, updated_at, project_id, traversal_path
-  from: siphon_packages_package_files
-  traversal_path_filter: "startsWith(traversal_path, {traversal_path:String})"
-  order_by: [traversal_path, id]
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    package_id:
-      to: Package
-      as: HAS_PACKAGE_FILE
-      direction: incoming
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: PackageFile
+    extract:
+      type: clickhouse
+      tables: [siphon_packages_package_files]
+      order_by: [traversal_path, id]
+      query:
+        select: >-
+          id, package_id, file_name, size,
+          if(match(file_sha256, '^\\\\x[0-9a-fA-F]{128}$'),
+          unhex(substring(file_sha256, 3)), NULL) AS file_sha256,
+          status, created_at, updated_at, project_id, traversal_path
+        from: siphon_packages_package_files
+        traversal_path_filter: "startsWith(traversal_path, {traversal_path:String})"
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: PackageFile
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: package_id
+            kind: Package
+          to:
+            field: id
+            kind: PackageFile
+          label: HAS_PACKAGE_FILE
 
 storage:
   primary_key: [traversal_path, id]

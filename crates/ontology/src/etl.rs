@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-/// Default transform: the built-in SQL projection. Nodes and standalone edges
-/// use it implicitly; derived entities must name a different one.
-pub const DEFAULT_TRANSFORM: &str = "data_fusion";
+/// Default transform: the built-in SQL projection. Node and standalone-edge
+/// pipelines must declare it; derived entities must name a different one.
+pub const DEFAULT_TRANSFORM: &str = "datafusion";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]

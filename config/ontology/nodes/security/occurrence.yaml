@@ -167,27 +167,46 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_vulnerability_occurrences
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    scanner_id:
-      to: VulnerabilityScanner
-      as: DETECTED_BY
-      direction: outgoing
-    primary_identifier_id:
-      to: VulnerabilityIdentifier
-      as: HAS_IDENTIFIER
-      direction: outgoing
-    vulnerability_id:
-      to: Vulnerability
-      as: OCCURRENCE_OF
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: VulnerabilityOccurrence
+    extract:
+      type: clickhouse
+      tables: [siphon_vulnerability_occurrences]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: VulnerabilityOccurrence
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: id
+            kind: VulnerabilityOccurrence
+          to:
+            field: scanner_id
+            kind: VulnerabilityScanner
+          label: DETECTED_BY
+        - from:
+            field: id
+            kind: VulnerabilityOccurrence
+          to:
+            field: primary_identifier_id
+            kind: VulnerabilityIdentifier
+          label: HAS_IDENTIFIER
+        - from:
+            field: id
+            kind: VulnerabilityOccurrence
+          to:
+            field: vulnerability_id
+            kind: Vulnerability
+          label: OCCURRENCE_OF
 storage:
   primary_key: [traversal_path, id]
   settings:

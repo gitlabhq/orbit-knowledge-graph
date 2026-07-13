@@ -6,11 +6,19 @@
 #   scope: sdlc   SDLC-sourced tables; optional `entities:` narrows to a subset
 #   scope: code   the code-graph tables (Definition, File, Directory, Branch,
 #                 ImportedSymbol) and their edge table
+#   scope: none   re-index NOTHING; the source text changed but the produced
+#                 output is byte-identical. Requires a `note:` certifying
+#                 output-neutrality. This deliberately bypasses the
+#                 under-declaration guard, so the note is mandatory and audited.
 #
 # Humans may WIDEN an entry (scope or entities), never narrow it below the
-# drift detected from the fingerprint snapshot — CI enforces this. A version
-# with no entry is treated as "*", which also makes pruning old entries safe.
+# drift detected from the fingerprint snapshot — CI enforces this, except for a
+# note-gated `scope: none` entry, the certified output-neutral escape hatch. A
+# version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
-  - version: 80
-    scope: "*"
-    note: ledger introduced; earlier versions implicitly "*"
+- version: 81
+  scope: none
+  note: 'pipelines: YAML format migration; extract and transform SQL are golden-pinned byte-identical'
+- version: 80
+  scope: '*'
+  note: ledger introduced; earlier versions implicitly "*"

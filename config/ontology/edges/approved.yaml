@@ -6,15 +6,24 @@ variants:
     scope: prune_to_target
     description: "User approved a merge request."
 
-etl:
-  - scope: namespaced
-    source: siphon_approvals
-    order_by: [traversal_path, merge_request_id, id]
-    from:
-      id: user_id
-      type: User
-      enrich: [state, private_profile, admin, auditor, external, user_type]
-    to:
-      id: merge_request_id
-      type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: APPROVED_siphon_approvals_MergeRequest
+    extract:
+      type: clickhouse
+      tables: [siphon_approvals, siphon_users, merge_requests]
+      order_by: [traversal_path, merge_request_id, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: user_id
+            kind: User
+            enrich: [state, private_profile, admin, auditor, external, user_type]
+          to:
+            field: merge_request_id
+            kind: MergeRequest
+            enrich: [state_id, merge_status, draft, squash, discussion_locked]
+          label: APPROVED

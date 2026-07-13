@@ -37,8 +37,12 @@ A typed directed connection between two **Nodes** (e.g., `AUTHORED`, `CONTAINS`,
 _Avoid_: interaction, link
 
 **Derived Entity**:
-A third **Ontology** shape alongside **Node** and **Relationship**: a **Datalake** extract with no node table, whose rows a named Rust transform turns into **Relationships**. Declared per domain in `schema.yaml` and named via `etl.transform`; it stays dormant until that transform is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection — they need multi-hop datalake reads or free-text parsing. See ADR 015.
+A third **Ontology** shape alongside **Node** and **Relationship**: a **Pipeline** with no node table, whose extracted rows a named Rust transform turns into **Relationships**. Declared per domain in `schema.yaml` and implemented in `config/ontology/derived/`; a derived entity stays dormant until its `transform.type` is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection — they need multi-hop datalake reads or free-text parsing. See ADR 015.
 _Avoid_: storageless node, derived node
+
+**Pipeline**:
+An **Ontology** ETL unit with `extract` and `transform` sections. Nodes, **Relationships**, and **Derived Entities** all use this shape. The extract names source tables, cursor ordering, and either `query: generated` (a projection built from the declaration) or an authored query object with explicit SELECT/FROM pieces; the transform is `datafusion` or a registered Rust transform.
+_Avoid_: old-style `etl` block
 
 **Ontology**:
 The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, **Derived Entity** definitions, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.

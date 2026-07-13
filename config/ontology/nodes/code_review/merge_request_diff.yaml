@@ -129,20 +129,32 @@ properties:
       depends_on: [project_id, id]
     description: "Full unified patch. Resolved from GitLab at query time."
 
-etl:
-  type: table
-  source: siphon_merge_request_diffs
-  order_by: [traversal_path, merge_request_id, id]
-  edges:
-    merge_request_id:
-      to: MergeRequest
-      as: HAS_DIFF
-      direction: incoming
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: MergeRequestDiff
+    extract:
+      type: clickhouse
+      tables: [siphon_merge_request_diffs]
+      order_by: [traversal_path, merge_request_id, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: merge_request_id
+            kind: MergeRequest
+          to:
+            field: id
+            kind: MergeRequestDiff
+          label: HAS_DIFF
+        - from:
+            field: id
+            kind: MergeRequestDiff
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
 storage:
   primary_key: [traversal_path, id]
   settings:

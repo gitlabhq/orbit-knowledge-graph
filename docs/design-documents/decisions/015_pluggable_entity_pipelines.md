@@ -124,12 +124,13 @@ batching can buffer internally.
 
 ### Extraction and writing are not duplicated — they are reused as-is
 
-SystemNote needs no bespoke extractor: its source is `siphon_notes ⋈
-siphon_system_note_metadata`, which is an ordinary `query`-type ETL plan (a JOIN in
-`extract_template`). It rides the same keyset pagination, watermark window, retry,
-read-ahead, checkpoint, and streaming-write path as every other entity. The only
-Rust-specific code is the transform body. This is the whole point: a new
-hand-written entity contributes a `BlockTransform`, nothing else.
+SystemNote needs no bespoke extractor: its source is the `SystemNote` pipeline in
+`config/ontology/derived/core/system_note.yaml`, whose extract is an authored query
+over `siphon_notes` with a `page_join` on `siphon_system_note_metadata` for the note
+action. It rides the same keyset pagination, watermark window, retry, read-ahead,
+checkpoint, and streaming-write path as every other entity. The only Rust-specific
+code is the transform body. This is the whole point: a new hand-written entity
+contributes a `BlockTransform` and an ontology pipeline, nothing else.
 
 ### Output routing
 
@@ -153,7 +154,8 @@ pub(in crate::modules::sdlc) enum TransformSpec {
 ```
 
 `lower.rs` sets it when it lowers each ontology plan: node and standalone-edge
-plans get `DataFusion(..)`; a derived entity gets `Rust(<etl.transform>)`.
+pipelines with `transform.type: datafusion` get `DataFusion(..)`; a derived entity
+gets `Rust(<transform.type>)`.
 
 One shared `Pipeline` is built once in `register_handlers` and Arc-cloned to every
 handler. It is an Arc-bundle of stateless collaborators (`datalake`,
@@ -164,7 +166,7 @@ At the start of each run, `Pipeline::run` calls `registry.build(plan)`:
 - `TransformSpec::DataFusion(transforms)` builds a `DataFusionTransform` inline.
 - `TransformSpec::Rust(name)` resolves a registered factory by name.
 
-`data_fusion` is therefore *not* a registry entry; it is the default arm. The
+`datafusion` is therefore *not* a registry entry; it is the default arm. The
 registry holds only Rust transforms, which self-register from their own module
 (the same composition pattern as `*::register_handlers`):
 
@@ -240,10 +242,11 @@ unaffected.
 - **Exposing DataFusion in the trait.** Stays internal to `DataFusionTransform`.
 - **Bespoke extractors/writers for Rust entities.** They reuse the shared pipeline;
   a different source shape is a different extract plan, not new machinery.
-- **A transform-type taxonomy in the ontology.** The ontology names a transform per
-  extract (`etl.transform`, defaulting to `data_fusion`), but it does not model
-  transform types or behavior; whether a named transform resolves is a Rust
-  registration concern. Edge/node kinds remain ontology-declared.
+- **A transform-type taxonomy in the ontology.** The ontology names the transform
+  in each pipeline's `transform.type` (`datafusion` for the built-in path, or a
+  registered Rust transform name), but it does not model transform behavior;
+  whether a named Rust transform resolves is a registration concern. Edge/node
+  kinds remain ontology-declared.
 - **Code and namespace-deletion modules.** Out of scope; they sit outside the SQL
   plan path already.
 

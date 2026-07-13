@@ -56,41 +56,48 @@ properties:
 #
 # Shared-commit transient: deleting one MR can tombstone a Commit still
 # referenced by another MR. The next re-index re-inserts it.
-etl:
-  type: query
-  source: merge_requests
-  select: >-
-    toInt64(bitAnd(sipHash64(m.target_project_id, m.decoded_sha), toUInt64(9223372036854775807))) AS id,
-    m.decoded_sha AS sha,
-    m.target_project_id AS project_id,
-    m.traversal_path AS traversal_path
-  from: >-
-    (
-      SELECT
-        *,
-        coalesce(
-          if(
-            startsWith(merged_commit_sha, '\\x'),
-            unhex(substring(merged_commit_sha, 3)),
-            nullIf(merged_commit_sha, '')
-          ),
-          nullIf(merge_commit_sha, ''),
-          if(
-            startsWith(squash_commit_sha, '\\x'),
-            substring(squash_commit_sha, 3),
-            lower(hex(nullIf(squash_commit_sha, '')))
-          )
-        ) AS decoded_sha
-      FROM merge_requests
-    ) AS m
-  where: >-
-    m.state_id = 3 AND m.decoded_sha IS NOT NULL
-  traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
-  watermark: m.{{watermark_column}}
-  table_alias: m
-  deleted: m.{{deleted_column}}
-  order_by: [traversal_path, project_id, id]
-  reindex_on: [merge_requests]
+indexer:
+  reindex: use_specified_tables
+  tables: [merge_requests]
+pipelines:
+  - name: Commit
+    extract:
+      type: clickhouse
+      tables: [merge_requests]
+      order_by: [traversal_path, project_id, id]
+      query:
+        select: >-
+          toInt64(bitAnd(sipHash64(m.target_project_id, m.decoded_sha), toUInt64(9223372036854775807))) AS id,
+          m.decoded_sha AS sha,
+          m.target_project_id AS project_id,
+          m.traversal_path AS traversal_path
+        from: >-
+          (
+            SELECT
+              *,
+              coalesce(
+                if(
+                  startsWith(merged_commit_sha, '\\x'),
+                  unhex(substring(merged_commit_sha, 3)),
+                  nullIf(merged_commit_sha, '')
+                ),
+                nullIf(merge_commit_sha, ''),
+                if(
+                  startsWith(squash_commit_sha, '\\x'),
+                  substring(squash_commit_sha, 3),
+                  lower(hex(nullIf(squash_commit_sha, '')))
+                )
+              ) AS decoded_sha
+            FROM merge_requests
+          ) AS m
+        where: >-
+          m.state_id = 3 AND m.decoded_sha IS NOT NULL
+        traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
+        watermark: m.{{watermark_column}}
+        deleted: m.{{deleted_column}}
+        table_alias: m
+    transform:
+      type: datafusion
 
 storage:
   settings:

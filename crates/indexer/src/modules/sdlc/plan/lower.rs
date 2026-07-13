@@ -1379,10 +1379,12 @@ mod tests {
             match &plan.transform {
                 TransformSpec::DataFusion(transformations) => {
                     for transformation in transformations {
-                        actual.push_str(&format!(
-                            "=== {} -> {} ===\n",
-                            plan.name, transformation.destination_table
-                        ));
+                        // Strip the vN_ prefix so SCHEMA_VERSION bumps don't churn the snapshot.
+                        let destination = transformation
+                            .destination_table
+                            .strip_prefix(&format!("v{}_", *SCHEMA_VERSION))
+                            .unwrap_or(&transformation.destination_table);
+                        actual.push_str(&format!("=== {} -> {} ===\n", plan.name, destination));
                         actual.push_str(&transformation.sql);
                         actual.push_str("\n\n");
                     }

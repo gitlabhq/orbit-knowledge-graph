@@ -4,7 +4,7 @@ use crate::OntologyError;
 use crate::entities::DerivedEntity;
 use crate::etl::{DEFAULT_TRANSFORM, EtlScope};
 use crate::loading::EtlSettings;
-use crate::loading::node::EtlYaml;
+use crate::loading::node::{IndexerYaml, PipelineYaml};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DerivedYaml {
@@ -14,7 +14,9 @@ pub(crate) struct DerivedYaml {
     emits: Vec<String>,
     #[serde(default)]
     global: bool,
-    etl: EtlYaml,
+    #[serde(default)]
+    indexer: Option<IndexerYaml>,
+    pipelines: Vec<PipelineYaml>,
 }
 
 impl DerivedYaml {
@@ -33,21 +35,34 @@ impl DerivedYaml {
             )));
         }
 
-        let transform = match self.etl.transform() {
-            Some(t) if t != DEFAULT_TRANSFORM => t.to_string(),
-            _ => {
+        if let Some(indexer) = &self.indexer {
+            indexer.validate(&name)?;
+        }
+        let indexer = self.indexer;
+        let pipeline = match <[PipelineYaml; 1]>::try_from(self.pipelines) {
+            Ok([pipeline]) => pipeline,
+            Err(pipelines) => {
                 return Err(OntologyError::Validation(format!(
-                    "derived entity '{name}' must set etl.transform to a custom transform name"
+                    "derived entity '{name}' declares {} pipelines; derived entities support exactly one",
+                    pipelines.len()
                 )));
             }
         };
+
+        let transform = pipeline.transform_type();
+        if transform == DEFAULT_TRANSFORM {
+            return Err(OntologyError::Validation(format!(
+                "derived entity '{name}' must set transform.type to a custom transform name"
+            )));
+        }
+        let transform = transform.to_string();
 
         let scope = if self.global {
             EtlScope::Global
         } else {
             EtlScope::Namespaced
         };
-        let etl = self.etl.into_config(&name, etl_settings, scope)?;
+        let etl = pipeline.into_config(&name, etl_settings, scope, indexer.as_ref())?;
         Ok(DerivedEntity {
             name,
             emits: self.emits,

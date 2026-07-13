@@ -5,28 +5,34 @@ description: >-
 
 emits: [MENTIONS]
 
-etl:
-  type: query
-  transform: system_notes
-  source: siphon_notes
-  from: siphon_notes AS sn
-  select: >-
-    sn.id AS id, sn.note AS note, sn.noteable_id AS noteable_id,
-    sn.noteable_type AS noteable_type, sn.author_id AS author_id,
-    sn.project_id AS project_id, sn.created_at AS created_at,
-    sn.traversal_path AS traversal_path
-  where: "sn.system = true AND sn.{{deleted_column}} = false"
-  traversal_path_filter: "startsWith(sn.traversal_path, {traversal_path:String})"
-  watermark: sn.{{watermark_column}}
-  deleted: sn.{{deleted_column}}
-  table_alias: sn
-  order_by: [traversal_path, id]
-  reindex_on: [siphon_notes, siphon_system_note_metadata]
-  page_join:
-    table: siphon_system_note_metadata
-    alias: snm
-    fk_column: note_id
-    select: [action]
-    where: "snm.{{deleted_column}} = false"
-    # Sorted by (traversal_path, id), so this prunes by the leading PK column.
-    traversal_path_column: traversal_path
+indexer:
+  reindex: use_specified_tables
+  tables: [siphon_notes, siphon_system_note_metadata]
+pipelines:
+  - name: SystemNote
+    extract:
+      type: clickhouse
+      tables: [siphon_notes, siphon_system_note_metadata]
+      order_by: [traversal_path, id]
+      query:
+        select: >-
+          sn.id AS id, sn.note AS note, sn.noteable_id AS noteable_id,
+          sn.noteable_type AS noteable_type, sn.author_id AS author_id,
+          sn.project_id AS project_id, sn.created_at AS created_at,
+          sn.traversal_path AS traversal_path
+        from: siphon_notes AS sn
+        where: "sn.system = true AND sn.{{deleted_column}} = false"
+        traversal_path_filter: "startsWith(sn.traversal_path, {traversal_path:String})"
+        watermark: sn.{{watermark_column}}
+        deleted: sn.{{deleted_column}}
+        table_alias: sn
+        page_join:
+          table: siphon_system_note_metadata
+          alias: snm
+          fk_column: note_id
+          select: [action]
+          where: "snm.{{deleted_column}} = false"
+          # Sorted by (traversal_path, id), so this prunes by the leading PK column.
+          traversal_path_column: traversal_path
+    transform:
+      type: system_notes

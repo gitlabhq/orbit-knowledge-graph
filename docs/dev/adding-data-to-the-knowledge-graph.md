@@ -209,9 +209,26 @@ Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Requ
 - `node_type`, `domain`, `description`, `label`, `destination_table: gl_<node>`, `default_columns`.
 - `redaction: { resource_type: <type>, id_column: id, ability: <ability> }` — **must match the monolith registration** (Section 4).
 - `properties:` — **every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**: don't mark a `NOT NULL` source nullable, and don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
-- `etl: { type: table, scope: namespaced, source: siphon_<table>, order_by: [traversal_path, id], edges: { project_id: { to: Project, as: IN_PROJECT, direction: outgoing } } }`.
-  - **Which edge mechanism to use:** the inline `edges:` block here is for edges derived from an **FK column on this node's own source table** (like `IN_PROJECT` from `project_id`). Use a **separate edge YAML (§5.2)** only for **join-table edges** (e.g. `DECLARES_DEPENDENCY` from `packages_dependency_links`), where the relationship lives in its own table.
-  - **How the ETL uses this (read before adding a mapping):** the `etl:` block declares an extraction plus a row-wise transform (source columns → graph columns, FK-edge resolution, type discriminators). Most nodes are a straight column projection, but if a property needs a **mapping** — an Integer-to-Enum column, a computed value, or a non-trivial rename — you must declare it here, not discover it fails at index time. See [SDLC indexing → ETL](../design-documents/indexing/sdlc_indexing.md#etl) (and the Integer-to-Enum mapping note in that doc) for how plans, transforms, and column mappings are derived from the ontology.
+- a `pipelines:` list with one pipeline named after the node:
+
+  ```yaml
+  pipelines:
+    - name: <Node>
+      extract:
+        type: clickhouse
+        tables: [siphon_<table>]
+        order_by: [traversal_path, id]
+        query: generated
+      transform:
+        type: datafusion
+        edges:
+          - from: { field: id, kind: <Node> }
+            to: { field: project_id, kind: Project }
+            label: IN_PROJECT
+  ```
+
+  - **Which edge mechanism to use:** the `transform.edges` list here is for edges derived from an **FK column on this node's own source table** (like `IN_PROJECT` from `project_id`); one endpoint is the node itself (`field: id`), the other names the FK field. Use a **separate edge YAML (§5.2)** only for **join-table edges** (e.g. `DECLARES_DEPENDENCY` from `packages_dependency_links`), where the relationship lives in its own table.
+  - **How the ETL uses this (read before adding a mapping):** a pipeline declares an extraction plus a row-wise transform (source columns → graph columns, FK-edge resolution, type discriminators). Most nodes are a straight column projection, but if a property needs a **mapping** — an Integer-to-Enum column, a computed value, or a non-trivial rename — you must declare it here, not discover it fails at index time. See [SDLC indexing → ETL](../design-documents/indexing/sdlc_indexing.md#etl) (and the Integer-to-Enum mapping note in that doc) for how plans, transforms, and column mappings are derived from the ontology.
 - `storage:` — `primary_key`, `columns`, `indexes`, `projections`. Copy the shape from the template node.
 
 ### 5.2 Edge YAML — `config/ontology/edges/<edge>.yaml`
@@ -225,13 +242,25 @@ variants:
     to_node:   { type: <To>,   id: id }
     scope: same_namespace
     description: "..."
-etl:
-  - scope: namespaced
-    source: siphon_<join_table>
-    order_by: [traversal_path, id]
-    from: { id: <from_fk_column>, type: <From> }
-    to:   { id: <to_fk_column>,   type: <To> }
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: <EDGE>_siphon_<join_table>_<To>
+    extract:
+      type: clickhouse
+      tables: [siphon_<join_table>]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: <from_fk_column>, kind: <From> }
+          to: { field: <to_fk_column>, kind: <To> }
+          label: <EDGE>
 ```
+
+The pipeline `name` is the composed checkpoint key `<KIND>_<source_table>_<TargetType>`;
+the loader rejects any other name.
 
 If either FK column is `Nullable` in the source, the ETL can emit null-target edges —
 filter or document it (reviewers will ask). Prefer NOT-NULL join columns.

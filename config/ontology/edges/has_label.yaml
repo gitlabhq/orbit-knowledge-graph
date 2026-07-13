@@ -13,16 +13,26 @@ variants:
     scope: prune_to_source
     description: "Merge request has label."
 
-etl:
-  - scope: namespaced
-    source: siphon_label_links
-    order_by: [traversal_path, target_id, id]
-    from:
-      id: target_id
-      type_column: target_type
-      type_mapping:
-        Issue: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
-    to:
-      id: label_id
-      type: Label
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: HAS_LABEL_siphon_label_links_Label
+    extract:
+      type: clickhouse
+      tables: [siphon_label_links]
+      order_by: [traversal_path, target_id, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: target_id
+            kind:
+              derive: target_type
+              mapping:
+                Issue: WorkItem
+            enrich: [state_id, work_item_type_id, confidential]
+          to:
+            field: label_id
+            kind: Label
+          label: HAS_LABEL

@@ -41,15 +41,24 @@ variants:
     scope: same_namespace
     description: "Directory contains file."
 
-etl:
-  - scope: namespaced
-    source: siphon_work_item_parent_links
-    order_by: [traversal_path, work_item_parent_id, id]
-    from:
-      id: work_item_parent_id
-      type: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
-    to:
-      id: work_item_id
-      type: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: CONTAINS_siphon_work_item_parent_links_WorkItem
+    extract:
+      type: clickhouse
+      tables: [siphon_work_item_parent_links, work_items]
+      order_by: [traversal_path, work_item_parent_id, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: work_item_parent_id
+            kind: WorkItem
+            enrich: [state_id, work_item_type_id, confidential]
+          to:
+            field: work_item_id
+            kind: WorkItem
+            enrich: [state_id, work_item_type_id, confidential]
+          label: CONTAINS

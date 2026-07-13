@@ -141,23 +141,39 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_deployments
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    environment_id:
-      to: Environment
-      as: IN_ENVIRONMENT
-      direction: outgoing
-    user_id:
-      to: User
-      as: DEPLOYED_BY
-      direction: incoming
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: Deployment
+    extract:
+      type: clickhouse
+      tables: [siphon_deployments]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: Deployment
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: id
+            kind: Deployment
+          to:
+            field: environment_id
+            kind: Environment
+          label: IN_ENVIRONMENT
+        - from:
+            field: user_id
+            kind: User
+          to:
+            field: id
+            kind: Deployment
+          label: DEPLOYED_BY
 storage:
   primary_key: [traversal_path, id]
   settings:

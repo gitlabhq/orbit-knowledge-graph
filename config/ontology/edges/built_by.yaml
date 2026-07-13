@@ -13,23 +13,38 @@ variants:
     scope: same_namespace
     description: "Package file was built by pipeline (per-artifact provenance)."
 
-etl:
-  - scope: namespaced
-    source: siphon_packages_build_infos
-    order_by: [traversal_path, id]
-    from:
-      id: package_id
-      type: Package
-    to:
-      id: pipeline_id
-      type: Pipeline
-
-  - scope: namespaced
-    source: siphon_packages_package_file_build_infos
-    order_by: [traversal_path, id]
-    from:
-      id: package_file_id
-      type: PackageFile
-    to:
-      id: pipeline_id
-      type: Pipeline
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: BUILT_BY_siphon_packages_build_infos_Pipeline
+    extract:
+      type: clickhouse
+      tables: [siphon_packages_build_infos]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: package_id
+            kind: Package
+          to:
+            field: pipeline_id
+            kind: Pipeline
+          label: BUILT_BY
+  - name: BUILT_BY_siphon_packages_package_file_build_infos_Pipeline
+    extract:
+      type: clickhouse
+      tables: [siphon_packages_package_file_build_infos]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: package_file_id
+            kind: PackageFile
+          to:
+            field: pipeline_id
+            kind: Pipeline
+          label: BUILT_BY

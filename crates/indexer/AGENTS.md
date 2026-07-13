@@ -154,19 +154,19 @@ below and in the root `AGENTS.md`.
 
 ### When a Rust transform is justified (ADR 015)
 
-The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `data_fusion`
+The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `datafusion`
 transform is a row-wise SQL projection of one extracted block and is the **default** for every
-node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity's `etl.transform`)
-is justified **only when the graph shape cannot be expressed as that SQL projection** — concretely,
-when it needs:
+node and standalone-edge pipeline. A hand-written `BlockTransform` (a derived entity's
+`transform.type`) is justified **only when the graph shape cannot be expressed as that SQL
+projection** — concretely, when it needs:
 
 - **multi-hop datalake reads** mid-transform (e.g. resolving GFM references to entity IDs via a
   second `IN`-list lookup against `siphon_routes` and entity tables), or
 - **cross-row or free-text work** SQL can't do (parsing note bodies, fanning one source row into
   several edge kinds).
 
-If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
-`data_fusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
+If the transform is a per-row projection of one extracted batch, express it as an ontology
+pipeline + `datafusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
 `docs/design-documents/decisions/015_pluggable_entity_pipelines.md`.
 
 ### Adding a handler

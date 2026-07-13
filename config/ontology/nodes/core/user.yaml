@@ -165,10 +165,17 @@ properties:
       16: duo_code_review_bot
       17: import_user
 
-etl:
-  type: table
-  source: siphon_users
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: User
+    extract:
+      type: clickhouse
+      tables: [siphon_users]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
 storage:
   primary_key: [id]
   settings:

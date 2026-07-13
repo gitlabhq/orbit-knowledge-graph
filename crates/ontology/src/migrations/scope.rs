@@ -206,15 +206,15 @@ enum NodeScope {
 struct NodeScopeYaml {
     node_type: String,
     #[serde(default)]
-    etl: Option<serde_yaml::Value>,
+    pipelines: Vec<serde_yaml::Value>,
 }
 
 fn parse_node_scope(content: &str) -> Option<NodeScope> {
     let parsed: NodeScopeYaml = serde_yaml::from_str(content).ok()?;
-    if parsed.etl.is_some() {
-        Some(NodeScope::Sdlc(parsed.node_type))
-    } else {
+    if parsed.pipelines.is_empty() {
         Some(NodeScope::Code)
+    } else {
+        Some(NodeScope::Sdlc(parsed.node_type))
     }
 }
 
@@ -381,7 +381,7 @@ mod tests {
         let ontology = Ontology::new();
         let embedded = BTreeMap::from([(
             "nodes/core/note.yaml".to_string(),
-            "node_type: Note\netl:\n  type: table\n".to_string(),
+            "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
         )]);
         let scope = derive_scope(
             &ontology,
@@ -414,7 +414,7 @@ mod tests {
         let embedded = BTreeMap::from([
             (
                 "nodes/core/note.yaml".to_string(),
-                "node_type: Note\netl:\n  type: table\n".to_string(),
+                "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
             ),
             (
                 "nodes/source_code/file.yaml".to_string(),
@@ -435,7 +435,7 @@ mod tests {
         let ontology = Ontology::new().with_nodes(["Note"]);
         let embedded = BTreeMap::from([(
             "nodes/core/note.yaml".to_string(),
-            "node_type: Note\netl:\n  type: table\n".to_string(),
+            "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
         )]);
         let scope = derive_scope(
             &ontology,
@@ -451,7 +451,7 @@ mod tests {
         let ontology = Ontology::new().with_nodes(["Note"]);
         let embedded = BTreeMap::from([(
             "nodes/core/note.yaml".to_string(),
-            "node_type: Note\netl:\n  type: table\n".to_string(),
+            "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
         )]);
         let scope = derive_scope(
             &ontology,

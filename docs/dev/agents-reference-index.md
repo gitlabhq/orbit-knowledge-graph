@@ -17,6 +17,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Duo / Orbit prompt routing (Rails-side) | `docs/design-documents/duo_orbit_prompt_routing.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
 | Ontology edge definitions | `config/ontology/edges/` |
+| Ontology derived entity definitions | `config/ontology/derived/` |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
 | Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/gkg-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |

@@ -72,15 +72,25 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_vulnerability_scanners
-  edges:
-    project_id:
-      to: Project
-      as: SCANS
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: VulnerabilityScanner
+    extract:
+      type: clickhouse
+      tables: [siphon_vulnerability_scanners]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: VulnerabilityScanner
+          to:
+            field: project_id
+            kind: Project
+          label: SCANS
 storage:
   primary_key: [traversal_path, id]
   settings:

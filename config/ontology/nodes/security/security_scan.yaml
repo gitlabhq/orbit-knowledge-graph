@@ -104,23 +104,39 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
-etl:
-  type: table
-  source: siphon_security_scans
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    pipeline_id:
-      to: Pipeline
-      as: IN_PIPELINE
-      direction: outgoing
-    build_id:
-      to: Job
-      as: RAN_BY
-      direction: outgoing
-
+indexer:
+  reindex: use_source_tables
+pipelines:
+  - name: SecurityScan
+    extract:
+      type: clickhouse
+      tables: [siphon_security_scans]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: SecurityScan
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+        - from:
+            field: id
+            kind: SecurityScan
+          to:
+            field: pipeline_id
+            kind: Pipeline
+          label: IN_PIPELINE
+        - from:
+            field: id
+            kind: SecurityScan
+          to:
+            field: build_id
+            kind: Job
+          label: RAN_BY
 storage:
   primary_key: [traversal_path, id]
   settings:
