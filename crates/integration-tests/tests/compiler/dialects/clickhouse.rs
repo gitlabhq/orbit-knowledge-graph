@@ -104,11 +104,11 @@ fn group_by_property_truncate_month_wraps_column() {
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
-        rendered.contains("toStartOfMonth(u.created_at)"),
-        "expected toStartOfMonth wrapper; got:\n{rendered}"
+        rendered.contains("toDate32(toStartOfMonth(u.created_at))"),
+        "expected toDate32(toStartOfMonth(...)) wrapper; got:\n{rendered}"
     );
     assert!(
-        rendered.contains("toStartOfMonth(u.created_at) AS created_at_month"),
+        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS created_at_month"),
         "expected default alias `created_at_month`; got:\n{rendered}"
     );
 }
@@ -132,14 +132,16 @@ fn group_by_property_truncate_all_units_compile() {
         let result = compile(&json, &test_ontology(), &test_ctx())
             .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
+        // Sub-daily units cast to DateTime64, daily+ to Date32, so the key
+        // crosses Arrow as a typed date/timestamp rather than a bare integer.
         let expected = match unit {
-            "minute" => "toStartOfMinute",
-            "hour" => "toStartOfHour",
-            "day" => "toStartOfDay",
-            "week" => "toStartOfWeek",
-            "month" => "toStartOfMonth",
-            "quarter" => "toStartOfQuarter",
-            "year" => "toStartOfYear",
+            "minute" => "toDateTime64(toStartOfMinute(u.created_at), 0)",
+            "hour" => "toDateTime64(toStartOfHour(u.created_at), 0)",
+            "day" => "toDate32(toStartOfDay(u.created_at))",
+            "week" => "toDate32(toStartOfWeek(u.created_at))",
+            "month" => "toDate32(toStartOfMonth(u.created_at))",
+            "quarter" => "toDate32(toStartOfQuarter(u.created_at))",
+            "year" => "toDate32(toStartOfYear(u.created_at))",
             _ => unreachable!(),
         };
         assert!(
@@ -188,7 +190,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         result
             .base
             .render()
-            .contains("toStartOfMinute(u.created_at)")
+            .contains("toDateTime64(toStartOfMinute(u.created_at), 0)")
     );
 }
 
@@ -206,7 +208,12 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         "limit": 50
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    assert!(result.base.render().contains("toStartOfHour(u.created_at)"));
+    assert!(
+        result
+            .base
+            .render()
+            .contains("toDateTime64(toStartOfHour(u.created_at), 0)")
+    );
 }
 
 #[test]
@@ -246,7 +253,7 @@ fn group_by_truncate_custom_alias_preserved() {
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
-        rendered.contains("toStartOfMonth(u.created_at) AS bucket"),
+        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
         "expected alias `bucket`; got:\n{rendered}"
     );
 }
