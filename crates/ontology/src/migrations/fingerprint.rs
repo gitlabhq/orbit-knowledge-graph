@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn versioned_schema_hash_ignores_ddl_owned_settings() {
         let first = "settings:\n  table_prefix: gl_\n";
-        let second = "settings:\n  table_prefix: gl_\n  auxiliary_tables:\n    - name: first\n      versioned: false\n  refreshable_materialized_views:\n    - name: second\n      versioned: true\n      append_to: first\n      refresh: EVERY 1 DAY\n      select_file: sql/second.sql\n";
+        let second = "settings:\n  table_prefix: gl_\n  auxiliary_tables:\n    - name: first\n      versioned: false\n  refreshable_materialized_views:\n    - name: second\n      versioned: true\n      append_to: first\n      refresh: EVERY 1 DAY\n      select_file: sql/second.sql.j2\n";
         assert_eq!(
             stable_versioned_schema_hash(first),
             stable_versioned_schema_hash(second)

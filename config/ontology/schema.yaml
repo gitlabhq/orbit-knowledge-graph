@@ -341,7 +341,7 @@ settings:
       versioned: true
       append_to: namespace_storage_snapshot
       refresh: EVERY 1 DAY OFFSET 2 HOUR
-      select_file: sql/namespace_storage_snapshot.sql
+      select_file: sql/namespace_storage_snapshot.sql.j2
   gc_preserve_patterns: []
   etl:
     default_watermark: _siphon_watermark

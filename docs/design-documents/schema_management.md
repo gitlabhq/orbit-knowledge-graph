@@ -64,9 +64,11 @@ matches the embedded version. During migration completion, it creates the incomi
 and refreshable views before promotion and drops outgoing version-prefixed refreshable views afterward.
 
 `namespace_storage_snapshot` is an unversioned daily history table populated by the versioned
-`namespace_storage_snapshot_refresh` view. Its ontology-relative SQL template attributes compressed
-ClickHouse bytes to the first two `traversal_path` segments and groups global tables under
-`__global`. Replacing the view does not remove previously collected snapshot rows.
+`namespace_storage_snapshot_refresh` view. Its ontology-relative MiniJinja SQL template uses the
+`.sql.j2` suffix and renders a ClickHouse `SELECT` from the schema version and ontology-derived
+graph table metadata. The query attributes compressed bytes to the first two `traversal_path`
+segments and groups global tables under `__global`. Replacing the view does not remove previously
+collected snapshot rows.
 
 ```sql
 CREATE TABLE IF NOT EXISTS gkg_schema_version (
