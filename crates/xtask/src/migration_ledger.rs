@@ -206,10 +206,8 @@ fn check_under_declaration(
 
     let (changed_sources, changed_tables) = committed.get_versioned_diff_keys_between(&base_fps);
     let source_contents = migrations::embedded_sources();
-    // `scope: none` is the certified output-neutral escape hatch: it deliberately
-    // under-covers the derived scope, so the coverage guard is skipped for it. The
-    // safety is enforced elsewhere — `MigrationLedger::validate` requires the entry
-    // to carry a note certifying the source change produces byte-identical output.
+    // A `none` entry may under-declare drift by design; its gate is the mandatory
+    // note enforced by `MigrationLedger::validate`, not this coverage check.
     if let Some(required) = derive_scope(
         ontology,
         &source_contents,
@@ -256,9 +254,6 @@ pub fn bump(
         &changed_tables,
     );
 
-    // `--scope none` is the certified output-neutral hatch: it may under-declare
-    // the detected drift, so it bypasses the widen-only coverage check. The note
-    // is the author's audited justification and is therefore mandatory.
     let entry_declaration = if matches!(explicit, Some(MigrationScope::None)) {
         if note.as_ref().is_none_or(|n| n.trim().is_empty()) {
             bail!(

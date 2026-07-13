@@ -112,9 +112,6 @@ impl MigrationLedger {
                 ));
             }
 
-            // `scope: none` re-indexes nothing and so bypasses the under-declaration
-            // guard; the note is the author's audited certification that the source
-            // change is output-neutral, so it is mandatory.
             if entry.scope == LedgerScope::None
                 && entry.note.as_ref().is_none_or(|n| n.trim().is_empty())
             {

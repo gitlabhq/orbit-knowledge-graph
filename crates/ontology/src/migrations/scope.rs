@@ -37,7 +37,6 @@ impl MigrationScope {
     pub fn covers_scope_of(&self, required: &Self) -> bool {
         match (self, required) {
             (Self::Full, _) => true,
-            // Anything covers "re-index nothing"; `None` itself covers only `None`.
             (_, Self::None) => true,
             (Self::None, _) => false,
             (_, Self::Full) => false,
