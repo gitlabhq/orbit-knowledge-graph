@@ -196,7 +196,9 @@ Local (DuckDB) DDL is generated from the ontology at runtime, so `config/ontolog
 changes automatically affect both ClickHouse and DuckDB schemas.
 
 Because the snapshot hashes the canonicalized ontology, comment- and formatting-only
-edits do not require a bump.
+edits do not require a bump. A genuinely non-invalidating change can bypass the CI base-diff
+guard with `[skip migration-ledger-check]` in the MR description; build-time fingerprint drift
+still fails.
 
 ## Zero-downtime migration orchestrator
 

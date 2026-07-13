@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::loading::ONTOLOGY_SCHEMA_FILE;
+
 /// Fingerprint-snapshot path relative to `CONFIG_DIR`.
 pub const FINGERPRINT_FILE: &str = "schema-migrations.fingerprint.yaml";
 
@@ -63,7 +65,7 @@ pub fn source_fingerprints() -> BTreeMap<String, String> {
         .into_iter()
         .filter(|(path, _)| !path.starts_with("sql/"))
         .map(|(path, content)| {
-            let hash = if path == "schema.yaml" {
+            let hash = if path == ONTOLOGY_SCHEMA_FILE {
                 stable_versioned_schema_hash(&content)
             } else if path.ends_with(".yaml") || path.ends_with(".yml") {
                 stable_yaml_hash(&content)
