@@ -128,6 +128,20 @@ fn parse_explicit_scope(
     }))
 }
 
+fn widen_amended_entry_scope(
+    existing: &MigrationScope,
+    declared: &MigrationScope,
+) -> Result<MigrationScope> {
+    if matches!(declared, MigrationScope::None) && !matches!(existing, MigrationScope::None) {
+        bail!(
+            "--scope none cannot amend an entry with {existing}: the wider scope already covers \
+             this version's drift, so drop --scope none; hand-edit the ledger YAML only if the \
+             entire version span is output-neutral"
+        );
+    }
+    Ok(existing.widened_with(declared))
+}
+
 /// Lowers a [`MigrationScope`] into the wire `scope:` + `entities:` fields of a ledger entry.
 fn split_scope_into_ledger_fields(scope: MigrationScope) -> (LedgerScope, BTreeSet<String>) {
     match scope {
@@ -323,7 +337,7 @@ pub fn bump(
             .migrations
             .first_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
-        let widened = latest.migration_scope().widened_with(&entry_declaration);
+        let widened = widen_amended_entry_scope(&latest.migration_scope(), &entry_declaration)?;
         let (scope, entities) = split_scope_into_ledger_fields(widened);
         latest.scope = scope;
         latest.entities = entities;
@@ -419,5 +433,29 @@ mod tests {
     fn parse_explicit_scope_rejects_unknown() {
         let err = parse_explicit_scope(Some("bogus".to_string()), None).unwrap_err();
         assert!(err.to_string().contains("unknown scope"), "{err}");
+    }
+
+    #[test]
+    fn amend_rejects_scope_none_over_wider_entry() {
+        for existing in [
+            MigrationScope::Full,
+            MigrationScope::Code,
+            MigrationScope::Sdlc(BTreeSet::new()),
+        ] {
+            let err = widen_amended_entry_scope(&existing, &MigrationScope::None).unwrap_err();
+            assert!(err.to_string().contains("cannot amend"), "{err}");
+        }
+    }
+
+    #[test]
+    fn amend_widens_none_entry_to_declared_scope() {
+        assert_eq!(
+            widen_amended_entry_scope(&MigrationScope::None, &MigrationScope::Code).unwrap(),
+            MigrationScope::Code
+        );
+        assert_eq!(
+            widen_amended_entry_scope(&MigrationScope::None, &MigrationScope::None).unwrap(),
+            MigrationScope::None
+        );
     }
 }
