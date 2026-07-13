@@ -50,20 +50,20 @@ fn build_aggregation(
                 let col = Expr::col(node, property);
                 let expr = match transform {
                     Some(crate::input::PropertyTransform::Truncate { unit }) => {
-                        // Cast to an explicit date/timestamp type: ClickHouse's
-                        // Arrow output otherwise ships `Date` as bare UInt16
-                        // epoch days and `DateTime` as UInt32 epoch seconds
-                        // (server-version/setting dependent), which the value
-                        // extractor serializes as plain integers (#1016).
+                        // Without the cast, `Date`/`DateTime` keys cross Arrow
+                        // as bare integers on some server versions (#1016).
                         let truncated = Expr::func(unit.ch_function(), vec![col]);
                         match unit {
                             TruncateUnit::Minute | TruncateUnit::Hour => {
-                                // The scale must render as a bare literal:
-                                // toDateTime64 rejects a parameterized
-                                // (`_CAST(0, 'Int64')`) scale argument.
+                                // Ident, not lit: toDateTime64 rejects a
+                                // parameterized scale argument.
                                 Expr::func("toDateTime64", vec![truncated, Expr::ident("0")])
                             }
-                            _ => Expr::func("toDate32", vec![truncated]),
+                            TruncateUnit::Day
+                            | TruncateUnit::Week
+                            | TruncateUnit::Month
+                            | TruncateUnit::Quarter
+                            | TruncateUnit::Year => Expr::func("toDate32", vec![truncated]),
                         }
                     }
                     None => col,

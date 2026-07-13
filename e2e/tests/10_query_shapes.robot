@@ -44,6 +44,19 @@ GOON Format Encodes The Neighbors Result
     Should Contain    ${resp.text}    query_type:neighbors    GOON header missing query_type
     Should Contain    ${resp.text}    ${SHAPE_PROJECT_NAME}    GOON body missing the seeded project name
 
+Truncated Date Group Key Serializes As An ISO Date String
+    [Documentation]    A month-truncated group key must arrive as an ISO date string, not the
+    ...                epoch-day integer ClickHouse's Arrow output uses for Date columns on some
+    ...                server versions (#1016).
+    [Tags]    query-shapes
+    ${query}=    Evaluate
+    ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"kind": "property", "node": "w", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "month"}], "aggregations": [{"function": "count", "target": "w", "alias": "n"}], "limit": 5}
+    ${resp}=    Orbit Query    ${query}
+    ${month}=    Aggregation Value    ${resp}    month
+    ${month}=    Convert To String    ${month}
+    Should Match Regexp    ${month}    ^\\d{4}-\\d{2}-\\d{2}$
+    ...    truncated month key is not an ISO date string: ${month}
+
 
 *** Keywords ***
 Seed Query Shape Fixture
