@@ -285,6 +285,18 @@ settings:
         - {name: target_kind, type: string}
         - {name: traversal_path, type: string}
   auxiliary_tables:
+    - name: namespace_storage_snapshot
+      versioned: false
+      include_system_columns: false
+      engine: ReplacingMergeTree
+      columns:
+        - {name: snapshot_date, type: date}
+        - {name: schema_version, type: int64}
+        - {name: logical_table, type: string}
+        - {name: top_level_namespace, type: string}
+        - {name: compressed_bytes, type: int64}
+      order_by: [logical_table, top_level_namespace, snapshot_date]
+      ttl: snapshot_date + INTERVAL 400 DAY
     - name: checkpoint
       columns:
         - {name: key, type: string, codec: ["zstd(1)"]}
@@ -324,6 +336,12 @@ settings:
         - {name: traversal_path, type: string}
       layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
+  refreshable_materialized_views:
+    - name: namespace_storage_snapshot_refresh
+      versioned: true
+      append_to: namespace_storage_snapshot
+      refresh: EVERY 1 DAY OFFSET 2 HOUR
+      select_file: sql/namespace_storage_snapshot.sql.j2
   gc_preserve_patterns: []
   etl:
     default_watermark: _siphon_watermark

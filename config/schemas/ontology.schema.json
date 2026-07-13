@@ -897,7 +897,7 @@
         },
         "refreshable_materialized_views": {
           "type": "array",
-          "description": "ClickHouse refreshable materialized views whose SELECT bodies are stored in ontology SQL files.",
+          "description": "ClickHouse refreshable materialized views whose SELECT bodies are stored in ontology MiniJinja SQL templates.",
           "items": {
             "type": "object",
             "properties": {
@@ -919,7 +919,8 @@
               },
               "select_file": {
                 "type": "string",
-                "description": "SELECT template path relative to the ontology directory."
+                "pattern": "^.+\\.sql\\.j2$",
+                "description": "MiniJinja SQL SELECT template path relative to the ontology directory. Use the .sql.j2 suffix."
               }
             },
             "required": ["name", "versioned", "append_to", "refresh", "select_file"],
