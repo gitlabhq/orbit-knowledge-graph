@@ -103,7 +103,8 @@ fn parse_explicit_scope(
         "*" => LedgerScope::All,
         "sdlc" => LedgerScope::Sdlc,
         "code" => LedgerScope::Code,
-        other => bail!("unknown scope '{other}'; expected '*', 'sdlc', or 'code'"),
+        "none" => LedgerScope::None,
+        other => bail!("unknown scope '{other}'; expected '*', 'sdlc', 'code', or 'none'"),
     };
 
     let entities: BTreeSet<String> = entities
@@ -123,6 +124,7 @@ fn parse_explicit_scope(
         LedgerScope::All => MigrationScope::Full,
         LedgerScope::Code => MigrationScope::Code,
         LedgerScope::Sdlc => MigrationScope::Sdlc(entities),
+        LedgerScope::None => MigrationScope::None,
     }))
 }
 
@@ -132,6 +134,7 @@ fn split_scope_into_ledger_fields(scope: MigrationScope) -> (LedgerScope, BTreeS
         MigrationScope::Full => (LedgerScope::All, BTreeSet::new()),
         MigrationScope::Code => (LedgerScope::Code, BTreeSet::new()),
         MigrationScope::Sdlc(entities) => (LedgerScope::Sdlc, entities),
+        MigrationScope::None => (LedgerScope::None, BTreeSet::new()),
     }
 }
 
@@ -203,12 +206,17 @@ fn check_under_declaration(
 
     let (changed_sources, changed_tables) = committed.get_versioned_diff_keys_between(&base_fps);
     let source_contents = migrations::embedded_sources();
+    // `scope: none` is the certified output-neutral escape hatch: it deliberately
+    // under-covers the derived scope, so the coverage guard is skipped for it. The
+    // safety is enforced elsewhere — `MigrationLedger::validate` requires the entry
+    // to carry a note certifying the source change produces byte-identical output.
     if let Some(required) = derive_scope(
         ontology,
         &source_contents,
         &changed_sources,
         &changed_tables,
-    ) && !entry.migration_scope().covers_scope_of(&required)
+    ) && !matches!(entry.migration_scope(), MigrationScope::None)
+        && !entry.migration_scope().covers_scope_of(&required)
     {
         bail!(
             "ledger entry for version {schema_version} under-declares the change: \
@@ -248,20 +256,33 @@ pub fn bump(
         &changed_tables,
     );
 
-    let entry_declaration = match (derived, explicit) {
-        (None, None) => bail!(
-            "no ontology drift detected. Pass --scope for a lowering-code-only change \
-             (e.g. `--scope sdlc --entities Note`)."
-        ),
-        (None, Some(explicit)) => explicit,
-        (Some(derived), None) => derived,
-        (Some(derived), Some(explicit)) => {
-            if !explicit.covers_scope_of(&derived) {
-                bail!(
-                    "--scope narrows below the detected drift ({derived}); flags may only widen it"
-                );
+    // `--scope none` is the certified output-neutral hatch: it may under-declare
+    // the detected drift, so it bypasses the widen-only coverage check. The note
+    // is the author's audited justification and is therefore mandatory.
+    let entry_declaration = if matches!(explicit, Some(MigrationScope::None)) {
+        if note.as_ref().is_none_or(|n| n.trim().is_empty()) {
+            bail!(
+                "--scope none requires --note certifying the source change is output-neutral \
+                 (produces byte-identical output)"
+            );
+        }
+        MigrationScope::None
+    } else {
+        match (derived, explicit) {
+            (None, None) => bail!(
+                "no ontology drift detected. Pass --scope for a lowering-code-only change \
+                 (e.g. `--scope sdlc --entities Note`)."
+            ),
+            (None, Some(explicit)) => explicit,
+            (Some(derived), None) => derived,
+            (Some(derived), Some(explicit)) => {
+                if !explicit.covers_scope_of(&derived) {
+                    bail!(
+                        "--scope narrows below the detected drift ({derived}); flags may only widen it"
+                    );
+                }
+                derived.widened_with(&explicit)
             }
-            derived.widened_with(&explicit)
         }
     };
 
@@ -378,4 +399,31 @@ fn write_initial_snapshot(ontology: &Ontology, current: &Fingerprints) -> Result
     fs::write(fingerprint_path(), current.render()).context("writing fingerprint snapshot")?;
     println!("wrote initial fingerprint snapshot for version {version}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_explicit_scope_accepts_none() {
+        let scope = parse_explicit_scope(Some("none".to_string()), None).unwrap();
+        assert_eq!(scope, Some(MigrationScope::None));
+    }
+
+    #[test]
+    fn parse_explicit_scope_none_rejects_entities() {
+        let err =
+            parse_explicit_scope(Some("none".to_string()), Some("Note".to_string())).unwrap_err();
+        assert!(
+            err.to_string().contains("--entities is only valid"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_explicit_scope_rejects_unknown() {
+        let err = parse_explicit_scope(Some("bogus".to_string()), None).unwrap_err();
+        assert!(err.to_string().contains("unknown scope"), "{err}");
+    }
 }

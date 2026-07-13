@@ -16,6 +16,10 @@ pub enum LedgerScope {
     /// Code-graph tables.
     #[serde(rename = "code")]
     Code,
+    /// Re-index nothing; the source text changed but the produced output is
+    /// certified byte-identical. Requires a `note:` justifying output-neutrality.
+    #[serde(rename = "none")]
+    None,
 }
 
 /// What a migration invalidates and must re-index. Empty `Sdlc` set = the whole SDLC domain.
@@ -24,6 +28,8 @@ pub enum MigrationScope {
     Full,
     Code,
     Sdlc(BTreeSet<String>),
+    /// Re-index nothing: clone every table unchanged and advance the version.
+    None,
 }
 
 impl MigrationScope {
@@ -31,6 +37,9 @@ impl MigrationScope {
     pub fn covers_scope_of(&self, required: &Self) -> bool {
         match (self, required) {
             (Self::Full, _) => true,
+            // Anything covers "re-index nothing"; `None` itself covers only `None`.
+            (_, Self::None) => true,
+            (Self::None, _) => false,
             (_, Self::Full) => false,
             (Self::Code, Self::Code) => true,
             (Self::Code, Self::Sdlc(_)) | (Self::Sdlc(_), Self::Code) => false,
@@ -49,6 +58,8 @@ impl MigrationScope {
     pub fn widened_with(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Full, _) | (_, Self::Full) => Self::Full,
+            (Self::None, other) => other.clone(),
+            (s, Self::None) => s.clone(),
             (Self::Code, Self::Code) => Self::Code,
             (Self::Code, Self::Sdlc(_)) | (Self::Sdlc(_), Self::Code) => Self::Full,
             (Self::Sdlc(left), Self::Sdlc(right)) => {
@@ -66,6 +77,7 @@ impl std::fmt::Display for MigrationScope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Full => write!(f, "scope \"*\""),
+            Self::None => write!(f, "scope none"),
             Self::Code => write!(f, "scope code"),
             Self::Sdlc(entities) if entities.is_empty() => write!(f, "scope sdlc"),
             Self::Sdlc(entities) => {
@@ -289,6 +301,36 @@ mod tests {
         assert!(!MigrationScope::Code.covers_scope_of(&MigrationScope::Sdlc(entities(&["Note"]))));
         assert!(!MigrationScope::Sdlc(BTreeSet::new()).covers_scope_of(&MigrationScope::Code));
         assert!(MigrationScope::Code.covers_scope_of(&MigrationScope::Code));
+    }
+
+    #[test]
+    fn scope_covers_none_is_covered_by_everything() {
+        assert!(MigrationScope::Full.covers_scope_of(&MigrationScope::None));
+        assert!(MigrationScope::Code.covers_scope_of(&MigrationScope::None));
+        assert!(MigrationScope::Sdlc(entities(&["Note"])).covers_scope_of(&MigrationScope::None));
+        assert!(MigrationScope::None.covers_scope_of(&MigrationScope::None));
+    }
+
+    #[test]
+    fn scope_covers_none_covers_nothing_but_none() {
+        assert!(!MigrationScope::None.covers_scope_of(&MigrationScope::Full));
+        assert!(!MigrationScope::None.covers_scope_of(&MigrationScope::Code));
+        assert!(!MigrationScope::None.covers_scope_of(&MigrationScope::Sdlc(entities(&["Note"]))));
+    }
+
+    #[test]
+    fn widen_none_is_identity() {
+        let sdlc = MigrationScope::Sdlc(entities(&["Note"]));
+        assert_eq!(MigrationScope::None.widened_with(&sdlc), sdlc);
+        assert_eq!(sdlc.widened_with(&MigrationScope::None), sdlc);
+        assert_eq!(
+            MigrationScope::None.widened_with(&MigrationScope::None),
+            MigrationScope::None
+        );
+        assert_eq!(
+            MigrationScope::None.widened_with(&MigrationScope::Full),
+            MigrationScope::Full
+        );
     }
 
     #[test]

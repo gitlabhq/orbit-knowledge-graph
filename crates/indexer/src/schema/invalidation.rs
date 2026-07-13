@@ -112,6 +112,8 @@ fn invalidated_entities(ontology: &Ontology, scope: &MigrationScope) -> BTreeSet
         MigrationScope::Sdlc(entities) if entities.is_empty() => sdlc_entity_names(ontology),
         MigrationScope::Sdlc(entities) => entities.clone(),
         MigrationScope::Code => code_entity_names(ontology),
+        // Re-index nothing: no entity is invalidated, so every table clones intact.
+        MigrationScope::None => BTreeSet::new(),
     }
 }
 

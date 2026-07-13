@@ -17,10 +17,15 @@ const LEDGER_HEADER: &str = "\
 #   scope: sdlc   SDLC-sourced tables; optional `entities:` narrows to a subset
 #   scope: code   the code-graph tables (Definition, File, Directory, Branch,
 #                 ImportedSymbol) and their edge table
+#   scope: none   re-index NOTHING; the source text changed but the produced
+#                 output is byte-identical. Requires a `note:` certifying
+#                 output-neutrality. This deliberately bypasses the
+#                 under-declaration guard, so the note is mandatory and audited.
 #
 # Humans may WIDEN an entry (scope or entities), never narrow it below the
-# drift detected from the fingerprint snapshot — CI enforces this. A version
-# with no entry is treated as \"*\", which also makes pruning old entries safe.
+# drift detected from the fingerprint snapshot — CI enforces this, except for a
+# note-gated `scope: none` entry, the certified output-neutral escape hatch. A
+# version with no entry is treated as \"*\", which also makes pruning old entries safe.
 ";
 
 const EMBEDDED_LEDGER: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
@@ -106,6 +111,18 @@ impl MigrationLedger {
                     entry.version
                 ));
             }
+
+            // `scope: none` re-indexes nothing and so bypasses the under-declaration
+            // guard; the note is the author's audited certification that the source
+            // change is output-neutral, so it is mandatory.
+            if entry.scope == LedgerScope::None
+                && entry.note.as_ref().is_none_or(|n| n.trim().is_empty())
+            {
+                return Err(format!(
+                    "version {}: `scope: none` requires a non-empty `note:` certifying the source change is output-neutral",
+                    entry.version
+                ));
+            }
         }
 
         let latest = self.latest().expect("non-empty checked above");
@@ -151,6 +168,7 @@ impl MigrationEntry {
             LedgerScope::All => MigrationScope::Full,
             LedgerScope::Code => MigrationScope::Code,
             LedgerScope::Sdlc => MigrationScope::Sdlc(self.entities.clone()),
+            LedgerScope::None => MigrationScope::None,
         }
     }
 }
@@ -238,6 +256,50 @@ mod tests {
         assert!(err.contains("only valid with `scope: sdlc`"), "{err}");
     }
 
+    #[test]
+    fn none_scope_requires_note() {
+        let ledger = MigrationLedger {
+            migrations: vec![MigrationEntry {
+                version: 1,
+                scope: LedgerScope::None,
+                entities: BTreeSet::new(),
+                note: None,
+            }],
+        };
+        let ontology = Ontology::new();
+        let err = ledger.validate(&ontology, 1).unwrap_err();
+        assert!(err.contains("requires a non-empty `note:`"), "{err}");
+    }
+
+    #[test]
+    fn none_scope_rejects_blank_note() {
+        let ledger = MigrationLedger {
+            migrations: vec![MigrationEntry {
+                version: 1,
+                scope: LedgerScope::None,
+                entities: BTreeSet::new(),
+                note: Some("   ".to_string()),
+            }],
+        };
+        let ontology = Ontology::new();
+        let err = ledger.validate(&ontology, 1).unwrap_err();
+        assert!(err.contains("requires a non-empty `note:`"), "{err}");
+    }
+
+    #[test]
+    fn none_scope_with_note_validates() {
+        let ledger = MigrationLedger {
+            migrations: vec![MigrationEntry {
+                version: 1,
+                scope: LedgerScope::None,
+                entities: BTreeSet::new(),
+                note: Some("output-neutral extract-SQL refactor".to_string()),
+            }],
+        };
+        let ontology = Ontology::new();
+        ledger.validate(&ontology, 1).unwrap();
+    }
+
     fn ledger(entries: Vec<MigrationEntry>) -> MigrationLedger {
         MigrationLedger {
             migrations: entries,
@@ -292,6 +354,39 @@ mod tests {
         );
         assert_eq!(
             ledger.resolve_migration_scope_between(82, 82),
+            MigrationScope::Full
+        );
+    }
+
+    #[test]
+    fn invalidation_scope_all_none_entries_resolve_to_none() {
+        let ledger = ledger(vec![
+            entry(83, LedgerScope::None, &[]),
+            entry(82, LedgerScope::None, &[]),
+        ]);
+        assert_eq!(
+            ledger.resolve_migration_scope_between(81, 83),
+            MigrationScope::None
+        );
+    }
+
+    #[test]
+    fn invalidation_scope_none_entry_does_not_narrow_sdlc() {
+        let ledger = ledger(vec![
+            entry(83, LedgerScope::None, &[]),
+            entry(82, LedgerScope::Sdlc, &["Note"]),
+        ]);
+        assert_eq!(
+            ledger.resolve_migration_scope_between(81, 83),
+            MigrationScope::Sdlc(entities(&["Note"]))
+        );
+    }
+
+    #[test]
+    fn invalidation_scope_gap_still_full_with_none_entries() {
+        let ledger = ledger(vec![entry(83, LedgerScope::None, &[])]);
+        assert_eq!(
+            ledger.resolve_migration_scope_between(81, 83),
             MigrationScope::Full
         );
     }

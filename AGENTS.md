@@ -31,7 +31,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `gkg-server`'s build script, so drift fails every build
-- Migration ledger YAML validated against JSON schema (`migration-ledger-schema-validate`); a bumped fingerprint snapshot must carry a scope-covering ledger entry (`migration-ledger-check`), and `gkg-server`'s build script fails on ontology-vs-snapshot drift or a malformed ledger
+- Migration ledger YAML validated against JSON schema (`migration-ledger-schema-validate`); a bumped fingerprint snapshot must carry a scope-covering ledger entry (`migration-ledger-check`), except a note-gated `scope: none` entry certifying an output-neutral source change (re-index nothing), and `gkg-server`'s build script fails on ontology-vs-snapshot drift or a malformed ledger
 - `cargo fmt` (`fmt-check`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)

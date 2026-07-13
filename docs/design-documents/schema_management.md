@@ -207,6 +207,24 @@ edits do not require a bump. A genuinely non-invalidating change can bypass the 
 guard with `[skip migration-ledger-check]` in the MR description; build-time fingerprint drift
 still fails.
 
+### Ledger scopes
+
+Each entry's `scope:` declares how much of the graph the version invalidates:
+
+- `*` — full rebuild (the fail-safe default for anything unmapped).
+- `sdlc` — SDLC-sourced tables; an optional `entities:` list narrows it to a subset.
+- `code` — the code-graph tables and their edge table.
+- `none` — re-index **nothing**. The source text changed but the produced output is certified
+  byte-identical (for example an output-neutral refactor of how extract SQL is declared). The
+  migration clones every table unchanged and advances `SCHEMA_VERSION` without re-indexing.
+
+`none` is the certified escape hatch for output-neutral source changes: it deliberately
+under-declares the fingerprint diff and so bypasses the under-declaration guard that otherwise
+forces a re-index. Because that guard exists to prevent a promoted-but-incomplete re-index (a
+past data-loss cause), a `none` entry **must** carry a non-empty `note:` certifying why the change
+is output-neutral, and `mise schema:bump --scope none` refuses to run without `--note`. The scope
+is never auto-derived; an author must ask for it explicitly.
+
 ## Zero-downtime migration orchestrator
 
 The **dispatcher** owns schema migration. At boot, before its task loops start, it compares the
