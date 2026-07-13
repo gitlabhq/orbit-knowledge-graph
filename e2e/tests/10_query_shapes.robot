@@ -47,7 +47,7 @@ GOON Format Encodes The Neighbors Result
 Truncated Date Group Key Serializes As An ISO Date String
     [Documentation]    A month-truncated group key must arrive as an ISO date string, not the
     ...                epoch-day integer ClickHouse's Arrow output uses for Date columns on some
-    ...                server versions (#1016).
+    ...                server versions.
     [Tags]    query-shapes
     ${query}=    Evaluate
     ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"kind": "property", "node": "w", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "month"}], "aggregations": [{"function": "count", "target": "w", "alias": "n"}], "limit": 5}

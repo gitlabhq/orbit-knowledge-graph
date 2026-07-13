@@ -51,7 +51,7 @@ fn build_aggregation(
                 let expr = match transform {
                     Some(crate::input::PropertyTransform::Truncate { unit }) => {
                         // Without the cast, `Date`/`DateTime` keys cross Arrow
-                        // as bare integers on some server versions (#1016).
+                        // as bare integers on some server versions.
                         let truncated = Expr::func(unit.ch_function(), vec![col]);
                         match unit {
                             TruncateUnit::Minute | TruncateUnit::Hour => {
