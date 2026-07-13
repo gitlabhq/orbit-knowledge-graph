@@ -101,8 +101,8 @@ query type.
 | `neighbors` | `object` | Neighbor lookup configuration. Required for `neighbors`. |
 | `limit` | `integer` | Maximum rows to return when no `cursor` is set. Default 30. Maximum 1000. Check `pagination.truncated` in the response: when true, more matching rows exist. |
 | `cursor` | `object` | Keyset pagination: `{"page_size": N}` for the first page, then `{"page_size": N, "after": "<pagination.next_cursor>"}` until `next_cursor` is absent. Reaches every row regardless of dataset size. The token is bound to the exact query that issued it. |
-| `order_by` | `object` | Sort rows by a node property. |
-| `aggregation_sort` | `object` | Sort aggregation rows by output column. |
+| `order_by` | `string` | Sort rows by a node property: `"node.property"` (asc) or `"-node.property"` (desc). |
+| `aggregation_sort` | `string` | Sort aggregation rows by output column (aggregation or group-key alias): `"column"` (asc) or `"-column"` (desc). |
 | `options` | `object` | Presentation and debug options. |
 
 Pagination reads live data at request time; there is no snapshot. Each page
@@ -488,7 +488,7 @@ Count merged merge requests per project:
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "merged_mrs"}
   ],
-  "aggregation_sort": {"column": "merged_mrs", "direction": "DESC"},
+  "aggregation_sort": "-merged_mrs",
   "limit": 10
 }
 ```
@@ -511,7 +511,7 @@ Count detected vulnerabilities by severity:
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vulnerability_count"}
   ],
-  "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"},
+  "aggregation_sort": "-vulnerability_count",
   "limit": 10
 }
 ```

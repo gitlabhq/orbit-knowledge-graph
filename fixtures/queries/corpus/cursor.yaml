@@ -183,10 +183,7 @@
           "alias": "merged_mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merged_mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merged_mr_count",
       "cursor": {
         "page_size": 5
       }
@@ -236,10 +233,7 @@
           "alias": "total_pipeline_seconds"
         }
       ],
-      "aggregation_sort": {
-        "column": "total_pipeline_seconds",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-total_pipeline_seconds",
       "cursor": {
         "page_size": 5
       }
@@ -646,10 +640,7 @@
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "cursor": {
         "page_size": 5
       }
@@ -700,10 +691,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "cursor": {
         "page_size": 10
       }
@@ -766,10 +754,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "cursor": {
         "page_size": 10
       }

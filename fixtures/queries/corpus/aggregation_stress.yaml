@@ -42,10 +42,7 @@ security_vulnerability_001_by_severity:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -89,10 +86,7 @@ security_vulnerability_002_by_state:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -126,10 +120,7 @@ security_vulnerability_003_by_report_type:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -175,10 +166,7 @@ security_vulnerability_004_by_resolution_flags:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -225,10 +213,7 @@ security_vulnerability_005_by_severity_state:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 30
     }
 
@@ -272,10 +257,7 @@ security_vulnerability_006_by_report_type_severity_state:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 50
     }
 
@@ -309,10 +291,7 @@ security_vulnerability_007_by_project_id:
           "alias": "critical_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "critical_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-critical_count",
       "limit": 50
     }
 
@@ -352,10 +331,7 @@ security_vulnerability_008_latest_detected_by_project:
           "alias": "latest_update"
         }
       ],
-      "aggregation_sort": {
-        "column": "detected_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-detected_count",
       "limit": 50
     }
 
@@ -389,10 +365,7 @@ security_scan_009_by_scan_type:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -426,10 +399,7 @@ security_scan_010_by_status:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -468,10 +438,7 @@ security_scan_011_by_type_status:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 50
     }
 
@@ -505,10 +472,7 @@ security_scan_012_by_project_id:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 50
     }
 
@@ -549,10 +513,7 @@ security_scan_013_by_pipeline_id:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 50
     }
 
@@ -586,10 +547,7 @@ security_finding_014_by_severity:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 20
     }
 
@@ -631,10 +589,7 @@ security_finding_015_by_deduplicated:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 20
     }
 
@@ -668,10 +623,7 @@ security_finding_016_by_project_id:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 50
     }
 
@@ -705,10 +657,7 @@ security_finding_017_by_scan_id:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 50
     }
 
@@ -748,10 +697,7 @@ security_finding_018_by_scanner_id:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 50
     }
 
@@ -793,10 +739,7 @@ security_occurrence_019_by_severity:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
 
@@ -837,10 +780,7 @@ security_occurrence_020_by_report_type:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
 
@@ -887,10 +827,7 @@ security_occurrence_021_by_severity_report_type:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
 
@@ -924,10 +861,7 @@ security_occurrence_022_by_project_id:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
 
@@ -961,10 +895,7 @@ security_occurrence_023_by_scanner_id:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
 
@@ -1001,10 +932,7 @@ security_identifier_024_by_external_type:
           "alias": "identifier_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "identifier_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-identifier_count",
       "limit": 50
     }
 
@@ -1041,10 +969,7 @@ security_identifier_025_by_project_id:
           "alias": "identifier_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "identifier_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-identifier_count",
       "limit": 50
     }
 
@@ -1081,10 +1006,7 @@ security_scanner_026_by_vendor:
           "alias": "scanner_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scanner_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scanner_count",
       "limit": 20
     }
 
@@ -1121,10 +1043,7 @@ security_scanner_027_by_project_id:
           "alias": "scanner_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scanner_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scanner_count",
       "limit": 50
     }
 
@@ -1167,10 +1086,7 @@ ci_pipeline_028_by_status:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
 
@@ -1213,10 +1129,7 @@ ci_pipeline_029_by_source:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
 
@@ -1264,10 +1177,7 @@ ci_pipeline_030_by_status_source:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 50
     }
 
@@ -1307,10 +1217,7 @@ ci_pipeline_031_by_protected:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
 
@@ -1344,10 +1251,7 @@ ci_pipeline_032_by_project_id:
           "alias": "failed_pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "failed_pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-failed_pipeline_count",
       "limit": 50
     }
 
@@ -1393,10 +1297,7 @@ ci_pipeline_033_avg_duration_by_status:
           "alias": "avg_duration"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
 
@@ -1430,10 +1331,7 @@ ci_pipeline_034_by_ref:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 50
     }
 
@@ -1474,10 +1372,7 @@ ci_job_035_by_status:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -1519,10 +1414,7 @@ ci_job_036_by_when:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -1569,10 +1461,7 @@ ci_job_037_by_status_when:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 50
     }
 
@@ -1612,10 +1501,7 @@ ci_job_038_by_allow_failure:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -1655,10 +1541,7 @@ ci_job_039_by_retried:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -1692,10 +1575,7 @@ ci_job_040_by_failure_reason:
           "alias": "failed_job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "failed_job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-failed_job_count",
       "limit": 50
     }
 
@@ -1729,10 +1609,7 @@ ci_job_041_by_project_id:
           "alias": "failed_job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "failed_job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-failed_job_count",
       "limit": 50
     }
 
@@ -1766,10 +1643,7 @@ ci_job_042_by_runner_id:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 50
     }
 
@@ -1803,10 +1677,7 @@ ci_job_043_by_ref:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 50
     }
 
@@ -1848,10 +1719,7 @@ ci_stage_044_by_status:
           "alias": "stage_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "stage_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-stage_count",
       "limit": 20
     }
 
@@ -1885,10 +1753,7 @@ ci_stage_045_by_name:
           "alias": "stage_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "stage_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-stage_count",
       "limit": 50
     }
 
@@ -1928,10 +1793,7 @@ ci_stage_046_by_position:
           "alias": "stage_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "stage_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-stage_count",
       "limit": 20
     }
 
@@ -1965,10 +1827,7 @@ ci_deployment_047_by_status:
           "alias": "deployment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "deployment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-deployment_count",
       "limit": 20
     }
 
@@ -2009,10 +1868,7 @@ ci_deployment_048_by_ref:
           "alias": "deployment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "deployment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-deployment_count",
       "limit": 50
     }
 
@@ -2053,10 +1909,7 @@ ci_deployment_049_by_archived:
           "alias": "deployment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "deployment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-deployment_count",
       "limit": 20
     }
 
@@ -2099,10 +1952,7 @@ ci_environment_050_by_state:
           "alias": "environment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "environment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-environment_count",
       "limit": 20
     }
 
@@ -2143,10 +1993,7 @@ ci_environment_051_by_tier:
           "alias": "environment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "environment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-environment_count",
       "limit": 20
     }
 
@@ -2192,10 +2039,7 @@ ci_environment_052_by_state_tier:
           "alias": "environment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "environment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-environment_count",
       "limit": 50
     }
 
@@ -2237,10 +2081,7 @@ code_review_mr_056_by_state:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
 
@@ -2280,10 +2121,7 @@ code_review_mr_057_by_merge_status:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
 
@@ -2323,10 +2161,7 @@ code_review_mr_058_by_draft:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
 
@@ -2366,10 +2201,7 @@ code_review_mr_059_by_squash:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
 
@@ -2415,10 +2247,7 @@ code_review_mr_060_by_state_draft:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
 
@@ -2452,10 +2281,7 @@ code_review_mr_061_by_project_id:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
 
@@ -2489,10 +2315,7 @@ code_review_mr_062_by_author_id:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
 
@@ -2526,10 +2349,7 @@ code_review_mr_063_by_target_branch:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 50
     }
 
@@ -2575,10 +2395,7 @@ code_review_mr_064_avg_diff_by_state:
           "alias": "avg_diff_size"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
 
@@ -2620,10 +2437,7 @@ planning_work_item_065_by_state:
           "alias": "work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-work_item_count",
       "limit": 20
     }
 
@@ -2663,10 +2477,7 @@ planning_work_item_066_by_type:
           "alias": "work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-work_item_count",
       "limit": 20
     }
 
@@ -2706,10 +2517,7 @@ planning_work_item_067_by_confidential:
           "alias": "work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-work_item_count",
       "limit": 20
     }
 
@@ -2754,10 +2562,7 @@ planning_work_item_068_by_state_type:
           "alias": "work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-work_item_count",
       "limit": 50
     }
 
@@ -2791,10 +2596,7 @@ planning_work_item_069_by_project_id:
           "alias": "open_work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "open_work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-open_work_item_count",
       "limit": 50
     }
 
@@ -2828,10 +2630,7 @@ planning_work_item_070_by_namespace_id:
           "alias": "open_work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "open_work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-open_work_item_count",
       "limit": 50
     }
 
@@ -2872,10 +2671,7 @@ project_071_by_visibility:
           "alias": "project_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "project_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-project_count",
       "limit": 20
     }
 
@@ -2916,10 +2712,7 @@ project_072_by_archived:
           "alias": "project_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "project_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-project_count",
       "limit": 20
     }
 
@@ -2971,10 +2764,7 @@ project_073_by_visibility_archived:
           "alias": "latest_update"
         }
       ],
-      "aggregation_sort": {
-        "column": "project_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-project_count",
       "limit": 20
     }
 
@@ -3019,10 +2809,7 @@ join_vulnerability_project_074_by_project_visibility:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -3072,10 +2859,7 @@ join_vulnerability_project_075_by_vulnerability_and_visibility:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 50
     }
 
@@ -3120,10 +2904,7 @@ join_security_scan_project_076_by_project_visibility:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -3168,10 +2949,7 @@ join_security_scan_pipeline_077_by_pipeline_status:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -3217,10 +2995,7 @@ join_security_scan_job_078_by_job_status:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -3265,10 +3040,7 @@ join_finding_project_079_by_project_visibility:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 20
     }
 
@@ -3313,10 +3085,7 @@ join_finding_scanner_080_by_scanner_vendor:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 20
     }
 
@@ -3367,10 +3136,7 @@ join_occurrence_project_082_by_project_visibility:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
 
@@ -3421,10 +3187,7 @@ join_occurrence_vulnerability_083_by_vulnerability_state:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 20
     }
 
@@ -3475,10 +3238,7 @@ join_occurrence_identifier_084_by_identifier_type:
           "alias": "occurrence_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occurrence_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occurrence_count",
       "limit": 50
     }
 
@@ -3529,10 +3289,7 @@ join_pipeline_project_085_by_project_visibility:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
 
@@ -3583,10 +3340,7 @@ join_job_pipeline_086_by_pipeline_status:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -3631,10 +3385,7 @@ join_job_project_087_by_project_visibility:
           "alias": "failed_job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "failed_job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-failed_job_count",
       "limit": 20
     }
 
@@ -3685,10 +3436,7 @@ join_pipeline_job_088_by_job_status:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -3739,10 +3487,7 @@ join_pipeline_stage_089_by_stage_status:
           "alias": "stage_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "stage_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-stage_count",
       "limit": 20
     }
 
@@ -3793,10 +3538,7 @@ join_stage_job_090_by_job_status:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -3841,10 +3583,7 @@ join_merge_request_project_091_by_project_visibility:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
 
@@ -3889,10 +3628,7 @@ join_merge_request_pipeline_092_by_pipeline_status:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
 
@@ -3937,10 +3673,7 @@ join_work_item_project_093_by_project_visibility:
           "alias": "work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-work_item_count",
       "limit": 20
     }
 
@@ -3985,10 +3718,7 @@ join_work_item_group_094_by_group_visibility:
           "alias": "work_item_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "work_item_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-work_item_count",
       "limit": 20
     }
 
@@ -4040,10 +3770,7 @@ join_deployment_environment_095_by_environment_tier:
           "alias": "deployment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "deployment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-deployment_count",
       "limit": 20
     }
 
@@ -4095,10 +3822,7 @@ join_deployment_project_096_by_project_visibility:
           "alias": "deployment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "deployment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-deployment_count",
       "limit": 20
     }
 
@@ -4143,10 +3867,7 @@ join_environment_project_097_by_project_visibility:
           "alias": "environment_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "environment_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-environment_count",
       "limit": 20
     }
 
@@ -4191,10 +3912,7 @@ join_vulnerability_finding_098_by_finding_severity:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -4239,10 +3957,7 @@ join_security_scan_finding_099_by_finding_severity:
           "alias": "finding_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "finding_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-finding_count",
       "limit": 20
     }
 
@@ -4306,10 +4021,7 @@ join_pipeline_project_100_by_status_and_visibility:
           "alias": "avg_duration"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 50
     }
 

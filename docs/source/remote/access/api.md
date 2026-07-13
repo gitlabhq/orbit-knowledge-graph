@@ -101,7 +101,7 @@ Put the request body in `request.json`:
         "alias": "failed_pipelines"
       }
     ],
-    "aggregation_sort": {"column": "failed_pipelines", "direction": "DESC"},
+    "aggregation_sort": "-failed_pipelines",
     "limit": 10
   },
   "format": "raw"

@@ -2444,7 +2444,7 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [{"function": "count", "target": "u"}],
-            "aggregation_sort": {"column": "count", "direction": "DESC"},
+            "aggregation_sort": "-count",
             "limit": 10
         }"#,
         &allow_all(),

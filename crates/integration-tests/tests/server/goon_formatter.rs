@@ -332,7 +332,7 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": [{"kind": "property", "node": "u", "property": "state"}],
             "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
-            "aggregation_sort": {"column": "user_count", "direction": "DESC"},
+            "aggregation_sort": "-user_count",
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),

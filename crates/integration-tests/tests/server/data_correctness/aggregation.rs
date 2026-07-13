@@ -90,7 +90,7 @@ pub(super) async fn aggregation_sort_orders_by_aggregate_value(ctx: &TestContext
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
-            "aggregation_sort": {"column": "member_count", "direction": "DESC"},
+            "aggregation_sort": "-member_count",
             "limit": 10
         }"#,
         &allow_all(),
@@ -117,7 +117,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
                 {"kind": "property", "node": "n", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
             ],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
-            "aggregation_sort": {"column": "bucket", "direction": "ASC"},
+            "aggregation_sort": "bucket",
             "limit": 20
         }"#,
         &allow_all(),

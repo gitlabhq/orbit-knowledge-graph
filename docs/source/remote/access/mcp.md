@@ -219,7 +219,7 @@ You can also pass raw JSON queries directly if you want precise control over res
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "open_mrs"}
   ],
-  "aggregation_sort": {"column": "open_mrs", "direction": "DESC"},
+  "aggregation_sort": "-open_mrs",
   "limit": 10
 }
 ```

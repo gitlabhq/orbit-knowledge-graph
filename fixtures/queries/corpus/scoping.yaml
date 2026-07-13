@@ -178,7 +178,7 @@ proj_id_mr_count_by_state_agg:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -196,7 +196,7 @@ proj_full_path_mr_count_by_state_agg:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -292,7 +292,7 @@ grp_id_milestone_count_by_state_agg:
       "relationships": [{"type": "IN_GROUP", "from": "m", "to": "g"}],
       "group_by": [{"kind": "property", "node": "m", "property": "state", "alias": "ms_state"}],
       "aggregations": [{"function": "count", "target": "m", "alias": "ms_count"}],
-      "aggregation_sort": {"column": "ms_count", "direction": "DESC"},
+      "aggregation_sort": "-ms_count",
       "limit": 10
     }
 
@@ -334,7 +334,7 @@ grp_id_count_mrs_aggregation_MOTIVATING:
       ],
       "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 50
     }
 
@@ -356,7 +356,7 @@ subgrp_id_count_mrs_aggregation_deeper_prefix:
       ],
       "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 50
     }
 
@@ -412,7 +412,7 @@ grp_id_vuln_count_by_severity_agg:
       ],
       "group_by": [{"kind": "property", "node": "v", "property": "severity", "alias": "sev"}],
       "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
-      "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+      "aggregation_sort": "-vuln_count",
       "limit": 20
     }
 
@@ -461,7 +461,7 @@ grp_id_count_workitems_aggregation:
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
       "group_by": [{"kind": "property", "node": "wi", "property": "work_item_type", "alias": "wi_type"}],
       "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
-      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "aggregation_sort": "-wi_count",
       "limit": 20
     }
 
@@ -552,7 +552,7 @@ proj_full_path_mr_count_agg_scoped:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -747,7 +747,7 @@ proj_id_mr_by_state:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
       "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 10,
       "options": {"include_debug_sql": true}
     }
@@ -772,7 +772,7 @@ group_id_mr_by_author:
       ],
       "group_by": [{"kind": "node", "node": "author", "alias": "author"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 20,
       "options": {"include_debug_sql": true}
     }
@@ -791,7 +791,7 @@ group_fullpath_wi_by_state:
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g", "direction": "outgoing"}],
       "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "wi_state"}],
       "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
-      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "aggregation_sort": "-wi_count",
       "limit": 10,
       "options": {"include_debug_sql": true}
     }
@@ -932,7 +932,7 @@ project_id_in_multi:
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "aggregation_sort": "-mr_count",
       "limit": 20,
       "options": {"include_debug_sql": true}
     }
@@ -1004,7 +1004,7 @@ unknown_namespace_id_group_empty:
       ],
       "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "state"}],
       "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
-      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "aggregation_sort": "-wi_count",
       "limit": 10,
       "options": {"include_debug_sql": true}
     }
@@ -1056,7 +1056,7 @@ mr_ids_changed_paths_agg:
       ],
       "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
       "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
-      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "aggregation_sort": "-changes",
       "limit": 40
     }
 
@@ -1080,7 +1080,7 @@ pipeline_filter_changed_paths_agg:
       ],
       "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
       "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
-      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "aggregation_sort": "-changes",
       "limit": 60
     }
 

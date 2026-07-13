@@ -34,10 +34,7 @@ vulnerabilities_by_severity:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 10
     }
 
@@ -71,10 +68,7 @@ vulnerabilities_by_state:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 10
     }
 
@@ -108,10 +102,7 @@ vulnerabilities_by_report_type:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 10
     }
 
@@ -160,10 +151,7 @@ vulnerabilities_by_severity_and_state:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 30
     }
 
@@ -230,10 +218,7 @@ vulnerabilities_by_project_and_severity:
           "alias": "latest_vulnerability_update"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -267,10 +252,7 @@ security_scans_by_scan_type:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 10
     }
 
@@ -304,10 +286,7 @@ security_scans_by_status:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 10
     }
 
@@ -362,10 +341,7 @@ security_scans_by_project_and_scan_type:
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -406,10 +382,7 @@ projects_by_visibility:
           "alias": "project_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "project_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-project_count",
       "limit": 10
     }
 
@@ -450,10 +423,7 @@ merge_requests_by_state:
           "alias": "merge_request_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 10
     }
 
@@ -507,10 +477,7 @@ merge_requests_by_state_and_draft:
           "alias": "avg_diff_size"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_request_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_request_count",
       "limit": 20
     }
 
@@ -552,10 +519,7 @@ pipelines_by_status:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 10
     }
 
@@ -601,10 +565,7 @@ pipeline_duration_by_status:
           "alias": "avg_duration"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 10
     }
 
@@ -646,10 +607,7 @@ jobs_by_status:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 10
     }
 
@@ -698,10 +656,7 @@ jobs_by_status_and_when:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -746,10 +701,7 @@ vulnerabilities_by_project_visibility:
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 10
     }
 
@@ -794,10 +746,7 @@ pipelines_by_project_visibility:
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 10
     }
 
@@ -866,10 +815,7 @@ project_pipeline_status_matrix:
           "alias": "avg_duration"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
 

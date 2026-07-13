@@ -239,10 +239,7 @@
           "alias": "merged_mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merged_mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merged_mr_count",
       "limit": 20
     }
 
@@ -290,10 +287,7 @@
           "alias": "total_pipeline_seconds"
         }
       ],
-      "aggregation_sort": {
-        "column": "total_pipeline_seconds",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-total_pipeline_seconds",
       "limit": 15
     }
 
@@ -341,10 +335,7 @@
           "alias": "merged_mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merged_mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merged_mr_count",
       "limit": 10
     }
 
@@ -538,10 +529,7 @@
           "alias": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 20
     }
 
@@ -596,10 +584,7 @@
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -713,10 +698,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
 
@@ -842,10 +824,7 @@
           "alias": "merged_non_draft_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merged_non_draft_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merged_non_draft_count",
       "limit": 20
     }
 
@@ -931,10 +910,7 @@
           "alias": "failed_job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "failed_job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-failed_job_count",
       "limit": 20
     }
 
@@ -1043,10 +1019,7 @@
           "alias": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -1080,10 +1053,7 @@
           "alias": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -1132,10 +1102,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
 
@@ -1202,10 +1169,7 @@
           "alias": "avg_duration"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
 

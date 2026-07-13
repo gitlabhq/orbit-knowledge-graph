@@ -417,7 +417,7 @@ mod tests {
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"column": "c", "direction": "DESC"},
+                "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -657,7 +657,7 @@ mod tests {
                 "nodes": [{"id": "u", "entity": "User"}],
                 "group_by": [{"kind": "node", "node": "u"}],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"column": "c", "direction": "DESC"},
+                "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_grouped_aggregation_response());
@@ -861,7 +861,7 @@ mod tests {
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"column": "c", "direction": "DESC"},
+                "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());

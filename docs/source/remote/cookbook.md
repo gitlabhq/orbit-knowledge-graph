@@ -107,7 +107,7 @@ Rank the most frequent job failures across your organization:
   ],
   "group_by": [{"kind": "property", "node": "j", "property": "name", "alias": "job_name"}],
   "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
-  "aggregation_sort": {"column": "failures", "direction": "DESC"},
+  "aggregation_sort": "-failures",
   "limit": 40
 }
 ```
@@ -136,7 +136,7 @@ that appears under three or more projects is a shared-template hot spot.
     {"kind": "property", "node": "p", "property": "full_path", "alias": "project"}
   ],
   "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
-  "aggregation_sort": {"column": "failures", "direction": "DESC"},
+  "aggregation_sort": "-failures",
   "limit": 200
 }
 ```
@@ -161,7 +161,7 @@ pipelines those pipelines triggered.
   ],
   "group_by": [{"kind": "property", "node": "pl", "property": "merge_request_id", "alias": "mr_id"}],
   "aggregations": [{"function": "count", "target": "pl", "alias": "failed_pipelines"}],
-  "aggregation_sort": {"column": "failed_pipelines", "direction": "DESC"},
+  "aggregation_sort": "-failed_pipelines",
   "limit": 20
 }
 ```
@@ -185,7 +185,7 @@ incomplete coverage rather than authoritative.
   ],
   "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file"}],
   "aggregations": [{"function": "count", "target": "d", "alias": "diff_snapshots"}],
-  "aggregation_sort": {"column": "diff_snapshots", "direction": "DESC"},
+  "aggregation_sort": "-diff_snapshots",
   "limit": 20
 }
 ```
@@ -259,7 +259,7 @@ Find the most active contributors to a project:
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "merged_mrs"}
   ],
-  "aggregation_sort": {"column": "merged_mrs", "direction": "DESC"},
+  "aggregation_sort": "-merged_mrs",
   "limit": 10
 }
 ```
@@ -346,7 +346,7 @@ Rank the definitions that the most code imports:
   "aggregations": [
     {"function": "count", "target": "sym", "alias": "import_count"}
   ],
-  "aggregation_sort": {"column": "import_count", "direction": "DESC"},
+  "aggregation_sort": "-import_count",
   "limit": 20
 }
 ```
@@ -385,7 +385,7 @@ Find projects with the most failed pipelines:
   "aggregations": [
     {"function": "count", "target": "pl", "alias": "failed_count"}
   ],
-  "aggregation_sort": {"column": "failed_count", "direction": "DESC"},
+  "aggregation_sort": "-failed_count",
   "limit": 10
 }
 ```
@@ -469,7 +469,7 @@ Count vulnerabilities by project:
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vuln_count"}
   ],
-  "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+  "aggregation_sort": "-vuln_count",
   "limit": 20
 }
 ```
@@ -492,7 +492,7 @@ Count vulnerabilities by severity:
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vuln_count"}
   ],
-  "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+  "aggregation_sort": "-vuln_count",
   "limit": 10
 }
 ```

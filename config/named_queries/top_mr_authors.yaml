@@ -16,7 +16,5 @@ query:
     - { kind: node, node: u }
   aggregations:
     - { function: count, target: mr, alias: mr_count }
-  aggregation_sort:
-    column: mr_count
-    direction: DESC
+  aggregation_sort: "-mr_count"
   limit: 100

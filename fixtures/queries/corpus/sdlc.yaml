@@ -164,10 +164,7 @@ q5:
           "alias": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -560,10 +557,7 @@ q17:
           "alias": "note_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "note_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-note_count",
       "limit": 20
     }
 
@@ -665,10 +659,7 @@ q20:
           "alias": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 20
     }
 
@@ -958,10 +949,7 @@ q29:
           "alias": "total"
         }
       ],
-      "aggregation_sort": {
-        "column": "total",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-total",
       "limit": 10
     }
 
@@ -1002,10 +990,7 @@ q30:
           "alias": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -1051,10 +1036,7 @@ q31:
           "alias": "avg_duration"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 10
     }
 
@@ -1103,10 +1085,7 @@ q32:
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -1155,10 +1134,7 @@ q33:
           "alias": "vuln_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vuln_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vuln_count",
       "limit": 30
     }
 
@@ -1217,10 +1193,7 @@ q34:
           "alias": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 20
     }
 

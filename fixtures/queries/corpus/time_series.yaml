@@ -48,10 +48,7 @@
           "alias": "failure_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "month",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "month",
       "limit": 12
     }
 
@@ -94,10 +91,7 @@
           "alias": "merge_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "quarter",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "quarter",
       "limit": 12
     }
 
@@ -139,10 +133,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "year",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "year",
       "limit": 10
     }
 
@@ -184,10 +175,7 @@
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "week",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "week",
       "limit": 10
     }
 
@@ -230,10 +218,7 @@
           "alias": "failure_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "day",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "day",
       "limit": 30
     }
 
@@ -275,10 +260,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "hour",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "hour",
       "limit": 50
     }
 
@@ -315,10 +297,7 @@
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "minute",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "minute",
       "limit": 50
     }
 
@@ -379,10 +358,7 @@
           "alias": "merge_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_count",
       "limit": 30
     }
 
@@ -429,10 +405,7 @@
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 30
     }
 
@@ -475,10 +448,7 @@
           "alias": "opened_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "month",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "month",
       "limit": 12
     }
 
@@ -526,10 +496,7 @@
           "alias": "total_duration_secs"
         }
       ],
-      "aggregation_sort": {
-        "column": "day",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "day",
       "limit": 30
     }
 
@@ -571,10 +538,7 @@
           "alias": "n"
         }
       ],
-      "aggregation_sort": {
-        "column": "finished_at_month",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "finished_at_month",
       "limit": 12
     }
 

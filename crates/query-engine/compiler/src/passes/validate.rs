@@ -43,6 +43,18 @@ pub(crate) fn order_by_regex() -> &'static regex::Regex {
     })
 }
 
+pub(crate) fn aggregation_sort_regex() -> &'static regex::Regex {
+    static AGGREGATION_SORT_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    AGGREGATION_SORT_REGEX.get_or_init(|| {
+        let schema: serde_json::Value =
+            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
+        let pattern = schema["properties"]["aggregation_sort"]["pattern"]
+            .as_str()
+            .expect("schema.json must define an aggregation_sort pattern");
+        regex::Regex::new(pattern).expect("aggregation_sort pattern must be a valid regex")
+    })
+}
+
 fn collect_schema_errors(
     validator: &jsonschema::Validator,
     value: &serde_json::Value,

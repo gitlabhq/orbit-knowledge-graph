@@ -183,10 +183,7 @@ q5:
           "alias": "definition_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "definition_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-definition_count",
       "limit": 20
     }
 
@@ -228,10 +225,7 @@ q6:
           "alias": "file_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "file_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-file_count",
       "limit": 20
     }
 
@@ -294,10 +288,7 @@ q7:
           "alias": "definition_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "definition_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-definition_count",
       "limit": 20
     }
 
@@ -342,10 +333,7 @@ q8:
           "alias": "import_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "import_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-import_count",
       "limit": 20
     }
 

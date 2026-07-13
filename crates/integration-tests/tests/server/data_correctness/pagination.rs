@@ -885,7 +885,7 @@ pub(super) async fn cursor_aggregation_multi_hop_desc_seek_covers_all_groups(ctx
         ],
         "group_by": [{"kind": "node", "node": "u"}],
         "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
-        "aggregation_sort": {"column": "project_count", "direction": "DESC"},
+        "aggregation_sort": "-project_count",
         "cursor": {"page_size": 2}
     }"#;
 

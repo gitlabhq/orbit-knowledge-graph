@@ -899,11 +899,40 @@ pub enum OrderDirection {
     Desc,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputAggSort {
     pub column: String,
-    #[serde(default)]
     pub direction: OrderDirection,
+}
+
+impl<'de> Deserialize<'de> for InputAggSort {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let caps = crate::passes::validate::aggregation_sort_regex()
+            .captures(&spec)
+            .ok_or_else(|| {
+                let hint = if spec.contains('.') {
+                    "; aggregation_sort takes a bare output column name (aggregation or group-key alias) — \"node.property\" belongs in order_by"
+                } else {
+                    ""
+                };
+                serde::de::Error::custom(format!(
+                    "aggregation_sort {spec:?} must be \"[-]column\" (leading \"-\" = descending){hint}"
+                ))
+            })?;
+        let direction = if caps.name("descending").is_some() {
+            OrderDirection::Desc
+        } else {
+            OrderDirection::Asc
+        };
+        Ok(InputAggSort {
+            column: caps["column"].to_owned(),
+            direction,
+        })
+    }
 }
 
 #[must_use = "the parsed input should be used"]
@@ -958,6 +987,55 @@ mod tests {
             serde_json::from_str::<InputOrderBy>(&format!("\"{over_length}.prop\"")).is_err(),
             "identifier longer than 64 chars should not parse"
         );
+    }
+
+    fn agg_sort(spec: &str) -> InputAggSort {
+        serde_json::from_str(&format!("\"{spec}\"")).expect("aggregation_sort parses")
+    }
+
+    #[test]
+    fn aggregation_sort_descending_uses_leading_dash() {
+        assert_eq!(
+            agg_sort("-note_count"),
+            InputAggSort {
+                column: "note_count".into(),
+                direction: OrderDirection::Desc,
+            }
+        );
+    }
+
+    #[test]
+    fn aggregation_sort_without_dash_is_ascending() {
+        assert_eq!(agg_sort("note_count").direction, OrderDirection::Asc);
+    }
+
+    #[test]
+    fn aggregation_sort_requires_bare_identifier() {
+        for malformed in [
+            "",
+            "-",
+            "1count",
+            "note-count",
+            "mr.merged_at",
+            "-mr.merged_at",
+        ] {
+            assert!(
+                serde_json::from_str::<InputAggSort>(&format!("\"{malformed}\"")).is_err(),
+                "{malformed:?} should not parse"
+            );
+        }
+
+        let over_length = "a".repeat(65);
+        assert!(
+            serde_json::from_str::<InputAggSort>(&format!("\"{over_length}\"")).is_err(),
+            "identifier longer than 64 chars should not parse"
+        );
+    }
+
+    #[test]
+    fn aggregation_sort_dotted_value_error_points_to_order_by() {
+        let err = serde_json::from_str::<InputAggSort>("\"-mr.merged_at\"").unwrap_err();
+        assert!(err.to_string().contains("order_by"), "{err}");
     }
 
     #[test]
@@ -1086,7 +1164,7 @@ mod tests {
             "nodes": [{"id": "n"}, {"id": "u"}],
             "group_by": [{"kind": "node", "node": "u"}],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
-            "aggregation_sort": {"column": "note_count", "direction": "DESC"}
+            "aggregation_sort": "-note_count"
         }"#,
         )
         .unwrap();

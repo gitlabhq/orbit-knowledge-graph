@@ -84,8 +84,9 @@
       "description": "Result ordering as \"node.property\" (ascending) or \"-node.property\" (descending)."
     },
     "aggregation_sort": {
-      "$ref": "#/$defs/AggregationSort",
-      "description": "Ordering for aggregation outputs"
+      "type": "string",
+      "pattern": "^(?<descending>-)?(?<column>[a-zA-Z_][a-zA-Z0-9_]{0,63})$",
+      "description": "Aggregation row ordering as an output column name (aggregation alias or group-key alias): \"column\" (ascending) or \"-column\" (descending)."
     },
     "options": {
       "$ref": "#/$defs/QueryOptions",
@@ -722,29 +723,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "AggregationSort": {
-      "type": "object",
-      "description": "Ordering for aggregation outputs",
-      "required": ["column"],
-      "properties": {
-        "column": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Output column name to sort by. Can reference an aggregation alias or group key alias."
-        },
-        "direction": {
-          "$ref": "#/$defs/OrderDirection",
-          "description": "Sort direction",
-          "default": "ASC"
-        }
-      },
-      "additionalProperties": false
-    },
-    "OrderDirection": {
-      "type": "string",
-      "description": "Sort direction",
-      "enum": ["ASC", "DESC"],
-      "default": "ASC"
     },
     "QueryOptions": {
       "type": "object",

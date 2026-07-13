@@ -160,7 +160,7 @@ underlying join shape and inflate the count):
     ],
     "group_by": [{"kind": "property", "node": "p", "property": "status", "alias": "status"}],
     "aggregations": [{"function": "count", "target": "p", "alias": "pipeline_count"}],
-    "aggregation_sort": {"column": "pipeline_count", "direction": "DESC"},
+    "aggregation_sort": "-pipeline_count",
     "limit": 20
   }
 }
@@ -374,7 +374,7 @@ Count open merge requests per project, highest first:
     "aggregations": [
       {"function": "count", "target": "mr", "alias": "open_mrs"}
     ],
-    "aggregation_sort": {"column": "open_mrs", "direction": "DESC"},
+    "aggregation_sort": "-open_mrs",
     "limit": 10
   }
 }
@@ -395,7 +395,7 @@ Count detected vulnerabilities by severity:
     "aggregations": [
       {"function": "count", "target": "v", "alias": "vuln_count"}
     ],
-    "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+    "aggregation_sort": "-vuln_count",
     "limit": 10
   }
 }

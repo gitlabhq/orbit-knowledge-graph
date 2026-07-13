@@ -62,7 +62,7 @@ The JSON query schema supports four query types through a single unified structu
 | `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
 | `limit` | `integer` | Max results (1-1000, default: 30) |
 | `order_by` | `string` | Result ordering: `"node.property"` (asc) or `"-node.property"` (desc). |
-| `aggregation_sort` | `object` | Ordering for aggregation outputs |
+| `aggregation_sort` | `string` | Aggregation row ordering: `"column"` (asc) or `"-column"` (desc), referencing an output column alias. |
 | `cursor` | `object` | Keyset pagination cursor `{ page_size, after? }`. `after` is the previous response's `pagination.next_cursor`. |
 | `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
 
@@ -193,7 +193,7 @@ aggregation in the query. A node group uses
     {"function": "count", "target": "mr", "alias": "mr_count"}
   ],
   "limit": 10,
-  "aggregation_sort": {"column": "mr_count", "direction": "DESC"}
+  "aggregation_sort": "-mr_count"
 }
 ```
 
@@ -221,7 +221,7 @@ Duplicate group or aggregate output names are rejected.
     {"function": "count", "target": "v", "alias": "vulnerability_count"}
   ],
   "limit": 10,
-  "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"}
+  "aggregation_sort": "-vulnerability_count"
 }
 ```
 
