@@ -22,8 +22,20 @@ image:
   tag: {{ $gkgTag | quote }}
   pullPolicy: IfNotPresent
 
+# The chart-default `key` for each perKey entry matches the field names the
+# e2e-bootstrap chart writes into gkg-secrets, so only secretName is set.
 secrets:
-  existingSecret: "gkg-secrets"
+  perKey:
+    gitlabJwtVerifyingKey:
+      secretName: "gkg-secrets"
+    gitlabJwtSigningKey:
+      secretName: "gkg-secrets"
+    datalakePassword:
+      secretName: "gkg-secrets"
+    graphPassword:
+      secretName: "gkg-secrets"
+    graphReadPassword:
+      secretName: "gkg-secrets"
 
 webserver:
   enabled: true
@@ -170,7 +182,7 @@ engine:
   concurrency_groups:
     sdlc: 10
     code: 3
-  handlers:
+  topics:
     global-handler:
       concurrency_group: sdlc
       max_attempts: 1
@@ -183,6 +195,8 @@ engine:
       concurrency_group: code
       max_attempts: 3
       retry_interval_secs: 60
+  handlers:
+    code-indexing-task:
       # Fixture repos never reach the prod flush thresholds, leaving code rows
       # buffered ~2 min and checkpoints deferred (endless re-dispatch).
       pipeline:
