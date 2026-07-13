@@ -848,7 +848,6 @@ pub enum PathType {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputNeighbors {
-    pub node: String,
     #[serde(default)]
     pub direction: Direction,
     #[serde(default)]
@@ -1221,7 +1220,6 @@ mod tests {
 
         assert_eq!(input.query_type, QueryType::Neighbors);
         let neighbors = input.neighbors.unwrap();
-        assert_eq!(neighbors.node, "u");
         assert_eq!(neighbors.direction, Direction::Both);
     }
 

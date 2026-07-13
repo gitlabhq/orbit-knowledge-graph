@@ -106,7 +106,6 @@
         "node_ids": "$sample:3"
       }],
       "neighbors": {
-        "node": "mr",
         "direction": "both"
       },
       "limit": 100
@@ -125,7 +124,6 @@
         "node_ids": "$sample"
       }],
       "neighbors": {
-        "node": "p",
         "direction": "incoming",
         "rel_types": [
           "IN_PROJECT"

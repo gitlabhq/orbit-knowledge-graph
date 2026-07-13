@@ -5,9 +5,7 @@ use ontology::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::{
-    EdgeTableConfig, HydrationStrategy, NodePlan, Plan, PlanBody, Selectivity, Strategy, find_node,
-};
+use super::{EdgeTableConfig, HydrationStrategy, NodePlan, Plan, PlanBody, Selectivity, Strategy};
 use crate::passes::shared::has_non_denorm_filters;
 
 pub fn plan_neighbors(input: &Input) -> Result<Plan> {
@@ -16,7 +14,11 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         .as_ref()
         .ok_or_else(|| crate::error::QueryError::Lowering("neighbors config missing".into()))?;
 
-    let center_node = find_node(input, &config.node)?;
+    let [center_node] = input.nodes.as_slice() else {
+        return Err(crate::error::QueryError::Lowering(
+            "neighbors query requires exactly one node".into(),
+        ));
+    };
     let center_alias = center_node.id.clone();
 
     let center_np = NodePlan {

@@ -17,6 +17,5 @@ query:
       entity: { $param: entity }
       node_ids: { $param: node_ids }
   neighbors:
-    node: center
     direction: both
   limit: { $param: limit }

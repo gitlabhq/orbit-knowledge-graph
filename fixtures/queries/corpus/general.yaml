@@ -92,7 +92,6 @@ q3_bidirectional_neighbors_on_project:
         "node_ids": "$sample"
       }],
       "neighbors": {
-        "node": "p",
         "direction": "both",
         "rel_types": [
           "CONTAINS",
@@ -603,7 +602,6 @@ q15_neighbors_many_rel_types:
         "node_ids": "$sample"
       }],
       "neighbors": {
-        "node": "u",
         "direction": "both",
         "rel_types": [
           "AUTHORED",
@@ -1638,7 +1636,6 @@ b2_bidirectional_neighbors_group:
         "node_ids": "$sample"
       }],
       "neighbors": {
-        "node": "g",
         "direction": "both"
       },
       "limit": 20

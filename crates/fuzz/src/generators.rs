@@ -230,7 +230,6 @@ impl TypeGenerator for FuzzQuery {
 
                 let direction = *pick(driver, DIRECTIONS)?;
                 let mut neighbors = Map::new();
-                neighbors.insert("node".into(), json!("center"));
                 neighbors.insert("direction".into(), json!(direction));
 
                 let has_rel_types: bool = driver.produce()?;
