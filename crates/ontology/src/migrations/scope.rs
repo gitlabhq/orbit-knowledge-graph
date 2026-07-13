@@ -16,8 +16,7 @@ pub enum LedgerScope {
     /// Code-graph tables.
     #[serde(rename = "code")]
     Code,
-    /// Re-index nothing; the source text changed but the produced output is
-    /// certified byte-identical. Requires a `note:` justifying output-neutrality.
+    /// Re-index nothing; requires a `note:` certifying the change is output-neutral.
     #[serde(rename = "none")]
     None,
 }
@@ -28,7 +27,6 @@ pub enum MigrationScope {
     Full,
     Code,
     Sdlc(BTreeSet<String>),
-    /// Re-index nothing: clone every table unchanged and advance the version.
     None,
 }
 

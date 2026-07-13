@@ -206,8 +206,7 @@ fn check_under_declaration(
 
     let (changed_sources, changed_tables) = committed.get_versioned_diff_keys_between(&base_fps);
     let source_contents = migrations::embedded_sources();
-    // A `none` entry may under-declare drift by design; its gate is the mandatory
-    // note enforced by `MigrationLedger::validate`, not this coverage check.
+    // A `none` entry may under-declare drift; its gate is the note check in `MigrationLedger::validate`.
     if let Some(required) = derive_scope(
         ontology,
         &source_contents,
