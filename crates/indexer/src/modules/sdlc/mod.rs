@@ -34,7 +34,7 @@ pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(SDLC_CONCURRENCY_GROUP.to_string()),
         max_attempts: Some(1),
-        retry_interval_secs: Some(60),
+        retry_interval_secs: None,
         dead_letter_on_exhaustion: None,
         max_ack_pending: None,
     }

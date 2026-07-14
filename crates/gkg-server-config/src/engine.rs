@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// The correct default policy for each topic is declared in Rust by the indexer
 /// module that owns the topic (see `crates/indexer/src/modules/*`). A
 /// `engine.topics.<name>` entry in YAML is a *field-wise override* layered on top
-/// of that declared default via [`SubscriptionConfig::overlaid_with`]: only the
+/// of that declared default via [`SubscriptionConfig::with_optional_override`]: only the
 /// fields the entry sets change; every unset field keeps the module default. Each
 /// field is therefore `Option`, so "unset" is distinguishable from an explicit
 /// value (notably `dead_letter_on_exhaustion: false`).
@@ -57,7 +57,13 @@ impl SubscriptionConfig {
     }
 
     /// Field-wise merge: fields `overlay` sets win, unset fields keep `self`'s value.
-    pub fn overlaid_with(&self, overlay: &SubscriptionConfig) -> SubscriptionConfig {
+    pub fn with_optional_override(
+        &self,
+        overlay: Option<&SubscriptionConfig>,
+    ) -> SubscriptionConfig {
+        let Some(overlay) = overlay else {
+            return self.clone();
+        };
         SubscriptionConfig {
             concurrency_group: overlay
                 .concurrency_group
@@ -69,16 +75,6 @@ impl SubscriptionConfig {
                 .dead_letter_on_exhaustion
                 .or(self.dead_letter_on_exhaustion),
             max_ack_pending: overlay.max_ack_pending.or(self.max_ack_pending),
-        }
-    }
-
-    pub fn with_optional_override(
-        &self,
-        overlay: Option<&SubscriptionConfig>,
-    ) -> SubscriptionConfig {
-        match overlay {
-            Some(overlay) => self.overlaid_with(overlay),
-            None => self.clone(),
         }
     }
 }
@@ -784,10 +780,11 @@ mod tests {
 
     #[test]
     fn overlay_replaces_only_fields_the_override_sets() {
-        let resolved = declared_policy_fixture().overlaid_with(&SubscriptionConfig {
-            max_attempts: Some(2),
-            ..Default::default()
-        });
+        let resolved =
+            declared_policy_fixture().with_optional_override(Some(&SubscriptionConfig {
+                max_attempts: Some(2),
+                ..Default::default()
+            }));
         assert_eq!(resolved.max_attempts, Some(2));
         assert_eq!(resolved.retry_interval_secs, Some(60));
         assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
@@ -796,10 +793,11 @@ mod tests {
 
     #[test]
     fn overlay_can_turn_dead_letter_off() {
-        let resolved = declared_policy_fixture().overlaid_with(&SubscriptionConfig {
-            dead_letter_on_exhaustion: Some(false),
-            ..Default::default()
-        });
+        let resolved =
+            declared_policy_fixture().with_optional_override(Some(&SubscriptionConfig {
+                dead_letter_on_exhaustion: Some(false),
+                ..Default::default()
+            }));
         assert_eq!(resolved.dead_letter_on_exhaustion, Some(false));
     }
 
