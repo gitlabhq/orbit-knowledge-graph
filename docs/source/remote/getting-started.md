@@ -32,7 +32,7 @@ title: Get started with GitLab Orbit Remote
 - To query a group after it has been indexed, the Reporter role or higher.
 - To view security data, the Security Manager role. For more information, see [roles required to query GitLab Orbit](security.md#roles-required-to-query-orbit).
 
-Orbit indexes top-level groups only. Subgroups and projects inherit indexing automatically.
+GitLab Orbit indexes top-level groups only. Subgroups and projects inherit indexing automatically.
 
 ## Step 1: Enable GitLab Orbit
 

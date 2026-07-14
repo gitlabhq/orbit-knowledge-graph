@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: How Orbit Remote secures your data, including the roles required to query, the authorization model, and programmatic access.
+description: How GitLab Orbit Remote secures your data, including the roles required to query, the authorization model, and programmatic access.
 title: GitLab Orbit Remote security
 ---
 

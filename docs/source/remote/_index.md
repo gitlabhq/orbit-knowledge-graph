@@ -37,7 +37,7 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 
 | Page | Description |
 |---|---|
-| [Get started](getting-started.md) | Enable Orbit and run your first query |
+| [Get started](getting-started.md) | Enable GitLab Orbit and run your first query |
 | [How it works](how-it-works.md) | Indexing pipeline, graph model, query execution |
 | [What GitLab Orbit indexes](indexing.md) | SDLC coverage, language support, indexing scope |
 | [Security](security.md) | Roles required to query, the authorization model, and programmatic access |

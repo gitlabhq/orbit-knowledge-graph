@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Pick an access method and build your first local GitLab Orbit graph.
-title: Get started with Orbit Local
+title: Get started with GitLab Orbit Local
 ---
 
 {{< details >}}

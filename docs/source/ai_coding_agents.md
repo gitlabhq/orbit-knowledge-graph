@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install the GitLab Orbit skill to give AI coding agents ready-to-use query recipes, DSL guidance, and troubleshooting for both Orbit Remote and Orbit Local.
+description: Install the GitLab Orbit skill to give AI coding agents ready-to-use query recipes, DSL guidance, and troubleshooting for both GitLab Orbit Remote and GitLab Orbit Local.
 title: Set up AI coding agents with the GitLab Orbit skill
 ---
 
