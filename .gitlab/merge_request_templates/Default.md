@@ -73,14 +73,22 @@ this block.
 
 </details>
 
-/label ~"devops::analytics" ~"section::analytics" ~"knowledge graph" ~"group::context-systems"
+/label ~"group::context-systems" ~"Category:Orbit"
 
 /assign me
 <!--
-Set a type label (pick one):
+LABELS: every Orbit MR carries exactly one type label. type::feature is for
+a new capability, type::bug for a defect fix, type::maintenance for refactors,
+docs, dependencies, and upkeep. Add it under this comment (quick actions
+inside a comment do not run):
 /label ~"type::feature"
 /label ~"type::bug"
 /label ~"type::maintenance"
+
+Also add the matching orbit::<area> label when the area is obvious (the 14
+areas are listed in .gitlab/issue_templates/Default.md), and ~documentation
+on docs MRs, e.g.:
+/label ~"orbit::indexing"
 
 Set the milestone to the current release, e.g.:
 /milestone %<current-release>
