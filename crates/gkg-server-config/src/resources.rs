@@ -1,7 +1,6 @@
-const CGROUP_V2_MEMORY_MAX: &str = "/sys/fs/cgroup/memory.max";
-const CGROUP_V1_MEMORY_LIMIT: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
 
-/// cgroup v1 reports "no limit" as a near-`u64::MAX` page-counter sentinel, not an absent file.
+/// sysinfo reports an unlimited or unreadable memory ceiling as a near-`u64::MAX` sentinel.
 const CGROUP_UNLIMITED_THRESHOLD_BYTES: u64 = 1 << 62;
 
 #[derive(Debug, Clone)]
@@ -24,18 +23,23 @@ impl ContainerResources {
     }
 }
 
-fn read_cgroup_memory_limit_bytes() -> Option<u64> {
-    parse_memory_limit(&std::fs::read_to_string(CGROUP_V2_MEMORY_MAX).ok()?)
-        .or_else(|| parse_memory_limit(&std::fs::read_to_string(CGROUP_V1_MEMORY_LIMIT).ok()?))
+/// Drops sysinfo's unlimited/unreadable sentinel, leaving a usable byte limit.
+pub fn readable_memory_limit_bytes(total_memory: u64) -> Option<u64> {
+    (total_memory < CGROUP_UNLIMITED_THRESHOLD_BYTES).then_some(total_memory)
 }
 
-fn parse_memory_limit(contents: &str) -> Option<u64> {
-    let trimmed = contents.trim();
-    if trimmed == "max" {
-        return None;
-    }
-    let value: u64 = trimmed.parse().ok()?;
-    (value < CGROUP_UNLIMITED_THRESHOLD_BYTES).then_some(value)
+// `Process::cgroup_limits` resolves /proc/self/cgroup and min-walks ancestors;
+// `System::cgroup_limits` reads only fixed root paths and misses sub-cgroup limits.
+fn read_cgroup_memory_limit_bytes() -> Option<u64> {
+    let pid = get_current_pid().ok()?;
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::nothing(),
+    );
+    let limits = system.process(pid)?.cgroup_limits()?;
+    readable_memory_limit_bytes(limits.total_memory)
 }
 
 #[cfg(test)]
@@ -43,23 +47,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_a_concrete_byte_limit() {
-        assert_eq!(parse_memory_limit("34359738368\n"), Some(34_359_738_368));
+    fn concrete_limit_passes_through() {
+        assert_eq!(
+            readable_memory_limit_bytes(34_359_738_368),
+            Some(34_359_738_368)
+        );
     }
 
     #[test]
-    fn cgroup_v2_unlimited_reads_as_none() {
-        assert_eq!(parse_memory_limit("max\n"), None);
-    }
-
-    #[test]
-    fn cgroup_v1_sentinel_reads_as_none() {
-        assert_eq!(parse_memory_limit("9223372036854771712"), None);
-    }
-
-    #[test]
-    fn unparseable_limit_reads_as_none() {
-        assert_eq!(parse_memory_limit(""), None);
-        assert_eq!(parse_memory_limit("not-a-number"), None);
+    fn unlimited_sentinel_reads_as_none() {
+        assert_eq!(readable_memory_limit_bytes(u64::MAX), None);
     }
 }
