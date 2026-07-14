@@ -11,7 +11,7 @@ proj_node_lookup_by_id:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}},
+      "nodes": [{"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}],
       "limit": 1
     }
 
@@ -22,7 +22,7 @@ proj_node_lookup_by_full_path:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}},
+      "nodes": [{"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}],
       "limit": 1
     }
 
@@ -472,7 +472,7 @@ ns_group_id_resolves_traversal:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}}}],
       "limit": 50
     }
 
@@ -483,7 +483,7 @@ ns_group_full_path_resolves_traversal:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}}],
       "limit": 50
     }
 
@@ -494,7 +494,7 @@ ns_subgroup_id_scopes_to_subtree:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path", "traversal_path"], "filters": {"id": {"op": "eq", "value": {{SUBGROUP_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "full_path", "traversal_path"], "filters": {"id": {"op": "eq", "value": {{SUBGROUP_ID}}}}}],
       "limit": 50
     }
 
@@ -506,7 +506,7 @@ ns_project_namespace_id_GAP:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}}],
       "limit": 50
     }
 
@@ -518,7 +518,7 @@ ns_unknown_id_no_widen:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{UNKNOWN_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{UNKNOWN_ID}}}}}],
       "limit": 50
     }
 
@@ -669,7 +669,7 @@ neighbors_project_center_outgoing:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}], "columns": ["id", "full_path"]},
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}], "columns": ["id", "full_path"]}],
       "neighbors": {"node": "p", "direction": "both"},
       "limit": 100
     }
@@ -682,7 +682,7 @@ unknown_id_neighbors_no_widen:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}], "columns": ["id", "full_path"]},
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}], "columns": ["id", "full_path"]}],
       "neighbors": {"node": "p", "direction": "both"},
       "limit": 100
     }
@@ -694,7 +694,7 @@ neighbors_group_center_contains_rel_filter:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}], "columns": ["id", "full_path"]},
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}], "columns": ["id", "full_path"]}],
       "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
       "limit": 100
     }
@@ -887,7 +887,7 @@ unknown_full_path_proj_empty:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "this-org/does-not-exist-nowhere"}}, "columns": ["full_path", "name", "visibility_level"]},
+      "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "this-org/does-not-exist-nowhere"}}, "columns": ["full_path", "name", "visibility_level"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -900,7 +900,7 @@ full_path_trailing_slash:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}/"}}, "columns": ["full_path", "name"]},
+      "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}/"}}, "columns": ["full_path", "name"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -913,7 +913,7 @@ full_path_case_variant:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH_UPPER}}"}}, "columns": ["full_path", "name"]},
+      "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH_UPPER}}"}}, "columns": ["full_path", "name"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -944,7 +944,7 @@ org_unscoped_control:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "u", "entity": "User", "filters": {"state": "active"}, "columns": ["username", "state"]},
+      "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}, "columns": ["username", "state"]}],
       "limit": 30,
       "options": {"include_debug_sql": true}
     }
@@ -957,7 +957,7 @@ out_of_scope_project_id_zero_leak:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "eq", "value": {{UNAUTH_PROJECT_ID}}}}, "columns": ["iid", "title", "project_id"]},
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "eq", "value": {{UNAUTH_PROJECT_ID}}}}, "columns": ["iid", "title", "project_id"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -986,7 +986,7 @@ negsec_namespace_id_project_gap:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened", "namespace_id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}, "columns": ["iid", "title", "namespace_id", "project_id"]},
+      "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"state": "opened", "namespace_id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}, "columns": ["iid", "title", "namespace_id", "project_id"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -1016,7 +1016,7 @@ scoped_group_full_path_neighbors_authz_and:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}, "columns": ["name", "full_path"]},
+      "nodes": [{"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}, "columns": ["name", "full_path"]}],
       "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
       "limit": 50,
       "options": {"include_debug_sql": true}

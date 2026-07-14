@@ -179,18 +179,11 @@ impl TypeGenerator for FuzzQuery {
 
                 let node_ids: Vec<String> = (0..node_count).map(|i| format!("n{i}")).collect();
 
-                let use_single_node: bool = driver.produce()?;
-                if node_count == 1 || use_single_node {
-                    if let Some(node) = gen_node(driver, &node_ids[0]) {
-                        query.insert("node".into(), node);
-                    }
-                } else {
-                    let nodes: Vec<Value> = node_ids
-                        .iter()
-                        .filter_map(|id| gen_node(driver, id))
-                        .collect();
-                    query.insert("nodes".into(), json!(nodes));
-                }
+                let nodes: Vec<Value> = node_ids
+                    .iter()
+                    .filter_map(|id| gen_node(driver, id))
+                    .collect();
+                query.insert("nodes".into(), json!(nodes));
 
                 if node_count > 1 {
                     let rel_count: u8 = driver.produce()?;
@@ -233,7 +226,7 @@ impl TypeGenerator for FuzzQuery {
             }
             "neighbors" => {
                 let node = gen_node(driver, "center")?;
-                query.insert("node".into(), node);
+                query.insert("nodes".into(), json!([node]));
 
                 let direction = *pick(driver, DIRECTIONS)?;
                 let mut neighbors = Map::new();

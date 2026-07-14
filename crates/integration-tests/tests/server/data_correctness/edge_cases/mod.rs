@@ -40,7 +40,7 @@ pub(super) async fn giant_string_survives_pipeline(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]},
+            "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -60,7 +60,7 @@ pub(super) async fn sql_injection_string_preserved(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]},
+            "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -330,7 +330,7 @@ pub(super) async fn neighbors_cross_namespace_no_false_positives(ctx: &TestConte
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [101]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
             "neighbors": {"node": "g", "direction": "both"}
         }"#,
         &allow_all(),
@@ -371,7 +371,7 @@ pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]}],
             "limit": 10
         }"#,
         &allow_all(),

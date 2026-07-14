@@ -166,11 +166,11 @@ Execute a Knowledge Graph query.
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "mr",
       "entity": "MergeRequest",
       "filters": { "state": "merged" }
-    },
+    }],
     "limit": 10
   },
   "query_type": "json",
@@ -371,7 +371,7 @@ Query body:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+  "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
   "limit": 5
 }
 ```

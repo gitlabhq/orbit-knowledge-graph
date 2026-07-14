@@ -276,14 +276,14 @@ Match a single entity type with optional filters — a `traversal` query with on
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "u",
     "entity": "User",
     "columns": ["username", "email"],
     "filters": {
       "username": {"op": "starts_with", "value": "admin"}
     }
-  },
+  }],
   "limit": 10
 }
 ```
@@ -295,7 +295,7 @@ Find all nodes connected to a given node. Neighbors queries use the `node` field
 ```json orbit-query
 {
   "query_type": "neighbors",
-  "node": {"id": "u", "entity": "User", "node_ids": [100]},
+  "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
   "neighbors": {
     "node": "u",
     "direction": "both",

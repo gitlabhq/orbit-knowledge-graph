@@ -80,13 +80,13 @@ Put the request body in `/tmp/q-min.json`:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "filters": {
         "full_path": {"op": "starts_with", "value": "gitlab-org/"}
       }
-    },
+    }],
     "limit": 1
   }
 }

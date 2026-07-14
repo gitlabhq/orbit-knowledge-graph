@@ -39,12 +39,12 @@ query object in a top-level `query` field:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "mr",
       "entity": "MergeRequest",
       "node_ids": [12345],
       "columns": ["iid", "title", "state"]
-    },
+    }],
     "limit": 1
   },
   "response_format": "raw"
@@ -66,12 +66,12 @@ Every query has a `query_type` and either `node` or `nodes`.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345],
     "columns": ["iid", "title", "state"]
-  },
+  }],
   "limit": 1
 }
 ```
@@ -266,12 +266,12 @@ Fetch one merge request with its full diff:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345],
     "columns": ["iid", "title", "state", "diff"]
-  },
+  }],
   "limit": 1
 }
 ```
@@ -328,14 +328,14 @@ Fetch source file content:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "file",
     "entity": "File",
     "filters": {
       "path": {"op": "ends_with", "value": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
-  },
+  }],
   "limit": 5
 }
 ```
@@ -348,14 +348,14 @@ for a broader search:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "d",
     "entity": "Definition",
     "filters": {
       "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
     },
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"]
-  },
+  }],
   "limit": 5
 }
 ```
@@ -393,7 +393,7 @@ Find every pipeline that ran for one merge request. Always filter
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "p",
     "entity": "Pipeline",
     "filters": {
@@ -401,7 +401,7 @@ Find every pipeline that ran for one merge request. Always filter
       "source": {"op": "eq", "value": "merge_request_event"}
     },
     "columns": ["id", "status", "source", "sha", "ref", "created_at"]
-  },
+  }],
   "order_by": "-p.created_at",
   "limit": 100
 }
@@ -569,11 +569,11 @@ node must be bounded by `node_ids`, filters, or a narrow `id_range`.
 ```json orbit-query
 {
   "query_type": "neighbors",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345]
-  },
+  }],
   "neighbors": {
     "node": "mr",
     "direction": "both",

@@ -289,14 +289,14 @@ the module or library you want to trace:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "sym",
     "entity": "ImportedSymbol",
     "columns": ["file_path", "import_path", "identifier_name"],
     "filters": {
       "import_path": {"op": "contains", "value": "payments-service"}
     }
-  },
+  }],
   "limit": 100
 }
 ```
@@ -395,12 +395,12 @@ Find failed jobs and their failure reasons:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "j",
     "entity": "Job",
     "columns": ["name", "status", "failure_reason"],
     "filters": {"status": "failed"}
-  },
+  }],
   "limit": 10
 }
 ```
@@ -519,14 +519,14 @@ Fetch the source text of a file. Use `limit: 1` to avoid large responses:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "f",
     "entity": "File",
     "columns": ["path", "language", "content"],
     "filters": {
       "path": {"op": "ends_with", "value": "app/models/project.rb"}
     }
-  },
+  }],
   "limit": 1
 }
 ```
@@ -537,14 +537,14 @@ field returns the raw source text of just that definition, not the full file:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "d",
     "entity": "Definition",
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"],
     "filters": {
       "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
     }
-  },
+  }],
   "limit": 5
 }
 ```

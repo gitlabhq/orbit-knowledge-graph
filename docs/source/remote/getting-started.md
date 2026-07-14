@@ -94,14 +94,14 @@ Put the request body in `request.json`:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "columns": ["name", "full_path"],
       "filters": {
         "full_path": {"op": "starts_with", "value": "your-group/"}
       }
-    },
+    }],
     "limit": 10
   },
   "format": "raw"

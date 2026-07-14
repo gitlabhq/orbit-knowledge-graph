@@ -52,13 +52,11 @@ pub struct QueryParameters {
 pub fn extract_parameters(query_value: &serde_json::Value) -> QueryParameters {
     let mut params = QueryParameters::default();
 
-    let mut all_nodes: Vec<&serde_json::Value> = Vec::new();
-    if let Some(nodes) = query_value.get("nodes").and_then(|n| n.as_array()) {
-        all_nodes.extend(nodes);
-    }
-    if let Some(node) = query_value.get("node") {
-        all_nodes.push(node);
-    }
+    let all_nodes = query_value
+        .get("nodes")
+        .and_then(|n| n.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or_default();
 
     for node in all_nodes {
         if let Some(obj) = node.as_object()
@@ -266,7 +264,8 @@ mod tests {
     fn test_query_entry_parse() {
         let entry = QueryEntry {
             desc: "test query".into(),
-            query: r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}}"#.into(),
+            query: r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#
+                .into(),
         };
         let value = entry.parse_query().unwrap();
         assert_eq!(value["query_type"], "traversal");
