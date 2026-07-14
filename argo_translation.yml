@@ -9,8 +9,8 @@ components:
   - name: Technical Documentation
     create_request: false
     paths:
-      - source: 'docs/**/*.md'
-        target: 'docs-locale/{{language}}/'
+      - source: 'docs/source/**/*.md'
+        target: 'docs-locale/{{language}}/source/'
     ignored_paths:
       - 'docs/.*/**'
       - 'docs/source/schema.md'
