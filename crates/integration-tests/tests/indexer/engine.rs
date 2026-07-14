@@ -507,7 +507,7 @@ fn permanent_error_subscription(stream: &str, subject: &str) -> Subscription {
     Subscription::new(stream, subject).with_config(&SubscriptionConfig {
         max_attempts: Some(5),
         retry_interval_secs: Some(1),
-        dead_letter_on_exhaustion: true,
+        dead_letter_on_exhaustion: Some(true),
         ..Default::default()
     })
 }

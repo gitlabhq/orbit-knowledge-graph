@@ -135,41 +135,49 @@ engine:
 
 ## Topic configuration
 
-Each NATS subscription has retry and concurrency settings under `engine.topics.<name>`:
+Each topic's default subscription policy (retry, DLQ, concurrency group) is
+**declared in Rust** by the indexer module that owns the topic, next to the
+handler it protects:
 
-| Config path | Default | Description |
-|-------------|---------|-------------|
-| `topics.<name>.concurrency_group` | None | Which group semaphore to use |
-| `topics.<name>.max_attempts` | None | Total attempts (1 = no retry, 5 = 4 retries) |
-| `topics.<name>.retry_interval_secs` | None | Delay between retries (NATS nack delay) |
+- `code-indexing-task` — `crates/indexer/src/modules/code/mod.rs`
+- `global-handler`, `namespace-handler` — `crates/indexer/src/modules/sdlc/mod.rs`
+- `namespace-deletion` — `crates/indexer/src/modules/namespace_deletion/mod.rs`
+
+Because the policy lives in code, a deployment that omits config still gets the
+correct policy — omitting `engine.topics` no longer silently disables
+`code-indexing-task` retries and dead-lettering.
+
+An `engine.topics.<name>` entry in YAML is a **sparse, field-wise override**
+layered on top of the declared default: only the fields the entry sets change;
+every unset field keeps the module default. `dead_letter_on_exhaustion` is
+`Option<bool>`, so an entry can explicitly turn it off, not just on.
+
+| Config path | Overrides | Description |
+|-------------|-----------|-------------|
+| `topics.<name>.concurrency_group` | declared default | Which group semaphore to use |
+| `topics.<name>.max_attempts` | declared default | Total attempts (1 = no retry, 5 = 4 retries) |
+| `topics.<name>.retry_interval_secs` | declared default | Delay between retries (NATS nack delay) |
+| `topics.<name>.dead_letter_on_exhaustion` | declared default | Route exhausted retries to the DLQ |
 
 ### Default topic settings
 
-From `config/default.yaml`:
+These are the module-declared defaults (canonical values, matching the production
+Helm chart). They apply with no `engine.topics` config at all:
+
+| Topic | concurrency_group | max_attempts | retry_interval_secs | dead_letter_on_exhaustion |
+|-------|-------------------|--------------|---------------------|---------------------------|
+| `global-handler` | `sdlc` | 1 | 60 | — |
+| `namespace-handler` | `sdlc` | 1 | 60 | — |
+| `code-indexing-task` | `code` | 5 | 60 | true |
+| `namespace-deletion` | `code` | 1 | — | — |
+
+To override a single field, e.g. raise code retries to 8:
 
 ```yaml
 engine:
-  max_concurrent_workers: 16
-  concurrency_groups:
-    sdlc: 12
-    code: 4
   topics:
-    global-handler:
-      concurrency_group: sdlc
-      max_attempts: 1
-      retry_interval_secs: 60
-    namespace-handler:
-      concurrency_group: sdlc
-      max_attempts: 1
-      retry_interval_secs: 60
     code-indexing-task:
-      concurrency_group: code
-      max_attempts: 5
-      retry_interval_secs: 60
-      dead_letter_on_exhaustion: true
-    namespace-deletion:
-      concurrency_group: code
-      max_attempts: 1
+      max_attempts: 8
 ```
 
 ### Handler-specific settings
@@ -202,7 +210,7 @@ engine:
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Tasks without a cron expression fall back to a 60-second interval.
+Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in Rust (`ScheduledTasksConfiguration` in `crates/gkg-server-config/src/engine.rs`); a `schedule.tasks.<name>` entry in YAML overrides only the cadence you set. A task with no declared cron and no config falls back to a 60-second interval.
 
 Distributed locking via NATS KV ensures only one dispatcher instance runs each task per interval.
 

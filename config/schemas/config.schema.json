@@ -247,13 +247,13 @@
       "default": {
         "tasks": {
           "code-backfill": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           },
           "global": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           },
           "migration-completion": {
-            "cron": "0 */5 * * * *"
+            "cron": "0 */1 * * * *"
           },
           "namespace": {
             "cron": "*/30 * * * * *",
@@ -635,7 +635,7 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `topics`: empty (no retry/DLQ by default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
+      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `topics`: empty (each module applies its own declared default policy; an\n  entry here is a field-wise override on top of that default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
       "type": "object",
       "properties": {
         "concurrency_groups": {
@@ -715,7 +715,7 @@
           }
         },
         "topics": {
-          "description": "Per-subscription message processing policy (retry, concurrency, DLQ).\nKeyed by a human-readable label matching topic name constants.",
+          "description": "Sparse per-subscription policy overrides, keyed by topic name. Each entry\nis layered field-wise over the module-declared default for that topic;\nomit a topic to use its declared default unchanged.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/SubscriptionConfig"
@@ -1541,13 +1541,13 @@
           "$ref": "#/$defs/ScheduledTasksConfiguration",
           "default": {
             "code-backfill": {
-              "cron": null
+              "cron": "0 */1 * * * *"
             },
             "global": {
-              "cron": null
+              "cron": "0 */1 * * * *"
             },
             "migration-completion": {
-              "cron": "0 */5 * * * *"
+              "cron": "0 */1 * * * *"
             },
             "namespace": {
               "cron": "*/30 * * * * *",
@@ -1578,19 +1578,19 @@
         "code-backfill": {
           "$ref": "#/$defs/CodeBackfillSweepConfig",
           "default": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           }
         },
         "global": {
           "$ref": "#/$defs/GlobalDispatcherConfig",
           "default": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           }
         },
         "migration-completion": {
           "$ref": "#/$defs/MigrationCompletionConfig",
           "default": {
-            "cron": "0 */5 * * * *"
+            "cron": "0 */1 * * * *"
           }
         },
         "namespace": {
@@ -1688,7 +1688,7 @@
       "additionalProperties": false
     },
     "SubscriptionConfig": {
-      "description": "Per-subscription message processing policy (retry, concurrency, DLQ).\n\nLives under `engine.topics.<name>` in YAML. Applied to the `Subscription`\nat handler registration time, so all handlers sharing a subscription\nshare the same processing policy.\n\nRetries are opt-in: a subscription with no retry config will ack on failure.",
+      "description": "Sparse per-subscription policy override (retry, concurrency, DLQ).\n\nThe correct default policy for each topic is declared in Rust by the indexer\nmodule that owns the topic (see `crates/indexer/src/modules/*`). A\n`engine.topics.<name>` entry in YAML is a *field-wise override* layered on top\nof that declared default via [`SubscriptionConfig::overlaid_with`]: only the\nfields the entry sets change; every unset field keeps the module default. Each\nfield is therefore `Option`, so \"unset\" is distinguishable from an explicit\nvalue (notably `dead_letter_on_exhaustion: false`).",
       "type": "object",
       "properties": {
         "concurrency_group": {
@@ -1701,8 +1701,11 @@
         },
         "dead_letter_on_exhaustion": {
           "description": "Route exhausted retries to the dead letter queue.",
-          "type": "boolean",
-          "default": false
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "max_ack_pending": {
           "description": "Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.\nWhen absent, the NATS server default applies (currently 1000).",
@@ -1715,7 +1718,7 @@
           "minimum": 0
         },
         "max_attempts": {
-          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the message is processed once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the message is processed once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.",
           "type": [
             "integer",
             "null"

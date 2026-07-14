@@ -71,6 +71,10 @@ impl Subscription {
         self
     }
 
+    /// Applies a fully-resolved subscription policy (a module default already
+    /// merged with any `engine.topics.<name>` override). Every field is taken
+    /// verbatim from `config`, so the resolved `dead_letter_on_exhaustion` maps
+    /// an unset override to `false`.
     pub fn with_config(mut self, config: &SubscriptionConfig) -> Self {
         if let Some(ref group) = config.concurrency_group {
             self.concurrency_group = Some(Arc::from(group.as_str()));
@@ -78,9 +82,7 @@ impl Subscription {
         self.max_attempts = config.max_attempts;
         self.retry_interval_secs = config.retry_interval_secs;
         self.max_ack_pending = config.max_ack_pending;
-        if config.dead_letter_on_exhaustion {
-            self.dead_letter_on_exhaustion = true;
-        }
+        self.dead_letter_on_exhaustion = config.dead_letter_on_exhaustion.unwrap_or(false);
         self
     }
 

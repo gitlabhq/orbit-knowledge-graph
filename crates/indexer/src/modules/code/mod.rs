@@ -21,6 +21,7 @@ use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
+use gkg_server_config::SubscriptionConfig;
 use metrics::CodeMetrics;
 use repository::RepositoryResolver;
 
@@ -32,6 +33,22 @@ pub use repository::{
     RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
+
+const CODE_CONCURRENCY_GROUP: &str = "code";
+
+/// Default subscription policy for [`CODE_INDEXING_TASK_TOPIC`]. Code indexing is
+/// event-driven (one Siphon push per repository) and never re-dispatched, so a
+/// transient failure must retry and dead-letter on exhaustion; acking on failure
+/// would silently drop that repository's index update.
+pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
+    SubscriptionConfig {
+        concurrency_group: Some(CODE_CONCURRENCY_GROUP.to_string()),
+        max_attempts: Some(5),
+        retry_interval_secs: Some(60),
+        dead_letter_on_exhaustion: Some(true),
+        max_ack_pending: None,
+    }
+}
 
 pub async fn register_handlers(
     registry: &HandlerRegistry,
@@ -98,10 +115,9 @@ pub async fn register_handlers(
         pipeline_config,
     ));
 
-    let mut subscription = CodeIndexingTaskRequest::subscription();
-    if let Some(topic_config) = config.engine.topics.get(CODE_INDEXING_TASK_TOPIC) {
-        subscription = subscription.with_config(topic_config);
-    }
+    let policy = code_indexing_task_topic_policy()
+        .with_optional_override(config.engine.topics.get(CODE_INDEXING_TASK_TOPIC));
+    let mut subscription = CodeIndexingTaskRequest::subscription().with_config(&policy);
     if let Some(max_inflight) = pipeline.max_inflight() {
         subscription = subscription.with_max_inflight(max_inflight);
     }
@@ -126,7 +142,37 @@ fn job_timeout_outlives_ack_wait(job_timeout_secs: u64, ack_wait_secs: u64) -> b
 
 #[cfg(test)]
 mod tests {
-    use super::job_timeout_outlives_ack_wait;
+    use super::{code_indexing_task_topic_policy, job_timeout_outlives_ack_wait};
+    use gkg_server_config::SubscriptionConfig;
+
+    #[test]
+    fn declared_policy_retries_and_dead_letters() {
+        let policy = code_indexing_task_topic_policy();
+        assert_eq!(policy.max_attempts, Some(5));
+        assert_eq!(policy.retry_interval_secs, Some(60));
+        assert_eq!(policy.dead_letter_on_exhaustion, Some(true));
+        assert_eq!(policy.concurrency_group.as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn sparse_override_changes_only_named_field() {
+        let resolved =
+            code_indexing_task_topic_policy().with_optional_override(Some(&SubscriptionConfig {
+                max_attempts: Some(2),
+                ..Default::default()
+            }));
+        assert_eq!(resolved.max_attempts, Some(2));
+        assert_eq!(resolved.retry_interval_secs, Some(60));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+        assert_eq!(resolved.concurrency_group.as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn absent_override_keeps_declared_policy() {
+        let resolved = code_indexing_task_topic_policy().with_optional_override(None);
+        assert_eq!(resolved.max_attempts, Some(5));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+    }
 
     #[test]
     fn job_timeout_must_sit_below_ack_wait() {

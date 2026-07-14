@@ -11,13 +11,15 @@ use serde::{Deserialize, Serialize};
 
 // ── Base config types ────────────────────────────────────────────────
 
-/// Per-subscription message processing policy (retry, concurrency, DLQ).
+/// Sparse per-subscription policy override (retry, concurrency, DLQ).
 ///
-/// Lives under `engine.topics.<name>` in YAML. Applied to the `Subscription`
-/// at handler registration time, so all handlers sharing a subscription
-/// share the same processing policy.
-///
-/// Retries are opt-in: a subscription with no retry config will ack on failure.
+/// The correct default policy for each topic is declared in Rust by the indexer
+/// module that owns the topic (see `crates/indexer/src/modules/*`). A
+/// `engine.topics.<name>` entry in YAML is a *field-wise override* layered on top
+/// of that declared default via [`SubscriptionConfig::overlaid_with`]: only the
+/// fields the entry sets change; every unset field keeps the module default. Each
+/// field is therefore `Option`, so "unset" is distinguishable from an explicit
+/// value (notably `dead_letter_on_exhaustion: false`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SubscriptionConfig {
@@ -30,8 +32,6 @@ pub struct SubscriptionConfig {
     ///
     /// `max_attempts: 1` means the message is processed once with no retries.
     /// `max_attempts: 5` means 1 initial attempt + 4 retries.
-    ///
-    /// When absent, failures are acked immediately (retries are opt-in).
     #[serde(default)]
     pub max_attempts: Option<u32>,
 
@@ -42,7 +42,7 @@ pub struct SubscriptionConfig {
 
     /// Route exhausted retries to the dead letter queue.
     #[serde(default)]
-    pub dead_letter_on_exhaustion: bool,
+    pub dead_letter_on_exhaustion: Option<bool>,
 
     /// Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.
     /// When absent, the NATS server default applies (currently 1000).
@@ -54,6 +54,36 @@ impl SubscriptionConfig {
     /// Returns the retry interval as a [`Duration`], if configured.
     pub fn retry_interval(&self) -> Option<Duration> {
         self.retry_interval_secs.map(Duration::from_secs)
+    }
+
+    /// Layers `overlay` field-wise onto `self`: every field `overlay` sets wins,
+    /// and every unset field keeps `self`'s value. Modules call this to merge a
+    /// sparse `engine.topics.<name>` config entry over their declared default.
+    pub fn overlaid_with(&self, overlay: &SubscriptionConfig) -> SubscriptionConfig {
+        SubscriptionConfig {
+            concurrency_group: overlay
+                .concurrency_group
+                .clone()
+                .or_else(|| self.concurrency_group.clone()),
+            max_attempts: overlay.max_attempts.or(self.max_attempts),
+            retry_interval_secs: overlay.retry_interval_secs.or(self.retry_interval_secs),
+            dead_letter_on_exhaustion: overlay
+                .dead_letter_on_exhaustion
+                .or(self.dead_letter_on_exhaustion),
+            max_ack_pending: overlay.max_ack_pending.or(self.max_ack_pending),
+        }
+    }
+
+    /// Layers an optional config override onto `self`, returning `self` unchanged
+    /// when no override is present.
+    pub fn with_optional_override(
+        &self,
+        overlay: Option<&SubscriptionConfig>,
+    ) -> SubscriptionConfig {
+        match overlay {
+            Some(overlay) => self.overlaid_with(overlay),
+            None => self.clone(),
+        }
     }
 }
 
@@ -433,10 +463,20 @@ pub struct HandlersConfiguration {
 
 // ── Dispatcher / scheduler config types ──────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GlobalDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+}
+
+impl Default for GlobalDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */1 * * * *".into()),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -491,10 +531,20 @@ impl Default for SiphonRouterConfig {
 }
 
 /// Cadence for the coverage-driven code-backfill sweep.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+}
+
+impl Default for CodeBackfillSweepConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */1 * * * *".into()),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -539,7 +589,7 @@ impl Default for MigrationCompletionConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                cron: Some("0 */5 * * * *".into()),
+                cron: Some("0 */1 * * * *".into()),
             },
         }
     }
@@ -621,7 +671,8 @@ impl IndexerModule {
 ///
 /// - `max_concurrent_workers`: 16
 /// - `concurrency_groups`: empty
-/// - `topics`: empty (no retry/DLQ by default)
+/// - `topics`: empty (each module applies its own declared default policy; an
+///   entry here is a field-wise override on top of that default)
 /// - `handlers`: defaults for all handlers
 /// - `modules`: all variants of [`IndexerModule`] (universal indexer)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -636,8 +687,9 @@ pub struct EngineConfiguration {
     #[serde(default)]
     pub concurrency_groups: HashMap<String, usize>,
 
-    /// Per-subscription message processing policy (retry, concurrency, DLQ).
-    /// Keyed by a human-readable label matching topic name constants.
+    /// Sparse per-subscription policy overrides, keyed by topic name. Each entry
+    /// is layered field-wise over the module-declared default for that topic;
+    /// omit a topic to use its declared default unchanged.
     #[serde(default)]
     pub topics: HashMap<String, SubscriptionConfig>,
 
@@ -723,6 +775,88 @@ pub struct ScheduleConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn declared_policy_fixture() -> SubscriptionConfig {
+        SubscriptionConfig {
+            concurrency_group: Some("code".into()),
+            max_attempts: Some(5),
+            retry_interval_secs: Some(60),
+            dead_letter_on_exhaustion: Some(true),
+            max_ack_pending: None,
+        }
+    }
+
+    #[test]
+    fn overlay_replaces_only_fields_the_override_sets() {
+        let resolved = declared_policy_fixture().overlaid_with(&SubscriptionConfig {
+            max_attempts: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(resolved.max_attempts, Some(2));
+        assert_eq!(resolved.retry_interval_secs, Some(60));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+        assert_eq!(resolved.concurrency_group.as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn overlay_can_turn_dead_letter_off() {
+        let resolved = declared_policy_fixture().overlaid_with(&SubscriptionConfig {
+            dead_letter_on_exhaustion: Some(false),
+            ..Default::default()
+        });
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(false));
+    }
+
+    #[test]
+    fn with_optional_override_none_returns_declared_policy() {
+        let resolved = declared_policy_fixture().with_optional_override(None);
+        assert_eq!(resolved.max_attempts, Some(5));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+    }
+
+    #[test]
+    fn schedule_tasks_default_to_declared_crons() {
+        let tasks = ScheduledTasksConfiguration::default();
+        assert_eq!(tasks.global.schedule.cron.as_deref(), Some("0 */1 * * * *"));
+        assert_eq!(
+            tasks.namespace.schedule.cron.as_deref(),
+            Some("*/30 * * * * *")
+        );
+        assert_eq!(tasks.namespace.sweep_interval_secs, 3600);
+        assert_eq!(
+            tasks.code_backfill.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+        assert_eq!(
+            tasks.table_cleanup.schedule.cron.as_deref(),
+            Some("0 0 3 * * *")
+        );
+        assert_eq!(
+            tasks.namespace_deletion.schedule.cron.as_deref(),
+            Some("0 0 3 * * *")
+        );
+        assert_eq!(
+            tasks.migration_completion.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+        assert_eq!(
+            tasks.stale_edge_reconciliation.schedule.cron.as_deref(),
+            Some("0 */30 * * * *")
+        );
+    }
+
+    #[test]
+    fn empty_schedule_yaml_yields_default_crons() {
+        let cfg: ScheduleConfig = serde_yaml::from_str("tasks: {}\n").expect("valid yaml");
+        assert_eq!(
+            cfg.tasks.global.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+        assert_eq!(
+            cfg.tasks.migration_completion.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+    }
 
     #[test]
     fn job_timeout_is_some_by_default_and_disabled_at_zero() {
