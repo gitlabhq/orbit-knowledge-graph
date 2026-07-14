@@ -1,6 +1,6 @@
 //! Walks the ontology and builds each pipeline as an extract plus a transform.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use indexmap::IndexSet;
 use ontology::{
@@ -60,63 +60,61 @@ pub(in crate::modules::sdlc) fn build_plans(
 
     for node in ontology.nodes() {
         for pipeline in &node.pipelines {
-            plans.insert(node_plan(node, pipeline, ontology, &sizing)?)?;
+            plans.insert(build_node_plan(node, pipeline, ontology, &sizing)?)?;
         }
     }
 
     for (relationship_kind, pipeline) in ontology.edge_etl_configs() {
-        plans.insert(edge_plan(relationship_kind, pipeline, ontology, &sizing)?)?;
+        plans.insert(build_edge_plan(
+            relationship_kind,
+            pipeline,
+            ontology,
+            &sizing,
+        )?)?;
     }
 
     for derived in ontology.derived_entities() {
         for pipeline in &derived.pipelines {
-            plans.insert(derived_plan(pipeline, &sizing)?)?;
+            plans.insert(build_derived_plan(pipeline, &sizing)?)?;
         }
     }
 
     Ok(plans.into_plans())
 }
 
-fn node_plan(
+fn build_node_plan(
     node: &NodeEntity,
     pipeline: &Pipeline,
     ontology: &Ontology,
     sizing: &Sizing<'_>,
 ) -> Result<Plan, PlanError> {
     let Extract::ClickHouse(extract) = &pipeline.extract;
-    let namespaced = pipeline.scope == EtlScope::Namespaced;
-
     let decl = ExtractDecl::of(pipeline);
-    let (spec, _) = match &extract.query {
+
+    let spec = match &extract.query {
         ExtractQuery::Generated { filter } => {
-            let columns = SourceColumn::from_node(node);
-            let node_refs = fk_node_ref_columns(node, pipeline.transform.edges(), namespaced);
-            generated::build(
-                &decl,
-                generated::Shape::Node {
-                    columns: &columns,
-                    node_ref_columns: &node_refs,
-                },
-                filter.as_deref(),
-            )?
+            let mut columns = SourceColumn::from_node(node);
+            columns.extend(SourceColumn::bare_all(&edge_fk_columns(
+                pipeline.transform.edges(),
+            )));
+
+            generated::build(&decl, generated::Shape::Node { columns }, filter.as_deref())?
         }
         ExtractQuery::Sql(raw) => sql::build(&decl, raw)?,
     };
 
-    let transform =
-        transform::node_transform(node, pipeline.transform.edges(), namespaced, ontology);
+    let transform = transform::node_transform(node, pipeline.transform.edges(), ontology);
 
     Ok(assemble(
+        pipeline,
         pipeline.name.clone(),
-        pipeline.name.clone(),
-        pipeline.scope,
         spec,
         transform,
         sizing,
     ))
 }
 
-fn edge_plan(
+fn build_edge_plan(
     relationship_kind: &str,
     pipeline: &Pipeline,
     ontology: &Ontology,
@@ -139,23 +137,26 @@ fn edge_plan(
     let Extract::ClickHouse(extract) = &pipeline.extract;
     let decl = ExtractDecl::of(pipeline);
 
-    let (spec, batch_schema) = match &extract.query {
+    let spec = match &extract.query {
         ExtractQuery::Generated { filter } => {
-            let joins = EnrichmentJoin::from_mapping(mapping, pipeline.scope, ontology);
+            let joins = EnrichmentJoin::from_mapping(mapping, pipeline.scope);
             if joins.is_empty() {
-                let columns = edge_single_table_columns(mapping);
                 generated::build(
                     &decl,
-                    generated::Shape::SingleTable { columns: &columns },
+                    generated::Shape::SingleTable {
+                        columns: edge_single_table_columns(mapping),
+                    },
                     filter.as_deref(),
                 )?
             } else {
-                let batch = SourceColumn::bare_all(&edge_batch_columns(mapping, &extract.order_by));
                 generated::build(
                     &decl,
                     generated::Shape::Enriched {
-                        batch_columns: &batch,
-                        joins: &joins,
+                        batch_columns: SourceColumn::bare_all(&edge_batch_columns(
+                            mapping,
+                            &extract.order_by,
+                        )),
+                        joins,
                     },
                     filter.as_deref(),
                 )?
@@ -168,21 +169,20 @@ fn edge_plan(
         relationship_kind,
         mapping,
         pipeline.scope,
-        &batch_schema,
+        &spec.batch_schema,
         ontology,
     );
 
     Ok(assemble(
-        pipeline.name.clone(),
+        pipeline,
         relationship_kind.to_string(),
-        pipeline.scope,
         spec,
         transform,
         sizing,
     ))
 }
 
-fn derived_plan(pipeline: &Pipeline, sizing: &Sizing<'_>) -> Result<Plan, PlanError> {
+fn build_derived_plan(pipeline: &Pipeline, sizing: &Sizing<'_>) -> Result<Plan, PlanError> {
     let Transform::Rust(name) = &pipeline.transform else {
         return Err(PlanError::UnsupportedDerivedTransform(
             pipeline.name.clone(),
@@ -193,36 +193,26 @@ fn derived_plan(pipeline: &Pipeline, sizing: &Sizing<'_>) -> Result<Plan, PlanEr
     let ExtractQuery::Sql(raw) = &extract.query else {
         return Err(PlanError::DerivedRequiresSql(pipeline.name.clone()));
     };
-    let (spec, _) = sql::build(&decl, raw)?;
+    let spec = sql::build(&decl, raw)?;
 
     let transform = transform::rust_transform(name);
 
     Ok(assemble(
+        pipeline,
         pipeline.name.clone(),
-        pipeline.name.clone(),
-        pipeline.scope,
         spec,
         transform,
         sizing,
     ))
 }
 
-/// FK node-ref columns to append, skipping ones the node already selects.
-fn fk_node_ref_columns(node: &NodeEntity, edges: &[EdgeMapping], namespaced: bool) -> Vec<String> {
-    let node_columns: HashSet<&str> = node.fields.iter().filter_map(|f| f.column_name()).collect();
-
+/// FK node-ref columns the edges need; overlaps with node fields are dropped by render-time dedup.
+fn edge_fk_columns(edges: &[EdgeMapping]) -> Vec<String> {
     let mut columns = IndexSet::new();
     for mapping in edges {
         columns.extend(node_ref_columns(mapping));
     }
-    if namespaced {
-        columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
-    }
-
-    columns
-        .into_iter()
-        .filter(|column| !node_columns.contains(column.as_str()))
-        .collect()
+    columns.into_iter().collect()
 }
 
 /// Both node-ref fields plus, for `Derived` node refs, the column the kind is derived from.
@@ -253,23 +243,22 @@ fn edge_batch_columns(mapping: &EdgeMapping, order_by: &[String]) -> Vec<String>
 }
 
 fn assemble(
-    name: String,
+    pipeline: &Pipeline,
     target: String,
-    scope: EtlScope,
     spec: ExtractSpec,
     transform: TransformSpec,
     sizing: &Sizing<'_>,
 ) -> Plan {
-    let batch_size = sizing.resolve(&name, scope);
+    let Extract::ClickHouse(extract) = &pipeline.extract;
     Plan {
-        name,
+        name: pipeline.name.clone(),
         target,
-        scope,
+        scope: pipeline.scope,
         extract_template: spec.template,
         watermark_column: spec.watermark,
         deleted_column: spec.deleted,
-        sort_key: spec.order_by,
-        batch_size,
+        sort_key: extract.order_by.clone(),
+        batch_size: sizing.resolve(&pipeline.name, pipeline.scope),
         transform,
     }
 }

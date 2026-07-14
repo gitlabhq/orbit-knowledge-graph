@@ -77,9 +77,9 @@ pub(super) fn rust_transform(name: &str) -> TransformSpec {
 pub(super) fn node_transform(
     node: &NodeEntity,
     edges: &[EdgeMapping],
-    namespaced: bool,
     ontology: &Ontology,
 ) -> TransformSpec {
+    let namespaced = !node.global;
     let node_destination = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
     let mut transforms = vec![Transformation {
         sql: node_transform_sql(&node_columns(&node.fields)),
@@ -633,11 +633,13 @@ mod tests {
                     mapping,
                 },
                 enrich: vec![],
+                enrich_source: None,
             },
             target: NodeRef {
                 field: "id".to_string(),
                 kind: NodeRefKind::Literal("Note".to_string()),
                 enrich: vec![],
+                enrich_source: None,
             },
             label: "HAS_NOTE".to_string(),
             array_field: None,
@@ -659,11 +661,13 @@ mod tests {
                 field: "assignees".to_string(),
                 kind: NodeRefKind::Literal("User".to_string()),
                 enrich: vec![],
+                enrich_source: None,
             },
             target: NodeRef {
                 field: "id".to_string(),
                 kind: NodeRefKind::Literal("MergeRequest".to_string()),
                 enrich: vec![],
+                enrich_source: None,
             },
             label: "assigned".to_string(),
             array_field: Some("user_id".to_string()),
@@ -686,11 +690,13 @@ mod tests {
                 field: from_field.to_string(),
                 kind: NodeRefKind::Literal(from_kind.to_string()),
                 enrich: vec![],
+                enrich_source: None,
             },
             target: NodeRef {
                 field: to_field.to_string(),
                 kind: NodeRefKind::Literal(to_kind.to_string()),
                 enrich: vec![],
+                enrich_source: None,
             },
             label: label.to_string(),
             array_field: None,

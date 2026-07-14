@@ -798,6 +798,7 @@ impl EndpointYaml {
                 },
             },
             enrich: self.enrich,
+            enrich_source: None,
         })
     }
 }

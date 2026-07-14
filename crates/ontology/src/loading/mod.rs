@@ -751,6 +751,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     ontology.gc_preserve_patterns = schema.settings.gc_preserve_patterns;
 
+    resolve_enriched_endpoints(&mut ontology)?;
+
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
@@ -760,6 +762,60 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_unique_pipeline_names(&ontology)?;
 
     Ok(ontology)
+}
+
+fn resolve_enriched_endpoints(ontology: &mut crate::Ontology) -> Result<(), OntologyError> {
+    let sources: std::collections::BTreeMap<String, crate::etl::EnrichSource> = ontology
+        .nodes
+        .iter()
+        .filter_map(|(name, node)| {
+            let crate::etl::Extract::ClickHouse(extract) = &node.pipelines.first()?.extract;
+            let table = extract.tables.first()?;
+            Some((
+                name.clone(),
+                crate::etl::EnrichSource {
+                    table: table.clone(),
+                    namespaced: !node.global,
+                },
+            ))
+        })
+        .collect();
+
+    let pipelines = ontology
+        .nodes
+        .values_mut()
+        .flat_map(|node| node.pipelines.iter_mut())
+        .chain(ontology.edge_pipelines.values_mut().flatten())
+        .chain(
+            ontology
+                .derived_entities
+                .values_mut()
+                .flat_map(|derived| derived.pipelines.iter_mut()),
+        );
+    for pipeline in pipelines {
+        let crate::etl::Transform::DataFusion { edges } = &mut pipeline.transform else {
+            continue;
+        };
+        for mapping in edges {
+            for node_ref in [&mut mapping.source, &mut mapping.target] {
+                if node_ref.enrich.is_empty() {
+                    continue;
+                }
+                let crate::etl::NodeRefKind::Literal(kind) = &node_ref.kind else {
+                    continue;
+                };
+                let source = sources.get(kind).ok_or_else(|| {
+                    OntologyError::Validation(format!(
+                        "pipeline '{}': enriched endpoint '{kind}' declares no extract table \
+                         to join its `enrich` columns from",
+                        pipeline.name
+                    ))
+                })?;
+                node_ref.enrich_source = Some(source.clone());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_unique_pipeline_names(ontology: &crate::Ontology) -> Result<(), OntologyError> {
@@ -1120,6 +1176,7 @@ mod tests {
             field: field.to_string(),
             kind: NodeRefKind::Literal(kind.to_string()),
             enrich: vec![],
+            enrich_source: None,
         }
     }
 
@@ -1160,6 +1217,84 @@ mod tests {
         ontology.nodes.get_mut(node).unwrap().pipelines =
             vec![pipeline_with_edges(&format!("{node}_pipeline"), edges)];
         ontology
+    }
+
+    fn enriched_ref(field: &str, kind: &str, columns: &[&str]) -> NodeRef {
+        NodeRef {
+            enrich: columns.iter().map(|c| c.to_string()).collect(),
+            ..literal_ref(field, kind)
+        }
+    }
+
+    #[test]
+    fn enriched_literal_endpoint_resolves_to_node_extract_table() {
+        let mut ontology = crate::Ontology::new().with_nodes(["Note", "User"]);
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
+            "note_pipeline",
+            vec![edge_mapping(
+                "AUTHORED",
+                enriched_ref("author_id", "User", &["state"]),
+                literal_ref("id", "Note"),
+            )],
+        )];
+        let user = ontology.nodes.get_mut("User").unwrap();
+        user.pipelines = vec![pipeline_with_edges("user_pipeline", vec![])];
+        user.global = true;
+
+        resolve_enriched_endpoints(&mut ontology).unwrap();
+
+        let mapping = &ontology.nodes["Note"].pipelines[0].transform.edges()[0];
+        assert_eq!(
+            mapping.source.enrich_source,
+            Some(crate::etl::EnrichSource {
+                table: "siphon_x".to_string(),
+                namespaced: false,
+            })
+        );
+        assert_eq!(mapping.target.enrich_source, None);
+    }
+
+    #[test]
+    fn enrich_on_derived_endpoint_stays_unresolved() {
+        let mut ontology = crate::Ontology::new().with_nodes(["Note"]);
+        let derived = NodeRef {
+            kind: NodeRefKind::Derived {
+                column: "noteable_type".to_string(),
+                mapping: BTreeMap::new(),
+            },
+            ..enriched_ref("noteable_id", "", &["state"])
+        };
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
+            "note_pipeline",
+            vec![edge_mapping(
+                "BELONGS_TO",
+                literal_ref("id", "Note"),
+                derived,
+            )],
+        )];
+
+        resolve_enriched_endpoints(&mut ontology).unwrap();
+
+        let mapping = &ontology.nodes["Note"].pipelines[0].transform.edges()[0];
+        assert_eq!(mapping.target.enrich_source, None);
+    }
+
+    #[test]
+    fn enriched_endpoint_without_extract_table_is_rejected() {
+        let mut ontology = crate::Ontology::new().with_nodes(["Note", "User"]);
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
+            "note_pipeline",
+            vec![edge_mapping(
+                "AUTHORED",
+                enriched_ref("author_id", "User", &["state"]),
+                literal_ref("id", "Note"),
+            )],
+        )];
+
+        let msg = resolve_enriched_endpoints(&mut ontology)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("declares no extract table"), "got: {msg}");
     }
 
     #[test]
@@ -1220,6 +1355,7 @@ mod tests {
                         ]),
                     },
                     enrich: vec![],
+                    enrich_source: None,
                 },
             )
         };

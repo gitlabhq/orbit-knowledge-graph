@@ -94,6 +94,13 @@ pub struct NodeRef {
     pub field: String,
     pub kind: NodeRefKind,
     pub enrich: Vec<String>,
+    pub enrich_source: Option<EnrichSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnrichSource {
+    pub table: String,
+    pub namespaced: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

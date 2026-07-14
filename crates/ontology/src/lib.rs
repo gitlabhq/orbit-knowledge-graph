@@ -20,6 +20,7 @@ pub mod constants;
 mod entities;
 pub mod errors;
 pub mod etl;
+pub mod etl_sql;
 pub mod introspection;
 mod json_schema;
 mod loading;
@@ -43,8 +44,8 @@ pub use entities::{
     TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
-    ClickHouseExtract, DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef,
-    NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
+    ClickHouseExtract, DEFAULT_TRANSFORM, EdgeMapping, EnrichSource, EtlScope, Extract,
+    ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -896,15 +897,7 @@ impl Ontology {
         let Some(node) = self.nodes.get(entity) else {
             return false;
         };
-        if !node.has_traversal_path {
-            return false;
-        }
-        if node
-            .pipelines
-            .first()
-            .as_ref()
-            .is_some_and(|p| p.scope == EtlScope::Global)
-        {
+        if !node.has_traversal_path || node.global {
             return false;
         }
         node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)

@@ -2,6 +2,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     validate_named_queries();
     validate_migration_ledger();
+    validate_authored_etl_sql();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
 }
@@ -49,6 +50,14 @@ fn validate_migration_ledger() {
 
     ontology::migrations::verify_snapshot(&ontology, &current, &committed, &ledger, version)
         .unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// Fails the build when authored ETL SQL hardcodes a watermark/deleted column
+/// instead of using the `{{watermark_column}}`/`{{deleted_column}}` markers.
+fn validate_authored_etl_sql() {
+    let ontology = ontology::Ontology::load_embedded()
+        .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));
+    ontology::etl_sql::validate_authored_etl_sql(&ontology).unwrap_or_else(|e| panic!("{e}"));
 }
 
 fn validate_named_queries() {

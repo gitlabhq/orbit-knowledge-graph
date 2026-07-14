@@ -8,51 +8,44 @@ use super::super::schema::{BatchSchema, EnrichedColumn};
 use super::enrichment::EnrichmentJoin;
 use super::{ExtractDecl, ExtractSpec, SourceColumn};
 
-pub(in crate::modules::sdlc) enum Shape<'a> {
+pub(in crate::modules::sdlc) enum Shape {
     Node {
-        columns: &'a [SourceColumn],
-        node_ref_columns: &'a [String],
+        columns: Vec<SourceColumn>,
     },
     SingleTable {
-        columns: &'a [String],
+        columns: Vec<String>,
     },
     Enriched {
-        batch_columns: &'a [SourceColumn],
-        joins: &'a [EnrichmentJoin],
+        batch_columns: Vec<SourceColumn>,
+        joins: Vec<EnrichmentJoin>,
     },
 }
 
 pub(in crate::modules::sdlc) fn build(
-    decl: &ExtractDecl<'_>,
-    shape: Shape<'_>,
+    decl: &ExtractDecl,
+    shape: Shape,
     filter: Option<&str>,
-) -> Result<(ExtractSpec, BatchSchema), PlanError> {
+) -> Result<ExtractSpec, PlanError> {
     let filter = resolve_filter(decl, filter)?;
     let (sql, schema) = match shape {
-        Shape::Node {
-            columns,
-            node_ref_columns,
-        } => (
-            render_node(decl, columns, node_ref_columns, filter.as_deref()),
+        Shape::Node { columns } => (
+            render_node(decl, &columns, filter.as_deref()),
             BatchSchema::opaque(),
         ),
         Shape::SingleTable { columns } => (
-            render_single_table(decl, columns, filter.as_deref()),
+            render_single_table(decl, &columns, filter.as_deref()),
             BatchSchema::opaque(),
         ),
         Shape::Enriched {
             batch_columns,
             joins,
-        } => render_enriched(decl, batch_columns, joins, filter.as_deref()),
+        } => render_enriched(decl, &batch_columns, &joins, filter.as_deref()),
     };
-    Ok((decl.build_spec(sql)?, schema))
+    decl.build_spec(sql, schema)
 }
 
 /// Substitutes `{{watermark_column}}`/`{{deleted_column}}` and rejects any other `{{marker}}`.
-fn resolve_filter(
-    decl: &ExtractDecl<'_>,
-    filter: Option<&str>,
-) -> Result<Option<String>, PlanError> {
+fn resolve_filter(decl: &ExtractDecl, filter: Option<&str>) -> Result<Option<String>, PlanError> {
     let Some(filter) = filter else {
         return Ok(None);
     };
@@ -100,24 +93,18 @@ impl SelectColumn {
     }
 }
 
-fn render_node(
-    decl: &ExtractDecl<'_>,
-    columns: &[SourceColumn],
-    node_ref_columns: &[String],
-    filter: Option<&str>,
-) -> String {
-    let mut select: Vec<SelectColumn> = columns.iter().map(SelectColumn::typed).collect();
-    select.extend(node_ref_columns.iter().map(|name| SelectColumn::bare(name)));
+fn render_node(decl: &ExtractDecl, columns: &[SourceColumn], filter: Option<&str>) -> String {
+    let select: Vec<SelectColumn> = columns.iter().map(SelectColumn::typed).collect();
     render_single_table_sql(decl, &select, filter)
 }
 
-fn render_single_table(decl: &ExtractDecl<'_>, columns: &[String], filter: Option<&str>) -> String {
+fn render_single_table(decl: &ExtractDecl, columns: &[String], filter: Option<&str>) -> String {
     let select: Vec<SelectColumn> = columns.iter().map(|c| SelectColumn::bare(c)).collect();
     render_single_table_sql(decl, &select, filter)
 }
 
 fn render_single_table_sql(
-    decl: &ExtractDecl<'_>,
+    decl: &ExtractDecl,
     columns: &[SelectColumn],
     filter: Option<&str>,
 ) -> String {
@@ -128,7 +115,7 @@ fn render_single_table_sql(
             select_columns.push(column.expression.clone());
         }
     }
-    for column in decl.order_by {
+    for column in &decl.order_by {
         if seen.insert(column.clone()) {
             select_columns.push(column.clone());
         }
@@ -157,14 +144,14 @@ fn render_single_table_sql(
 
 /// `_batch` CTE + one `_eN` CTE per join; the per-consumer semantics ride in each [`EnrichmentJoin`].
 fn render_enriched(
-    decl: &ExtractDecl<'_>,
+    decl: &ExtractDecl,
     batch_columns: &[SourceColumn],
     joins: &[EnrichmentJoin],
     filter: Option<&str>,
 ) -> (String, BatchSchema) {
-    let watermark = decl.watermark;
-    let deleted = decl.deleted;
-    let source = decl.table;
+    let watermark = &decl.watermark;
+    let deleted = &decl.deleted;
+    let source = &decl.table;
 
     let mut where_clause = "startsWith(traversal_path, {traversal_path:String})".to_string();
     if let Some(filter) = filter {
@@ -207,7 +194,7 @@ fn render_enriched(
                 .iter()
                 .map(|c| format!("argMax({c}, {watermark}) AS {c}")),
         );
-        let path_scope = if join.scope_to_path {
+        let path_scope = if join.has_traversal_path {
             "\n    AND startsWith(traversal_path, {traversal_path:String})"
         } else {
             ""
@@ -222,7 +209,7 @@ fn render_enriched(
             join.batch_column
         ));
         for c in &join.columns {
-            let output = if join.prefix_output {
+            let output = if join.column_alias {
                 format!("{alias}_{c}")
             } else {
                 c.clone()

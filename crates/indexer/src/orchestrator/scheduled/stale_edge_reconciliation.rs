@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use ontology::{EdgeMapping, EtlScope, NodeEntity, NodeRef, NodeRefKind, Ontology};
+use ontology::{EdgeMapping, NodeEntity, NodeRef, NodeRefKind, Ontology};
 use tracing::{info, warn};
 
 use crate::checkpoint::CheckpointStore;
@@ -184,10 +184,10 @@ impl StaleEdgeReconciliation {
 fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
     let mut specs = Vec::new();
     for node in ontology.nodes() {
+        if node.global {
+            continue;
+        }
         for pipeline in &node.pipelines {
-            if pipeline.scope != EtlScope::Namespaced {
-                continue;
-            }
             for mapping in pipeline.transform.edges() {
                 if let Some(spec) = reconciliation_spec(ontology, node, mapping) {
                     specs.push(spec);
@@ -342,11 +342,13 @@ mod tests {
                 field: "user_id".to_string(),
                 kind: NodeRefKind::Literal("User".to_string()),
                 enrich: vec![],
+                enrich_source: None,
             },
             target: NodeRef {
                 field: "id".to_string(),
                 kind: NodeRefKind::Literal("MergeRequest".to_string()),
                 enrich: vec![],
+                enrich_source: None,
             },
             label: relationship_kind.to_string(),
             array_field: None,
@@ -453,6 +455,7 @@ mod tests {
                     mapping: Default::default(),
                 },
                 enrich: vec![],
+                enrich_source: None,
             },
             ..mapping("HAS_NOTE")
         };

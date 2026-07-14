@@ -15,6 +15,7 @@ use ontology::{
 pub(in crate::modules::sdlc) use enrichment::EnrichmentJoin;
 
 use super::build::PlanError;
+use super::schema::BatchSchema;
 
 pub(super) const FILTERS_MARKER: &str = "{{filters}}";
 pub(super) const BATCH_SIZE_MARKER: &str = "{{batch_size}}";
@@ -22,10 +23,9 @@ pub(super) const BATCH_SIZE_MARKER: &str = "{{batch_size}}";
 #[derive(Debug)]
 pub(in crate::modules::sdlc) struct ExtractSpec {
     pub template: ExtractTemplate,
-    /// Settings default for generated extracts, or recovered from authored SQL's `AS _version`/`AS _deleted`.
     pub watermark: String,
     pub deleted: String,
-    pub order_by: Vec<String>,
+    pub batch_schema: BatchSchema,
 }
 
 /// Validated template — the only way a `Plan` gets its `extract_template`.
@@ -110,39 +110,35 @@ impl SourceColumn {
 }
 
 /// The narrow view strategies receive; deliberately excludes the pipeline's `query` and transform.
-pub(super) struct ExtractDecl<'a> {
-    pub entity: &'a str,
+pub(super) struct ExtractDecl {
+    pub entity: String,
     pub scope: EtlScope,
-    pub table: &'a str,
-    pub watermark: &'a str,
-    pub deleted: &'a str,
-    pub order_by: &'a [String],
+    pub table: String,
+    pub watermark: String,
+    pub deleted: String,
+    pub order_by: Vec<String>,
 }
 
-impl<'a> ExtractDecl<'a> {
+impl ExtractDecl {
     /// The single ontology→indexer conversion point — nothing below the `*_plan` fns sees the pipeline.
-    pub(super) fn of(pipeline: &'a Pipeline) -> Self {
+    pub(super) fn of(pipeline: &Pipeline) -> Self {
         let Extract::ClickHouse(extract) = &pipeline.extract;
         ExtractDecl {
-            entity: &pipeline.name,
+            entity: pipeline.name.clone(),
             scope: pipeline.scope,
-            table: extract
-                .tables
-                .first()
-                .map(String::as_str)
-                .unwrap_or_default(),
-            watermark: &extract.watermark,
-            deleted: &extract.deleted,
-            order_by: &extract.order_by,
+            table: extract.tables.first().cloned().unwrap_or_default(),
+            watermark: extract.watermark.clone(),
+            deleted: extract.deleted.clone(),
+            order_by: extract.order_by.clone(),
         }
     }
 
-    fn build_spec(&self, sql: String) -> Result<ExtractSpec, PlanError> {
+    fn build_spec(&self, sql: String, batch_schema: BatchSchema) -> Result<ExtractSpec, PlanError> {
         Ok(ExtractSpec {
             template: ExtractTemplate::new(sql)?,
-            watermark: self.watermark.to_string(),
-            deleted: self.deleted.to_string(),
-            order_by: self.order_by.to_vec(),
+            watermark: self.watermark.clone(),
+            deleted: self.deleted.clone(),
+            batch_schema,
         })
     }
 }
