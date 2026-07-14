@@ -1,33 +1,19 @@
-//! Container resource detection for runtime-derived indexer defaults.
-//!
-//! Reading the environment (CPU count, cgroup memory limit) is kept here, thin
-//! and side-effecting, so the value-mapping functions in [`crate::engine`] stay
-//! pure and unit-testable.
-
 const CGROUP_V2_MEMORY_MAX: &str = "/sys/fs/cgroup/memory.max";
 const CGROUP_V1_MEMORY_LIMIT: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
 
-/// cgroup v1 encodes "no limit" as a near-`u64::MAX` sentinel (page counter max
-/// times the page size). Any reported limit above this is treated as unlimited,
-/// which is far larger than any real container allocation.
+/// cgroup v1 reports "no limit" as a near-`u64::MAX` page-counter sentinel, not an absent file.
 const CGROUP_UNLIMITED_THRESHOLD_BYTES: u64 = 1 << 62;
 
-/// Observed CPU and memory the container is allowed to use, as the basis for
-/// [`crate::engine::EngineConfiguration::resolve_runtime_defaults`].
 #[derive(Debug, Clone)]
 pub struct ContainerResources {
-    /// CPUs the process may run on. `std::thread::available_parallelism` is
-    /// cgroup-aware on Linux (it honours the CPU quota), so this reflects the
-    /// pod's CPU limit, not the node's core count.
+    /// Cgroup-aware on Linux: reflects the pod CPU quota, not the node core count.
     pub available_parallelism: usize,
 
-    /// Container memory limit in bytes, or `None` when no limit is readable
-    /// (unlimited cgroup, or a platform without cgroups such as macOS dev).
+    /// `None` when no limit is readable (unlimited cgroup, or no cgroups — e.g. macOS).
     pub memory_limit_bytes: Option<u64>,
 }
 
 impl ContainerResources {
-    /// Reads CPU and memory limits from the current environment.
     pub fn detect() -> Self {
         Self {
             available_parallelism: std::thread::available_parallelism()

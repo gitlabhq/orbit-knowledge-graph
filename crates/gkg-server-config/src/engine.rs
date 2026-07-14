@@ -212,10 +212,8 @@ pub struct EntityHandlerConfig {
     #[serde(default = "default_partition_min_rows")]
     pub partition_min_rows: u64,
 
-    /// Rows per block streamed from the datalake (`max_block_size`). Larger blocks
-    /// amortize per-batch write round-trips (more throughput) at the cost of peak
-    /// memory per in-flight block. Unset = derived from the container memory limit
-    /// (see [`derive_stream_block_size`]).
+    /// Rows per block streamed from the datalake (`max_block_size`). Unset =
+    /// derived from the container memory limit.
     #[serde(default)]
     #[schemars(range(min = 1))]
     pub stream_block_size: Option<u64>,
@@ -241,9 +239,6 @@ impl Default for EntityHandlerConfig {
 }
 
 impl EntityHandlerConfig {
-    /// Resolved rows-per-block for datalake streaming. Falls back to the
-    /// memory-scarce default when [`EngineConfiguration::resolve_runtime_defaults`]
-    /// has not populated it (e.g. dev machines with no readable memory limit).
     pub fn stream_block_size(&self) -> u64 {
         self.stream_block_size
             .unwrap_or(MEMORY_SCARCE_STREAM_BLOCK_SIZE)
@@ -666,8 +661,7 @@ impl IndexerModule {
     }
 
     /// Name of the concurrency group this module's handlers subscribe under.
-    /// Namespace deletion shares the code group; the ETL modules that register
-    /// these subscriptions read this so the derived caps match the group names.
+    /// Single source for group names so derived caps can't drift from subscription groups.
     pub const fn concurrency_group(self) -> &'static str {
         match self {
             Self::Sdlc => "sdlc",
@@ -676,33 +670,18 @@ impl IndexerModule {
     }
 }
 
-/// ETL engine configuration.
-///
-/// # Defaults
-///
-/// Scale-related fields left unset are derived from the container's resources at
-/// startup by [`EngineConfiguration::resolve_runtime_defaults`]; an explicit
-/// config value always wins.
-///
-/// - `max_concurrent_workers`: unset = derived from `available_parallelism`
-/// - `concurrency_groups`: empty = derived from `modules` and the worker cap
-/// - `topics`: empty (each module applies its own declared default policy; an
-///   entry here is a field-wise override on top of that default)
-/// - `handlers`: defaults for all handlers
-/// - `modules`: all variants of [`IndexerModule`] (universal indexer)
+/// ETL engine configuration. Scale fields left unset derive from the
+/// container's resources at startup; an explicit value always wins.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
     /// Maximum concurrent message handlers across all modules. Unset = derived
-    /// from the container's `available_parallelism` (see
-    /// [`derive_max_concurrent_workers`]).
+    /// from the container CPU count.
     #[serde(default)]
     pub max_concurrent_workers: Option<usize>,
 
-    /// Named concurrency groups with their limits. Subscriptions reference these
-    /// by name via `SubscriptionConfig::concurrency_group`. Empty = derived from
-    /// the enabled `modules` and the resolved worker cap (see
-    /// [`derive_concurrency_groups`]).
+    /// Named concurrency groups with their limits. Empty = derived from the
+    /// enabled `modules` and the worker cap.
     #[serde(default)]
     pub concurrency_groups: HashMap<String, usize>,
 
@@ -720,9 +699,7 @@ pub struct EngineConfiguration {
     #[serde(default)]
     pub datalake_retry: DatalakeRetryConfig,
 
-    /// Modules whose handlers this indexer process should register. Defaults to all
-    /// modules for backward compatibility (universal indexer). Set to a subset to
-    /// run a specialised pool, e.g. `[code]` for a code-only Deployment.
+    /// Modules whose handlers this process registers. Unset = all modules.
     #[serde(default = "IndexerModule::all")]
     pub modules: Vec<IndexerModule>,
 }
@@ -741,8 +718,6 @@ impl Default for EngineConfiguration {
 }
 
 impl EngineConfiguration {
-    /// Resolved worker cap. Falls back to the conservative default when
-    /// [`Self::resolve_runtime_defaults`] has not populated it.
     pub fn max_concurrent_workers(&self) -> usize {
         self.max_concurrent_workers
             .unwrap_or(DEFAULT_MAX_CONCURRENT_WORKERS)
@@ -753,10 +728,6 @@ impl EngineConfiguration {
         self.modules.contains(&module)
     }
 
-    /// Fills scale-related defaults from the container's resources, in place.
-    /// Only fields the operator left unset are derived; an explicit config value
-    /// always wins. Returns a report of what was derived (empty fields mean the
-    /// operator set them explicitly) so the caller can log the decisions.
     pub fn resolve_runtime_defaults(
         &mut self,
         resources: &ContainerResources,
@@ -821,32 +792,19 @@ pub enum EngineConfigError {
     ZeroSystemNotesResolveLookupBatchSize,
 }
 
-// ── Resource-derived defaults ────────────────────────────────────────
-
-/// Conservative worker cap used when neither an explicit config value nor a
-/// derived value is available. Matches the historical hardcoded default.
 const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
 
-/// The two `stream_block_size` calibration points. Memory-scarce deployments
-/// (the historical default) keep the small block; roomy pods stream wider
-/// blocks to amortize write round-trips. Prod runs 32 GiB SDLC pods at 262144.
+/// Calibration: 65536 is the shipped memory-scarce default; prod's 32 GiB SDLC pods run 262144.
 const MEMORY_SCARCE_STREAM_BLOCK_SIZE: u64 = 65_536;
 const ROOMY_STREAM_BLOCK_SIZE: u64 = 262_144;
 
-/// Memory limit at or above which a pod is considered roomy enough for the wide
-/// streaming block. Set below the 32 GiB prod calibration point so those pods
-/// land on the wide tier with margin, while typical memory-scarce deployments
-/// (≤ 8 GiB) keep the conservative block.
+/// Below the 32 GiB prod calibration point so those pods land on the wide tier with margin.
 const ROOMY_MEMORY_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 
-/// Share of the worker cap the SDLC group gets when a pool registers both the
-/// SDLC and code groups. Calibrated to the historical universal-pool split of
-/// sdlc 12 / code 4 out of 16 workers (75% / 25%); code takes the remainder.
+/// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
 
-/// What [`EngineConfiguration::resolve_runtime_defaults`] derived, for logging.
-/// A field is `Some` only when it was derived (the operator left it unset); the
-/// resource inputs are always populated so a single log line explains the choice.
+/// A field is `Some` only when it was derived; explicitly configured fields stay `None`.
 #[derive(Debug, Default, Clone)]
 pub struct RuntimeDefaultsReport {
     pub available_parallelism: usize,
@@ -856,15 +814,10 @@ pub struct RuntimeDefaultsReport {
     pub concurrency_groups: Option<HashMap<String, usize>>,
 }
 
-/// Worker cap from the CPUs the container may use. `available_parallelism` is
-/// cgroup-aware on Linux, so this tracks the pod's CPU limit directly.
 pub fn derive_max_concurrent_workers(available_parallelism: usize) -> usize {
     available_parallelism.max(1)
 }
 
-/// Datalake streaming block size from the container memory limit, as a two-tier
-/// step function over the calibration points. An unreadable limit (dev machines,
-/// unlimited cgroup) keeps the memory-scarce block.
 pub fn derive_stream_block_size(memory_limit_bytes: Option<u64>) -> u64 {
     match memory_limit_bytes {
         Some(bytes) if bytes >= ROOMY_MEMORY_THRESHOLD_BYTES => ROOMY_STREAM_BLOCK_SIZE,
@@ -872,9 +825,6 @@ pub fn derive_stream_block_size(memory_limit_bytes: Option<u64>) -> u64 {
     }
 }
 
-/// Per-group worker caps from the modules a pool registers. A single-group pool
-/// gives that group the whole worker cap (no split needed); a pool spanning both
-/// the SDLC and code groups splits the cap by [`SDLC_WORKER_SHARE_PERCENT`].
 pub fn derive_concurrency_groups(
     modules: &[IndexerModule],
     worker_count: usize,

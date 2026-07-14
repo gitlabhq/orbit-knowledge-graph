@@ -635,11 +635,11 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\nScale-related fields left unset are derived from the container's resources at\nstartup by [`EngineConfiguration::resolve_runtime_defaults`]; an explicit\nconfig value always wins.\n\n- `max_concurrent_workers`: unset = derived from `available_parallelism`\n- `concurrency_groups`: empty = derived from `modules` and the worker cap\n- `topics`: empty (each module applies its own declared default policy; an\n  entry here is a field-wise override on top of that default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
+      "description": "ETL engine configuration. Scale fields left unset derive from the\ncontainer's resources at startup; an explicit value always wins.",
       "type": "object",
       "properties": {
         "concurrency_groups": {
-          "description": "Named concurrency groups with their limits. Subscriptions reference these\nby name via `SubscriptionConfig::concurrency_group`. Empty = derived from\nthe enabled `modules` and the resolved worker cap (see\n[`derive_concurrency_groups`]).",
+          "description": "Named concurrency groups with their limits. Empty = derived from the\nenabled `modules` and the worker cap.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
@@ -696,7 +696,7 @@
           }
         },
         "max_concurrent_workers": {
-          "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container's `available_parallelism` (see\n[`derive_max_concurrent_workers`]).",
+          "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container CPU count.",
           "type": [
             "integer",
             "null"
@@ -706,7 +706,7 @@
           "minimum": 0
         },
         "modules": {
-          "description": "Modules whose handlers this indexer process should register. Defaults to all\nmodules for backward compatibility (universal indexer). Set to a subset to\nrun a specialised pool, e.g. `[code]` for a code-only Deployment.",
+          "description": "Modules whose handlers this process registers. Unset = all modules.",
           "type": "array",
           "default": [
             "sdlc",
@@ -763,7 +763,7 @@
           "default": {}
         },
         "stream_block_size": {
-          "description": "Rows per block streamed from the datalake (`max_block_size`). Larger blocks\namortize per-batch write round-trips (more throughput) at the cost of peak\nmemory per in-flight block. Unset = derived from the container memory limit\n(see [`derive_stream_block_size`]).",
+          "description": "Rows per block streamed from the datalake (`max_block_size`). Unset =\nderived from the container memory limit.",
           "type": [
             "integer",
             "null"
