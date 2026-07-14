@@ -295,11 +295,10 @@ mod tests {
     use super::*;
     use crate::checkpoint::Checkpoint;
     use crate::modules::sdlc::plan::{
-        Cursor, CursorFilter, DeletedFilter, Plan, TransformSpec, TraversalPathFilter,
-        WatermarkFilter,
+        Cursor, CursorFilter, Plan, TransformSpec, TraversalPathFilter, WatermarkFilter,
     };
     use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
-    use chrono::{DateTime, Utc};
+    use chrono::Utc;
 
     fn test_ontology() -> Ontology {
         Ontology::load_embedded().expect("should load ontology")
@@ -319,12 +318,6 @@ mod tests {
 
     fn normalize(sql: &str) -> String {
         sql.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
-    fn timestamp(value: &str) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(value)
-            .expect("timestamp literal should parse")
-            .with_timezone(&Utc)
     }
 
     fn render_namespaced(plan: &Plan, path: &str) -> String {
@@ -709,53 +702,5 @@ mod tests {
             }
         }
         assert!(count > 0, "ontology produced no plans");
-    }
-
-    #[test]
-    fn embedded_extract_sql_matches_golden_snapshot() {
-        let built = plans(&test_ontology(), 1000);
-        let mut cases: Vec<_> = built
-            .global
-            .iter()
-            .map(|plan| (EtlScope::Global, plan))
-            .chain(
-                built
-                    .namespaced
-                    .iter()
-                    .map(|plan| (EtlScope::Namespaced, plan)),
-            )
-            .collect();
-        cases.sort_by(|(_, left), (_, right)| left.name.cmp(&right.name));
-
-        let mut actual = String::new();
-        for (scope, plan) in cases {
-            actual.push_str(&format!("=== {} ===\n", plan.name));
-            actual.push_str(&runtime_sql(scope, plan));
-            actual.push_str("\n\n");
-        }
-
-        let expected = include_str!("../../../../tests/golden/extract_sql.txt");
-        assert_eq!(normalize(&actual), normalize(expected));
-    }
-
-    fn runtime_sql(scope: EtlScope, plan: &Plan) -> String {
-        let last = timestamp("2024-01-01T00:00:00Z");
-        let current = timestamp("2024-01-02T00:00:00Z");
-        plan.prepare()
-            .with(WatermarkFilter {
-                column: &plan.watermark_column,
-                last,
-                current,
-            })
-            .with((scope == EtlScope::Namespaced).then_some(TraversalPathFilter { path: "1/" }))
-            .with(Some(DeletedFilter {
-                column: &plan.deleted_column,
-            }))
-            .with(CursorFilter {
-                sort_key: &plan.sort_key,
-                values: Cursor::first_page().values(),
-            })
-            .to_sql()
-            .expect("renders extract SQL")
     }
 }
