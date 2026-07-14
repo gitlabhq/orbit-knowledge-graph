@@ -52,10 +52,7 @@ pub async fn register_handlers(
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
 
-    let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
-        datalake_client,
-        entity_handler_config.stream_block_size(),
-    ));
+    let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(datalake_client));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();

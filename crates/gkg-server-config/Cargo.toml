@@ -11,7 +11,6 @@ schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
-sysinfo = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

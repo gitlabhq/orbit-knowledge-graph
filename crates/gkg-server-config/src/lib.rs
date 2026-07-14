@@ -43,8 +43,7 @@ pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
 pub use query::{CompilerDerivedSettings, PathResolverConfig, QueryConfig, QuerySettings};
 pub use resources::{
-    ContainerResources, derive_concurrency_groups, derive_max_concurrent_workers,
-    derive_stream_block_size,
+    derive_concurrency_groups, derive_max_concurrent_workers, detect_available_parallelism,
 };
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;

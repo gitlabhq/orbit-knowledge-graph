@@ -72,15 +72,11 @@ pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
 pub(crate) struct Datalake {
     client: DatalakeClient,
-    default_max_block_size: u64,
 }
 
 impl Datalake {
-    pub fn new(client: DatalakeClient, default_max_block_size: u64) -> Self {
-        Self {
-            client,
-            default_max_block_size,
-        }
+    pub fn new(client: DatalakeClient) -> Self {
+        Self { client }
     }
 
     fn build_query(&self, sql: &str, params: Value) -> ArrowQuery {
@@ -102,12 +98,9 @@ impl DatalakeQuery for Datalake {
         params: Value,
         max_block_size: Option<u64>,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-        // The Arrow 2GB-overflow byte-cap lives in `query_arrow_with_scan`; this
-        // path only serves `query_batches`, which always passes `None`.
-        let block_size = max_block_size.unwrap_or(self.default_max_block_size);
         let query = self.build_query(sql, params);
         let stream = query
-            .fetch_arrow_streamed(block_size)
+            .fetch_arrow_streamed(max_block_size)
             .await
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 
@@ -141,7 +134,6 @@ impl DatalakeQuery for Datalake {
         params: Value,
         max_block_size: Option<u64>,
     ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
-        let block_size = max_block_size.unwrap_or(self.default_max_block_size);
         let mut query = self.build_query(sql, params);
         if max_block_size.is_some() {
             // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
@@ -152,7 +144,7 @@ impl DatalakeQuery for Datalake {
             );
         }
         let (mut stream, summary) = query
-            .fetch_arrow_streamed_with_summary(block_size)
+            .fetch_arrow_streamed_with_summary(max_block_size)
             .await
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 

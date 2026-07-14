@@ -77,7 +77,6 @@ serde_yaml = "0.9.34"
 sha2 = "0.11.0"
 smallvec = "1.15.1"
 stacker = "0.1.23"
-sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 tempfile = "3.24.0"
 
 # Indexer dependencies
