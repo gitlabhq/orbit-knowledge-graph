@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: How Orbit Remote indexes GitLab data and source code, builds a graph in ClickHouse, and exposes it as a queryable API.
-title: How Orbit Remote works
+title: How GitLab Orbit Remote works
 ---
 
 {{< details >}}
@@ -28,7 +28,7 @@ title: How Orbit Remote works
 
 ## Indexing pipeline
 
-Orbit indexes data from two sources and combines them into a single graph.
+GitLab Orbit indexes data from two sources and combines them into a single graph.
 
 ### SDLC data
 
@@ -42,7 +42,7 @@ or kicks off a pipeline, the change propagates to the Orbit graph within minutes
 
 ### Source code
 
-Orbit calls the GitLab Rails internal API to fetch source files from your repositories.
+GitLab Orbit calls the GitLab Rails internal API to fetch source files from your repositories.
 It parses each file with a language-specific parser, extracts definitions (functions,
 classes, modules) and import references, and writes them as nodes and edges to the graph.
 
@@ -51,12 +51,12 @@ the default branch changes.
 
 ### Graph construction
 
-After reading SDLC data and code, Orbit writes a unified graph to ClickHouse.
+After reading SDLC data and code, GitLab Orbit writes a unified graph to ClickHouse.
 Each entity (a project, a user, a function definition) becomes a node.
 Each relationship (a user authored a merge request, a file imports a module)
 becomes a directed edge.
 
-When you send a query, Orbit compiles the JSON query DSL to ClickHouse SQL,
+When you send a query, GitLab Orbit compiles the JSON query DSL to ClickHouse SQL,
 executes it, and returns typed results.
 
 ## The graph model
@@ -73,7 +73,7 @@ A user (SDLC layer) owns a definition (code layer) if they last modified the con
 
 ## Performance
 
-Orbit runs in a separate Kubernetes cluster. It does not share compute or memory
+GitLab Orbit runs in a separate Kubernetes cluster. It does not share compute or memory
 with your GitLab instance.
 
 Initial indexing of a large group (thousands of projects, millions of lines of code)
@@ -84,13 +84,13 @@ depending on the size of the change.
 
 All queries go through the same path:
 
-1. Orbit receives a JSON query payload (via REST, MCP, or GitLab Duo Agent Platform).
+1. GitLab Orbit receives a JSON query payload (via REST, MCP, or GitLab Duo Agent Platform).
 1. The query engine validates the query against the current schema.
-1. Orbit compiles the JSON DSL to ClickHouse SQL.
+1. GitLab Orbit compiles the JSON DSL to ClickHouse SQL.
 1. ClickHouse executes the query against the graph tables.
-1. Orbit applies authorization filtering: results are scoped to entities the
+1. GitLab Orbit applies authorization filtering: results are scoped to entities the
    requesting user has access to in GitLab. For more information, see [Security](security.md).
-1. Orbit returns typed JSON results.
+1. GitLab Orbit returns typed JSON results.
 
 You can request the compiled SQL in query responses by setting `options.include_debug_sql: true`.
 This field is only populated for instance administrators and direct GitLab organization members
@@ -98,6 +98,6 @@ with Reporter or higher access.
 
 ## Data retention and deletion
 
-When you disable Orbit on a group, your indexed data is not deleted immediately. Orbit keeps it for 30 days so you can re-enable without losing your graph history. After the grace period, all graph data for that group, including all nodes, edges, and indexing checkpoints, is permanently deleted.
+When you disable GitLab Orbit on a group, your indexed data is not deleted immediately. GitLab Orbit keeps it for 30 days so you can re-enable without losing your graph history. After the grace period, all graph data for that group, including all nodes, edges, and indexing checkpoints, is permanently deleted.
 
-If you re-enable Orbit before the 30 days are up, deletion is canceled and indexing resumes from where it left off.
+If you re-enable GitLab Orbit before the 30 days are up, deletion is canceled and indexing resumes from where it left off.

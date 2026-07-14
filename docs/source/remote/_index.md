@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit running on GitLab-hosted infrastructure
-title: Orbit Remote
+description: GitLab Orbit running on GitLab-hosted infrastructure
+title: GitLab Orbit Remote
 ---
 
 {{< details >}}
@@ -26,7 +26,7 @@ title: Orbit Remote
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level group and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests, pipelines, vulnerabilities, and source code - into a ClickHouse property graph.
+GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level group and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests, pipelines, vulnerabilities, and source code - into a ClickHouse property graph.
 
 - Indexes: Full SDLC + code graph
 - Storage: ClickHouse (managed, no setup required)
@@ -39,7 +39,7 @@ Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level grou
 |---|---|
 | [Get started](getting-started.md) | Enable Orbit and run your first query |
 | [How it works](how-it-works.md) | Indexing pipeline, graph model, query execution |
-| [What Orbit indexes](indexing.md) | SDLC coverage, language support, indexing scope |
+| [What GitLab Orbit indexes](indexing.md) | SDLC coverage, language support, indexing scope |
 | [Security](security.md) | Roles required to query, the authorization model, and programmatic access |
 | [Schema reference](schema.md) | All 28 node types across 6 domains |
 | [Cookbook](cookbook.md) | Copy-paste queries for common use cases |

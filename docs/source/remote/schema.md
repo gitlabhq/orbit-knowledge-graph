@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Full reference for all 27 Orbit node types across 6 domains, including properties and their types.
+description: Full reference for all 27 GitLab Orbit node types across 6 domains, including properties and their types.
 title: Schema reference
 ---
 
@@ -26,7 +26,7 @@ title: Schema reference
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit indexes 27 node types across 6 domains. Use these as entity names in your queries.
+GitLab Orbit indexes 27 node types across 6 domains. Use these as entity names in your queries.
 
 To fetch the live schema at any time:
 

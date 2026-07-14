@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: How Orbit Local builds and queries a code graph on your machine using the Orbit CLI and DuckDB.
+description: How Orbit Local builds and queries a code graph on your machine using the GitLab Orbit CLI and DuckDB.
 title: How Orbit Local works
 ---
 
@@ -27,7 +27,7 @@ title: How Orbit Local works
 
 ## Indexing pipeline
 
-When you run `orbit index`, Orbit Local:
+When you run `orbit index`, GitLab Orbit Local:
 
 1. Walks the repository directory tree, respecting `.gitignore`.
 1. Passes each source file to a language-specific parser (rust-analyzer, tree-sitter, or a custom parser depending on language).
@@ -71,7 +71,7 @@ All 13 languages supported by Orbit Remote are also supported locally:
 Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP,
 and Bash/Shell.
 
-See [What Orbit indexes](../remote/indexing.md#supported-languages) for the full language support table.
+See [What GitLab Orbit indexes](../remote/indexing.md#supported-languages) for the full language support table.
 
 ## Billing
 

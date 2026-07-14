@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Pick an access method and build your first local Orbit graph.
+description: Pick an access method and build your first local GitLab Orbit graph.
 title: Get started with Orbit Local
 ---
 
@@ -109,7 +109,7 @@ the structured JSON query DSL is [Orbit Remote](../remote/_index.md) only.
 > 1.94 or later. To run the binary directly instead, see
 > [Use the `orbit` CLI directly](access/cli.md).
 
-Index a repository and inspect what Orbit found:
+Index a repository and inspect what GitLab Orbit found:
 
 ```shell
 glab orbit local index /path/to/your/repo
@@ -123,7 +123,7 @@ table and column in it: `gl_definition`, `gl_file`, `gl_directory`,
 Next:
 
 - Run a real query: [Use Orbit Local with glab](access/glab.md).
-- Wire it into your AI agent: run `glab orbit setup` to install the Orbit
+- Wire it into your AI agent: run `glab orbit setup` to install the GitLab Orbit
   skill, or [connect via MCP](access/mcp.md).
 - Browse the table layout: [Schema reference](schema.md).
 
