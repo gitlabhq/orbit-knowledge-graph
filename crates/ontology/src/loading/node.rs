@@ -11,8 +11,8 @@ use crate::entities::{
     VirtualSource,
 };
 use crate::etl::{
-    ClickHouseExtract, DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef,
-    NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
+    ClickHouseExtract, ClickHouseExtractLookup, DEFAULT_TRANSFORM, EdgeMapping, EtlScope, Extract,
+    ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
 };
 
 use super::{EtlSettings, ReadOntologyFile};
@@ -38,6 +38,8 @@ pub(crate) struct NodeYaml {
     destination_table: String,
     #[serde(default)]
     properties: IndexMap<String, PropertyYaml>,
+    #[serde(default)]
+    enrichment_props: Vec<String>,
     #[serde(default)]
     default_columns: Vec<String>,
     #[serde(default)]
@@ -80,6 +82,18 @@ struct ExtractYaml {
     /// `state = 5`. Used by `query: generated` edges and `query: generated` nodes.
     #[serde(default)]
     filter: Option<String>,
+    #[serde(default)]
+    lookups: Vec<ExtractLookupYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtractLookupYaml {
+    node: String,
+    id: String,
+    #[serde(default)]
+    fields: IndexMap<String, String>,
+    #[serde(default)]
+    prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -136,7 +150,11 @@ struct EndpointYaml {
     field: String,
     kind: EndpointKindYaml,
     #[serde(default)]
-    enrich: Vec<String>,
+    properties: IndexMap<String, String>,
+    #[serde(default)]
+    enrich: bool,
+    #[serde(default)]
+    prefix: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -488,6 +506,23 @@ impl NodeYaml {
 
         let storage = convert_node_storage(self.storage.unwrap_or_default(), &sort_key);
 
+        for tag in &self.enrichment_props {
+            let field = fields.iter().find(|f| f.name == *tag);
+            match field {
+                Some(f) if f.column_name().is_some() => {}
+                Some(_) => {
+                    return Err(OntologyError::Validation(format!(
+                        "node '{name}' enrichment_props '{tag}' is a virtual field; only column-backed properties can be denormalized onto edges"
+                    )));
+                }
+                None => {
+                    return Err(OntologyError::Validation(format!(
+                        "node '{name}' enrichment_props '{tag}' is not a declared property"
+                    )));
+                }
+            }
+        }
+
         Ok(NodeEntity {
             name,
             domain: self.domain,
@@ -495,6 +530,7 @@ impl NodeYaml {
             label: self.label,
             fields,
             primary_keys,
+            enrichment_props: self.enrichment_props,
             default_columns: self.default_columns,
             sort_key,
             destination_table: self.destination_table,
@@ -575,8 +611,6 @@ impl PipelineYaml {
             transform,
         } = self;
         let transform = transform.into_transform()?;
-        // The indexer builds an edge extract from exactly one mapping (batch +
-        // enrichment CTEs); more than one has no single-table shape to generate.
         let edge_count = match &transform {
             Transform::DataFusion { edges } => edges.len(),
             Transform::Rust(_) => 0,
@@ -628,6 +662,13 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
         )));
     }
     let generated = b.extract.query.as_str() == GENERATED_QUERY;
+    if generated && b.extract.tables.len() != 1 {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': generated extracts require exactly one base table, found {}",
+            b.name,
+            b.extract.tables.len()
+        )));
+    }
     // Derived-entity rows are neither node properties nor edge endpoints, so the
     // indexer has nothing to project them from; they must carry authored SQL.
     if b.is_derived && generated {
@@ -641,6 +682,29 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
             "pipeline '{}': extract.filter requires query: generated (authored .sql.j2 ignores it)",
             b.name
         )));
+    }
+    if !b.extract.lookups.is_empty() && !generated {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': extract.lookups requires query: generated",
+            b.name
+        )));
+    }
+    let mut lookup_output_fields = HashSet::new();
+    for lookup in &b.extract.lookups {
+        if lookup.prefix.is_some() && !lookup.fields.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "pipeline '{}': extract lookup '{}' sets prefix with explicit fields; use one",
+                b.name, lookup.node
+            )));
+        }
+        for output_field in lookup.fields.values() {
+            if !lookup_output_fields.insert(output_field) {
+                return Err(OntologyError::Validation(format!(
+                    "pipeline '{}': extract.lookups output field '{output_field}' is declared more than once",
+                    b.name
+                )));
+            }
+        }
     }
     let query =
         b.extract
@@ -656,6 +720,12 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
             watermark,
             deleted,
             query,
+            lookups: b
+                .extract
+                .lookups
+                .into_iter()
+                .map(ExtractLookupYaml::into_lookup)
+                .collect(),
         }),
     };
     Ok(Pipeline {
@@ -774,6 +844,18 @@ impl TransformYaml {
     }
 }
 
+impl ExtractLookupYaml {
+    fn into_lookup(self) -> ClickHouseExtractLookup {
+        ClickHouseExtractLookup {
+            node_kind: self.node,
+            batch_id_column: self.id,
+            output_fields: self.fields,
+            prefix: self.prefix,
+            resolved_source: None,
+        }
+    }
+}
+
 impl EdgeMappingYaml {
     fn into_mapping(self) -> Result<EdgeMapping, OntologyError> {
         Ok(EdgeMapping {
@@ -788,8 +870,23 @@ impl EdgeMappingYaml {
 
 impl EndpointYaml {
     fn into_node_ref(self) -> Result<NodeRef, OntologyError> {
+        if self.enrich && !self.properties.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "transform endpoint '{}' sets both enrich and explicit properties; use one",
+                self.field
+            )));
+        }
+        if !self.enrich && self.prefix.is_some() {
+            return Err(OntologyError::Validation(format!(
+                "transform endpoint '{}' sets prefix without enrich: true",
+                self.field
+            )));
+        }
         Ok(NodeRef {
             field: self.field,
+            property_inputs: self.properties,
+            enrich: self.enrich,
+            prefix: self.prefix,
             kind: match self.kind {
                 EndpointKindYaml::Literal(lit) => NodeRefKind::Literal(lit),
                 EndpointKindYaml::Derived { derive, mapping } => NodeRefKind::Derived {
@@ -797,8 +894,6 @@ impl EndpointYaml {
                     mapping,
                 },
             },
-            enrich: self.enrich,
-            enrich_source: None,
         })
     }
 }
@@ -1098,6 +1193,37 @@ mod tests {
     }
 
     #[test]
+    fn node_rejects_multiple_generated_extract_tables() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table, unused_table]
+                  order_by: [id]
+                  query: generated
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let error = result.expect_err("generated extracts with multiple tables should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("generated extracts require exactly one base table, found 2"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
     fn node_rejects_filter_on_sql_query() {
         let result = parse_test_node(
             r#"
@@ -1125,6 +1251,149 @@ mod tests {
             err.to_string()
                 .contains("extract.filter requires query: generated"),
             "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_lookups_on_sql_query() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: test_node.sql
+                  lookups:
+                    - node: User
+                      id: author_id
+                      fields:
+                        state: user_state
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("lookups on an authored .sql query should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.lookups requires query: generated"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_duplicate_lookup_output_fields() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: generated
+                  lookups:
+                    - node: User
+                      id: author_id
+                      fields:
+                        state: user_state
+                    - node: User
+                      id: reviewer_id
+                      fields:
+                        state: user_state
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("duplicate lookup output fields should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.lookups output field 'user_state' is declared more than once"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_lookup_prefix_with_explicit_fields() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id: {type: int64, source: id}
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: generated
+                  lookups:
+                    - node: User
+                      id: author_id
+                      prefix: author_
+                      fields:
+                        state: user_state
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let error = result.expect_err("lookup prefix with explicit fields should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("sets prefix with explicit fields; use one"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_endpoint_prefix_without_enrichment_contract() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id: {type: int64, source: id}
+              user_id: {type: int64, source: user_id}
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: generated
+                transform:
+                  type: datafusion
+                  edges:
+                    - from: {field: user_id, kind: User, prefix: author_}
+                      to: {field: id, kind: TestNode}
+                      label: AUTHORED
+            "#,
+        );
+        let error = result.expect_err("endpoint prefix without enrich should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("sets prefix without enrich: true"),
+            "got: {error}"
         );
     }
 
@@ -1401,7 +1670,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_edge_carries_filter_and_enrich_declaration() {
+    fn generated_edge_carries_filter_and_lookup_declaration() {
         // The edge SQL itself is generated by the indexer (covered by its golden);
         // here we assert the declarative model the indexer consumes.
         let ontology = crate::Ontology::load_embedded().expect("load");
@@ -1421,12 +1690,12 @@ mod tests {
         };
         assert_eq!(filter.as_deref(), Some("state = 5"));
 
-        // MEMBER_OF's `to` endpoint is polymorphic (Group/Project via source_type),
-        // so it declares no enrichable literal kind.
         let member = edge_pipeline("MEMBER_OF_siphon_members");
+        let Extract::ClickHouse(member_extract) = &member.extract;
         let mapping = &member.transform.edges()[0];
         assert!(matches!(mapping.source.kind, NodeRefKind::Literal(ref k) if k == "User"));
-        assert!(!mapping.source.enrich.is_empty());
+        assert_eq!(member_extract.lookups.len(), 1);
+        assert_eq!(member_extract.lookups[0].node_kind, "User");
         assert!(matches!(mapping.target.kind, NodeRefKind::Derived { .. }));
     }
 

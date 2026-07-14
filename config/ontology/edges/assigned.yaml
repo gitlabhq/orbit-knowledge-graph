@@ -19,36 +19,30 @@ pipelines:
   - name: ASSIGNED_siphon_merge_request_assignees_MergeRequest
     extract:
       type: clickhouse
-      tables: [siphon_merge_request_assignees, siphon_users, merge_requests]
+      tables: [siphon_merge_request_assignees]
       order_by: [traversal_path, merge_request_id, id]
       query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: MergeRequest, id: merge_request_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: user_id
-            kind: User
-            enrich: [state, private_profile, admin, auditor, external, user_type]
-          to:
-            field: merge_request_id
-            kind: MergeRequest
-            enrich: [state_id, merge_status, draft, squash, discussion_locked]
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: merge_request_id, kind: MergeRequest, enrich: true }
           label: ASSIGNED
   - name: ASSIGNED_siphon_issue_assignees_WorkItem
     extract:
       type: clickhouse
-      tables: [siphon_issue_assignees, siphon_users, work_items]
+      tables: [siphon_issue_assignees]
       order_by: [traversal_path, issue_id, user_id]
       query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: WorkItem, id: issue_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: user_id
-            kind: User
-            enrich: [state, private_profile, admin, auditor, external, user_type]
-          to:
-            field: issue_id
-            kind: WorkItem
-            enrich: [state_id, work_item_type_id, confidential]
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: issue_id, kind: WorkItem, enrich: true }
           label: ASSIGNED

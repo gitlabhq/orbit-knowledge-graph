@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use indexmap::IndexMap;
+
 pub const DEFAULT_TRANSFORM: &str = "datafusion";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
@@ -34,6 +36,22 @@ pub struct ClickHouseExtract {
     pub watermark: String,
     pub deleted: String,
     pub query: ExtractQuery,
+    pub lookups: Vec<ClickHouseExtractLookup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClickHouseExtractLookup {
+    pub node_kind: String,
+    pub batch_id_column: String,
+    pub output_fields: IndexMap<String, String>,
+    pub prefix: Option<String>,
+    pub resolved_source: Option<ClickHouseExtractLookupSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClickHouseExtractLookupSource {
+    pub table: String,
+    pub namespaced: bool,
 }
 
 /// How the indexer obtains the extract SQL — the one place the Generated vs
@@ -78,6 +96,13 @@ impl Transform {
             Self::Rust(_) => &[],
         }
     }
+
+    pub fn edges_mut(&mut self) -> &mut [EdgeMapping] {
+        match self {
+            Self::DataFusion { edges } => edges,
+            Self::Rust(_) => &mut [],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,14 +118,9 @@ pub struct EdgeMapping {
 pub struct NodeRef {
     pub field: String,
     pub kind: NodeRefKind,
-    pub enrich: Vec<String>,
-    pub enrich_source: Option<EnrichSource>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnrichSource {
-    pub table: String,
-    pub namespaced: bool,
+    pub property_inputs: IndexMap<String, String>,
+    pub enrich: bool,
+    pub prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

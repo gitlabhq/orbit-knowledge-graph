@@ -13,18 +13,15 @@ pipelines:
   - name: CLOSES_siphon_merge_requests_closing_issues_WorkItem
     extract:
       type: clickhouse
-      tables: [siphon_merge_requests_closing_issues, merge_requests, work_items]
+      tables: [siphon_merge_requests_closing_issues]
       order_by: [traversal_path, issue_id, id]
       query: generated
+      lookups:
+        - { node: MergeRequest, id: merge_request_id }
+        - { node: WorkItem, id: issue_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: merge_request_id
-            kind: MergeRequest
-            enrich: [state_id, merge_status, draft, squash, discussion_locked]
-          to:
-            field: issue_id
-            kind: WorkItem
-            enrich: [state_id, work_item_type_id, confidential]
+        - from: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          to: { field: issue_id, kind: WorkItem, enrich: true }
           label: CLOSES

@@ -3,9 +3,8 @@
 use ontology::sql_template;
 use ontology::{DataType, EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
-use super::super::EnrichedFieldSource;
 use super::super::build::PlanError;
-use super::enrichment::EnrichmentJoin;
+use super::lookup::PointLookupJoin;
 use super::{ExtractDecl, ExtractSpec, SourceColumn};
 
 pub(in crate::modules::sdlc) enum Shape {
@@ -15,9 +14,9 @@ pub(in crate::modules::sdlc) enum Shape {
     SingleTable {
         columns: Vec<String>,
     },
-    Enriched {
+    WithLookups {
         batch_columns: Vec<SourceColumn>,
-        joins: Vec<EnrichmentJoin>,
+        joins: Vec<PointLookupJoin>,
     },
 }
 
@@ -27,15 +26,15 @@ pub(in crate::modules::sdlc) fn build(
     filter: Option<&str>,
 ) -> Result<ExtractSpec, PlanError> {
     let filter = resolve_filter(decl, filter)?;
-    let (sql, enriched_fields) = match shape {
+    let sql = match shape {
         Shape::Node { columns } => render_node(decl, &columns, filter.as_deref()),
         Shape::SingleTable { columns } => render_single_table(decl, &columns, filter.as_deref()),
-        Shape::Enriched {
+        Shape::WithLookups {
             batch_columns,
             joins,
-        } => render_enriched(decl, &batch_columns, &joins, filter.as_deref()),
+        } => render_with_lookups(decl, &batch_columns, &joins, filter.as_deref()),
     };
-    decl.build_spec(sql, enriched_fields)
+    decl.build_spec(sql)
 }
 
 /// Substitutes `{{watermark_column}}`/`{{deleted_column}}` and rejects any other `{{marker}}`.
@@ -87,20 +86,12 @@ impl SelectColumn {
     }
 }
 
-fn render_node(
-    decl: &ExtractDecl,
-    columns: &[SourceColumn],
-    filter: Option<&str>,
-) -> (String, Vec<EnrichedFieldSource>) {
+fn render_node(decl: &ExtractDecl, columns: &[SourceColumn], filter: Option<&str>) -> String {
     let select: Vec<SelectColumn> = columns.iter().map(SelectColumn::typed).collect();
     render_single_table_sql(decl, &select, filter)
 }
 
-fn render_single_table(
-    decl: &ExtractDecl,
-    columns: &[String],
-    filter: Option<&str>,
-) -> (String, Vec<EnrichedFieldSource>) {
+fn render_single_table(decl: &ExtractDecl, columns: &[String], filter: Option<&str>) -> String {
     let select: Vec<SelectColumn> = columns.iter().map(|c| SelectColumn::bare(c)).collect();
     render_single_table_sql(decl, &select, filter)
 }
@@ -109,7 +100,7 @@ fn render_single_table_sql(
     decl: &ExtractDecl,
     columns: &[SelectColumn],
     filter: Option<&str>,
-) -> (String, Vec<EnrichedFieldSource>) {
+) -> String {
     let mut select_columns = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for column in columns {
@@ -135,25 +126,21 @@ fn render_single_table_sql(
         where_clause = format!("{where_clause} AND ({filter})");
     }
 
-    (
-        format!(
-            "SELECT {} FROM {} WHERE {} {{{{filters}}}} ORDER BY {} LIMIT {{{{batch_size}}}}",
-            select_columns.join(", "),
-            decl.table,
-            where_clause,
-            decl.order_by.join(", ")
-        ),
-        Vec::new(),
+    format!(
+        "SELECT {} FROM {} WHERE {} {{{{filters}}}} ORDER BY {} LIMIT {{{{batch_size}}}}",
+        select_columns.join(", "),
+        decl.table,
+        where_clause,
+        decl.order_by.join(", ")
     )
 }
 
-/// `_batch` CTE + one `_eN` CTE per join; the per-consumer semantics ride in each [`EnrichmentJoin`].
-fn render_enriched(
+fn render_with_lookups(
     decl: &ExtractDecl,
     batch_columns: &[SourceColumn],
-    joins: &[EnrichmentJoin],
+    joins: &[PointLookupJoin],
     filter: Option<&str>,
-) -> (String, Vec<EnrichedFieldSource>) {
+) -> String {
     let watermark = &decl.watermark;
     let deleted = &decl.deleted;
     let source = &decl.table;
@@ -187,18 +174,16 @@ fn render_enriched(
     final_cols.push("_batch._deleted AS _deleted".to_string());
 
     let mut join_clauses: Vec<String> = Vec::new();
-    let mut enriched_fields = Vec::new();
     for join in joins {
-        let alias = &join.alias;
-        let table = &join.table;
-        let key = &join.key;
+        let alias = &join.internal_alias;
+        let table = &join.source_table;
+        let key = &join.source_id_column;
 
         let mut select_cols = vec![format!("{key} AS id")];
-        select_cols.extend(
-            join.columns
-                .iter()
-                .map(|c| format!("argMax({c}, {watermark}) AS {c}")),
-        );
+        select_cols.extend(join.output_fields.iter().map(|field| {
+            let source_column = &field.source_column;
+            format!("argMax({source_column}, {watermark}) AS {source_column}")
+        }));
         let path_scope = if join.has_traversal_path {
             "\n    AND startsWith(traversal_path, {traversal_path:String})"
         } else {
@@ -207,25 +192,16 @@ fn render_enriched(
         ctes.push(format!(
             "{alias} AS (SELECT\n    {}\n  FROM {table}\n  WHERE {key} IN (SELECT\n      DISTINCT {}\n    FROM _batch){path_scope}\n  GROUP BY {key}\n  HAVING argMax({deleted}, {watermark}) = false)",
             select_cols.join(",\n    "),
-            join.batch_column,
+            join.batch_id_column,
         ));
         join_clauses.push(format!(
             "LEFT JOIN {alias} ON _batch.{} = {alias}.id",
-            join.batch_column
+            join.batch_id_column
         ));
-        for c in &join.columns {
-            let output = if join.column_alias {
-                format!("{alias}_{c}")
-            } else {
-                c.clone()
-            };
-            final_cols.push(format!("{alias}.{c} AS {output}"));
-            enriched_fields.push(EnrichedFieldSource {
-                batch_field_name: output,
-                node_kind: join.node_kind.clone(),
-                direction: join.direction.clone(),
-                source_node_column: c.clone(),
-            });
+        for field in &join.output_fields {
+            let source_column = &field.source_column;
+            let output_field = &field.output_field;
+            final_cols.push(format!("{alias}.{source_column} AS {output_field}"));
         }
     }
 
@@ -239,5 +215,5 @@ fn render_enriched(
         ctes.join(",\n  "),
         final_cols.join(",\n  "),
     );
-    (sql, enriched_fields)
+    sql
 }

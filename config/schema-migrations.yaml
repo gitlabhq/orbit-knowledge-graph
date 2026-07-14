@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 82
+  scope: none
+  note: Extract lookups and transform property bindings expand from node enrichment_props; graph rows remain byte-identical.
 - version: 81
   scope: none
   note: MR !1931 pipeline/.sql.j2 restructuring plus indexer.reindex explicit-list unification; DDL and reindex_sources() output byte-identical.

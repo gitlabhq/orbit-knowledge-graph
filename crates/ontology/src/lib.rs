@@ -44,8 +44,9 @@ pub use entities::{
     TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
-    ClickHouseExtract, DEFAULT_TRANSFORM, EdgeMapping, EnrichSource, EtlScope, Extract,
-    ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline, ReindexSource, Transform,
+    ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
+    EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline,
+    ReindexSource, Transform,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1349,27 +1350,36 @@ impl Ontology {
     ///
     /// - FK edges (no standalone ETL config) project every column of their
     ///   node, so they always carry it.
-    /// - A standalone edge projects `column` only when the matching endpoint
-    ///   is a fixed `Literal` node type whose `enrich` list includes it;
-    ///   polymorphic (`Column`-typed) endpoints materialize no node columns.
+    /// - A standalone edge projects `column` only when the matching literal
+    ///   endpoint maps its ontology property to an extracted input field.
     pub fn edge_projects_column(
         &self,
         relationship_kind: &str,
+        node_kind: &str,
         direction: DenormDirection,
         column: &str,
     ) -> bool {
         if let Some(pipelines) = self.get_edge_etl(relationship_kind) {
             return pipelines.iter().any(|pipeline| {
-                pipeline.transform.edges().iter().any(|edge| {
-                    if edge.label != relationship_kind {
-                        return false;
-                    }
+                pipeline.transform.edges().iter().any(|mapping| {
                     let node_ref = match direction {
-                        DenormDirection::Source => &edge.source,
-                        DenormDirection::Target => &edge.target,
+                        DenormDirection::Source => &mapping.source,
+                        DenormDirection::Target => &mapping.target,
                     };
-                    matches!(node_ref.kind, NodeRefKind::Literal(_))
-                        && node_ref.enrich.iter().any(|c| c == column)
+                    let NodeRefKind::Literal(endpoint_kind) = &node_ref.kind else {
+                        return false;
+                    };
+                    endpoint_kind == node_kind
+                        && node_ref.property_inputs.keys().any(|property_name| {
+                            self.get_node(node_kind)
+                                .and_then(|node| {
+                                    node.fields
+                                        .iter()
+                                        .find(|field| field.name == *property_name)
+                                })
+                                .and_then(|field| field.column_name())
+                                == Some(column)
+                        })
                 })
             });
         }
@@ -1392,16 +1402,16 @@ impl Ontology {
                     DenormDirection::Source => &v.source_kind,
                     DenormDirection::Target => &v.target_kind,
                 };
-                self.node_has_column(holder, fk)
+                holder == node_kind && self.node_has_property(holder, fk)
             });
         }
 
         true
     }
 
-    fn node_has_column(&self, node_kind: &str, column: &str) -> bool {
+    fn node_has_property(&self, node_kind: &str, property_name: &str) -> bool {
         self.get_node(node_kind)
-            .is_some_and(|n| n.fields.iter().any(|f| f.column_name() == Some(column)))
+            .is_some_and(|node| node.fields.iter().any(|field| field.name == property_name))
     }
 
     pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &Pipeline)> {
@@ -1838,15 +1848,30 @@ mod tests {
         // row (gitlab-org/gitlab#601941). Call edge_projects_column directly so the
         // guard would fail if that fix were reverted.
         assert!(
-            !ontology.edge_projects_column("HAS_DIFF", DenormDirection::Source, "state"),
+            !ontology.edge_projects_column(
+                "HAS_DIFF",
+                "MergeRequest",
+                DenormDirection::Source,
+                "state",
+            ),
             "HAS_DIFF must not project MergeRequest.state onto source_tags"
         );
         assert!(
-            ontology.edge_projects_column("HAS_DIFF", DenormDirection::Target, "state"),
+            ontology.edge_projects_column(
+                "HAS_DIFF",
+                "MergeRequestDiff",
+                DenormDirection::Target,
+                "state",
+            ),
             "HAS_DIFF (diff holds merge_request_id) projects on the target side"
         );
         assert!(
-            ontology.edge_projects_column("IN_PROJECT", DenormDirection::Source, "state"),
+            ontology.edge_projects_column(
+                "IN_PROJECT",
+                "MergeRequest",
+                DenormDirection::Source,
+                "state",
+            ),
             "IN_PROJECT (project_id on the MR) projects MergeRequest.state onto source_tags"
         );
     }

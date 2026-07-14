@@ -51,16 +51,15 @@ pipelines:
   - name: MEMBER_OF_siphon_members
     extract:
       type: clickhouse
-      tables: [siphon_members, siphon_users]
+      tables: [siphon_members]
       order_by: [traversal_path, id]
       query: generated
+      lookups:
+        - { node: User, id: user_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: user_id
-            kind: User
-            enrich: [state, private_profile, admin, auditor, external, user_type]
+        - from: { field: user_id, kind: User, enrich: true }
           to:
             field: source_id
             kind:
@@ -68,5 +67,4 @@ pipelines:
               mapping:
                 Namespace: Group
                 Project: Project
-            enrich: [visibility_level, archived]
           label: MEMBER_OF

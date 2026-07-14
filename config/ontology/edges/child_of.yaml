@@ -13,18 +13,15 @@ pipelines:
   - name: CHILD_OF_siphon_ci_sources_pipelines_Pipeline
     extract:
       type: clickhouse
-      tables: [siphon_ci_sources_pipelines, siphon_p_ci_pipelines]
+      tables: [siphon_ci_sources_pipelines]
       order_by: [traversal_path, id, partition_id]
       query: generated
+      lookups:
+        - { node: Pipeline, id: pipeline_id }
+        - { node: Pipeline, id: source_pipeline_id, prefix: source_pipeline_ }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: pipeline_id
-            kind: Pipeline
-            enrich: [status, source, tag, failure_reason, protected]
-          to:
-            field: source_pipeline_id
-            kind: Pipeline
-            enrich: [status, source, tag, failure_reason, protected]
+        - from: { field: pipeline_id, kind: Pipeline, enrich: true }
+          to: { field: source_pipeline_id, kind: Pipeline, enrich: true, prefix: source_pipeline_ }
           label: CHILD_OF

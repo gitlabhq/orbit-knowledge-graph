@@ -1121,6 +1121,15 @@
             "$ref": "#/definitions/propertyDefinition"
           }
         },
+        "enrichment_props": {
+          "type": "array",
+          "description": "Property names denormalized onto any edge endpoint that references this node via enrich: true. The single source of truth for the endpoint tag contract.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
         "default_columns": {
           "type": "array",
           "description": "Columns returned by default when this node appears in dynamic query results (e.g., path finding, neighbors). If omitted, all columns are returned.",
@@ -1571,12 +1580,21 @@
         "kind": {
           "$ref": "#/definitions/endpointKind"
         },
-        "enrich": {
-          "type": "array",
-          "items": {
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
             "type": "string"
           },
-          "description": "Literal-endpoint columns projected for denormalization."
+          "description": "Ontology properties mapped to input fields available in the extracted RecordBatch. Escape hatch; prefer enrich."
+        },
+        "enrich": {
+          "type": "boolean",
+          "default": false,
+          "description": "Carry the referenced node's enrichment_props onto this endpoint. Requires a matching extract lookup and a literal kind. Mutually exclusive with explicit properties."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Batch-field namespace; must match the extract lookup's prefix. Defaults to the node's snake_case name. Set on same-node self-edges to disambiguate."
         }
       },
       "required": [
@@ -1649,6 +1667,37 @@
       ],
       "additionalProperties": false
     },
+    "pipelineExtractLookup": {
+      "type": "object",
+      "description": "ClickHouse node lookup that publishes additional fields in the extracted RecordBatch.",
+      "properties": {
+        "node": {
+          "type": "string",
+          "description": "Literal node type providing the lookup fields."
+        },
+        "id": {
+          "type": "string",
+          "description": "Batch column containing the lookup node ID."
+        },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Source node columns mapped to stable output field names. Escape hatch; omit to derive from the node's enrichment_props."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Batch-field namespace for derived fields; must match the transform endpoint's prefix. Defaults to the node's snake_case name."
+        }
+      },
+      "required": [
+        "node",
+        "id"
+      ],
+      "additionalProperties": false
+    },
     "pipelineExtract": {
       "type": "object",
       "description": "Extraction input for a pipeline.",
@@ -1666,7 +1715,7 @@
             "type": "string"
           },
           "minItems": 1,
-          "description": "Datalake tables read by the extract."
+          "description": "Datalake tables read by authored SQL, or the single base table used by a generated extract."
         },
         "order_by": {
           "type": "array",
@@ -1687,11 +1736,18 @@
               "pattern": "^[A-Za-z0-9_]+\\.sql\\.j2$"
             }
           ],
-          "description": "'generated' lets the loader build the extract SQL from the pipeline declaration (a single-table projection for nodes and non-enriching edges, or a batch + endpoint-enrichment join for enriching edges); otherwise a MiniJinja .sql.j2 template next to the YAML that references it. Derived-entity pipelines must use a .sql.j2 template."
+          "description": "'generated' builds the extract SQL from the pipeline declaration, including declared lookups; otherwise references a neighboring MiniJinja .sql.j2 template. Derived pipelines require authored SQL."
         },
         "filter": {
           "type": "string",
           "description": "Extra WHERE predicate appended to the traversal-path scope of the _batch (e.g. 'state = 5'). May use {{watermark_column}}/{{deleted_column}} markers. Used by 'generated' queries."
+        },
+        "lookups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/pipelineExtractLookup"
+          },
+          "description": "Node lookups and stable output fields owned by generated ClickHouse extraction."
         }
       },
       "required": [

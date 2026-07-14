@@ -332,6 +332,7 @@ pub struct NodeEntity {
     pub fields: Vec<Field>,
     pub primary_keys: Vec<String>,
     pub destination_table: String,
+    pub enrichment_props: Vec<String>,
     /// If empty, all columns are returned.
     pub default_columns: Vec<String>,
     /// ClickHouse ORDER BY columns; used as the deduplication key for ReplacingMergeTree.
@@ -360,6 +361,7 @@ impl Default for NodeEntity {
             label: String::new(),
             fields: vec![],
             primary_keys: vec![DEFAULT_PRIMARY_KEY.to_string()],
+            enrichment_props: vec![],
             default_columns: vec![],
             sort_key: vec![],
             destination_table: String::new(),

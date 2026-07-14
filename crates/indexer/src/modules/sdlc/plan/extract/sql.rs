@@ -35,7 +35,6 @@ pub(in crate::modules::sdlc) fn build(
         template: ExtractTemplate::new(rendered)?,
         watermark,
         deleted,
-        enriched_fields: Vec::new(),
     })
 }
 

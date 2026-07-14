@@ -6,6 +6,7 @@ description: A CI/CD pipeline that runs a series of stages and jobs to build, te
 label: id
 destination_table: gl_pipeline
 default_columns: [id, iid, status, ref, source]
+enrichment_props: [status, source, tag, failure_reason, protected]
 
 style:
   size: 30

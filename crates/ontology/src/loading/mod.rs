@@ -326,6 +326,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
+    expand_pipeline_enrichment_contracts(&mut ontology)?;
+    resolve_extract_lookup_sources(&mut ontology)?;
+    validate_transform_property_inputs(&ontology)?;
+
     let has_denorm = !denormalization_entries.is_empty();
 
     for entry in &denormalization_entries {
@@ -367,7 +371,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     // Declare the denorm only on edges whose ETL materializes
                     // the column, so the compiler never pushes a tag onto an
                     // edge with empty tags.
-                    if !ontology.edge_projects_column(edge_name, direction.clone(), &field_column) {
+                    if !ontology.edge_projects_column(
+                        edge_name,
+                        &entry.node,
+                        direction.clone(),
+                        &field_column,
+                    ) {
                         continue;
                     }
                     let edge_column = match direction {
@@ -751,8 +760,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     ontology.gc_preserve_patterns = schema.settings.gc_preserve_patterns;
 
-    resolve_enriched_endpoints(&mut ontology)?;
-
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
@@ -764,20 +771,29 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     Ok(ontology)
 }
 
-fn resolve_enriched_endpoints(ontology: &mut crate::Ontology) -> Result<(), OntologyError> {
-    let sources: std::collections::BTreeMap<String, crate::etl::EnrichSource> = ontology
+fn expand_pipeline_enrichment_contracts(
+    ontology: &mut crate::Ontology,
+) -> Result<(), OntologyError> {
+    let enrichment_property_columns_by_node: std::collections::BTreeMap<
+        String,
+        Vec<(String, String)>,
+    > = ontology
         .nodes
         .iter()
-        .filter_map(|(name, node)| {
-            let crate::etl::Extract::ClickHouse(extract) = &node.pipelines.first()?.extract;
-            let table = extract.tables.first()?;
-            Some((
-                name.clone(),
-                crate::etl::EnrichSource {
-                    table: table.clone(),
-                    namespaced: !node.global,
-                },
-            ))
+        .filter(|(_, node)| !node.enrichment_props.is_empty())
+        .map(|(name, node)| {
+            let enrichment_property_columns = node
+                .enrichment_props
+                .iter()
+                .filter_map(|property_name| {
+                    let field = node
+                        .fields
+                        .iter()
+                        .find(|field| field.name == *property_name)?;
+                    Some((property_name.clone(), field.column_name()?.to_string()))
+                })
+                .collect();
+            (name.clone(), enrichment_property_columns)
         })
         .collect();
 
@@ -792,29 +808,211 @@ fn resolve_enriched_endpoints(ontology: &mut crate::Ontology) -> Result<(), Onto
                 .values_mut()
                 .flat_map(|derived| derived.pipelines.iter_mut()),
         );
+
     for pipeline in pipelines {
-        let crate::etl::Transform::DataFusion { edges } = &mut pipeline.transform else {
-            continue;
-        };
-        for mapping in edges {
-            for node_ref in [&mut mapping.source, &mut mapping.target] {
-                if node_ref.enrich.is_empty() {
-                    continue;
-                }
-                let crate::etl::NodeRefKind::Literal(kind) = &node_ref.kind else {
-                    continue;
-                };
-                let source = sources.get(kind).ok_or_else(|| {
-                    OntologyError::Validation(format!(
-                        "pipeline '{}': enriched endpoint '{kind}' declares no extract table \
-                         to join its `enrich` columns from",
-                        pipeline.name
-                    ))
-                })?;
-                node_ref.enrich_source = Some(source.clone());
+        let crate::etl::Extract::ClickHouse(extract) = &mut pipeline.extract;
+        for lookup in &mut extract.lookups {
+            if !lookup.output_fields.is_empty() {
+                continue;
+            }
+            let enrichment_property_columns = get_enrichment_property_columns_for_node(
+                &enrichment_property_columns_by_node,
+                &lookup.node_kind,
+                &pipeline.name,
+            )?;
+            let prefix = lookup
+                .prefix
+                .clone()
+                .unwrap_or_else(|| get_default_enrichment_field_prefix(&lookup.node_kind));
+            for (_, source_column) in enrichment_property_columns {
+                lookup
+                    .output_fields
+                    .insert(source_column.clone(), format!("{prefix}{source_column}"));
+            }
+        }
+        validate_unique_extract_lookup_output_fields(pipeline)?;
+
+        for endpoint in pipeline
+            .transform
+            .edges_mut()
+            .iter_mut()
+            .flat_map(|edge| [&mut edge.source, &mut edge.target])
+        {
+            if !endpoint.enrich {
+                continue;
+            }
+            let crate::etl::NodeRefKind::Literal(node_kind) = &endpoint.kind else {
+                return Err(OntologyError::Validation(format!(
+                    "pipeline '{}': transform endpoint '{}' sets enrich but resolves to a derived node kind",
+                    pipeline.name, endpoint.field
+                )));
+            };
+            let node_kind = node_kind.clone();
+            let enrichment_property_columns = get_enrichment_property_columns_for_node(
+                &enrichment_property_columns_by_node,
+                &node_kind,
+                &pipeline.name,
+            )?;
+            let prefix = endpoint
+                .prefix
+                .clone()
+                .unwrap_or_else(|| get_default_enrichment_field_prefix(&node_kind));
+            for (property, source_column) in enrichment_property_columns {
+                endpoint
+                    .property_inputs
+                    .insert(property.clone(), format!("{prefix}{source_column}"));
             }
         }
     }
+    Ok(())
+}
+
+fn get_enrichment_property_columns_for_node<'a>(
+    enrichment_property_columns_by_node: &'a std::collections::BTreeMap<
+        String,
+        Vec<(String, String)>,
+    >,
+    node_kind: &str,
+    pipeline_name: &str,
+) -> Result<&'a [(String, String)], OntologyError> {
+    enrichment_property_columns_by_node
+        .get(node_kind)
+        .map(Vec::as_slice)
+        .ok_or_else(|| {
+            OntologyError::Validation(format!(
+                "pipeline '{pipeline_name}': node '{node_kind}' declares no enrichment_props to enrich from"
+            ))
+        })
+}
+
+fn get_default_enrichment_field_prefix(node_kind: &str) -> String {
+    let mut field_prefix = String::with_capacity(node_kind.len() + 4);
+    for (character_index, character) in node_kind.char_indices() {
+        if character.is_ascii_uppercase() && character_index != 0 {
+            field_prefix.push('_');
+        }
+        field_prefix.push(character.to_ascii_lowercase());
+    }
+    field_prefix.push('_');
+    field_prefix
+}
+
+fn validate_unique_extract_lookup_output_fields(
+    pipeline: &crate::etl::Pipeline,
+) -> Result<(), OntologyError> {
+    let crate::etl::Extract::ClickHouse(extract) = &pipeline.extract;
+    let mut output_fields = std::collections::HashSet::new();
+    for output_field in extract
+        .lookups
+        .iter()
+        .flat_map(|lookup| lookup.output_fields.values())
+    {
+        if !output_fields.insert(output_field) {
+            return Err(OntologyError::Validation(format!(
+                "pipeline '{}': extract.lookups output field '{output_field}' is declared more than once",
+                pipeline.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_extract_lookup_sources(ontology: &mut crate::Ontology) -> Result<(), OntologyError> {
+    let sources: std::collections::BTreeMap<String, crate::etl::ClickHouseExtractLookupSource> =
+        ontology
+            .nodes
+            .iter()
+            .filter_map(|(name, node)| {
+                let crate::etl::Extract::ClickHouse(extract) = &node.pipelines.first()?.extract;
+                let table = extract.tables.first()?;
+                Some((
+                    name.clone(),
+                    crate::etl::ClickHouseExtractLookupSource {
+                        table: table.clone(),
+                        namespaced: !node.global,
+                    },
+                ))
+            })
+            .collect();
+
+    let pipelines = ontology
+        .nodes
+        .values_mut()
+        .flat_map(|node| node.pipelines.iter_mut())
+        .chain(ontology.edge_pipelines.values_mut().flatten())
+        .chain(
+            ontology
+                .derived_entities
+                .values_mut()
+                .flat_map(|derived| derived.pipelines.iter_mut()),
+        );
+    for pipeline in pipelines {
+        let crate::etl::Extract::ClickHouse(extract) = &mut pipeline.extract;
+        for lookup in &mut extract.lookups {
+            let source = sources.get(&lookup.node_kind).ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "pipeline '{}': extract.lookups node '{}' declares no extract table",
+                    pipeline.name, lookup.node_kind
+                ))
+            })?;
+            lookup.resolved_source = Some(source.clone());
+        }
+    }
+    Ok(())
+}
+
+fn validate_transform_property_inputs(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    let pipelines = ontology
+        .nodes()
+        .flat_map(|node| node.pipelines.iter())
+        .chain(ontology.edge_etl_configs().map(|(_, pipeline)| pipeline))
+        .chain(
+            ontology
+                .derived_entities()
+                .flat_map(|derived| derived.pipelines.iter()),
+        );
+
+    for pipeline in pipelines {
+        for edge in pipeline.transform.edges() {
+            validate_endpoint_property_inputs(ontology, &pipeline.name, &edge.source)?;
+            validate_endpoint_property_inputs(ontology, &pipeline.name, &edge.target)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_endpoint_property_inputs(
+    ontology: &crate::Ontology,
+    pipeline_name: &str,
+    endpoint: &crate::etl::NodeRef,
+) -> Result<(), OntologyError> {
+    let crate::etl::NodeRefKind::Literal(node_kind) = &endpoint.kind else {
+        if !endpoint.property_inputs.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "pipeline '{pipeline_name}': derived transform endpoint '{}' cannot declare properties",
+                endpoint.field
+            )));
+        }
+        return Ok(());
+    };
+
+    let node = ontology.nodes.get(node_kind).ok_or_else(|| {
+        OntologyError::Validation(format!(
+            "pipeline '{pipeline_name}': transform endpoint '{}' references unknown node '{node_kind}'",
+            endpoint.field
+        ))
+    })?;
+
+    for property_name in endpoint.property_inputs.keys() {
+        if !node.fields.iter().any(|field| field.name == *property_name) {
+            return Err(OntologyError::Validation(format!(
+                "pipeline '{pipeline_name}': transform endpoint '{}' references unknown property '{property_name}' on node '{node_kind}'",
+                endpoint.field
+            )));
+        }
+    }
+
     Ok(())
 }
 
@@ -1099,8 +1297,12 @@ fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), Ont
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entities::{DerivedEntity, EdgeEntity};
-    use crate::etl::{EdgeMapping, EtlScope, Extract, NodeRef, NodeRefKind, Pipeline, Transform};
+    use crate::entities::{DerivedEntity, EdgeEntity, Field};
+    use crate::etl::{
+        ClickHouseExtractLookup, ClickHouseExtractLookupSource, EdgeMapping, EtlScope, Extract,
+        NodeRef, NodeRefKind, Pipeline, Transform,
+    };
+    use indexmap::IndexMap;
     use std::collections::BTreeMap;
 
     fn system_note(emits: &[&str]) -> DerivedEntity {
@@ -1116,6 +1318,7 @@ mod tests {
                     watermark: "w".to_string(),
                     deleted: "d".to_string(),
                     query: crate::etl::ExtractQuery::Generated { filter: None },
+                    lookups: vec![],
                 }),
                 transform: Transform::Rust("system_notes".to_string()),
             }],
@@ -1175,8 +1378,9 @@ mod tests {
         NodeRef {
             field: field.to_string(),
             kind: NodeRefKind::Literal(kind.to_string()),
-            enrich: vec![],
-            enrich_source: None,
+            property_inputs: IndexMap::new(),
+            enrich: false,
+            prefix: None,
         }
     }
 
@@ -1200,9 +1404,99 @@ mod tests {
                 watermark: "w".to_string(),
                 deleted: "d".to_string(),
                 query: crate::etl::ExtractQuery::Generated { filter: None },
+                lookups: vec![],
             }),
             transform: Transform::DataFusion { edges },
         }
+    }
+
+    fn add_extract_lookup(pipeline: &mut Pipeline, node_kind: &str) {
+        let Extract::ClickHouse(extract) = &mut pipeline.extract;
+        extract.lookups.push(ClickHouseExtractLookup {
+            node_kind: node_kind.to_string(),
+            batch_id_column: "author_id".to_string(),
+            output_fields: IndexMap::from([("state".to_string(), "user_state".to_string())]),
+            prefix: None,
+            resolved_source: None,
+        });
+    }
+
+    #[test]
+    fn enrichment_contract_rejects_duplicate_expanded_lookup_fields() {
+        let mut ontology = crate::Ontology::new()
+            .with_nodes(["Note", "User"])
+            .with_fields("User", [("state", crate::DataType::String)]);
+        ontology.nodes.get_mut("User").unwrap().enrichment_props = vec!["state".to_string()];
+
+        let mut pipeline = pipeline_with_edges("note_pipeline", vec![]);
+        let Extract::ClickHouse(extract) = &mut pipeline.extract;
+        for batch_id_column in ["author_id", "reviewer_id"] {
+            extract.lookups.push(ClickHouseExtractLookup {
+                node_kind: "User".to_string(),
+                batch_id_column: batch_id_column.to_string(),
+                output_fields: IndexMap::new(),
+                prefix: None,
+                resolved_source: None,
+            });
+        }
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline];
+
+        let error = expand_pipeline_enrichment_contracts(&mut ontology)
+            .expect_err("expanded lookup fields should be unique");
+        assert!(
+            error
+                .to_string()
+                .contains("output field 'user_state' is declared more than once"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn extract_and_transform_enrichment_contracts_expand_independently() {
+        let mut ontology = crate::Ontology::new()
+            .with_nodes(["Note", "User"])
+            .with_fields("User", [("state", crate::DataType::String)]);
+        ontology.nodes.get_mut("User").unwrap().enrichment_props = vec!["state".to_string()];
+
+        let mut extract_pipeline = pipeline_with_edges("extract_pipeline", vec![]);
+        let Extract::ClickHouse(extract) = &mut extract_pipeline.extract;
+        extract.lookups.push(ClickHouseExtractLookup {
+            node_kind: "User".to_string(),
+            batch_id_column: "author_id".to_string(),
+            output_fields: IndexMap::new(),
+            prefix: None,
+            resolved_source: None,
+        });
+
+        let mut enriched_source = literal_ref("author_id", "User");
+        enriched_source.enrich = true;
+        let transform_pipeline = pipeline_with_edges(
+            "transform_pipeline",
+            vec![edge_mapping(
+                "AUTHORED",
+                enriched_source,
+                literal_ref("id", "Note"),
+            )],
+        );
+        ontology.nodes.get_mut("Note").unwrap().pipelines =
+            vec![extract_pipeline, transform_pipeline];
+
+        expand_pipeline_enrichment_contracts(&mut ontology).expect("contracts should expand");
+
+        let extract_pipeline = &ontology.nodes["Note"].pipelines[0];
+        let Extract::ClickHouse(extract) = &extract_pipeline.extract;
+        assert_eq!(
+            extract.lookups[0].output_fields,
+            IndexMap::from([("state".to_string(), "user_state".to_string())])
+        );
+
+        let transform_pipeline = &ontology.nodes["Note"].pipelines[1];
+        assert_eq!(
+            transform_pipeline.transform.edges()[0]
+                .source
+                .property_inputs,
+            IndexMap::from([("state".to_string(), "user_state".to_string())])
+        );
     }
 
     fn node_with_edges(
@@ -1219,82 +1513,130 @@ mod tests {
         ontology
     }
 
-    fn enriched_ref(field: &str, kind: &str, columns: &[&str]) -> NodeRef {
-        NodeRef {
-            enrich: columns.iter().map(|c| c.to_string()).collect(),
-            ..literal_ref(field, kind)
-        }
-    }
-
     #[test]
-    fn enriched_literal_endpoint_resolves_to_node_extract_table() {
+    fn extract_lookup_resolves_to_node_extract_table() {
         let mut ontology = crate::Ontology::new().with_nodes(["Note", "User"]);
-        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
+        let mut note_pipeline = pipeline_with_edges(
             "note_pipeline",
             vec![edge_mapping(
                 "AUTHORED",
-                enriched_ref("author_id", "User", &["state"]),
+                literal_ref("author_id", "User"),
                 literal_ref("id", "Note"),
             )],
-        )];
+        );
+        add_extract_lookup(&mut note_pipeline, "User");
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![note_pipeline];
         let user = ontology.nodes.get_mut("User").unwrap();
         user.pipelines = vec![pipeline_with_edges("user_pipeline", vec![])];
         user.global = true;
 
-        resolve_enriched_endpoints(&mut ontology).unwrap();
+        resolve_extract_lookup_sources(&mut ontology).unwrap();
 
-        let mapping = &ontology.nodes["Note"].pipelines[0].transform.edges()[0];
+        let Extract::ClickHouse(extract) = &ontology.nodes["Note"].pipelines[0].extract;
         assert_eq!(
-            mapping.source.enrich_source,
-            Some(crate::etl::EnrichSource {
+            extract.lookups[0].resolved_source,
+            Some(ClickHouseExtractLookupSource {
                 table: "siphon_x".to_string(),
                 namespaced: false,
             })
         );
-        assert_eq!(mapping.target.enrich_source, None);
     }
 
     #[test]
-    fn enrich_on_derived_endpoint_stays_unresolved() {
+    fn extract_lookup_without_node_extract_table_is_rejected() {
+        let mut ontology = crate::Ontology::new().with_nodes(["Note", "User"]);
+        let mut note_pipeline = pipeline_with_edges(
+            "note_pipeline",
+            vec![edge_mapping(
+                "AUTHORED",
+                literal_ref("author_id", "User"),
+                literal_ref("id", "Note"),
+            )],
+        );
+        add_extract_lookup(&mut note_pipeline, "User");
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![note_pipeline];
+
+        let msg = resolve_extract_lookup_sources(&mut ontology)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("declares no extract table"), "got: {msg}");
+    }
+
+    #[test]
+    fn transform_property_input_requires_known_node_property() {
+        let mut source = literal_ref("author_id", "User");
+        source
+            .property_inputs
+            .insert("missing".to_string(), "user_missing".to_string());
+        let mut ontology = crate::Ontology::new().with_nodes(["Note", "User"]);
+        ontology.nodes.get_mut("User").unwrap().fields = vec![Field {
+            name: "state".to_string(),
+            ..Default::default()
+        }];
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
+            "note_pipeline",
+            vec![edge_mapping("AUTHORED", source, literal_ref("id", "Note"))],
+        )];
+
+        let message = validate_transform_property_inputs(&ontology)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("unknown property 'missing' on node 'User'"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn transform_property_input_requires_known_literal_node() {
         let mut ontology = crate::Ontology::new().with_nodes(["Note"]);
-        let derived = NodeRef {
+        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
+            "note_pipeline",
+            vec![edge_mapping(
+                "AUTHORED",
+                literal_ref("author_id", "MissingUser"),
+                literal_ref("id", "Note"),
+            )],
+        )];
+
+        let message = validate_transform_property_inputs(&ontology)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("references unknown node 'MissingUser'"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn derived_transform_endpoint_rejects_property_inputs() {
+        let derived_source = NodeRef {
+            field: "noteable_id".to_string(),
             kind: NodeRefKind::Derived {
                 column: "noteable_type".to_string(),
-                mapping: BTreeMap::new(),
+                mapping: BTreeMap::from([("Issue".to_string(), "Issue".to_string())]),
             },
-            ..enriched_ref("noteable_id", "", &["state"])
+            property_inputs: IndexMap::from([("state".to_string(), "noteable_state".to_string())]),
+            enrich: false,
+            prefix: None,
         };
+        let mut ontology = crate::Ontology::new().with_nodes(["Note"]);
         ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
             "note_pipeline",
             vec![edge_mapping(
                 "BELONGS_TO",
                 literal_ref("id", "Note"),
-                derived,
+                derived_source,
             )],
         )];
 
-        resolve_enriched_endpoints(&mut ontology).unwrap();
-
-        let mapping = &ontology.nodes["Note"].pipelines[0].transform.edges()[0];
-        assert_eq!(mapping.target.enrich_source, None);
-    }
-
-    #[test]
-    fn enriched_endpoint_without_extract_table_is_rejected() {
-        let mut ontology = crate::Ontology::new().with_nodes(["Note", "User"]);
-        ontology.nodes.get_mut("Note").unwrap().pipelines = vec![pipeline_with_edges(
-            "note_pipeline",
-            vec![edge_mapping(
-                "AUTHORED",
-                enriched_ref("author_id", "User", &["state"]),
-                literal_ref("id", "Note"),
-            )],
-        )];
-
-        let msg = resolve_enriched_endpoints(&mut ontology)
+        let message = validate_transform_property_inputs(&ontology)
             .unwrap_err()
             .to_string();
-        assert!(msg.contains("declares no extract table"), "got: {msg}");
+        assert!(
+            message.contains("derived transform endpoint 'noteable_id' cannot declare properties"),
+            "got: {message}"
+        );
     }
 
     #[test]
@@ -1347,6 +1689,9 @@ mod tests {
                 literal_ref("id", "Note"),
                 NodeRef {
                     field: "noteable_id".to_string(),
+                    property_inputs: IndexMap::new(),
+                    enrich: false,
+                    prefix: None,
                     kind: NodeRefKind::Derived {
                         column: "noteable_type".to_string(),
                         mapping: BTreeMap::from([
@@ -1354,8 +1699,6 @@ mod tests {
                             ("MergeRequest".to_string(), "MergeRequest".to_string()),
                         ]),
                     },
-                    enrich: vec![],
-                    enrich_source: None,
                 },
             )
         };

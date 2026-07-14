@@ -178,33 +178,33 @@ The indexer's `plan` module is the one entry point that turns that model into ru
 walks nodes, edge ETL configs, and derived entities, decomposes each pipeline once,
 and hands each stage exactly its inputs so data flows top-down:
 
-- `plan/extract/enrichment.rs` is the single `_eN` join convention:
-  `EnrichmentJoin::from_mapping` turns an edge's endpoint `enrich:` lists into one
-  `argMax`-deduplicated point-lookup CTE per enriched `Literal` endpoint (side table
-  keyed by its own `id`, matched against the endpoint field, path-scoped for
-  namespaced endpoints of a namespaced edge). `build.rs` calls it per edge plan and
-  passes the joins to the extract renderer.
+- `plan/extract/lookup.rs` is the single point-lookup join convention.
+  `PointLookupJoin::get_from_extract_declaration` turns `extract.lookups` entries into internal `_eN`
+  CTEs, each keyed by the source node's `id`, matched against the declared batch ID
+  column, and path-scoped when both the pipeline and source node are namespaced.
+  The final projection exposes only the stable output field aliases from the extract
+  declaration.
 - `plan/extract/` produces one `ExtractSpec` (validated `ExtractTemplate` +
-  effective watermark/deleted) from `&ontology::Extract` plus
-  transform-neutral inputs (typed source columns, `_batch` column lists, enrichment
-  joins) computed by `build.rs`. It imports **nothing** from the transform stage.
+  effective watermark/deleted) from `&ontology::Extract` plus transform-neutral
+  inputs such as typed source columns and `_batch` column lists. It imports
+  **nothing** from the transform stage.
   `build.rs` matches exhaustively on `ExtractQuery`: `Generated` dispatches to
-  `generated::build` with a `generated::Shape` (`Node`, `SingleTable`, or `Enriched`),
+  `generated::build` with a `generated::Shape` (`Node`, `SingleTable`, or `WithLookups`),
   `Sql` dispatches to `sql::build`; `extract/generated.rs` renders SQL,
   `extract/sql.rs` handles the authored escape hatch. The `RecordBatch` schema produced at
   runtime is the extract-transform contract; planning does not maintain a second schema model.
 - `plan/transform.rs` exposes an owned, narrow `TransformDeclaration` and builds the `TransformSpec`
   (node column projection + FK edge rows, a standalone edge row, or a named Rust transform).
-  Generated endpoint enrichment temporarily leaves `EnrichedFieldSource` metadata on the
-  `ExtractSpec` so edge tags can resolve positional `_eN_*` fields. Net dependency direction is
-  `build → {extract, transform}`; neither stage imports the other.
+  Edge endpoints map ontology properties to fields in the extracted `RecordBatch`; DataFusion uses
+  those bindings to build denormalized edge tags. Net dependency direction is
+  `build → {extract, transform}`; neither stage imports the other or exchanges planning metadata.
 
 `ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
 unvalidated template cannot reach the runtime. A build-time gate in `gkg-server`'s
 build script (`ontology::etl_sql::validate_authored_etl_sql`) enforces that every
 authored `.sql.j2` file projects `AS _version`/`AS _deleted` and uses
 `{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
-names; projection completeness (order_by and enrich columns) is exercised end-to-end
+names; projection completeness (order-by and lookup columns) is exercised end-to-end
 by the indexer's Docker integration scenarios.
 
 One shared `Pipeline` is built once in `register_handlers` and Arc-cloned to every
@@ -315,8 +315,8 @@ unaffected.
   `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from
   `gkg-server`'s build script)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
-  `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; enrichment
-  joins in `plan/extract/enrichment.rs`; extract stage in `plan/extract/` (`ExtractSpec`,
+  `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; point
+  lookups in `plan/extract/lookup.rs`; extract stage in `plan/extract/` (`ExtractSpec`,
   `ExtractTemplate`, `SourceColumn`); transform building in `plan/transform.rs`
 - Generic handler: `crates/indexer/src/modules/sdlc/handler/entity.rs`
 - Datalake query capability: `crates/indexer/src/modules/sdlc/datalake.rs` (`DatalakeQuery`)

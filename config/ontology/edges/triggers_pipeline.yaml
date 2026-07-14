@@ -14,18 +14,15 @@ pipelines:
   - name: TRIGGERS_PIPELINE_siphon_ci_sources_pipelines_Pipeline
     extract:
       type: clickhouse
-      tables: [siphon_ci_sources_pipelines, siphon_p_ci_builds, siphon_p_ci_pipelines]
+      tables: [siphon_ci_sources_pipelines]
       order_by: [traversal_path, id, partition_id]
       query: generated
+      lookups:
+        - { node: Job, id: source_job_id }
+        - { node: Pipeline, id: pipeline_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: source_job_id
-            kind: Job
-            enrich: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
-          to:
-            field: pipeline_id
-            kind: Pipeline
-            enrich: [status, source, tag, failure_reason, protected]
+        - from: { field: source_job_id, kind: Job, enrich: true }
+          to: { field: pipeline_id, kind: Pipeline, enrich: true }
           label: TRIGGERS_PIPELINE
