@@ -82,9 +82,9 @@ shorthand equality (`{"state": "opened"}`) or the operator form
 plus text-token operators (`token_match`, `all_tokens`, `any_tokens`) for
 text-indexed properties — see [`query_language.md`](references/query_language.md).
 
-`query_type` dictates the top-level shape: `neighbors` and single-node
-`traversal` use `node` (singular); multi-node `traversal`, `aggregation`, and
-`path_finding` use `nodes` (array) plus `relationships`.
+All queries declare node selectors in the `nodes` array — a 1-element array
+for `neighbors` and single-node `traversal`; multi-node `traversal`,
+`aggregation`, and `path_finding` add `relationships`.
 
 - For multi-hop **traversal** edges, set `relationships[].max_hops` (and
   optionally `min_hops`). Default 1, max 3.

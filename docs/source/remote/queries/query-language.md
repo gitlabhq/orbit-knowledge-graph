@@ -61,7 +61,7 @@ the envelope.
 
 ## Query shape
 
-Every query has a `query_type` and either `node` or `nodes`.
+Every query has a `query_type` and a `nodes` array of node selectors.
 
 ```json orbit-query
 {
@@ -75,9 +75,6 @@ Every query has a `query_type` and either `node` or `nodes`.
   "limit": 1
 }
 ```
-
-Use `node` for one node selector. Use `nodes` for an array of selectors. You
-cannot use both in the same query.
 
 ## Query types
 
@@ -96,8 +93,7 @@ query type.
 | Field | Type | Description |
 |-------|------|-------------|
 | `query_type` | `string` | One of `traversal`, `aggregation`, `path_finding`, or `neighbors`. |
-| `node` | `object` | One node selector. Required for single-node `traversal` and `neighbors`. |
-| `nodes` | `array` | Multiple node selectors. Required for multi-node `traversal`, `aggregation`, and `path_finding`. Maximum 5. |
+| `nodes` | `array` | Node selectors. Always required; single-node queries (`neighbors`, search-shape `traversal`) use a 1-element array. Maximum 5. |
 | `relationships` | `array` | Relationship selectors for traversal or aggregation. Maximum 5. |
 | `aggregations` | `array` | Aggregation definitions. Required for `aggregation`. Maximum 10. |
 | `group_by` | `array` | Group keys for aggregation rows. Maximum 4. |
@@ -563,7 +559,7 @@ span of 500 or less. If either endpoint uses filters or `id_range`, provide
 
 ## Neighbors
 
-Neighbor queries use one `node` selector and a `neighbors` object. The center
+Neighbor queries use a 1-element `nodes` array and a `neighbors` object. The center
 node must be bounded by `node_ids`, filters, or a narrow `id_range`.
 
 ```json orbit-query

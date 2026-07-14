@@ -49,8 +49,7 @@ The JSON query schema supports four query types through a single unified structu
 | Field | Type | Description |
 |-------|------|-------------|
 | `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `neighbors` |
-| `nodes` | `array` | Node selectors to match (required for multi-node traversal, aggregation, path_finding) |
-| `node` | `object` | Single node selector (required for `neighbors`, allowed for single-entity `traversal`) |
+| `nodes` | `array` | Node selectors to match. Always required; single-node queries use a 1-element array |
 
 ### Optional Fields
 
@@ -69,7 +68,7 @@ The JSON query schema supports four query types through a single unified structu
 
 ## Node Selectors
 
-Each node selector specifies which graph nodes to match. For `neighbors` queries and single-entity `traversal` lookups, use the `node` field (singular). For multi-node `traversal`, `aggregation`, and `path_finding` queries, use the `nodes` array. You cannot specify both.
+Each node selector specifies which graph nodes to match. All query types declare selectors in the `nodes` array; `neighbors` queries and single-entity `traversal` lookups use a 1-element array.
 
 ```json
 {
@@ -271,7 +270,7 @@ Find paths between nodes using recursive CTEs.
 
 ### Single-entity Traversal (lookup)
 
-Match a single entity type with optional filters — a `traversal` query with one node and no relationships. Use the `node` field (singular) instead of `nodes`.
+Match a single entity type with optional filters — a `traversal` query with one node and no relationships.
 
 ```json orbit-query
 {
@@ -290,7 +289,7 @@ Match a single entity type with optional filters — a `traversal` query with on
 
 ### Neighbors Queries
 
-Find all nodes connected to a given node. Neighbors queries use the `node` field (singular) and require a `neighbors` configuration.
+Find all nodes connected to a given node. Neighbors queries take exactly one node selector and require a `neighbors` configuration.
 
 ```json orbit-query
 {
