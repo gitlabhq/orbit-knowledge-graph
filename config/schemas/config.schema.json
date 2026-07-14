@@ -1688,7 +1688,7 @@
       "additionalProperties": false
     },
     "SubscriptionConfig": {
-      "description": "Sparse per-subscription policy override (retry, concurrency, DLQ).\n\nThe correct default policy for each topic is declared in Rust by the indexer\nmodule that owns the topic (see `crates/indexer/src/modules/*`). A\n`engine.topics.<name>` entry in YAML is a *field-wise override* layered on top\nof that declared default via [`SubscriptionConfig::overlaid_with`]: only the\nfields the entry sets change; every unset field keeps the module default. Each\nfield is therefore `Option`, so \"unset\" is distinguishable from an explicit\nvalue (notably `dead_letter_on_exhaustion: false`).",
+      "description": "Sparse per-subscription policy override (retry, concurrency, DLQ).\n\nThe correct default policy for each topic is declared in Rust by the indexer\nmodule that owns the topic (see `crates/indexer/src/modules/*`). A\n`engine.topics.<name>` entry in YAML is a *field-wise override* layered on top\nof that declared default via [`SubscriptionConfig::with_optional_override`]: only the\nfields the entry sets change; every unset field keeps the module default. Each\nfield is therefore `Option`, so \"unset\" is distinguishable from an explicit\nvalue (notably `dead_letter_on_exhaustion: false`).",
       "type": "object",
       "properties": {
         "concurrency_group": {
