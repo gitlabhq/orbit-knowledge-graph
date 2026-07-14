@@ -87,7 +87,7 @@ Control tables like `gkg_schema_version` are never prefixed, cloned, or dropped.
 
 ### Promotion gates on the plan
 
-`MigrationCompletionChecker` (`crates/indexer/src/migration_completion.rs`)
+`MigrationCompletionChecker` (`crates/indexer/src/orchestrator/scheduled/migration_completion.rs`)
 promotes the `migrating` version only when every currently enabled namespace has a
 completed checkpoint for every required namespaced pipeline, plus every required
 global pipeline. "Required" is exactly the plan the scope produced, so a selective
@@ -159,7 +159,7 @@ What gets harder:
   `crates/indexer/src/schema/invalidation.rs`
 - Orchestration, seeding, rollback:
   `crates/indexer/src/schema/migration.rs`, `version.rs`
-- Promotion gate: `crates/indexer/src/migration_completion.rs`
+- Promotion gate: `crates/indexer/src/orchestrator/scheduled/migration_completion.rs`
 - Related: [ADR 014](014_entity_level_indexing.md),
   [ADR 015](015_pluggable_entity_pipelines.md)
 - Blue-green deployment epic: [Non-blocking migrations and blue/green deployment](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/7)
