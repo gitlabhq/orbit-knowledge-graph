@@ -4,6 +4,7 @@ use std::time::Duration;
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
 
+use crate::arrow_compat;
 use crate::converter::LocalGraphData;
 use crate::error::{DuckDbError, Result};
 
@@ -100,15 +101,16 @@ impl DuckDbClient {
             return Ok(());
         }
         let mut appender = self.conn.appender(table)?;
-        appender.append_record_batch(batch)?;
+        appender.append_record_batch(arrow_compat::to_duck(&batch)?)?;
         appender.flush()?;
         Ok(())
     }
 
     pub fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>> {
         let mut stmt = self.conn.prepare(sql)?;
-        let batches = stmt.query_arrow([])?.collect();
-        Ok(batches)
+        stmt.query_arrow([])?
+            .map(|b| arrow_compat::from_duck(&b))
+            .collect()
     }
 
     pub fn query_arrow_params(
@@ -117,10 +119,9 @@ impl DuckDbClient {
         params: &[Box<dyn duckdb::ToSql>],
     ) -> Result<Vec<RecordBatch>> {
         let mut stmt = self.conn.prepare(sql)?;
-        let batches = stmt
-            .query_arrow(duckdb::params_from_iter(params.iter()))?
-            .collect();
-        Ok(batches)
+        stmt.query_arrow(duckdb::params_from_iter(params.iter()))?
+            .map(|b| arrow_compat::from_duck(&b))
+            .collect()
     }
 
     /// In local mode each DB file is one project, so a full truncate is the
@@ -181,7 +182,7 @@ impl DuckDbClient {
             return Ok(());
         }
         let mut appender = self.conn.appender(table)?;
-        appender.append_record_batch(batch.clone())?;
+        appender.append_record_batch(arrow_compat::to_duck(batch)?)?;
         appender.flush()?;
         Ok(())
     }

@@ -369,11 +369,16 @@ fn lower_edge_select(
     for d in denormalized {
         let tag_expr = match &d.enum_mapping {
             Some(mapping) => {
+                // Compare as strings: enum-mapped properties are int-coded in
+                // some source tables but plain strings in others (e.g.
+                // ci_builds.status is 'success'), and DataFusion casts the
+                // column to the literal's int type strictly, which fails at
+                // runtime on non-numeric values.
                 let cases: Vec<String> = mapping
                     .iter()
                     .map(|(key, value)| {
                         format!(
-                            "WHEN {} = {} THEN '{}'",
+                            "WHEN CAST({} AS VARCHAR) = '{}' THEN '{}'",
                             d.source_column,
                             key,
                             value.replace('\'', "\\'")

@@ -10,4 +10,6 @@ pub enum DuckDbError {
     Arrow(#[from] arrow::error::ArrowError),
     #[error("schema error: {0}")]
     Schema(String),
+    #[error("arrow version conversion error: {0}")]
+    Conversion(String),
 }

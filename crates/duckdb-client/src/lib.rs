@@ -1,3 +1,4 @@
+mod arrow_compat;
 mod client;
 mod converter;
 mod error;

@@ -12,6 +12,7 @@ bundled = ["duckdb/bundled"]
 [dependencies]
 duckdb = { workspace = true }
 arrow = { workspace = true }
+arrow_58 = { workspace = true }
 code-graph = { path = "../code-graph" }
 gkg-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
