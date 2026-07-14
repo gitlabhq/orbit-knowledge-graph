@@ -1,0 +1,40 @@
+source_language: en-us
+target_languages: [fr-fr, ja-jp, ko-kr]
+argo_request_key: GITTECH
+translation_mr_labels: [gitlab-translation-service]
+translation_mr_branch_name: docs-i18n/
+pipelines:
+  request_template_key: GITTECHC
+components:
+  - name: Technical Documentation
+    create_request: false
+    paths:
+      - source: 'docs/**/*.md'
+        target: 'docs-locale/{{language}}/'
+    ignored_paths:
+      - 'docs/.*/**'
+      - 'docs/source/schema.md'
+      - 'docs/source/queries/query_language.md'
+      - 'docs/source/queries/mcp_tools.md'
+      - 'docs/source/queries/_index.md'
+      - 'docs/source/configure.md'
+      - 'docs/source/orbit_troubleshooting.md'
+
+  # Redirects list generated 2026-07-13
+  # This list contains all Redirects files. It is auto generated through the monthly maintenance tasks.
+  # See https://gitlab.com/gitlab-com/localization/docs-site-localization/-/blob/main/.gitlab/issue_templates/monthly-docs-tasks-eng.md
+  - name: Redirects
+    create_request: false
+    paths:
+      - source: 'docs/source/schema.md'
+        target: 'docs/source/schema.md'
+      - source: 'docs/source/queries/query_language.md'
+        target: 'docs/source/queries/query_language.md'
+      - source: 'docs/source/queries/mcp_tools.md'
+        target: 'docs/source/queries/mcp_tools.md'
+      - source: 'docs/source/queries/_index.md'
+        target: 'docs/source/queries/_index.md'
+      - source: 'docs/source/configure.md'
+        target: 'docs/source/configure.md'
+      - source: 'docs/source/orbit_troubleshooting.md'
+        target: 'docs/source/orbit_troubleshooting.md'
