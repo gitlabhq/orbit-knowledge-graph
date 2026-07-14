@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use the Orbit query language to search and traverse the knowledge graph.
-title: Orbit query language
+description: Use the GitLab Orbit query language to search and traverse the knowledge graph.
+title: GitLab Orbit query language
 ---
 
 {{< details >}}
@@ -26,7 +26,7 @@ title: Orbit query language
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Use the Orbit query language when you need GitLab data as a graph instead of a
+Use the GitLab Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.
 

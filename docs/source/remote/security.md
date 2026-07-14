@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: How Orbit Remote secures your data, including the roles required to query, the authorization model, and programmatic access.
-title: Orbit Remote security
+title: GitLab Orbit Remote security
 ---
 
 {{< details >}}
@@ -26,14 +26,14 @@ title: Orbit Remote security
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Responses from queries made to Orbit include only the information that is available to
+Responses from queries made to GitLab Orbit include only the information that is available to
 your role. If you or an agent try to access a part of GitLab that requires a higher user
 role, related information will not be displayed in the graph.
 
-Access in Orbit is hierarchical. A role assigned at the top-level group applies to every
-subgroup and project beneath it. Turning on Orbit does not change existing access.
+Access in GitLab Orbit is hierarchical. A role assigned at the top-level group applies to every
+subgroup and project beneath it. Turning on GitLab Orbit does not change existing access.
 
-## Roles required to query Orbit
+## Roles required to query GitLab Orbit
 
 To query a group, you must have the Reporter role or higher for that group.
 
@@ -57,7 +57,7 @@ are dropped from results, including from aggregate counts.
 
 ## Security architecture
 
-Orbit never invents permissions. GitLab is the single source of truth for who can see what,
+GitLab Orbit never invents permissions. GitLab is the single source of truth for who can see what,
 and every query is authorized through GitLab.
 
 Access is enforced in the following layers:
@@ -71,7 +71,7 @@ Access is enforced in the following layers:
 
 Group [IP address restrictions](https://docs.gitlab.com/user/group/access_and_permissions/#restrict-group-access-by-ip-address) apply to query results: a request from an IP outside a group's allowed ranges returns no results from that group.
 
-Orbit is read-only. It reads changes from GitLab and never writes back, runs in a separate
+GitLab Orbit is read-only. It reads changes from GitLab and never writes back, runs in a separate
 environment, and stores no permission data of its own.
 
 ## Programmatic access

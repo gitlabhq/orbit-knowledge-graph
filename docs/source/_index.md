@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Query your GitLab instance as a knowledge graph. Find blast radius, trace dependencies, and answer SDLC questions that GitLab alone cannot.
-title: Orbit
+title: GitLab Orbit
 ---
 
 {{< details >}}
@@ -26,8 +26,8 @@ title: Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable knowledge graph.
-Enable it on a group and Orbit maps everything: projects, users, merge requests, pipelines,
+GitLab Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable knowledge graph.
+Enable it on a group and GitLab Orbit maps everything: projects, users, merge requests, pipelines,
 work items, security findings, and the source code itself, then builds a property graph of how they
 relate to each other.
 
@@ -76,7 +76,7 @@ Orbit Remote runs as a separate service and shares minimal load with your GitLab
 
 ## Orbit Local
 
-Orbit Local runs entirely on your machine. The Orbit CLI (`orbit`) parses a local repository,
+Orbit Local runs entirely on your machine. The GitLab Orbit CLI (`orbit`) parses a local repository,
 extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
 No GitLab instance or network connection required.
 
@@ -95,9 +95,9 @@ Orbit Remote.
 
 [Get started with Orbit Local](local/getting-started.md)
 
-## What Orbit indexes
+## What GitLab Orbit indexes
 
-Orbit indexes two categories of data:
+GitLab Orbit indexes two categories of data:
 
 - SDLC objects from your GitLab instance: groups, projects, users, merge requests, pipelines, jobs,
   work items, milestones, labels, and security findings.
@@ -105,7 +105,7 @@ Orbit indexes two categories of data:
 - Source code from your repositories: files, directories, function and class definitions, and
   cross-file import references. Code is indexed from the default branch only.
 
-Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, and PHP.
+GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, and PHP.
 
 [Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
 
@@ -113,4 +113,4 @@ Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, 
 
 - [Enable Orbit Remote and run your first query](remote/getting-started.md)
 - [Build a local code graph with Orbit Local](local/getting-started.md)
-- [Set up AI coding agents with the Orbit skill](ai_coding_agents.md)
+- [Set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md)

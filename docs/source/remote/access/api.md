@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the Orbit knowledge graph directly using the REST API. Reference for all four endpoints with authentication requirements and example requests.
+description: Query the GitLab Orbit knowledge graph directly using the REST API. Reference for all four endpoints with authentication requirements and example requests.
 title: REST API
 ---
 
@@ -26,7 +26,7 @@ title: REST API
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-The Orbit REST API lets you query the knowledge graph directly from scripts,
+The GitLab Orbit REST API lets you query the knowledge graph directly from scripts,
 CI pipelines, or custom tooling.
 
 ## Authentication
@@ -174,7 +174,7 @@ Use this to discover available entity types and properties before writing querie
 
 ## Status endpoint
 
-Returns the indexing status for groups where Orbit is enabled.
+Returns the indexing status for groups where GitLab Orbit is enabled.
 
 ```shell
 curl --header "Authorization: Bearer <your_token>" \

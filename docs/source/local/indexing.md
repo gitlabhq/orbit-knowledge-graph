@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: What Orbit Local indexes on your machine, which languages are supported, and the boundaries of the local code graph.
-title: What Orbit Local indexes
+title: What GitLab Orbit Local indexes
 ---
 
 {{< details >}}
@@ -25,7 +25,7 @@ title: What Orbit Local indexes
 > Orbit Local is experimental. Capabilities and command shape may
 > change before GA.
 
-Orbit Local builds a code-only graph from a local repository. It does not
+GitLab Orbit Local builds a code-only graph from a local repository. It does not
 connect to GitLab and does not index SDLC data.
 
 ## Scope
@@ -51,7 +51,7 @@ default branch - whatever you have checked out is what gets indexed.
 
 ### Supported languages
 
-Orbit Local supports the same 13 languages as Orbit Remote. All resolve
+GitLab Orbit Local supports the same 13 languages as Orbit Remote. All resolve
 cross-file references except Bash/Shell (definitions only).
 
 | Language | Definitions | Cross-file references |
@@ -74,7 +74,7 @@ Languages not currently indexed: Swift, COBOL, Terraform, YAML.
 
 ## What is not indexed
 
-Orbit Local has no GitLab connection, so none of the following are available:
+GitLab Orbit Local has no GitLab connection, so none of the following are available:
 
 - Groups, projects, or users
 - Merge requests, comments, or reviewers
@@ -84,7 +84,7 @@ Orbit Local has no GitLab connection, so none of the following are available:
 
 For SDLC-aware queries, use [Orbit Remote](../remote/indexing.md).
 
-Also not indexed by Orbit Local:
+Also not indexed by GitLab Orbit Local:
 
 - Binary files
 - Files matched by `.gitignore`
@@ -92,7 +92,7 @@ Also not indexed by Orbit Local:
 
 ## Authorization
 
-Orbit Local has no authorization layer. All data in the graph is accessible
+GitLab Orbit Local has no authorization layer. All data in the graph is accessible
 to whoever runs the CLI. The graph file at `~/.orbit/graph.duckdb` is
 protected by your operating system's file permissions.
 

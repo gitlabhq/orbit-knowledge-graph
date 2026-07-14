@@ -25,7 +25,7 @@ title: Schema reference
 > Orbit Local is experimental. Capabilities and command shape may
 > change before GA.
 
-Orbit Local indexes 4 node types - all in the source code domain. There is no
+GitLab Orbit Local indexes 4 node types - all in the source code domain. There is no
 SDLC layer, because Orbit Local does not connect to GitLab.
 
 To inspect the live DuckDB schema at any time:
@@ -54,7 +54,7 @@ Edges in the local graph connect:
 
 ## Differences from Orbit Remote
 
-[Orbit Remote](../remote/schema.md) indexes 28 node types across 6 domains. Orbit Local
+[Orbit Remote](../remote/schema.md) indexes 28 node types across 6 domains. GitLab Orbit Local
 covers only the source code domain. Anything that requires GitLab data -
 merge requests, pipelines, users, vulnerabilities, work items - is unavailable.
 
@@ -65,6 +65,6 @@ function in two indexed repositories will have different IDs.
 - `content` fields on `Definition` and `File` nodes contain the full source
 text. These are populated so agent tools can hydrate code without separate
 file reads.
-- There is no authorization layer. Orbit Local does not enforce per-user access
+- There is no authorization layer. GitLab Orbit Local does not enforce per-user access
 control. The graph file at `~/.orbit/graph.duckdb` is protected only by file
 system permissions.
