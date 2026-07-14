@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup.
-title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
+title: Use Orbit Local with the GitLab CLI (`glab`)
 ---
 
 {{< details >}}
@@ -83,7 +83,7 @@ glab orbit setup
 The skill drives the `orbit` binary directly. To connect an MCP client to the
 local graph instead, see [Connect via MCP](mcp.md).
 
-You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
+You can also [install the Orbit skill manually](../../ai_coding_agents.md)
 with `glab skills install --global orbit`.
 
 ## Index a repository

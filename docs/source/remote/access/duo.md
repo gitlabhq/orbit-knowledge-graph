@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use GitLab Orbit through GitLab Duo Agent Platform. Agents call GitLab Orbit's graph tools to ground their answers in your live GitLab data, across the GitLab Duo Agent, the Planner Agent, the Security Analyst Agent, the Data Analyst Agent, the CI Expert Agent, and the Developer Flow.
-title: Use GitLab Orbit with GitLab Duo Agent Platform
+description: Use Orbit through GitLab Duo Agent Platform. Agents call Orbit's graph tools to ground their answers in your live GitLab data, across the GitLab Duo Agent, the Planner Agent, the Security Analyst Agent, the Data Analyst Agent, the CI Expert Agent, and the Developer Flow.
+title: Use Orbit with GitLab Duo Agent Platform
 ---
 
 {{< details >}}
@@ -26,32 +26,32 @@ title: Use GitLab Orbit with GitLab Duo Agent Platform
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit is integrated into GitLab Duo Agent Platform. Agents call GitLab Orbit's graph tools (`get_graph_schema`, `query_graph`) automatically when a question is best answered by traversing your SDLC graph - cross-project dependencies, blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When GitLab Orbit doesn't have the answer, the agent falls back to its existing tools.
+Orbit is integrated into GitLab Duo Agent Platform. Agents call Orbit's graph tools (`get_graph_schema`, `query_graph`) automatically when a question is best answered by traversing your SDLC graph - cross-project dependencies, blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When Orbit doesn't have the answer, the agent falls back to its existing tools.
 
 ## Prerequisites
 
-- GitLab Orbit is [enabled on your group](../getting-started.md).
+- Orbit is [enabled on your group](../getting-started.md).
 - You have access to [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/).
 
-## Where GitLab Orbit is available
+## Where Orbit is available
 
-GitLab Orbit is wired into the following GitLab Duo Agent Platform agents and flows:
+Orbit is wired into the following GitLab Duo Agent Platform agents and flows:
 
 | Agent or flow | When to use it |
 |---|---|
-| GitLab Duo Agent | General development assistant. Get help with code, planning, security, and project management. Calls GitLab Orbit when answers benefit from graph context. |
+| GitLab Duo Agent | General development assistant. Get help with code, planning, security, and project management. Calls Orbit when answers benefit from graph context. |
 | Planner Agent | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
 | Security Analyst Agent | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
 | Data Analyst Agent | SDLC analytics powered by GLQL. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
 | CI Expert Agent | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
-| Developer Flow | Turn a work item into a draft MR in the UI. GitLab Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
+| Developer Flow | Turn a work item into a draft MR in the UI. Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
 
-When an agent uses GitLab Orbit to answer a question, the answer is grounded in your
+When an agent uses Orbit to answer a question, the answer is grounded in your
 live graph rather than the agent's general knowledge.
 
 ## Billing
 
-Queries that GitLab Duo Agent Platform makes against GitLab Orbit on your behalf are
+Queries that GitLab Duo Agent Platform makes against Orbit on your behalf are
 zero-rated. They do not consume GitLab Credits.
 
 ## Example prompts
@@ -90,7 +90,7 @@ Planning and work items:
 
 ## Limitations
 
-- GitLab Orbit only answers about groups where it is enabled and that you have access to.
+- Orbit only answers about groups where it is enabled and that you have access to.
 - Complex multi-step questions may need a follow-up to narrow scope.
 - Code content (file text, function bodies) is available but may not be returned
   by default for large results. Ask explicitly: "Show me the source of this function."

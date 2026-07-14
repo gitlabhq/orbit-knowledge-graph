@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query GitLab Orbit from the command line with glab orbit remote, available in glab 1.94 or later. The glab orbit setup helper is planned for a future glab release.
-title: Use GitLab Orbit with the GitLab CLI (`glab`)
+description: Query Orbit from the command line with glab orbit remote, available in glab 1.94 or later. The glab orbit setup helper is planned for a future glab release.
+title: Use Orbit with the GitLab CLI (`glab`)
 ---
 
 {{< details >}}
@@ -31,7 +31,7 @@ title: Use GitLab Orbit with the GitLab CLI (`glab`)
 > [!disclaimer]
 
 The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to set up and
-query GitLab Orbit from the command line.
+query Orbit from the command line.
 
 Two top-level commands:
 
@@ -43,24 +43,24 @@ Two top-level commands:
 
 ## Prerequisites
 
-- GitLab Orbit is [enabled on your group](../getting-started.md).
+- Orbit is [enabled on your group](../getting-started.md).
 - `glab` is installed and authenticated:
 
   ```shell
   glab auth login
   ```
 
-- Your user has access to at least one top-level group with GitLab Orbit enabled.
+- Your user has access to at least one top-level group with Orbit enabled.
 
 ## Set up your AI agent
 
 `glab orbit setup` is planned for a future `glab` release. When it ships, one
-command will install the GitLab Orbit skill and write the MCP config for your AI
+command will install the Orbit skill and write the MCP config for your AI
 agent (Claude Code, OpenCode, Cursor, Codex, Gemini CLI).
 
 Until it ships, [configure your MCP client manually](mcp.md#connect-your-mcp-client).
 
-## Query GitLab Orbit from the command line
+## Query Orbit from the command line
 
 Use `glab orbit remote` (or the `r` alias) to call the Orbit Remote API directly.
 Useful for scripting, debugging, and exploring the schema before writing queries.

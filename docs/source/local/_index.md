@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Orbit Local - build and query a code graph on your own machine, no GitLab instance required.
-title: GitLab Orbit Local
+title: Orbit Local
 ---
 
 {{< details >}}

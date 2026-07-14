@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: How Orbit Remote secures your data, including the roles required to query, the authorization model, data handling and AI, and programmatic access.
-title: GitLab Orbit Remote security
+title: Orbit Remote security
 ---
 
 {{< details >}}
@@ -26,14 +26,14 @@ title: GitLab Orbit Remote security
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Responses from queries made to GitLab Orbit include only the information that is available to
+Responses from queries made to Orbit include only the information that is available to
 your role. If you or an agent try to access a part of GitLab that requires a higher user
 role, related information will not be displayed in the graph.
 
-Access in GitLab Orbit is hierarchical. A role assigned at the top-level group applies to every
-subgroup and project beneath it. Turning on GitLab Orbit does not change existing access.
+Access in Orbit is hierarchical. A role assigned at the top-level group applies to every
+subgroup and project beneath it. Turning on Orbit does not change existing access.
 
-## Roles required to query GitLab Orbit
+## Roles required to query Orbit
 
 To query a group, you must have the Reporter role or higher for that group.
 
@@ -57,7 +57,7 @@ are dropped from results, including from aggregate counts.
 
 ## Security architecture
 
-GitLab Orbit never invents permissions. GitLab is the single source of truth for who can see what,
+Orbit never invents permissions. GitLab is the single source of truth for who can see what,
 and every query is authorized through GitLab.
 
 Access is enforced in the following layers:
@@ -69,24 +69,24 @@ Access is enforced in the following layers:
   each item and removes anything you cannot access. This catches confidential items and
   runtime controls such as SAML group links and IP restrictions.
 
-GitLab Orbit is read-only. It reads changes from GitLab and never writes back, runs in a separate
+Orbit is read-only. It reads changes from GitLab and never writes back, runs in a separate
 environment, and stores no permission data of its own.
 
 ## Data handling and AI
 
-GitLab Orbit does not use LLMs to generate or infer data.
-GitLab Orbit is a deterministic data API: queries compile to ClickHouse SQL and return only data
+Orbit does not use LLMs to generate or infer data.
+Orbit is a deterministic data API: queries compile to ClickHouse SQL and return only data
 GitLab has indexed from your instance.
 
-GitLab does not train generative AI models on your GitLab Orbit data, including the indexed graph,
+GitLab does not train generative AI models on your Orbit data, including the indexed graph,
 source code, SDLC objects, or query inputs and outputs.
 GitLab's AI vendors are contractually barred from training on customer inputs or outputs.
 
 ### Data residency
 
-GitLab Orbit graph data is stored in ClickHouse on GitLab-managed infrastructure in `us-east1`
+Orbit graph data is stored in ClickHouse on GitLab-managed infrastructure in `us-east1`
 (South Carolina, United States).
-GitLab Orbit follows the same data compliance requirements as other GitLab SaaS features that use
+Orbit follows the same data compliance requirements as other GitLab SaaS features that use
 ClickHouse, such as Advanced Search and CI/CD analytics.
 
 ## Programmatic access

@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: A library of ready-to-use prompts that turn your AI agent into an expert on your codebase, pipelines, dependencies, and security using GitLab Orbit.
+description: A library of ready-to-use prompts that turn your AI agent into an expert on your codebase, pipelines, dependencies, and security using Orbit.
 title: Cookbook
 ---
 
@@ -26,17 +26,17 @@ title: Cookbook
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit answers questions about your entire software development lifecycle: code,
+Orbit answers questions about your entire software development lifecycle: code,
 merge requests, pipelines, dependencies, and security. You do not write graph
 queries by hand. You ask an AI agent a question in plain language, and the agent
-uses GitLab Orbit to traverse the graph and answer.
+uses Orbit to traverse the graph and answer.
 
 This page is a library of prompts that work. Each one turns your agent into an
 expert on your own projects.
 
 ## How to use this page
 
-1. Connect an agent to GitLab Orbit. GitLab Duo Agent Platform has GitLab Orbit built in.
+1. Connect an agent to Orbit. GitLab Duo Agent Platform has Orbit built in.
    External agents such as Claude Code or Codex connect through
    [MCP or the `glab` CLI](access/mcp.md).
 1. Pick the outcome you want and copy its prompt.
@@ -45,7 +45,7 @@ expert on your own projects.
 1. Paste the prompt into your agent and let it work. Ask follow-up questions in
    the same conversation to go deeper.
 
-Every prompt also has a **See the GitLab Orbit queries behind this** section. You never
+Every prompt also has a **See the Orbit queries behind this** section. You never
 need to open it, but it shows the exact graph queries the agent runs if you want
 to audit them or call the [REST API](access/api.md) directly.
 
@@ -59,7 +59,7 @@ last step is the cost-attribution chain: it turns "CI is expensive" into "these
 files keep breaking these jobs."
 
 ```plaintext
-Using GitLab Orbit, help me understand what is driving our CI compute cost.
+Using Orbit, help me understand what is driving our CI compute cost.
 
 1. Find the job and pipeline failures across my organization over the last
    60 days, covering at least 20 projects. Rank the job names by how often
@@ -84,7 +84,7 @@ Adapt it: change the time window, scope it to one group or project, or ask the
 agent to estimate the compute saved if you fixed the top three.
 
 <details>
-<summary>See the GitLab Orbit queries behind this</summary>
+<summary>See the Orbit queries behind this</summary>
 
 The agent runs these in sequence. Replace the example timestamp with a date at
 the start of your window, and replace the merge request ID and file path with
@@ -221,7 +221,7 @@ helpers, might not be indexed.
 Drop into an unfamiliar project and get oriented in minutes instead of days.
 
 ```plaintext
-I'm new to the <my-org/my-project> project. Using GitLab Orbit, give me a tour:
+I'm new to the <my-org/my-project> project. Using Orbit, give me a tour:
 - The most active contributors over the last few months.
 - The core classes, modules, and how they relate.
 - The main entry points and the files I should read first.
@@ -231,7 +231,7 @@ to read first to understand it.
 ```
 
 <details>
-<summary>See the GitLab Orbit queries behind this</summary>
+<summary>See the Orbit queries behind this</summary>
 
 Find the most active contributors to a project:
 
@@ -271,7 +271,7 @@ Find the most active contributors to a project:
 Answer "what breaks if I change this?" before you change it.
 
 ```plaintext
-Using GitLab Orbit, map the blast radius of <shared-auth-lib>.
+Using Orbit, map the blast radius of <shared-auth-lib>.
 - Which projects and files import it?
 - Which code definitions depend on it?
 - What would break if I changed its public interface?
@@ -281,7 +281,7 @@ riskiest change I could make.
 ```
 
 <details>
-<summary>See the GitLab Orbit queries behind this</summary>
+<summary>See the Orbit queries behind this</summary>
 
 Find all files that import a specific module. Replace `payments-service` with
 the module or library you want to trace:
@@ -358,7 +358,7 @@ Rank the definitions that the most code imports:
 Find your worst CI/CD offenders and the reasons they fail.
 
 ```plaintext
-Using GitLab Orbit, show me where our CI/CD is unhealthy over the last 30 days:
+Using Orbit, show me where our CI/CD is unhealthy over the last 30 days:
 - The projects with the most failed pipelines.
 - The jobs that fail most often.
 - The most common failure reasons.
@@ -367,7 +367,7 @@ Group the results so I can see which failures are worth fixing first.
 ```
 
 <details>
-<summary>See the GitLab Orbit queries behind this</summary>
+<summary>See the Orbit queries behind this</summary>
 
 Find projects with the most failed pipelines:
 
@@ -412,7 +412,7 @@ Find failed jobs and their failure reasons:
 See where your risk is and how it got there.
 
 ```plaintext
-Using GitLab Orbit, find the critical and high severity vulnerabilities across
+Using Orbit, find the critical and high severity vulnerabilities across
 <my-org> that are still detected:
 - Which projects are affected?
 - How did each one get there? Trace it back to the scan and, where possible,
@@ -422,7 +422,7 @@ Prioritize by severity and give me a short remediation shortlist.
 ```
 
 <details>
-<summary>See the GitLab Orbit queries behind this</summary>
+<summary>See the Orbit queries behind this</summary>
 
 Find all critical and high vulnerabilities:
 
@@ -504,7 +504,7 @@ Count vulnerabilities by severity:
 Pull real code into the conversation without leaving your agent.
 
 ```plaintext
-Using GitLab Orbit, show me the source of <app/models/project.rb> and the definition
+Using Orbit, show me the source of <app/models/project.rb> and the definition
 of <MyModule::my_function>, so I can review them here.
 ```
 
@@ -512,7 +512,7 @@ Virtual columns (`content` on `File` and `Definition`) trigger a Gitaly fetch
 after the graph query, so these responses are slower than other queries.
 
 <details>
-<summary>See the GitLab Orbit queries behind this</summary>
+<summary>See the Orbit queries behind this</summary>
 
 Fetch the source text of a file. Use `limit: 1` to avoid large responses:
 

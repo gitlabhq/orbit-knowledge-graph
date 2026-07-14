@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Enable Orbit Remote on GitLab.com and run your first query.
-title: Get started with GitLab Orbit Remote
+title: Get started with Orbit Remote
 ---
 
 {{< details >}}
@@ -28,20 +28,20 @@ title: Get started with GitLab Orbit Remote
 
 ## Prerequisites
 
-- To turn on GitLab Orbit, the Owner role on the top-level group.
+- To turn on Orbit, the Owner role on the top-level group.
 - To query a group after it has been indexed, the Reporter role or higher.
-- To view security data, the Security Manager role. For more information, see [roles required to query GitLab Orbit](security.md#roles-required-to-query-orbit).
+- To view security data, the Security Manager role. For more information, see [roles required to query Orbit](security.md#roles-required-to-query-orbit).
 
 Orbit indexes top-level groups only. Subgroups and projects inherit indexing automatically.
 
-## Step 1: Enable GitLab Orbit
+## Step 1: Enable Orbit
 
 1. On the left sidebar, expand **Your Work**.
 1. Select **Orbit** > **Configuration**.
 1. Find your top-level group in the **Indexes** list.
 1. Toggle **Enable**.
 
-GitLab Orbit begins indexing immediately. Initial indexing takes a few minutes for small groups
+Orbit begins indexing immediately. Initial indexing takes a few minutes for small groups
 and up to 30 minutes for groups with thousands of projects.
 
 Check indexing status at any time:
@@ -52,7 +52,7 @@ glab orbit remote status
 
 ## Step 2: Run your first query
 
-GitLab Orbit Remote exposes the same graph through three surfaces. Pick the one that matches who's querying:
+Orbit Remote exposes the same graph through three surfaces. Pick the one that matches who's querying:
 
 | Method | Best for | Setup | Billing |
 |---|---|---|---|
@@ -72,21 +72,21 @@ GitLab Duo queries are zero-rated and do not consume GitLab Credits.
 
 See [Use Orbit via MCP](access/mcp.md) for setup. Once configured, you have two tools: `query_graph` and `get_graph_schema`.
 
-### Install the GitLab Orbit skill for AI agents
+### Install the Orbit skill for AI agents
 
-The GitLab Orbit skill gives your AI agent query recipes, DSL guidance, and
-troubleshooting so it writes correct GitLab Orbit queries on the first attempt:
+The Orbit skill gives your AI agent query recipes, DSL guidance, and
+troubleshooting so it writes correct Orbit queries on the first attempt:
 
 ```shell
 glab skills install --global orbit
 ```
 
-See [Set up AI coding agents with the GitLab Orbit skill](../ai_coding_agents.md)
+See [Set up AI coding agents with the Orbit skill](../ai_coding_agents.md)
 for project-scoped install, update instructions, and what the skill contains.
 
 ### REST API
 
-Replace `your-group` with the top-level group path you enabled GitLab Orbit on. The `full_path` filter scopes the query so it passes GitLab Orbit's selectivity validation.
+Replace `your-group` with the top-level group path you enabled Orbit on. The `full_path` filter scopes the query so it passes Orbit's selectivity validation.
 
 Put the request body in `request.json`:
 
@@ -118,7 +118,7 @@ curl --request POST \
 
 ## What to try next
 
-- [What GitLab Orbit indexes](indexing.md) - understand coverage before writing queries
+- [What Orbit indexes](indexing.md) - understand coverage before writing queries
 - [Schema reference](schema.md) - explore the 28 node types and their properties
 - [Cookbook](cookbook.md) - copy-paste queries for common use cases
 - [Get started with Orbit Local](../local/getting-started.md) - query a local repository offline

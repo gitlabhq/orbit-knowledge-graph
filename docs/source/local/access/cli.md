@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Build and query a local code graph with the GitLab Orbit CLI (orbit) binary. No GitLab account or network connection required.
-title: Use Orbit Local with the GitLab Orbit CLI (`orbit`)
+description: Build and query a local code graph with the Orbit CLI (orbit) binary. No GitLab account or network connection required.
+title: Use Orbit Local with the Orbit CLI (`orbit`)
 ---
 
 {{< details >}}
@@ -21,7 +21,7 @@ title: Use Orbit Local with the GitLab Orbit CLI (`orbit`)
 
 {{< /history >}}
 
-The GitLab Orbit CLI (`orbit`) builds a code graph for any local repository and queries it
+The Orbit CLI (`orbit`) builds a code graph for any local repository and queries it
 against a local DuckDB file. No GitLab connection required.
 
 ## Install
@@ -41,11 +41,11 @@ orbit help
 If you already use the GitLab CLI (`glab`), you can instead install a managed
 binary with `glab orbit local --install`. That binary is invoked as
 `glab orbit local <command>` rather than `orbit` directly - see
-[Use Orbit Local with `glab`](glab.md).
+[Use Orbit Local with glab](glab.md).
 
 ### Build from source
 
-To contribute to GitLab Orbit or run an unreleased build, compile the binary
+To contribute to Orbit or run an unreleased build, compile the binary
 yourself.
 
 Prerequisites:
@@ -69,7 +69,7 @@ invoke it directly.
 orbit index /path/to/your/repo
 ```
 
-GitLab Orbit parses the repository and writes a DuckDB graph to `~/.orbit/graph.duckdb`.
+Orbit parses the repository and writes a DuckDB graph to `~/.orbit/graph.duckdb`.
 You can index multiple repositories. Each is scoped by project ID and branch
 in the manifest table.
 

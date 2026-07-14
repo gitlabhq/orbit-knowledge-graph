@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install the GitLab Orbit skill to give AI coding agents ready-to-use query recipes, DSL guidance, and troubleshooting for both Orbit Remote and Orbit Local.
-title: Set up AI coding agents with the GitLab Orbit skill
+description: Install the Orbit skill to give AI coding agents ready-to-use query recipes, DSL guidance, and troubleshooting for both Orbit Remote and Orbit Local.
+title: Set up AI coding agents with the Orbit skill
 ---
 
 {{< details >}}
@@ -14,7 +14,7 @@ title: Set up AI coding agents with the GitLab Orbit skill
 
 {{< /details >}}
 
-The GitLab Orbit skill gives AI coding agents structured guidance for querying the
+The Orbit skill gives AI coding agents structured guidance for querying the
 GitLab Knowledge Graph. It includes:
 
 - **Query recipes** - paste-ready JSON bodies for common questions (blast
@@ -56,7 +56,7 @@ This installs the skill to `.agents/skills/orbit` in the project root.
 If the skill is already installed, `glab` reports that `SKILL.md` exists and
 suggests `--force` to overwrite.
 
-## Update the GitLab Orbit skill
+## Update the skill
 
 To update to the latest version, re-run the install command with `--force`:
 

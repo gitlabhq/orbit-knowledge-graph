@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Troubleshoot common errors in Orbit Local and Orbit Remote.
-title: Troubleshoot GitLab Orbit
+title: Troubleshoot Orbit
 ---
 
 {{< details >}}
@@ -25,7 +25,7 @@ Use this page to troubleshoot errors you might encounter with
 
 ## Orbit Local
 
-GitLab Orbit Local errors occur when running the `orbit` binary directly or through
+Orbit Local errors occur when running the `orbit` binary directly or through
 `glab orbit local`.
 
 ### `no local graph found`
@@ -87,8 +87,8 @@ for Orbit Local is on the roadmap but is not available in the current release.
 
 ## Orbit Remote
 
-GitLab Orbit Remote errors occur when running `glab orbit remote` commands.
-GitLab Orbit Remote requires GitLab Premium or Ultimate and the `knowledge_graph`
+Orbit Remote errors occur when running `glab orbit remote` commands.
+Orbit Remote requires GitLab Premium or Ultimate and the `knowledge_graph`
 feature flag to be enabled on your instance.
 
 ### Exit code 2

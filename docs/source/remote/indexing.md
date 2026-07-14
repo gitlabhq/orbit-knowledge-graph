@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: What data GitLab Orbit indexes, which languages are supported for code indexing, and how indexing is scoped.
-title: What GitLab Orbit indexes
+description: What data Orbit indexes, which languages are supported for code indexing, and how indexing is scoped.
+title: What Orbit indexes
 ---
 
 {{< details >}}
@@ -28,13 +28,13 @@ title: What GitLab Orbit indexes
 
 ## Scope
 
-GitLab Orbit indexes top-level groups only. Enable GitLab Orbit on a top-level group and all its
-subgroups and projects are indexed automatically. You cannot enable GitLab Orbit on a
+Orbit indexes top-level groups only. Enable Orbit on a top-level group and all its
+subgroups and projects are indexed automatically. You cannot enable Orbit on a
 subgroup or individual project.
 
 ## SDLC data
 
-GitLab Orbit indexes the following GitLab objects and their relationships:
+Orbit indexes the following GitLab objects and their relationships:
 
 | Domain | Objects indexed |
 |--------|----------------|
@@ -49,7 +49,7 @@ appear in Orbit within minutes.
 
 ## Source code
 
-GitLab Orbit indexes source code from your repositories and builds a code graph on top of it.
+Orbit indexes source code from your repositories and builds a code graph on top of it.
 
 What gets indexed:
 
@@ -57,7 +57,7 @@ What gets indexed:
 - Function, class, and module definitions (with start/end line and full source content)
 - Import and cross-file reference relationships between files
 
-Code is indexed from the default branch only. GitLab Orbit re-indexes automatically when
+Code is indexed from the default branch only. Orbit re-indexes automatically when
 the default branch changes.
 
 ### Supported languages

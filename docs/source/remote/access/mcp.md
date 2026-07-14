@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Connect Claude Code, Codex, or any MCP-compatible AI agent to GitLab Orbit using the two MCP tools query_graph and get_graph_schema.
+description: Connect Claude Code, Codex, or any MCP-compatible AI agent to Orbit using the two MCP tools query_graph and get_graph_schema.
 title: Connect via MCP
 ---
 
@@ -26,13 +26,13 @@ title: Connect via MCP
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit exposes two MCP tools that let any MCP-compatible AI agent query your GitLab
+Orbit exposes two MCP tools that let any MCP-compatible AI agent query your GitLab
 knowledge graph. Use this with Claude Code, OpenAI Codex, or any other tool that
 supports the Model Context Protocol.
 
 ## Prerequisites
 
-- GitLab Orbit is [enabled on your group](../getting-started.md).
+- Orbit is [enabled on your group](../getting-started.md).
 - You're authenticated to GitLab. Run `glab auth login` (uses OAuth by default;
   personal access tokens with `read_api` scope also work).
 - Your auth has access to the groups you want to query.
@@ -44,7 +44,7 @@ supports the Model Context Protocol.
 
 | Tool | Description |
 |------|-------------|
-| `query_graph` | Execute a graph query using the GitLab Orbit query DSL. Returns typed results. |
+| `query_graph` | Execute a graph query using the Orbit query DSL. Returns typed results. |
 | `get_graph_schema` | Fetch the current schema: all node types, their properties, and relationship types. |
 
 ## Connect your MCP client
@@ -159,18 +159,18 @@ paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI,
 Antigravity.
 
 > [!note]
-> A planned `glab orbit setup` subcommand will install the GitLab Orbit skill and
+> A planned `glab orbit setup` subcommand will install the Orbit skill and
 > write this MCP config in one step. Until it ships, configure your MCP client
 > manually as shown above.
 
-You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
+You can also [install the Orbit skill manually](../../ai_coding_agents.md)
 today to give the agent query recipes, DSL guidance, and troubleshooting.
 
 ### Test it
 
 In your AI agent, ask:
 
-> "Use GitLab Orbit to list the 5 most recently updated projects in my group."
+> "Use Orbit to list the 5 most recently updated projects in my group."
 
 You should get typed results back with project names and paths. If you do, you're
 connected. If not, run `glab auth status` to confirm you're authenticated, and
@@ -183,21 +183,21 @@ uses credits from your GitLab subscription. `get_graph_schema` calls are free.
 
 ## Using the tools
 
-Once connected, instruct your AI agent to use the GitLab Orbit tools directly:
+Once connected, instruct your AI agent to use the Orbit tools directly:
 
 Discover the schema:
-> "Use `get_graph_schema` to show me what node types GitLab Orbit indexes."
+> "Use `get_graph_schema` to show me what node types Orbit indexes."
 
 Run a query:
 > "Use `query_graph` to find the 10 projects with the most open merge requests in
 > your group."
 
 Blast radius analysis:
-> "Use GitLab Orbit to find all files in this project that import `AuthService` directly
+> "Use Orbit to find all files in this project that import `AuthService` directly
 > or transitively."
 
 Onboarding:
-> "Use GitLab Orbit to map the key services in this group, their languages, and which
+> "Use Orbit to map the key services in this group, their languages, and which
 > projects they depend on."
 
 The agent composes the JSON query DSL and calls `query_graph` on your behalf.
@@ -258,7 +258,7 @@ glab auth login
 ### Query errors after connecting
 
 For query-time errors (validation failures, empty results, rate limits), see the
-[GitLab Orbit skill documentation](../../ai_coding_agents.md), which includes DSL
+[Orbit skill documentation](../../ai_coding_agents.md), which includes DSL
 guidance, query recipes, and exit-code diagnostics. Install the skill for
 inline guidance:
 

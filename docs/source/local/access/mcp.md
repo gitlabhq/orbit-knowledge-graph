@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Connect Claude Code, Codex, OpenCode, or any MCP-compatible AI agent to your local GitLab Orbit graph.
+description: Connect Claude Code, Codex, OpenCode, or any MCP-compatible AI agent to your local Orbit graph.
 title: Connect to Orbit Local via MCP
 ---
 
@@ -31,7 +31,7 @@ directly against the property graph tables.
 
 ## Prerequisites
 
-- The GitLab Orbit CLI (`orbit`) is installed. See [Use the GitLab Orbit CLI directly](cli.md).
+- The Orbit CLI (`orbit`) is installed. See [Use the Orbit CLI directly](cli.md).
 - A local repository has been indexed (`orbit index <path>` or
   `glab orbit local index <path>`). Agents can also index through the `index`
   MCP tool.
@@ -107,11 +107,11 @@ Discover the schema:
 > "Use `get_graph_schema` to show me what tables are in my local graph."
 
 Find definitions by type:
-> "Use GitLab Orbit to count the definitions in this repository by type, and list the
+> "Use Orbit to count the definitions in this repository by type, and list the
 > ten largest classes."
 
 Map a module:
-> "Use GitLab Orbit to list every definition declared in `src/auth/` and show its
+> "Use Orbit to list every definition declared in `src/auth/` and show its
 > kind."
 
 The `_orbit_manifest` table lists the indexed repositories, so "what repos are
