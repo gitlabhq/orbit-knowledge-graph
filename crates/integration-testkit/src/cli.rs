@@ -101,8 +101,6 @@ pub fn init_repo_at(path: &Path, files: &[(&str, &str)]) {
 
 pub fn create_test_repo() -> gitalisk_core::repository::testing::local::LocalGitRepository {
     let mut repo = gitalisk_core::repository::testing::local::LocalGitRepository::new(None);
-    // `App(Base)` yields an EXTENDS edge and `from utils import read_file`
-    // yields an imported symbol, so `repo-map extends`/`imports` produce rows.
     repo.fs.create_file(
         "src/main.py",
         Some(
