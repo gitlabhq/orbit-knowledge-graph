@@ -1,0 +1,82 @@
+# Throwaway spike for gitlab-org/orbit/knowledge-graph#1015: validates the
+# DinD assumptions the AX-evals CI job depends on before we build it.
+# Delete this file once the real ax-evals job lands.
+#
+# 1. A path under /builds volume-mounts into containers started via the dind
+#    daemon (the harness mounts per-task workspaces from the project dir).
+# 2. Ports published by those containers are reachable from the job container
+#    via the `docker` service alias (EVAL_CONTAINER_HOST derivation).
+# 3. Containers inside dind can reach an HTTP server running in the job
+#    container -- by the `build` network alias if DNS cooperates, else by IP
+#    (ORBIT_LOCAL_HOST for the harness's host query service).
+# 4. Anonymous pull of the harness eval image (informational until the
+#    harness publish job has run on main).
+
+ax-evals-dind-spike:
+  stage: test
+  image: docker:29
+  needs: []
+  services:
+    - name: docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    FF_NETWORK_PER_BUILD: "true"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  script:
+    - apk add --no-cache python3 curl
+    - docker pull alpine:3.21
+    - |
+      set +e
+      FAILED=""
+
+      echo "=== check 1 -- /builds volume mount into dind containers"
+      echo spike-payload > "$CI_PROJECT_DIR/spike-mount-probe.txt"
+      if docker run --rm -v "$CI_PROJECT_DIR:/mnt/probe:ro" alpine:3.21 \
+           grep -q spike-payload /mnt/probe/spike-mount-probe.txt; then
+        echo "PASS volume mount"
+      else
+        echo "FAIL volume mount"; FAILED="$FAILED volume-mount"
+      fi
+
+      echo "=== check 2 -- job -> published container port via docker alias"
+      # alpine's busybox omits the httpd applet; busybox-extras restores it
+      docker run -d --name probe-web -p 18080:80 alpine:3.21 \
+        sh -c 'apk add --no-cache busybox-extras && mkdir -p /www && echo probe-web-ok > /www/index.html && exec httpd -f -p 80 -h /www'
+      sleep 5
+      echo "--- container state:"; docker ps -a --filter name=probe-web
+      echo "--- server alive from inside its own netns:"
+      docker exec probe-web wget -q -T 3 -O- http://127.0.0.1:80/ || echo "(server not responding locally)"
+      if curl -s --max-time 5 http://docker:18080/ | grep -q probe-web-ok; then
+        echo "PASS published port via docker alias"
+      else
+        echo "--- probe-web logs:"; docker logs probe-web 2>&1 | tail -5
+        echo "FAIL published port via docker alias"; FAILED="$FAILED published-port"
+      fi
+
+      echo "=== check 3 -- dind container -> job container (build alias / IP)"
+      mkdir -p /tmp/www && echo host-service-ok > /tmp/www/index.html
+      python3 -m http.server 18765 --bind 0.0.0.0 --directory /tmp/www &
+      sleep 2
+      BUILD_IP="$(getent hosts build | awk '{print $1}')"
+      [ -n "$BUILD_IP" ] || BUILD_IP="$(hostname -i | awk '{print $1}')"
+      echo "job container IP = $BUILD_IP"
+      if docker run --rm alpine:3.21 wget -q -T 5 -O- "http://build:18765/" | grep -q host-service-ok; then
+        echo "PASS reachable via 'build' alias (ORBIT_LOCAL_HOST=build)"
+      elif docker run --rm alpine:3.21 wget -q -T 5 -O- "http://$BUILD_IP:18765/" | grep -q host-service-ok; then
+        echo "PASS reachable via IP only (resolve ORBIT_LOCAL_HOST at runtime)"
+      else
+        echo "FAIL job container unreachable from dind containers"; FAILED="$FAILED build-reachability"
+      fi
+
+      echo "=== check 4 -- anonymous pull of the harness eval image (informational)"
+      docker pull registry.gitlab.com/gitlab-org/orbit/gkg-evals-harness/gkg-eval:latest \
+        || echo "INFO gkg-eval:latest not published yet (harness MR pending) -- rerun after merge"
+
+      echo "=== summary"
+      if [ -n "$FAILED" ]; then echo "FAILED checks:$FAILED"; exit 1; fi
+      echo "all required checks passed"
