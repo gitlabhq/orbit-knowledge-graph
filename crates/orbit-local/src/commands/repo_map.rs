@@ -532,6 +532,33 @@ LIMIT 200",
             .collect();
         writeln!(out, "API MAP — under {prefix}/")?;
         writeln!(out, "{}", "=".repeat(78))?;
+
+        // The defs predicate is shared between the existence check and the
+        // main query so they cannot drift apart.
+        let defs_where = format!(
+            "project_id={pid} AND commit_sha={sha} \
+             AND file_path LIKE {prefix_like} \
+             AND start_line > 0 \
+             AND definition_type IN {api_kinds}{exclude}",
+            pid = self.project_id,
+            sha = sql_lit(&self.sha),
+            prefix_like = sql_lit(&format!("{prefix}/%")),
+            api_kinds = kind_list(&api_kinds),
+            exclude = self.exclude("file_path"),
+        );
+
+        // `read_text` fails with "No files found" when the glob matches
+        // nothing, so bail early when the prefix has no indexed definitions.
+        let has_defs = scalar_i64(&sql::query(
+            client,
+            &format!("SELECT COUNT(*) FROM gl_definition WHERE {defs_where} LIMIT 1"),
+        )?) > 0;
+
+        if !has_defs {
+            writeln!(out, "(no matching definitions under {prefix}/)")?;
+            return Ok(());
+        }
+
         section(
             client,
             out,
@@ -540,10 +567,7 @@ LIMIT 200",
   SELECT DISTINCT ON (file_path, name, definition_type, start_line)
          file_path, fqn, name, definition_type, start_line, end_line
   FROM gl_definition
-  WHERE project_id={pid} AND commit_sha={sha}
-    AND file_path LIKE {prefix_like}
-    AND start_line > 0
-    AND definition_type IN {api_kinds}{exclude}
+  WHERE {defs_where}
   ORDER BY file_path, name, definition_type, start_line, length(fqn)
 ),
 src AS (
@@ -582,11 +606,6 @@ FROM sigs
 GROUP BY file_path
 ORDER BY file_path
 LIMIT 300",
-                pid = self.project_id,
-                sha = sql_lit(&self.sha),
-                prefix_like = sql_lit(&format!("{prefix}/%")),
-                api_kinds = kind_list(&api_kinds),
-                exclude = self.exclude("file_path"),
                 globs = self.glob_list(prefix),
                 sig = sql_lit(SIG_REGEX),
             ),

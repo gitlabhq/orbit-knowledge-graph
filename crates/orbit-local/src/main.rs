@@ -235,9 +235,9 @@ enum Commands {
     #[command(name = "repo-map", about = descriptions::REPO_MAP_SHORT)]
     #[command(
         long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
-                      Scoped to the current commit; if it is not indexed, prints the index \
-                      command and exits. Use `overview` first, then drill down with `tree`, \
-                      `api`, `class`, `extends`, and `imports`."
+                       Scoped to the current commit; if it is not indexed, prints the index \
+                       command and exits. Running with no subcommand defaults to `overview`. \
+                       Drill down with `tree`, `api`, `class`, `extends`, and `imports`."
     )]
     RepoMap {
         /// Repository path (default: current directory).
@@ -254,7 +254,7 @@ enum Commands {
         db: Option<PathBuf>,
 
         #[command(subcommand)]
-        command: commands::repo_map::RepoMapCommand,
+        command: Option<commands::repo_map::RepoMapCommand>,
     },
 }
 
@@ -328,7 +328,12 @@ async fn main() -> Result<()> {
             extensions,
             db,
             command,
-        } => commands::repo_map::run(repo, extensions, db, command),
+        } => commands::repo_map::run(
+            repo,
+            extensions,
+            db,
+            command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
+        ),
     }
 }
 

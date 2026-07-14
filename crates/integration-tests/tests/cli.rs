@@ -4,7 +4,7 @@ use integration_testkit::cli::{
     create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd,
     orbit_index, orbit_sql, rows, rows_where, sorted_ids,
 };
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 const FILES_FULL: &str = "SELECT id, name, path, branch, commit_sha FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
@@ -693,14 +693,14 @@ struct RepoMapFixtureCommand {
     not_contains: Vec<String>,
 }
 
-fn load_fixture<T: DeserializeOwned>(path: &str) -> T {
+fn load_repo_map_fixture() -> RepoMapFixture {
     serde_yaml::from_str(include_str!("fixtures/repo_map.yaml"))
-        .unwrap_or_else(|error| panic!("invalid {path}: {error}"))
+        .expect("invalid fixtures/repo_map.yaml")
 }
 
 #[test]
 fn repo_map_yaml_fixture_suite() {
-    let fixture: RepoMapFixture = load_fixture("fixtures/repo_map.yaml");
+    let fixture = load_repo_map_fixture();
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo_dir = tempfile::TempDir::new().unwrap();
     let files: Vec<_> = fixture
@@ -1034,5 +1034,53 @@ fn repo_map_relative_orbit_data_dir() {
     assert!(
         text.contains("REPO MAP") && text.contains("Languages"),
         "overview output must contain expected sections: {text}"
+    );
+}
+
+#[test]
+fn repo_map_omitted_subcommand_runs_overview() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    let explicit = repo_map(&repo.path, dd, &["overview"]);
+    let omitted = repo_map(&repo.path, dd, &[]);
+    assert!(explicit.status.success());
+    assert!(omitted.status.success());
+
+    let explicit_text = String::from_utf8(explicit.stdout).unwrap();
+    let omitted_text = String::from_utf8(omitted.stdout).unwrap();
+    assert!(
+        omitted_text.contains("REPO MAP") && omitted_text.contains("Languages"),
+        "omitted subcommand must produce overview output: {omitted_text}"
+    );
+    assert_eq!(
+        explicit_text.lines().next(),
+        omitted_text.lines().next(),
+        "omitted subcommand must match explicit overview heading"
+    );
+}
+
+#[test]
+fn repo_map_api_empty_prefix_succeeds() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    let dd = data_dir.path();
+    assert!(orbit_index(&repo.path, dd));
+
+    let out = repo_map(&repo.path, dd, &["api", "nonexistent"]);
+    assert!(
+        out.status.success(),
+        "api with no matching definitions must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("API MAP"));
+    assert!(stdout.contains("no matching definitions under nonexistent/"));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        !stderr.contains("No files found"),
+        "must not leak DuckDB glob error: {stderr}"
     );
 }
