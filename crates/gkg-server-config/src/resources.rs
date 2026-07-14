@@ -28,8 +28,6 @@ pub fn readable_memory_limit_bytes(total_memory: u64) -> Option<u64> {
     (total_memory < CGROUP_UNLIMITED_THRESHOLD_BYTES).then_some(total_memory)
 }
 
-// `Process::cgroup_limits` resolves /proc/self/cgroup and min-walks ancestors;
-// `System::cgroup_limits` reads only fixed root paths and misses sub-cgroup limits.
 fn read_cgroup_memory_limit_bytes() -> Option<u64> {
     let pid = get_current_pid().ok()?;
     let mut system = System::new();
