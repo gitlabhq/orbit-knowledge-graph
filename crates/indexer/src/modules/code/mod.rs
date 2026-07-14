@@ -21,7 +21,7 @@ use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
-use gkg_server_config::SubscriptionConfig;
+use gkg_server_config::{IndexerModule, SubscriptionConfig};
 use metrics::CodeMetrics;
 use repository::RepositoryResolver;
 
@@ -34,7 +34,7 @@ pub use repository::{
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
-const CODE_CONCURRENCY_GROUP: &str = "code";
+const CODE_CONCURRENCY_GROUP: &str = IndexerModule::Code.concurrency_group();
 
 pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {

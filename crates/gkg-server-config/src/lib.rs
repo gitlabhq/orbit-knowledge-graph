@@ -18,6 +18,7 @@ pub mod health_check;
 pub mod metrics;
 pub mod nats;
 pub mod query;
+pub mod resources;
 pub mod schema;
 pub mod secret_file_source;
 pub mod tls;
@@ -30,9 +31,10 @@ pub use engine::{
     CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
     DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
     GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
-    ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
+    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, RuntimeDefaultsReport,
+    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
     StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
+    derive_concurrency_groups, derive_max_concurrent_workers, derive_stream_block_size,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
@@ -41,5 +43,6 @@ pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
 pub use query::{CompilerDerivedSettings, PathResolverConfig, QueryConfig, QuerySettings};
+pub use resources::ContainerResources;
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;

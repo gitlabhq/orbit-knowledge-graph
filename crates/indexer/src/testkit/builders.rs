@@ -55,7 +55,7 @@ impl TestEngineBuilder {
     }
 
     pub fn with_max_workers(mut self, max: usize) -> Self {
-        self.configuration.max_concurrent_workers = max;
+        self.configuration.max_concurrent_workers = Some(max);
         self
     }
 

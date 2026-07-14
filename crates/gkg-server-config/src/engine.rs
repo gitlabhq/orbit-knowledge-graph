@@ -9,6 +9,8 @@ use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::resources::ContainerResources;
+
 // ── Base config types ────────────────────────────────────────────────
 
 /// Sparse per-subscription policy override (retry, concurrency, DLQ).
@@ -152,10 +154,6 @@ fn default_datalake_batch_size() -> u64 {
     500_000
 }
 
-fn default_stream_block_size() -> u64 {
-    65_536
-}
-
 fn default_system_notes_resolve_lookup_batch_size() -> usize {
     1_000
 }
@@ -216,10 +214,11 @@ pub struct EntityHandlerConfig {
 
     /// Rows per block streamed from the datalake (`max_block_size`). Larger blocks
     /// amortize per-batch write round-trips (more throughput) at the cost of peak
-    /// memory per in-flight block.
-    #[serde(default = "default_stream_block_size")]
+    /// memory per in-flight block. Unset = derived from the container memory limit
+    /// (see [`derive_stream_block_size`]).
+    #[serde(default)]
     #[schemars(range(min = 1))]
-    pub stream_block_size: u64,
+    pub stream_block_size: Option<u64>,
 
     /// Maximum number of items bound into each SystemNote resolver lookup.
     #[serde(default = "default_system_notes_resolve_lookup_batch_size")]
@@ -234,10 +233,20 @@ impl Default for EntityHandlerConfig {
             batch_size_overrides: HashMap::new(),
             partition_overrides: HashMap::new(),
             partition_min_rows: default_partition_min_rows(),
-            stream_block_size: default_stream_block_size(),
+            stream_block_size: None,
             system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
             ),
         }
+    }
+}
+
+impl EntityHandlerConfig {
+    /// Resolved rows-per-block for datalake streaming. Falls back to the
+    /// memory-scarce default when [`EngineConfiguration::resolve_runtime_defaults`]
+    /// has not populated it (e.g. dev machines with no readable memory limit).
+    pub fn stream_block_size(&self) -> u64 {
+        self.stream_block_size
+            .unwrap_or(MEMORY_SCARCE_STREAM_BLOCK_SIZE)
     }
 }
 
@@ -655,14 +664,28 @@ impl IndexerModule {
     pub fn all() -> Vec<IndexerModule> {
         vec![Self::Sdlc, Self::Code, Self::NamespaceDeletion]
     }
+
+    /// Name of the concurrency group this module's handlers subscribe under.
+    /// Namespace deletion shares the code group; the ETL modules that register
+    /// these subscriptions read this so the derived caps match the group names.
+    pub const fn concurrency_group(self) -> &'static str {
+        match self {
+            Self::Sdlc => "sdlc",
+            Self::Code | Self::NamespaceDeletion => "code",
+        }
+    }
 }
 
 /// ETL engine configuration.
 ///
 /// # Defaults
 ///
-/// - `max_concurrent_workers`: 16
-/// - `concurrency_groups`: empty
+/// Scale-related fields left unset are derived from the container's resources at
+/// startup by [`EngineConfiguration::resolve_runtime_defaults`]; an explicit
+/// config value always wins.
+///
+/// - `max_concurrent_workers`: unset = derived from `available_parallelism`
+/// - `concurrency_groups`: empty = derived from `modules` and the worker cap
 /// - `topics`: empty (each module applies its own declared default policy; an
 ///   entry here is a field-wise override on top of that default)
 /// - `handlers`: defaults for all handlers
@@ -670,12 +693,16 @@ impl IndexerModule {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
-    /// Maximum concurrent message handlers across all modules. Defaults to 16.
-    #[serde(default = "EngineConfiguration::default_max_concurrent_workers")]
-    pub max_concurrent_workers: usize,
+    /// Maximum concurrent message handlers across all modules. Unset = derived
+    /// from the container's `available_parallelism` (see
+    /// [`derive_max_concurrent_workers`]).
+    #[serde(default)]
+    pub max_concurrent_workers: Option<usize>,
 
-    /// Named concurrency groups with their limits.
-    /// Subscriptions reference these by name via `SubscriptionConfig::concurrency_group`.
+    /// Named concurrency groups with their limits. Subscriptions reference these
+    /// by name via `SubscriptionConfig::concurrency_group`. Empty = derived from
+    /// the enabled `modules` and the resolved worker cap (see
+    /// [`derive_concurrency_groups`]).
     #[serde(default)]
     pub concurrency_groups: HashMap<String, usize>,
 
@@ -703,7 +730,7 @@ pub struct EngineConfiguration {
 impl Default for EngineConfiguration {
     fn default() -> Self {
         EngineConfiguration {
-            max_concurrent_workers: Self::default_max_concurrent_workers(),
+            max_concurrent_workers: None,
             concurrency_groups: HashMap::new(),
             topics: HashMap::new(),
             handlers: HandlersConfiguration::default(),
@@ -714,13 +741,51 @@ impl Default for EngineConfiguration {
 }
 
 impl EngineConfiguration {
-    fn default_max_concurrent_workers() -> usize {
-        16
+    /// Resolved worker cap. Falls back to the conservative default when
+    /// [`Self::resolve_runtime_defaults`] has not populated it.
+    pub fn max_concurrent_workers(&self) -> usize {
+        self.max_concurrent_workers
+            .unwrap_or(DEFAULT_MAX_CONCURRENT_WORKERS)
     }
 
     /// Returns whether `module` is enabled in this configuration.
     pub fn is_module_enabled(&self, module: IndexerModule) -> bool {
         self.modules.contains(&module)
+    }
+
+    /// Fills scale-related defaults from the container's resources, in place.
+    /// Only fields the operator left unset are derived; an explicit config value
+    /// always wins. Returns a report of what was derived (empty fields mean the
+    /// operator set them explicitly) so the caller can log the decisions.
+    pub fn resolve_runtime_defaults(
+        &mut self,
+        resources: &ContainerResources,
+    ) -> RuntimeDefaultsReport {
+        let mut report = RuntimeDefaultsReport {
+            available_parallelism: resources.available_parallelism,
+            memory_limit_bytes: resources.memory_limit_bytes,
+            ..RuntimeDefaultsReport::default()
+        };
+
+        if self.max_concurrent_workers.is_none() {
+            let workers = derive_max_concurrent_workers(resources.available_parallelism);
+            self.max_concurrent_workers = Some(workers);
+            report.max_concurrent_workers = Some(workers);
+        }
+
+        if self.handlers.entity_handler.stream_block_size.is_none() {
+            let block_size = derive_stream_block_size(resources.memory_limit_bytes);
+            self.handlers.entity_handler.stream_block_size = Some(block_size);
+            report.stream_block_size = Some(block_size);
+        }
+
+        if self.concurrency_groups.is_empty() {
+            let groups = derive_concurrency_groups(&self.modules, self.max_concurrent_workers());
+            self.concurrency_groups = groups.clone();
+            report.concurrency_groups = Some(groups);
+        }
+
+        report
     }
 
     /// Validates engine-level invariants that cannot be expressed in the type system.
@@ -729,7 +794,7 @@ impl EngineConfiguration {
             return Err(EngineConfigError::NoModulesEnabled);
         }
         let entity_handler = &self.handlers.entity_handler;
-        if entity_handler.stream_block_size == 0 {
+        if entity_handler.stream_block_size() == 0 {
             return Err(EngineConfigError::ZeroStreamBlockSize);
         }
         if entity_handler.system_notes_resolve_lookup_batch_size == 0 {
@@ -754,6 +819,89 @@ pub enum EngineConfigError {
         "engine.handlers.entity_handler.system_notes_resolve_lookup_batch_size must be at least 1"
     )]
     ZeroSystemNotesResolveLookupBatchSize,
+}
+
+// ── Resource-derived defaults ────────────────────────────────────────
+
+/// Conservative worker cap used when neither an explicit config value nor a
+/// derived value is available. Matches the historical hardcoded default.
+const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
+
+/// The two `stream_block_size` calibration points. Memory-scarce deployments
+/// (the historical default) keep the small block; roomy pods stream wider
+/// blocks to amortize write round-trips. Prod runs 32 GiB SDLC pods at 262144.
+const MEMORY_SCARCE_STREAM_BLOCK_SIZE: u64 = 65_536;
+const ROOMY_STREAM_BLOCK_SIZE: u64 = 262_144;
+
+/// Memory limit at or above which a pod is considered roomy enough for the wide
+/// streaming block. Set below the 32 GiB prod calibration point so those pods
+/// land on the wide tier with margin, while typical memory-scarce deployments
+/// (≤ 8 GiB) keep the conservative block.
+const ROOMY_MEMORY_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+
+/// Share of the worker cap the SDLC group gets when a pool registers both the
+/// SDLC and code groups. Calibrated to the historical universal-pool split of
+/// sdlc 12 / code 4 out of 16 workers (75% / 25%); code takes the remainder.
+const SDLC_WORKER_SHARE_PERCENT: usize = 75;
+
+/// What [`EngineConfiguration::resolve_runtime_defaults`] derived, for logging.
+/// A field is `Some` only when it was derived (the operator left it unset); the
+/// resource inputs are always populated so a single log line explains the choice.
+#[derive(Debug, Default, Clone)]
+pub struct RuntimeDefaultsReport {
+    pub available_parallelism: usize,
+    pub memory_limit_bytes: Option<u64>,
+    pub max_concurrent_workers: Option<usize>,
+    pub stream_block_size: Option<u64>,
+    pub concurrency_groups: Option<HashMap<String, usize>>,
+}
+
+/// Worker cap from the CPUs the container may use. `available_parallelism` is
+/// cgroup-aware on Linux, so this tracks the pod's CPU limit directly.
+pub fn derive_max_concurrent_workers(available_parallelism: usize) -> usize {
+    available_parallelism.max(1)
+}
+
+/// Datalake streaming block size from the container memory limit, as a two-tier
+/// step function over the calibration points. An unreadable limit (dev machines,
+/// unlimited cgroup) keeps the memory-scarce block.
+pub fn derive_stream_block_size(memory_limit_bytes: Option<u64>) -> u64 {
+    match memory_limit_bytes {
+        Some(bytes) if bytes >= ROOMY_MEMORY_THRESHOLD_BYTES => ROOMY_STREAM_BLOCK_SIZE,
+        _ => MEMORY_SCARCE_STREAM_BLOCK_SIZE,
+    }
+}
+
+/// Per-group worker caps from the modules a pool registers. A single-group pool
+/// gives that group the whole worker cap (no split needed); a pool spanning both
+/// the SDLC and code groups splits the cap by [`SDLC_WORKER_SHARE_PERCENT`].
+pub fn derive_concurrency_groups(
+    modules: &[IndexerModule],
+    worker_count: usize,
+) -> HashMap<String, usize> {
+    let sdlc_group = IndexerModule::Sdlc.concurrency_group();
+    let code_group = IndexerModule::Code.concurrency_group();
+
+    let has_sdlc = modules.iter().any(|m| m.concurrency_group() == sdlc_group);
+    let has_code = modules.iter().any(|m| m.concurrency_group() == code_group);
+
+    let mut groups = HashMap::new();
+    match (has_sdlc, has_code) {
+        (true, true) => {
+            let sdlc_cap = (worker_count * SDLC_WORKER_SHARE_PERCENT / 100).max(1);
+            let code_cap = worker_count.saturating_sub(sdlc_cap).max(1);
+            groups.insert(sdlc_group.to_string(), sdlc_cap);
+            groups.insert(code_group.to_string(), code_cap);
+        }
+        (true, false) => {
+            groups.insert(sdlc_group.to_string(), worker_count.max(1));
+        }
+        (false, true) => {
+            groups.insert(code_group.to_string(), worker_count.max(1));
+        }
+        (false, false) => {}
+    }
+    groups
 }
 
 /// Top-level schedule configuration.
@@ -919,7 +1067,7 @@ modules: [sdlc, namespace_deletion]
     #[test]
     fn entity_handler_streaming_knobs_default_to_pre_tunable_constants() {
         let cfg = EntityHandlerConfig::default();
-        assert_eq!(cfg.stream_block_size, 65_536);
+        assert_eq!(cfg.stream_block_size(), 65_536);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 1_000);
     }
 
@@ -927,14 +1075,14 @@ modules: [sdlc, namespace_deletion]
     fn entity_handler_streaming_knobs_override_from_yaml() {
         let yaml = "stream_block_size: 262144\nsystem_notes_resolve_lookup_batch_size: 2048\n";
         let cfg: EntityHandlerConfig = serde_yaml::from_str(yaml).expect("valid yaml");
-        assert_eq!(cfg.stream_block_size, 262_144);
+        assert_eq!(cfg.stream_block_size(), 262_144);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
     }
 
     #[test]
     fn zero_stream_block_size_fails_validation() {
         let mut cfg = EngineConfiguration::default();
-        cfg.handlers.entity_handler.stream_block_size = 0;
+        cfg.handlers.entity_handler.stream_block_size = Some(0);
         assert!(matches!(
             cfg.validate(),
             Err(EngineConfigError::ZeroStreamBlockSize)
@@ -994,5 +1142,109 @@ modules: [sdlc, namespace_deletion]
             (59.0..60.0).contains(&secs),
             "expected delay ~59.3s, got {secs:.3}s"
         );
+    }
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn max_concurrent_workers_tracks_available_parallelism() {
+        assert_eq!(derive_max_concurrent_workers(20), 20);
+        assert_eq!(derive_max_concurrent_workers(1), 1);
+        assert_eq!(derive_max_concurrent_workers(0), 1);
+    }
+
+    #[test]
+    fn stream_block_size_calibration_points() {
+        assert_eq!(derive_stream_block_size(None), 65_536);
+        assert_eq!(derive_stream_block_size(Some(8 * GIB)), 65_536);
+        assert_eq!(derive_stream_block_size(Some(32 * GIB)), 262_144);
+    }
+
+    #[test]
+    fn stream_block_size_switches_at_the_roomy_threshold() {
+        assert_eq!(derive_stream_block_size(Some(16 * GIB - 1)), 65_536);
+        assert_eq!(derive_stream_block_size(Some(16 * GIB)), 262_144);
+    }
+
+    #[test]
+    fn universal_pool_reproduces_historical_split() {
+        let groups = derive_concurrency_groups(&IndexerModule::all(), 16);
+        assert_eq!(groups.get("sdlc"), Some(&12));
+        assert_eq!(groups.get("code"), Some(&4));
+    }
+
+    #[test]
+    fn single_module_pool_gets_the_whole_cap() {
+        let sdlc_only = derive_concurrency_groups(&[IndexerModule::Sdlc], 20);
+        assert_eq!(sdlc_only.get("sdlc"), Some(&20));
+        assert_eq!(sdlc_only.get("code"), None);
+
+        let code_only = derive_concurrency_groups(&[IndexerModule::Code], 16);
+        assert_eq!(code_only.get("code"), Some(&16));
+        assert_eq!(code_only.get("sdlc"), None);
+    }
+
+    #[test]
+    fn namespace_deletion_shares_the_code_group() {
+        let groups =
+            derive_concurrency_groups(&[IndexerModule::Code, IndexerModule::NamespaceDeletion], 16);
+        assert_eq!(groups.get("code"), Some(&16));
+        assert_eq!(groups.len(), 1);
+    }
+
+    #[test]
+    fn resolve_fills_every_unset_scale_field() {
+        let mut cfg = EngineConfiguration::default();
+        let resources = ContainerResources {
+            available_parallelism: 20,
+            memory_limit_bytes: Some(32 * GIB),
+        };
+
+        let report = cfg.resolve_runtime_defaults(&resources);
+
+        assert_eq!(cfg.max_concurrent_workers(), 20);
+        assert_eq!(cfg.handlers.entity_handler.stream_block_size(), 262_144);
+        assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&15));
+        assert_eq!(cfg.concurrency_groups.get("code"), Some(&5));
+        assert_eq!(report.max_concurrent_workers, Some(20));
+        assert_eq!(report.stream_block_size, Some(262_144));
+    }
+
+    #[test]
+    fn explicit_config_beats_derivation() {
+        let mut cfg = EngineConfiguration {
+            max_concurrent_workers: Some(4),
+            concurrency_groups: HashMap::from([("sdlc".to_string(), 3)]),
+            ..EngineConfiguration::default()
+        };
+        cfg.handlers.entity_handler.stream_block_size = Some(1024);
+
+        let report = cfg.resolve_runtime_defaults(&ContainerResources {
+            available_parallelism: 64,
+            memory_limit_bytes: Some(64 * GIB),
+        });
+
+        assert_eq!(cfg.max_concurrent_workers(), 4);
+        assert_eq!(cfg.handlers.entity_handler.stream_block_size(), 1024);
+        assert_eq!(
+            cfg.concurrency_groups,
+            HashMap::from([("sdlc".to_string(), 3)])
+        );
+        assert!(report.max_concurrent_workers.is_none());
+        assert!(report.stream_block_size.is_none());
+        assert!(report.concurrency_groups.is_none());
+    }
+
+    #[test]
+    fn unreadable_memory_limit_keeps_the_conservative_defaults() {
+        let mut cfg = EngineConfiguration::default();
+
+        cfg.resolve_runtime_defaults(&ContainerResources {
+            available_parallelism: 8,
+            memory_limit_bytes: None,
+        });
+
+        assert_eq!(cfg.max_concurrent_workers(), 8);
+        assert_eq!(cfg.handlers.entity_handler.stream_block_size(), 65_536);
     }
 }

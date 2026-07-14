@@ -65,11 +65,10 @@ graph:
 #   key_path: "/path/to/key.pem"
 
 engine:
-  # Universal-pool defaults; production splits into per-module pools that override these (gkg-helm-charts `indexer.pools`).
-  max_concurrent_workers: 16
-  concurrency_groups:
-    sdlc: 12
-    code: 4
+  # max_concurrent_workers, concurrency_groups, and handlers.entity-handler.stream_block_size
+  # are left unset so they derive from the container's CPU and memory at startup
+  # (see EngineConfiguration::resolve_runtime_defaults). Set any of them here or in a
+  # per-module pool override to pin an explicit value (gkg-helm-charts `indexer.pools`).
   handlers:
     entity-handler:
       system_notes_resolve_lookup_batch_size: 1000

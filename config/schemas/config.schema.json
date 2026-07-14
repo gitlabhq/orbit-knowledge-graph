@@ -94,11 +94,11 @@
             "datalake_batch_size": 500000,
             "partition_min_rows": 50000000,
             "partition_overrides": {},
-            "stream_block_size": 65536,
+            "stream_block_size": null,
             "system_notes_resolve_lookup_batch_size": 1000
           }
         },
-        "max_concurrent_workers": 16,
+        "max_concurrent_workers": null,
         "modules": [
           "sdlc",
           "code",
@@ -635,11 +635,11 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `topics`: empty (each module applies its own declared default policy; an\n  entry here is a field-wise override on top of that default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
+      "description": "ETL engine configuration.\n\n# Defaults\n\nScale-related fields left unset are derived from the container's resources at\nstartup by [`EngineConfiguration::resolve_runtime_defaults`]; an explicit\nconfig value always wins.\n\n- `max_concurrent_workers`: unset = derived from `available_parallelism`\n- `concurrency_groups`: empty = derived from `modules` and the worker cap\n- `topics`: empty (each module applies its own declared default policy; an\n  entry here is a field-wise override on top of that default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
       "type": "object",
       "properties": {
         "concurrency_groups": {
-          "description": "Named concurrency groups with their limits.\nSubscriptions reference these by name via `SubscriptionConfig::concurrency_group`.",
+          "description": "Named concurrency groups with their limits. Subscriptions reference these\nby name via `SubscriptionConfig::concurrency_group`. Empty = derived from\nthe enabled `modules` and the resolved worker cap (see\n[`derive_concurrency_groups`]).",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
@@ -690,16 +690,19 @@
               "datalake_batch_size": 500000,
               "partition_min_rows": 50000000,
               "partition_overrides": {},
-              "stream_block_size": 65536,
+              "stream_block_size": null,
               "system_notes_resolve_lookup_batch_size": 1000
             }
           }
         },
         "max_concurrent_workers": {
-          "description": "Maximum concurrent message handlers across all modules. Defaults to 16.",
-          "type": "integer",
+          "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container's `available_parallelism` (see\n[`derive_max_concurrent_workers`]).",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 16,
+          "default": null,
           "minimum": 0
         },
         "modules": {
@@ -760,10 +763,13 @@
           "default": {}
         },
         "stream_block_size": {
-          "description": "Rows per block streamed from the datalake (`max_block_size`). Larger blocks\namortize per-batch write round-trips (more throughput) at the cost of peak\nmemory per in-flight block.",
-          "type": "integer",
+          "description": "Rows per block streamed from the datalake (`max_block_size`). Larger blocks\namortize per-batch write round-trips (more throughput) at the cost of peak\nmemory per in-flight block. Unset = derived from the container memory limit\n(see [`derive_stream_block_size`]).",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint64",
-          "default": 65536,
+          "default": null,
           "minimum": 1
         },
         "system_notes_resolve_lookup_batch_size": {
@@ -948,7 +954,7 @@
             "datalake_batch_size": 500000,
             "partition_min_rows": 50000000,
             "partition_overrides": {},
-            "stream_block_size": 65536,
+            "stream_block_size": null,
             "system_notes_resolve_lookup_batch_size": 1000
           }
         }

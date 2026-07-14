@@ -22,13 +22,13 @@ use crate::topic::{
 };
 use crate::types::Event;
 use datalake::{Datalake, DatalakeQuery};
-use gkg_server_config::SubscriptionConfig;
+use gkg_server_config::{IndexerModule, SubscriptionConfig};
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use pipeline::Pipeline;
 use tracing::info;
 
-const SDLC_CONCURRENCY_GROUP: &str = "sdlc";
+const SDLC_CONCURRENCY_GROUP: &str = IndexerModule::Sdlc.concurrency_group();
 
 pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
@@ -54,7 +54,7 @@ pub async fn register_handlers(
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
         datalake_client,
-        entity_handler_config.stream_block_size,
+        entity_handler_config.stream_block_size(),
     ));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));

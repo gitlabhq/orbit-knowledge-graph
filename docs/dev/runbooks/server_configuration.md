@@ -116,14 +116,23 @@ The worker pool limits how many messages are processed concurrently. It uses a t
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
-| `engine.max_concurrent_workers` | `GKG_ENGINE__MAX_CONCURRENT_WORKERS` | `16` | Global concurrency cap |
-| `engine.concurrency_groups` | | `{}` | Named group limits |
+| `engine.max_concurrent_workers` | `GKG_ENGINE__MAX_CONCURRENT_WORKERS` | derived | Global concurrency cap |
+| `engine.concurrency_groups` | | derived | Named group limits |
+
+### Resource-derived defaults
+
+Both fields derive from the container's resources at startup when left unset; an explicit config value (YAML or env var) always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
+
+- `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit).
+- `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap; a pool spanning both the SDLC and code groups splits the cap 75% / 25% (the historical universal-pool ratio of sdlc 12 / code 4 out of 16). Namespace deletion shares the code group.
+
+On a 16-core universal pool this reproduces the previous hardcoded defaults exactly (16 workers, sdlc 12 / code 4).
 
 ### How concurrency groups work
 
 Each handler can declare a `concurrency_group`. When a message arrives, the handler acquires the group semaphore first, then the global semaphore. Both are released after processing.
 
-This prevents one handler type from monopolizing all workers. For example, with 16 global workers, you can cap SDLC at 12 and code at 4:
+This prevents one handler type from monopolizing all workers. To pin explicit values instead of deriving them, e.g. 16 global workers capped at SDLC 12 and code 4:
 
 ```yaml
 engine:
@@ -189,6 +198,9 @@ engine:
 | `engine.handlers.entity-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
 | `engine.handlers.entity-handler.batch_size_overrides.<Entity>` | None | Per-entity override for datalake batch size |
 | `engine.handlers.entity-handler.partition_overrides.<Entity>` | None | Number of partitions for initial load parallelism |
+| `engine.handlers.entity-handler.stream_block_size` | derived | Rows per block streamed from the datalake (`max_block_size`) |
+
+`stream_block_size` derives from the container memory limit when unset (an explicit value always wins), logged once at startup. It is a two-tier step function keyed on the cgroup memory limit (v2 `/sys/fs/cgroup/memory.max`, then v1 `/sys/fs/cgroup/memory/memory.limit_in_bytes`): pods at or above 16 GiB stream 262144-row blocks; smaller pods, and hosts with no readable limit (local dev on macOS), keep the memory-scarce 65536. Calibrated against the 32 GiB production SDLC pods (262144) and the historical default (65536).
 
 #### Code indexing task handler
 
