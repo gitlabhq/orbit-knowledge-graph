@@ -22,10 +22,23 @@ use crate::topic::{
 };
 use crate::types::Event;
 use datalake::{Datalake, DatalakeQuery};
+use gkg_server_config::SubscriptionConfig;
 use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use pipeline::Pipeline;
 use tracing::info;
+
+const SDLC_CONCURRENCY_GROUP: &str = "sdlc";
+
+pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
+    SubscriptionConfig {
+        concurrency_group: Some(SDLC_CONCURRENCY_GROUP.to_string()),
+        max_attempts: Some(1),
+        retry_interval_secs: None,
+        dead_letter_on_exhaustion: None,
+        max_ack_pending: None,
+    }
+}
 
 pub async fn register_handlers(
     registry: &HandlerRegistry,
@@ -79,14 +92,13 @@ pub async fn register_handlers(
         .with_registry(Arc::clone(&transform_registry)),
     );
 
-    let mut global_subscription = GlobalIndexingRequest::subscription();
-    if let Some(topic_config) = config.engine.topics.get(GLOBAL_HANDLER_TOPIC) {
-        global_subscription = global_subscription.with_config(topic_config);
-    }
-    let mut namespace_subscription = NamespaceIndexingRequest::subscription();
-    if let Some(topic_config) = config.engine.topics.get(NAMESPACE_HANDLER_TOPIC) {
-        namespace_subscription = namespace_subscription.with_config(topic_config);
-    }
+    let global_policy = sdlc_dispatch_topic_policy()
+        .with_optional_override(config.engine.topics.get(GLOBAL_HANDLER_TOPIC));
+    let global_subscription = GlobalIndexingRequest::subscription().with_config(&global_policy);
+    let namespace_policy = sdlc_dispatch_topic_policy()
+        .with_optional_override(config.engine.topics.get(NAMESPACE_HANDLER_TOPIC));
+    let namespace_subscription =
+        NamespaceIndexingRequest::subscription().with_config(&namespace_policy);
 
     let mut global_count = 0;
     let mut namespaced_count = 0;
@@ -148,6 +160,14 @@ pub(crate) mod test_helpers;
 mod tests {
     use super::*;
     use ontology::Ontology;
+
+    #[test]
+    fn declared_dispatch_policy_does_not_retry() {
+        let policy = sdlc_dispatch_topic_policy();
+        assert_eq!(policy.max_attempts, Some(1));
+        assert_eq!(policy.dead_letter_on_exhaustion, None);
+        assert_eq!(policy.concurrency_group.as_deref(), Some("sdlc"));
+    }
 
     #[test]
     fn build_plans_returns_global_entities() {

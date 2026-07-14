@@ -78,9 +78,7 @@ impl Subscription {
         self.max_attempts = config.max_attempts;
         self.retry_interval_secs = config.retry_interval_secs;
         self.max_ack_pending = config.max_ack_pending;
-        if config.dead_letter_on_exhaustion {
-            self.dead_letter_on_exhaustion = true;
-        }
+        self.dead_letter_on_exhaustion = config.dead_letter_on_exhaustion.unwrap_or(false);
         self
     }
 

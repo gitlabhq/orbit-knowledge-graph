@@ -70,23 +70,6 @@ engine:
   concurrency_groups:
     sdlc: 12
     code: 4
-  topics:
-    global-handler:
-      concurrency_group: sdlc
-      max_attempts: 1  # re-dispatched every minute, no need to retry
-      retry_interval_secs: 60
-    namespace-handler:
-      concurrency_group: sdlc
-      max_attempts: 1  # re-dispatched every minute, no need to retry
-      retry_interval_secs: 60
-    code-indexing-task:
-      concurrency_group: code
-      max_attempts: 3  # event-driven, must retry to avoid data loss
-      retry_interval_secs: 60
-      dead_letter_on_exhaustion: true
-    namespace-deletion:
-      concurrency_group: code
-      max_attempts: 1  # re-dispatched daily, no need to retry
   handlers:
     entity-handler:
       system_notes_resolve_lookup_batch_size: 1000
@@ -117,24 +100,6 @@ engine:
         small_repo_max_files: 650
         small_indexing_slots: 6
         big_indexing_slots: 2
-
-schedule:
-  tasks:
-    global:
-      cron: "0 */1 * * * *"           # every minute
-    namespace:
-      cron: "*/30 * * * * *"          # every 30 seconds
-      sweep_interval_secs: 3600        # hourly full re-dispatch safety net
-    code-backfill:
-      cron: "0 */1 * * * *"           # every minute
-    table-cleanup:
-      cron: "0 0 3 * * *"             # daily at 03:00 UTC
-    namespace-deletion:
-      cron: "0 0 3 * * *"             # daily at 03:00 UTC
-    migration-completion:
-      cron: "0 */1 * * * *"           # every minute
-    stale-edge-reconciliation:
-      cron: "0 */30 * * * *"          # every 30 minutes
 
 health_check:
   bind_address: "0.0.0.0:4201"

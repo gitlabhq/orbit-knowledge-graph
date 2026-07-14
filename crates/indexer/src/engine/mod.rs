@@ -630,7 +630,7 @@ mod tests {
             Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
                 max_attempts: Some(3),
                 retry_interval_secs: Some(5),
-                dead_letter_on_exhaustion: true,
+                dead_letter_on_exhaustion: Some(true),
                 ..Default::default()
             });
 
