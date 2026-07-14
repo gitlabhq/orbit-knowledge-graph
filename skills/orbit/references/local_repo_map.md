@@ -90,9 +90,10 @@ task usually means the investigation has become enumeration instead of design.
 
 ## Subcommands
 
-### `overview`
+### `overview` (default)
 
-Always run this first for a new repository or planning session. It emits:
+Always run this first for a new repository or planning session. Omitting the
+subcommand runs `overview` automatically. It emits:
 
 - Language breakdown over non-test source files.
 - Definition totals by `definition_type`.
