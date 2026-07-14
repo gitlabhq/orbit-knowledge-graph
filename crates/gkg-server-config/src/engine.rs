@@ -8,6 +8,7 @@ use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::resources::ContainerResources;
 
@@ -728,35 +729,32 @@ impl EngineConfiguration {
         self.modules.contains(&module)
     }
 
-    pub fn resolve_runtime_defaults(
-        &mut self,
-        resources: &ContainerResources,
-    ) -> RuntimeDefaultsReport {
-        let mut report = RuntimeDefaultsReport {
-            available_parallelism: resources.available_parallelism,
-            memory_limit_bytes: resources.memory_limit_bytes,
-            ..RuntimeDefaultsReport::default()
-        };
-
+    pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
         if self.max_concurrent_workers.is_none() {
             let workers = derive_max_concurrent_workers(resources.available_parallelism);
             self.max_concurrent_workers = Some(workers);
-            report.max_concurrent_workers = Some(workers);
+            info!(
+                available_parallelism = resources.available_parallelism,
+                value = workers,
+                "derived engine.max_concurrent_workers"
+            );
         }
 
         if self.handlers.entity_handler.stream_block_size.is_none() {
             let block_size = derive_stream_block_size(resources.memory_limit_bytes);
             self.handlers.entity_handler.stream_block_size = Some(block_size);
-            report.stream_block_size = Some(block_size);
+            info!(
+                memory_limit_bytes = resources.memory_limit_bytes,
+                value = block_size,
+                "derived engine.handlers.entity_handler.stream_block_size"
+            );
         }
 
         if self.concurrency_groups.is_empty() {
             let groups = derive_concurrency_groups(&self.modules, self.max_concurrent_workers());
-            self.concurrency_groups = groups.clone();
-            report.concurrency_groups = Some(groups);
+            info!(?groups, "derived engine.concurrency_groups");
+            self.concurrency_groups = groups;
         }
-
-        report
     }
 
     /// Validates engine-level invariants that cannot be expressed in the type system.
@@ -803,16 +801,6 @@ const ROOMY_MEMORY_THRESHOLD_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
-
-/// A field is `Some` only when it was derived; explicitly configured fields stay `None`.
-#[derive(Debug, Default, Clone)]
-pub struct RuntimeDefaultsReport {
-    pub available_parallelism: usize,
-    pub memory_limit_bytes: Option<u64>,
-    pub max_concurrent_workers: Option<usize>,
-    pub stream_block_size: Option<u64>,
-    pub concurrency_groups: Option<HashMap<String, usize>>,
-}
 
 pub fn derive_max_concurrent_workers(available_parallelism: usize) -> usize {
     available_parallelism.max(1)
@@ -1150,14 +1138,12 @@ modules: [sdlc, namespace_deletion]
             memory_limit_bytes: Some(32 * GIB),
         };
 
-        let report = cfg.resolve_runtime_defaults(&resources);
+        cfg.resolve_runtime_defaults(&resources);
 
         assert_eq!(cfg.max_concurrent_workers(), 20);
         assert_eq!(cfg.handlers.entity_handler.stream_block_size(), 262_144);
         assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&15));
         assert_eq!(cfg.concurrency_groups.get("code"), Some(&5));
-        assert_eq!(report.max_concurrent_workers, Some(20));
-        assert_eq!(report.stream_block_size, Some(262_144));
     }
 
     #[test]
@@ -1169,7 +1155,7 @@ modules: [sdlc, namespace_deletion]
         };
         cfg.handlers.entity_handler.stream_block_size = Some(1024);
 
-        let report = cfg.resolve_runtime_defaults(&ContainerResources {
+        cfg.resolve_runtime_defaults(&ContainerResources {
             available_parallelism: 64,
             memory_limit_bytes: Some(64 * GIB),
         });
@@ -1180,9 +1166,6 @@ modules: [sdlc, namespace_deletion]
             cfg.concurrency_groups,
             HashMap::from([("sdlc".to_string(), 3)])
         );
-        assert!(report.max_concurrent_workers.is_none());
-        assert!(report.stream_block_size.is_none());
-        assert!(report.concurrency_groups.is_none());
     }
 
     #[test]

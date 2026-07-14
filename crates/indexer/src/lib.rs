@@ -85,9 +85,9 @@ pub async fn run(
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
     let mut config = config.clone();
-    let resources = gkg_server_config::ContainerResources::detect();
-    let derived = config.engine.resolve_runtime_defaults(&resources);
-    log_derived_runtime_defaults(&derived);
+    config
+        .engine
+        .resolve_runtime_defaults(&gkg_server_config::ContainerResources::detect());
     let config = &config;
 
     config.schema.validate()?;
@@ -253,26 +253,6 @@ pub async fn run(
 
     info!("indexer stopped");
     result
-}
-
-fn log_derived_runtime_defaults(derived: &gkg_server_config::RuntimeDefaultsReport) {
-    if let Some(workers) = derived.max_concurrent_workers {
-        info!(
-            available_parallelism = derived.available_parallelism,
-            value = workers,
-            "derived engine.max_concurrent_workers"
-        );
-    }
-    if let Some(block_size) = derived.stream_block_size {
-        info!(
-            memory_limit_bytes = derived.memory_limit_bytes,
-            value = block_size,
-            "derived engine.handlers.entity_handler.stream_block_size"
-        );
-    }
-    if let Some(groups) = &derived.concurrency_groups {
-        info!(?groups, "derived engine.concurrency_groups");
-    }
 }
 
 pub async fn run_dispatcher(
