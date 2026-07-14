@@ -14,7 +14,7 @@ variants:
     description: "Vulnerability occurrence has primary identifier."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_vulnerability_occurrence_identifiers]
 pipelines:
   - name: HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier
     extract:

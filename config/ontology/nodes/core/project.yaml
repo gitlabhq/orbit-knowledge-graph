@@ -104,8 +104,7 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: use_specified_tables
-  tables:
+  reindex:
     - table: siphon_projects
       traversal_path:
         dictionary: project_traversal_paths_dict

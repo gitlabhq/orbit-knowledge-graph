@@ -8,7 +8,7 @@ variants:
     description: "Merge request fixes vulnerability."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_vulnerability_merge_request_links]
 pipelines:
   - name: FIXES_siphon_vulnerability_merge_request_links_Vulnerability
     extract:

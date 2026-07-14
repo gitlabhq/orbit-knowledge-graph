@@ -56,12 +56,10 @@ pub(crate) struct NodeYaml {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct IndexerYaml {
+    /// Explicit reindex trigger tables: Siphon changes to any of these mean
+    /// this entity's root namespace must be re-indexed.
     #[serde(default)]
-    reindex: Option<String>,
-    /// Explicit reindex trigger tables. Required, and only allowed, when
-    /// `reindex: use_specified_tables`.
-    #[serde(default)]
-    tables: Vec<ReindexOnYaml>,
+    pub(crate) reindex: Vec<ReindexOnYaml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -450,7 +448,6 @@ impl NodeYaml {
         if let Some(indexer) = &self.indexer {
             indexer.validate(&name)?;
         }
-        let reindex = ReindexDirective::from_indexer(self.indexer.as_ref());
         let pipelines = self
             .pipelines
             .into_iter()
@@ -468,7 +465,8 @@ impl NodeYaml {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let reindex_on = reindex.resolve_reindex_sources(&name, &pipelines)?;
+        let reindex_on =
+            convert_reindex_on(&name, self.indexer.map(|i| i.reindex).unwrap_or_default())?;
         for pipeline in &pipelines {
             if !matches!(pipeline.transform, Transform::DataFusion { .. }) {
                 return Err(OntologyError::Validation(format!(
@@ -513,92 +511,12 @@ impl NodeYaml {
 
 impl IndexerYaml {
     pub(crate) fn validate(&self, entity_name: &str) -> Result<(), OntologyError> {
-        match self.reindex.as_deref() {
-            None | Some("use_source_tables") => {
-                if self.tables.is_empty() {
-                    Ok(())
-                } else {
-                    Err(OntologyError::Validation(format!(
-                        "entity '{entity_name}' declares indexer.tables but reindex is \
-                         'use_source_tables'; set reindex to 'use_specified_tables' to list \
-                         explicit reindex trigger tables"
-                    )))
-                }
-            }
-            Some("use_specified_tables") => {
-                if self.tables.is_empty() {
-                    Err(OntologyError::Validation(format!(
-                        "entity '{entity_name}' sets indexer.reindex 'use_specified_tables' but \
-                         declares no indexer.tables"
-                    )))
-                } else {
-                    Ok(())
-                }
-            }
-            Some(value) => Err(OntologyError::Validation(format!(
-                "entity '{entity_name}' sets unsupported indexer.reindex '{value}'"
-            ))),
+        if self.reindex.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "entity '{entity_name}' declares an indexer block with an empty reindex list"
+            )));
         }
-    }
-
-    pub(crate) fn uses_source_tables(&self) -> bool {
-        matches!(self.reindex.as_deref(), None | Some("use_source_tables"))
-    }
-
-    pub(crate) fn specified_reindex(&self) -> Vec<ReindexOnYaml> {
-        self.tables.clone()
-    }
-}
-
-/// Entity-level reindex configuration resolved from the `indexer` block. Reindex
-/// is an indexer concern declared once per entity, and the pipeline model knows
-/// nothing about it: either the trigger tables are derived from the pipelines'
-/// source tables (`use_source_tables`), or listed explicitly under
-/// `indexer.tables` (`use_specified_tables`).
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ReindexDirective {
-    use_source_tables: bool,
-    specified: Vec<ReindexOnYaml>,
-}
-
-impl ReindexDirective {
-    pub(crate) fn from_indexer(indexer: Option<&IndexerYaml>) -> Self {
-        Self {
-            use_source_tables: indexer.is_some_and(IndexerYaml::uses_source_tables),
-            specified: indexer
-                .map(IndexerYaml::specified_reindex)
-                .unwrap_or_default(),
-        }
-    }
-
-    /// Resolves this entity's reindex trigger tables. `use_specified_tables`
-    /// takes the explicit list; `use_source_tables` derives the first source
-    /// table of each namespaced pipeline (global entities do not participate in
-    /// namespace-change reindexing).
-    pub(crate) fn resolve_reindex_sources(
-        self,
-        entity_name: &str,
-        pipelines: &[Pipeline],
-    ) -> Result<Vec<ReindexSource>, OntologyError> {
-        if !self.specified.is_empty() {
-            return convert_reindex_on(entity_name, self.specified);
-        }
-        if !self.use_source_tables {
-            return Ok(Vec::new());
-        }
-        Ok(pipelines
-            .iter()
-            .filter(|p| p.scope == EtlScope::Namespaced)
-            .filter_map(|p| {
-                let Extract::ClickHouse(extract) = &p.extract;
-                extract.tables.first()
-            })
-            .map(|table| ReindexSource {
-                table: table.clone(),
-                target: entity_name.to_string(),
-                traversal_path: default_path_resolution(),
-            })
-            .collect())
+        Ok(())
     }
 }
 
@@ -1307,8 +1225,7 @@ mod tests {
                 type: string
                 source: traversal_path
             indexer:
-              reindex: use_specified_tables
-              tables: [source_table, source_details]
+              reindex: [source_table, source_details]
             pipelines:
               - name: TestNode
                 extract:
@@ -1346,8 +1263,7 @@ mod tests {
                 type: string
                 source: traversal_path
             indexer:
-              reindex: use_specified_tables
-              tables:
+              reindex:
                 - table: source_details
                   traversal_path:
                     dictionary: source_paths_dict

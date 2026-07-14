@@ -45,7 +45,6 @@ impl DerivedYaml {
         if let Some(indexer) = &self.indexer {
             indexer.validate(&name)?;
         }
-        let reindex = super::node::ReindexDirective::from_indexer(self.indexer.as_ref());
         let pipelines = self
             .pipelines
             .into_iter()
@@ -76,7 +75,10 @@ impl DerivedYaml {
                 "derived entity '{name}' must declare at least one pipeline"
             )));
         }
-        let reindex_on = reindex.resolve_reindex_sources(&name, &pipelines)?;
+        let reindex_on = super::node::convert_reindex_on(
+            &name,
+            self.indexer.map(|i| i.reindex).unwrap_or_default(),
+        )?;
         Ok(DerivedEntity {
             name,
             emits: self.emits,

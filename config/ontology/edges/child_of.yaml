@@ -8,7 +8,7 @@ variants:
     description: "Pipeline is a downstream child of the source pipeline."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_ci_sources_pipelines]
 pipelines:
   - name: CHILD_OF_siphon_ci_sources_pipelines_Pipeline
     extract:

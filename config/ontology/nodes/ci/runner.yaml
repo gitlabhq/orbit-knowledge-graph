@@ -101,8 +101,6 @@ properties:
     nullable: true
     description: "Last contact timestamp."
 
-indexer:
-  reindex: use_source_tables
 pipelines:
   - name: Runner
     extract:

@@ -46,7 +46,7 @@ variants:
     description: "User has access to project (via direct membership or group inheritance)."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_members]
 pipelines:
   - name: MEMBER_OF_siphon_members
     extract:

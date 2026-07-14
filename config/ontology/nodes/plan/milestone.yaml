@@ -97,7 +97,7 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_milestones]
 pipelines:
   - name: Milestone
     extract:

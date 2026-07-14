@@ -18,7 +18,7 @@
 migrations:
 - version: 81
   scope: none
-  note: MR !1931 pipeline/.sql.j2 restructuring; DDL and golden extract SQL byte-identical.
+  note: MR !1931 pipeline/.sql.j2 restructuring plus indexer.reindex explicit-list unification; DDL and reindex_sources() output byte-identical.
 - version: 80
   scope: '*'
   note: ledger introduced; earlier versions implicitly "*"

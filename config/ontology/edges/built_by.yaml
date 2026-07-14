@@ -14,7 +14,7 @@ variants:
     description: "Package file was built by pipeline (per-artifact provenance)."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_packages_build_infos, siphon_packages_package_file_build_infos]
 pipelines:
   - name: BUILT_BY_siphon_packages_build_infos_Pipeline
     extract:

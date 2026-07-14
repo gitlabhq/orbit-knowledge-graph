@@ -18,7 +18,7 @@ variants:
     description: "Work item is related to another work item."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_issue_links]
 pipelines:
   - name: RELATED_TO_siphon_issue_links_WorkItem
     extract:

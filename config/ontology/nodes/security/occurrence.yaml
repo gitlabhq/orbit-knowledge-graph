@@ -168,7 +168,7 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_vulnerability_occurrences]
 pipelines:
   - name: VulnerabilityOccurrence
     extract:

@@ -14,7 +14,7 @@ variants:
     description: "User is assigned to work item."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_merge_request_assignees, siphon_issue_assignees]
 pipelines:
   - name: ASSIGNED_siphon_merge_request_assignees_MergeRequest
     extract:

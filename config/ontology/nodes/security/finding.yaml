@@ -105,7 +105,7 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_security_findings]
 pipelines:
   - name: Finding
     extract:

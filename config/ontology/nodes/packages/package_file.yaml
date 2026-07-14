@@ -78,7 +78,7 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_packages_package_files]
 pipelines:
   - name: PackageFile
     extract:

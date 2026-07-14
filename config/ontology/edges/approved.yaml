@@ -7,7 +7,7 @@ variants:
     description: "User approved a merge request."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_approvals]
 pipelines:
   - name: APPROVED_siphon_approvals_MergeRequest
     extract:

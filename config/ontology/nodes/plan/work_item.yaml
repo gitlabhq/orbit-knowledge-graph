@@ -151,7 +151,7 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [work_items]
 pipelines:
   - name: WorkItem
     extract:

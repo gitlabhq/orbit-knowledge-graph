@@ -4,7 +4,7 @@ use crate::OntologyError;
 use crate::entities::{EdgeEntity, EdgeVariantScope};
 use crate::etl::{EtlScope, Pipeline, ReindexSource};
 
-use super::node::{IndexerYaml, PipelineYaml, ReindexDirective};
+use super::node::{IndexerYaml, PipelineYaml, convert_reindex_on};
 use super::{EtlSettings, ReadOntologyFile};
 
 #[derive(Debug, Deserialize)]
@@ -72,7 +72,6 @@ impl EdgeYaml {
         if let Some(indexer) = &self.indexer {
             indexer.validate(relationship_kind)?;
         }
-        let reindex = ReindexDirective::from_indexer(self.indexer.as_ref());
         let pipelines = self
             .pipelines
             .into_iter()
@@ -86,7 +85,10 @@ impl EdgeYaml {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let reindex_on = reindex.resolve_reindex_sources(relationship_kind, &pipelines)?;
+        let reindex_on = convert_reindex_on(
+            relationship_kind,
+            self.indexer.map(|i| i.reindex).unwrap_or_default(),
+        )?;
         Ok((pipelines, reindex_on))
     }
 }

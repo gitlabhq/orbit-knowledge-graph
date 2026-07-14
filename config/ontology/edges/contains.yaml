@@ -42,7 +42,7 @@ variants:
     description: "Directory contains file."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_work_item_parent_links]
 pipelines:
   - name: CONTAINS_siphon_work_item_parent_links_WorkItem
     extract:

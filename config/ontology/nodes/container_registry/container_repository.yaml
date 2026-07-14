@@ -70,7 +70,7 @@ properties:
     description: "Namespace path for authz."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_container_repositories]
 pipelines:
   - name: ContainerRepository
     extract:

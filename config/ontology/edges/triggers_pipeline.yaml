@@ -9,7 +9,7 @@ variants:
     description: "Bridge job (type='Ci::Bridge') triggered the downstream pipeline."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_ci_sources_pipelines]
 pipelines:
   - name: TRIGGERS_PIPELINE_siphon_ci_sources_pipelines_Pipeline
     extract:

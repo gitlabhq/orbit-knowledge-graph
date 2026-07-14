@@ -22,7 +22,7 @@ variants:
 #   app/models/resource_state_event.rb (enum :state ... .merge(reopened: 5))
 #   app/models/concerns/issuable.rb STATE_ID_MAP (opened:1, closed:2, merged:3, locked:4)
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_resource_state_events]
 pipelines:
   - name: REOPENED_siphon_resource_state_events_MergeRequest
     extract:

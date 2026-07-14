@@ -165,8 +165,6 @@ properties:
       16: duo_code_review_bot
       17: import_user
 
-indexer:
-  reindex: use_source_tables
 pipelines:
   - name: User
     extract:

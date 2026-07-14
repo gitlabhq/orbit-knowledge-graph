@@ -6,8 +6,7 @@ description: >-
 emits: [MENTIONS]
 
 indexer:
-  reindex: use_specified_tables
-  tables: [siphon_notes, siphon_system_note_metadata]
+  reindex: [siphon_notes, siphon_system_note_metadata]
 pipelines:
   - name: SystemNote
     extract:

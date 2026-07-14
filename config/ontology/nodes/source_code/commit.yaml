@@ -57,8 +57,7 @@ properties:
 # Shared-commit transient: deleting one MR can tombstone a Commit still
 # referenced by another MR. The next re-index re-inserts it.
 indexer:
-  reindex: use_specified_tables
-  tables: [merge_requests]
+  reindex: [merge_requests]
 pipelines:
   - name: Commit
     extract:

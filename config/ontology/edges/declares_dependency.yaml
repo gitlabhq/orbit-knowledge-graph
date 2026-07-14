@@ -9,7 +9,7 @@ variants:
     description: "Package declares a dependency."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_packages_dependency_links]
 pipelines:
   - name: DECLARES_DEPENDENCY_siphon_packages_dependency_links_Dependency
     extract:

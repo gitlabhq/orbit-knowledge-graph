@@ -136,7 +136,7 @@ properties:
     description: "Per-file unified diff. Resolved from GitLab at query time. Null when too_large is true."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_merge_request_diff_files]
 pipelines:
   - name: MergeRequestDiffFile
     extract:

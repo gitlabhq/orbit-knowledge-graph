@@ -1508,20 +1508,11 @@
     },
     "indexerConfig": {
       "type": "object",
-      "description": "Indexer behavior for this ontology entity, including how its reindex trigger tables are chosen.",
+      "description": "Indexer behavior for this ontology entity: the explicit reindex trigger tables.",
       "properties": {
         "reindex": {
-          "type": "string",
-          "enum": [
-            "use_source_tables",
-            "use_specified_tables"
-          ],
-          "default": "use_source_tables",
-          "description": "How this entity's reindex trigger tables are chosen. 'use_source_tables' derives them from the pipeline's source tables; 'use_specified_tables' takes the explicit 'tables' list."
-        },
-        "tables": {
           "type": "array",
-          "description": "Datalake tables whose Siphon changes mean this entity's root namespace must be re-indexed. Required, and only allowed, when reindex is 'use_specified_tables'.",
+          "description": "Datalake tables whose Siphon changes mean this entity's root namespace must be re-indexed.",
           "items": {
             "oneOf": [
               {
@@ -1535,31 +1526,8 @@
           "minItems": 1
         }
       },
-      "allOf": [
-        {
-          "if": {
-            "required": [
-              "reindex"
-            ],
-            "properties": {
-              "reindex": {
-                "const": "use_specified_tables"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "tables"
-            ]
-          },
-          "else": {
-            "not": {
-              "required": [
-                "tables"
-              ]
-            }
-          }
-        }
+      "required": [
+        "reindex"
       ],
       "additionalProperties": false
     },

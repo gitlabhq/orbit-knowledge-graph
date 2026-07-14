@@ -130,7 +130,7 @@ properties:
     description: "Full unified patch. Resolved from GitLab at query time."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_merge_request_diffs]
 pipelines:
   - name: MergeRequestDiff
     extract:

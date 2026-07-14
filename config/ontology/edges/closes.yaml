@@ -8,7 +8,7 @@ variants:
     description: "Merge request closes work item."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_merge_requests_closing_issues]
 pipelines:
   - name: CLOSES_siphon_merge_requests_closing_issues_WorkItem
     extract:

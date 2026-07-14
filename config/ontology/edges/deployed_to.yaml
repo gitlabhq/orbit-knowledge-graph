@@ -9,7 +9,7 @@ variants:
     description: "Merge request was included in deployment."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_deployment_merge_requests]
 pipelines:
   - name: DEPLOYED_TO_siphon_deployment_merge_requests_Deployment
     extract:

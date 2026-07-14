@@ -9,7 +9,7 @@ variants:
     description: "User is a reviewer of merge request."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_merge_request_reviewers]
 pipelines:
   - name: REVIEWER_siphon_merge_request_reviewers_MergeRequest
     extract:

@@ -14,7 +14,7 @@ variants:
     description: "Merge request has label."
 
 indexer:
-  reindex: use_source_tables
+  reindex: [siphon_label_links]
 pipelines:
   - name: HAS_LABEL_siphon_label_links_Label
     extract:

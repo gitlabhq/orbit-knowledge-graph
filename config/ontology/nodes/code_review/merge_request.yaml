@@ -310,8 +310,7 @@ properties:
     description: "Full unified diff. Resolved from GitLab at query time."
 
 indexer:
-  reindex: use_specified_tables
-  tables: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
+  reindex: [merge_requests, siphon_merge_request_metrics, siphon_merge_request_reviewers, siphon_approvals]
 pipelines:
   - name: MergeRequest
     extract:
