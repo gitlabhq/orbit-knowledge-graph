@@ -169,8 +169,8 @@ no ClickHouse SQL and no knowledge of runtime markers. `ExtractQuery` is either
 `Sql(String)` (the raw content of a co-located `.sql.j2` MiniJinja template, carried
 verbatim — markers unresolved). Derived-entity pipelines are always `Sql`: their rows
 are neither node properties nor edge endpoints, so the indexer has nothing to generate
-a projection from. Seven `.sql.j2` files exist — the six genuinely complex nodes (Group,
-Project, MergeRequest, Commit, MergeRequestDiffFile, Finding) and the SystemNote
+a projection from. Eight `.sql.j2` files exist — the seven genuinely complex nodes (Group,
+Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) and the SystemNote
 derived entity; every other node and edge is `generated`.
 
 The indexer's `plan` module is the one entry point that turns that model into runs.
@@ -178,32 +178,30 @@ The indexer's `plan` module is the one entry point that turns that model into ru
 walks nodes, edge ETL configs, and derived entities, decomposes each pipeline once,
 and hands each stage exactly its inputs so data flows top-down:
 
-- `plan/enrichment.rs` is the single `_eN` join convention. Two constructors produce
-  the same `EnrichmentJoin` core with different key semantics: `node_ref_joins`
-  (edges — side table keyed by its own `id`, matched against an endpoint field) and
-  `declared_joins` (nodes/derived — side table keyed by the declared `key`, matched
-  against the page `id` and scoped by traversal_path). `build.rs` calls the right one
-  per plan and passes the joins to the extract renderer (and, for edges, to the
-  transform's denorm mapping).
+- `plan/extract/enrichment.rs` is the single `_eN` join convention:
+  `EnrichmentJoin::from_mapping` turns an edge's endpoint `enrich:` lists into one
+  `argMax`-deduplicated point-lookup CTE per enriched `Literal` endpoint (side table
+  keyed by its own `id`, matched against the endpoint field, path-scoped for
+  namespaced endpoints of a namespaced edge). `build.rs` calls it per edge plan and
+  passes the joins to the extract renderer.
 - `plan/extract/` produces one `ExtractSpec` (validated `ExtractTemplate` +
-  effective watermark/deleted + sort key) from `&ontology::Extract` plus
+  effective watermark/deleted + batch schema) from `&ontology::Extract` plus
   transform-neutral inputs (typed source columns, `_batch` column lists, enrichment
   joins) computed by `build.rs`. It imports **nothing** from the transform stage.
-  Its shape-specific entry points (`extract::node`, `extract::flat`,
-  `extract::enriched`, `extract::authored_sql`) are selected by the exhaustive
-  `match` on `ExtractQuery` in `build.rs`; `extract/generated.rs` renders SQL,
+  `build.rs` matches exhaustively on `ExtractQuery`: `Generated` dispatches to
+  `generated::build` with a `generated::Shape` (`Node`, `SingleTable`, or `Enriched`),
+  `Sql` dispatches to `sql::build`; `extract/generated.rs` renders SQL,
   `extract/sql.rs` handles the authored escape hatch.
 - `plan/transform.rs` builds the `TransformSpec` (node column projection + FK edge
-  rows, or a standalone edge row, or a named Rust transform). For an enriching edge
-  `build.rs` calls `transform::enriched_denormalized(joins, …)` to map join output
-  columns to the transform's private denorm projections. Net dependency direction:
-  `build → {enrichment, extract, transform}`, `extract → enrichment`,
-  `transform → enrichment`; there is no extract↔transform edge.
+  rows, or a standalone edge row, or a named Rust transform). Its denormalized-tag
+  columns come from `ontology.denormalized_properties()`, independent of the extract
+  joins. Net dependency direction: `build → {extract, transform}`, with enrichment
+  internal to `extract`; there is no extract↔transform edge.
 
 `ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
-unvalidated template cannot reach the runtime. A unit test in the `ontology` crate
-(`authored_sql_uses_lifecycle_markers_and_aliases`) enforces that every authored
-`.sql.j2` file projects `AS _version`/`AS _deleted` and uses
+unvalidated template cannot reach the runtime. A build-time gate in `gkg-server`'s
+build script (`ontology::etl_sql::validate_authored_etl_sql`) enforces that every
+authored `.sql.j2` file projects `AS _version`/`AS _deleted` and uses
 `{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
 names; projection completeness (order_by and enrich columns) is exercised end-to-end
 by the indexer's Docker integration scenarios.
@@ -313,10 +311,11 @@ unaffected.
 - Ontology pipeline model: `crates/ontology/src/etl.rs` (`Pipeline`, `Extract`,
   `ExtractQuery`, `Transform`, `EdgeMapping`); YAML loading in
   `crates/ontology/src/loading/node.rs`; authored `.sql.j2` marker/alias check in
-  `crates/ontology/src/lib.rs` (`authored_sql_uses_lifecycle_markers_and_aliases`)
+  `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from
+  `gkg-server`'s build script)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
   `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; enrichment
-  joins in `plan/enrichment.rs`; extract stage in `plan/extract/` (`ExtractSpec`,
+  joins in `plan/extract/enrichment.rs`; extract stage in `plan/extract/` (`ExtractSpec`,
   `ExtractTemplate`, `SourceColumn`); transform building in `plan/transform.rs`
 - Generic handler: `crates/indexer/src/modules/sdlc/handler/entity.rs`
 - Datalake query capability: `crates/indexer/src/modules/sdlc/datalake.rs` (`DatalakeQuery`)

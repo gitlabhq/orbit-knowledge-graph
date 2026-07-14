@@ -41,7 +41,7 @@ A third **Ontology** shape alongside **Node** and **Relationship**: one or more 
 _Avoid_: storageless node, derived node
 
 **Pipeline**:
-An **Ontology** ETL unit with `extract` and `transform` sections. Nodes, **Relationships**, and **Derived Entities** all use this shape. The extract names source tables, cursor ordering, and either a SQL file next to the YAML that references it or `query: generated`; the transform is `datafusion` or a registered Rust transform.
+An **Ontology** ETL unit with `extract` and `transform` sections. Nodes, **Relationships**, and **Derived Entities** all use this shape. The extract names source tables, cursor ordering, and either a `.sql.j2` template next to the YAML that references it or `query: generated` (optionally with an `extract.filter` predicate); the transform is `datafusion` or a registered Rust transform.
 _Avoid_: old-style `etl` block
 
 **Ontology**:

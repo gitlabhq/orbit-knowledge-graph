@@ -24,7 +24,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   Nodes, edges, and derived entities declare `pipelines:` with `extract` and `transform` sections.
   Setting `query: generated` lets the indexer build the extract SQL from the declaration — a single-table projection for nodes and non-enriching edges, or a `_batch` CTE plus endpoint-enrichment CTEs for edges that denormalize their endpoints (declared under `transform.edges` as `from`/`to` `enrich:`, so edge YAML never restates the join).
   An optional `extract.filter` adds a `_batch` predicate (e.g. `state = 5`) and may use `{{watermark_column}}`/`{{deleted_column}}`.
-  Six genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, Finding) plus the SystemNote derived entity keep a `.sql.j2` MiniJinja template next to the YAML (all ontology SQL templates render through `ontology::sql_template`); derived pipelines are always authored SQL, since their rows are neither node properties nor edge endpoints to generate a projection from.
+  Seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) plus the SystemNote derived entity keep a `.sql.j2` MiniJinja template next to the YAML (all ontology SQL templates render through `ontology::sql_template`); derived pipelines are always authored SQL, since their rows are neither node properties nor edge endpoints to generate a projection from.
   New entity types start in the ontology, not in Rust.
   Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`).
   Schema: `config/schemas/ontology.schema.json`.
