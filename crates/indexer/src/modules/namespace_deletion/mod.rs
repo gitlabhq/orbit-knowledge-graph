@@ -64,6 +64,6 @@ mod tests {
         assert_eq!(policy.max_attempts, Some(1));
         assert_eq!(policy.retry_interval_secs, None);
         assert_eq!(policy.dead_letter_on_exhaustion, None);
-        assert_eq!(policy.concurrency_group.as_deref(), Some("code"));
+        assert_eq!(policy.concurrency_group.as_deref(), Some("sdlc"));
     }
 }

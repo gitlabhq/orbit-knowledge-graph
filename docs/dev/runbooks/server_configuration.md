@@ -175,10 +175,10 @@ Helm chart). They apply with no `engine.topics` config at all:
 
 | Topic | concurrency_group | max_attempts | retry_interval_secs | dead_letter_on_exhaustion |
 |-------|-------------------|--------------|---------------------|---------------------------|
-| `global-handler` | `sdlc` | 1 | 60 | — |
-| `namespace-handler` | `sdlc` | 1 | 60 | — |
+| `global-handler` | `sdlc` | 1 | — | — |
+| `namespace-handler` | `sdlc` | 1 | — | — |
 | `code-indexing-task` | `code` | 5 | 60 | true |
-| `namespace-deletion` | `code` | 1 | — | — |
+| `namespace-deletion` | `sdlc` | 1 | — | — |
 
 To override a single field, e.g. raise code retries to 8:
 

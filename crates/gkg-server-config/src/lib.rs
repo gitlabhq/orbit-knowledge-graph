@@ -34,7 +34,6 @@ pub use engine::{
     NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
     ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
     StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
-    derive_concurrency_groups, derive_max_concurrent_workers, derive_stream_block_size,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
@@ -43,6 +42,9 @@ pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
 pub use query::{CompilerDerivedSettings, PathResolverConfig, QueryConfig, QuerySettings};
-pub use resources::ContainerResources;
+pub use resources::{
+    ContainerResources, derive_concurrency_groups, derive_max_concurrent_workers,
+    derive_stream_block_size,
+};
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;
