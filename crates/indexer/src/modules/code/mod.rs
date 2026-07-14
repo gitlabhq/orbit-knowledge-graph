@@ -36,10 +36,6 @@ pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
 const CODE_CONCURRENCY_GROUP: &str = "code";
 
-/// Default subscription policy for [`CODE_INDEXING_TASK_TOPIC`]. Code indexing is
-/// event-driven (one Siphon push per repository) and never re-dispatched, so a
-/// transient failure must retry and dead-letter on exhaustion; acking on failure
-/// would silently drop that repository's index update.
 pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(CODE_CONCURRENCY_GROUP.to_string()),

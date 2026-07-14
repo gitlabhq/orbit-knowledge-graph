@@ -70,9 +70,6 @@ engine:
   concurrency_groups:
     sdlc: 12
     code: 4
-  # Topic subscription policy (retry, DLQ, concurrency group) is declared in code
-  # by the module that owns each topic (crates/indexer/src/modules/*). Add an
-  # `engine.topics.<name>` entry here only to override individual fields.
   handlers:
     entity-handler:
       system_notes_resolve_lookup_batch_size: 1000
@@ -103,10 +100,6 @@ engine:
         small_repo_max_files: 650
         small_indexing_slots: 6
         big_indexing_slots: 2
-
-# Scheduler cron/interval defaults are declared in code (ScheduledTasksConfiguration
-# in crates/gkg-server-config/src/engine.rs). Add a `schedule.tasks.<name>` entry
-# only to override a task's cadence.
 
 health_check:
   bind_address: "0.0.0.0:4201"

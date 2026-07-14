@@ -30,10 +30,6 @@ use tracing::info;
 
 const SDLC_CONCURRENCY_GROUP: &str = "sdlc";
 
-/// Default subscription policy shared by the SDLC dispatch topics
-/// ([`GLOBAL_HANDLER_TOPIC`] and [`NAMESPACE_HANDLER_TOPIC`]). Both are
-/// re-dispatched every scheduler cycle, so a transient failure is retried on the
-/// next cycle rather than in-band — `max_attempts: 1`, no dead-letter.
 pub fn sdlc_dispatch_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(SDLC_CONCURRENCY_GROUP.to_string()),

@@ -56,9 +56,7 @@ impl SubscriptionConfig {
         self.retry_interval_secs.map(Duration::from_secs)
     }
 
-    /// Layers `overlay` field-wise onto `self`: every field `overlay` sets wins,
-    /// and every unset field keeps `self`'s value. Modules call this to merge a
-    /// sparse `engine.topics.<name>` config entry over their declared default.
+    /// Field-wise merge: fields `overlay` sets win, unset fields keep `self`'s value.
     pub fn overlaid_with(&self, overlay: &SubscriptionConfig) -> SubscriptionConfig {
         SubscriptionConfig {
             concurrency_group: overlay
@@ -74,8 +72,6 @@ impl SubscriptionConfig {
         }
     }
 
-    /// Layers an optional config override onto `self`, returning `self` unchanged
-    /// when no override is present.
     pub fn with_optional_override(
         &self,
         overlay: Option<&SubscriptionConfig>,

@@ -18,9 +18,6 @@ use gkg_server_config::SubscriptionConfig;
 
 const NAMESPACE_DELETION_CONCURRENCY_GROUP: &str = "code";
 
-/// Default subscription policy for [`NAMESPACE_DELETION_TOPIC`]. Deletion is
-/// re-dispatched by the daily scheduler, so a failed attempt is retried on the
-/// next run rather than in-band — `max_attempts: 1`, no dead-letter.
 pub fn namespace_deletion_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
         concurrency_group: Some(NAMESPACE_DELETION_CONCURRENCY_GROUP.to_string()),

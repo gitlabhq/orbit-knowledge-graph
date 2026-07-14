@@ -147,10 +147,6 @@ mod tests {
     use super::*;
     use crate::engine::EngineConfiguration;
 
-    /// A full helm-chart-shaped `engine` block (topics + handlers) still
-    /// deserializes: operators send complete topic blocks during the transition
-    /// to code-declared defaults, and each block is carried through as a
-    /// field-wise override that happens to restate the declared default.
     #[test]
     fn engine_config_deserializes_from_kebab_case_yaml() {
         let yaml = r#"
@@ -298,11 +294,6 @@ handlers:
         );
     }
 
-    /// `GKG_ENGINE__TOPICS__*` and `GKG_SCHEDULE__*` overrides still reach the
-    /// sparse `engine.topics` map and `schedule.tasks` even though
-    /// `config/default.yaml` no longer declares those blocks: the fields live in
-    /// `AppConfig`, so the layered loader populates them from the highest-priority
-    /// source. `set_override` mirrors what `config::Environment` produces.
     #[test]
     fn env_style_overrides_reach_topics_and_schedule() {
         let dir = tempfile::TempDir::new().unwrap();
