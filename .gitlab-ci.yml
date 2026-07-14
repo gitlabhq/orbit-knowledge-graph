@@ -515,7 +515,7 @@ check_docs_i18n_markdown:
     - lychee --offline --include-fragments docs-locale/*/source/**/*.md
 
 docs_hugo_build:
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.150.1
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
   extends:
     - .mr-only-rules
