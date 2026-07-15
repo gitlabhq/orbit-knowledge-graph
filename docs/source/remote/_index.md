@@ -31,7 +31,7 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 - Indexes: Full SDLC + code graph
 - Storage: ClickHouse (managed, no setup required)
 
-[Get started with Orbit Remote](getting-started.md)
+[Get started with GitLab Orbit Remote](getting-started.md)
 
 ## In this section
 

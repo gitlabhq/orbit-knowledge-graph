@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit Local - build and query a code graph on your own machine, no GitLab instance required.
+description: GitLab Orbit Local - build and query a code graph on your own machine, no GitLab instance required.
 title: GitLab Orbit Local
 ---
 
@@ -21,14 +21,14 @@ title: GitLab Orbit Local
 
 {{< /history >}}
 
-Orbit Local runs entirely on your machine. Build a code graph for any local
-repository and query it using the same query language as Orbit Remote. No
+GitLab Orbit Local runs entirely on your machine. Build a code graph for any local
+repository and query it using the same query language as GitLab Orbit Remote. No
 GitLab account, no network connection required.
 
 - Indexes: Code only, including files, definitions, cross-file references.
 - Storage: DuckDB (local file at `~/.orbit/graph.duckdb`)
 
-[Get started with Orbit Local](getting-started.md)
+[Get started with GitLab Orbit Local](getting-started.md)
 
 ## In this section
 
@@ -36,7 +36,7 @@ GitLab account, no network connection required.
 |---|---|
 | [Get started](getting-started.md) | Pick an access method and run your first query |
 | [How it works](how-it-works.md) | Indexing pipeline, graph model, query execution |
-| [What Orbit Local indexes](indexing.md) | Code coverage, language support, scope |
+| [What GitLab Orbit Local indexes](indexing.md) | Code coverage, language support, scope |
 | [Schema reference](schema.md) | The four node types in the local code graph |
 
 ## Access methods
@@ -49,4 +49,4 @@ GitLab account, no network connection required.
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All processing is local.
+GitLab Orbit Local does not consume GitLab Credits. All processing is local.

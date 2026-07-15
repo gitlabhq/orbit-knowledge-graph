@@ -24,10 +24,10 @@ GitLab Knowledge Graph. It includes:
 - **Troubleshooting** - exit codes, empty-result diagnostics, and common
   pitfalls.
 - **Repository map helpers** - scripts that summarize codebase structure from
-  a local checkout or from Orbit Remote.
+  a local checkout or from GitLab Orbit Remote.
 
-The skill works with both [Orbit Remote](remote/_index.md) and
-[Orbit Local](local/_index.md).
+The skill works with both [GitLab Orbit Remote](remote/_index.md) and
+[GitLab Orbit Local](local/_index.md).
 
 ## Prerequisites
 

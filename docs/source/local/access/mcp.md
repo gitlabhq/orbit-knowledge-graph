@@ -20,9 +20,9 @@ title: Connect to GitLab Orbit Local via MCP
 
 {{< /history >}}
 
-Orbit Local runs as a stateless MCP server over stdio, pointed at the local
-DuckDB graph instead of a GitLab instance. Unlike Orbit Remote (which exposes
-a JSON query DSL), Orbit Local speaks raw DuckDB SQL: agents compose SQL
+GitLab Orbit Local runs as a stateless MCP server over stdio, pointed at the local
+DuckDB graph instead of a GitLab instance. Unlike GitLab Orbit Remote (which exposes
+a JSON query DSL), GitLab Orbit Local speaks raw DuckDB SQL: agents compose SQL
 directly against the property graph tables.
 
 > [!note]
@@ -119,12 +119,12 @@ in my local graph?" is one `run_sql` call away.
 
 ## What's in the local graph
 
-Orbit Local indexes code only: files, directories, definitions, and
+GitLab Orbit Local indexes code only: files, directories, definitions, and
 imported symbols across all 11 supported languages. SDLC data (merge requests,
 pipelines, users, vulnerabilities) is not available locally. That requires
-[Orbit Remote](../../remote/_index.md).
+[GitLab Orbit Remote](../../remote/_index.md).
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All local traffic stays on your
+GitLab Orbit Local does not consume GitLab Credits. All local traffic stays on your
 machine.

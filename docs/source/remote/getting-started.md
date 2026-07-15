@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Enable Orbit Remote on GitLab.com and run your first query.
+description: Enable GitLab Orbit Remote on GitLab.com and run your first query.
 title: Get started with GitLab Orbit Remote
 ---
 
@@ -121,4 +121,4 @@ curl --request POST \
 - [What GitLab Orbit indexes](indexing.md) - understand coverage before writing queries
 - [Schema reference](schema.md) - explore the 28 node types and their properties
 - [Cookbook](cookbook.md) - copy-paste queries for common use cases
-- [Get started with Orbit Local](../local/getting-started.md) - query a local repository offline
+- [Get started with GitLab Orbit Local](../local/getting-started.md) - query a local repository offline

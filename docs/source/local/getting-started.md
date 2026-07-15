@@ -21,7 +21,7 @@ title: Get started with GitLab Orbit Local
 
 {{< /history >}}
 
-Orbit Local runs on your machine. Install the `orbit` binary, pick the access
+GitLab Orbit Local runs on your machine. Install the `orbit` binary, pick the access
 method that matches how you work, then run your first query.
 
 ## Install
@@ -98,8 +98,8 @@ for details.
 | [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
 | [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-local -- orbit mcp serve` |
 
-All three read the same local graph. Orbit Local is queried with DuckDB SQL;
-the structured JSON query DSL is [Orbit Remote](../remote/_index.md) only.
+All three read the same local graph. GitLab Orbit Local is queried with DuckDB SQL;
+the structured JSON query DSL is [GitLab Orbit Remote](../remote/_index.md) only.
 
 ## 60-second quickstart
 
@@ -122,18 +122,18 @@ table and column in it: `gl_definition`, `gl_file`, `gl_directory`,
 
 Next:
 
-- Run a real query: [Use Orbit Local with glab](access/glab.md).
+- Run a real query: [Use GitLab Orbit Local with glab](access/glab.md).
 - Wire it into your AI agent: run `glab orbit setup` to install the GitLab Orbit
   skill, or [connect via MCP](access/mcp.md).
 - Browse the table layout: [Schema reference](schema.md).
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All processing is local.
+GitLab Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 
-- [What Orbit Local indexes](indexing.md) - language and coverage scope.
+- [What GitLab Orbit Local indexes](indexing.md) - language and coverage scope.
 - [Schema reference](schema.md) - the four node types in the local graph.
 - [Cookbook](../remote/cookbook.md) - copy-paste queries (code-only ones apply to Local).
-- [Get started with Orbit Remote](../remote/getting-started.md) - query your full GitLab instance.
+- [Get started with GitLab Orbit Remote](../remote/getting-started.md) - query your full GitLab instance.

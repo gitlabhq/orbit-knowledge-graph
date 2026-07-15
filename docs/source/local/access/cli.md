@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Build and query a local code graph with the GitLab Orbit CLI (orbit) binary. No GitLab account or network connection required.
-title: Use Orbit Local with the GitLab Orbit CLI (`orbit`)
+title: Use GitLab Orbit Local with the GitLab Orbit CLI (`orbit`)
 ---
 
 {{< details >}}
@@ -41,7 +41,7 @@ orbit help
 If you already use the GitLab CLI (`glab`), you can instead install a managed
 binary with `glab orbit local --install`. That binary is invoked as
 `glab orbit local <command>` rather than `orbit` directly - see
-[Use Orbit Local with glab](glab.md).
+[Use GitLab Orbit Local with glab](glab.md).
 
 ### Build from source
 
@@ -164,12 +164,12 @@ the same database. Delete the file to start over.
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All processing is local.
+GitLab Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 
 - [Connect via MCP](mcp.md) - connect Claude Code, Codex, and other agents to
   the local graph.
-- [Use Orbit Local with glab](glab.md) - call the CLI through `glab orbit local`.
+- [Use GitLab Orbit Local with glab](glab.md) - call the CLI through `glab orbit local`.
 - [Schema reference](../../remote/schema.md) - available node types and properties.
 - [Cookbook](../../remote/cookbook.md) - copy-paste queries for common use cases.

@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: What Orbit Local indexes on your machine, which languages are supported, and the boundaries of the local code graph.
+description: What GitLab Orbit Local indexes on your machine, which languages are supported, and the boundaries of the local code graph.
 title: What GitLab Orbit Local indexes
 ---
 
@@ -22,7 +22,7 @@ title: What GitLab Orbit Local indexes
 {{< /history >}}
 
 > [!note]
-> Orbit Local is experimental. Capabilities and command shape may
+> GitLab Orbit Local is experimental. Capabilities and command shape may
 > change before GA.
 
 GitLab Orbit Local builds a code-only graph from a local repository. It does not
@@ -30,7 +30,7 @@ connect to GitLab and does not index SDLC data.
 
 ## Scope
 
-Orbit Local indexes the working tree of any local repository you point it at.
+GitLab Orbit Local indexes the working tree of any local repository you point it at.
 There is no group, project, or branch concept - the index is scoped to the
 directory passed to `orbit index`.
 
@@ -39,7 +39,7 @@ separately by its absolute path.
 
 ## Source code
 
-Orbit Local indexes:
+GitLab Orbit Local indexes:
 
 - Files and directories (respecting `.gitignore`)
 - Function, class, method, and module definitions, including start/end line
@@ -51,7 +51,7 @@ default branch - whatever you have checked out is what gets indexed.
 
 ### Supported languages
 
-GitLab Orbit Local supports the same 13 languages as Orbit Remote. All resolve
+GitLab Orbit Local supports the same 13 languages as GitLab Orbit Remote. All resolve
 cross-file references except Bash/Shell (definitions only).
 
 | Language | Definitions | Cross-file references |
@@ -82,7 +82,7 @@ GitLab Orbit Local has no GitLab connection, so none of the following are availa
 - Work items, milestones, or labels
 - Vulnerabilities or security findings
 
-For SDLC-aware queries, use [Orbit Remote](../remote/indexing.md).
+For SDLC-aware queries, use [GitLab Orbit Remote](../remote/indexing.md).
 
 Also not indexed by GitLab Orbit Local:
 
@@ -98,4 +98,4 @@ protected by your operating system's file permissions.
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All processing is local.
+GitLab Orbit Local does not consume GitLab Credits. All processing is local.

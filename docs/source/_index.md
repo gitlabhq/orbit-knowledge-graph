@@ -44,9 +44,9 @@ Query the graph to answer questions your instance cannot answer directly:
 For a click-through demo, see [GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/).
 <!-- Demo published on 2026-06-30 -->
 
-## Orbit Remote
+## GitLab Orbit Remote
 
-On GitLab.com, Orbit Remote runs as a separate service on GitLab infrastructure. Enable it on a top-level group
+On GitLab.com, GitLab Orbit Remote runs as a separate service on GitLab infrastructure. Enable it on a top-level group
 and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests,
 pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 
@@ -70,30 +70,31 @@ flowchart LR
     GitLab Orbit --> DAP[GitLab Duo Agent Platform]
 ```
 
-Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
+GitLab Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
 
-[Get started with Orbit Remote](remote/getting-started.md)
+[Get started with GitLab Orbit Remote](remote/getting-started.md)
 
-## Orbit Local
+## GitLab Orbit Local
 
-Orbit Local runs entirely on your machine. The GitLab Orbit CLI (`orbit`) parses a local repository,
+GitLab Orbit Local runs entirely on your machine. The GitLab Orbit CLI (`orbit`) parses a local repository,
 extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
 No GitLab instance or network connection required.
 
 ```mermaid
 flowchart LR
-    accTitle: Orbit Local architecture
-    accDescr: The Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI.
+    accTitle: GitLab Orbit Local architecture
+    accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI.
 
     Repo[Local repository] --> CLI["orbit CLI"]
-    CLI --> DB[("DuckDB\n~/.orbit/graph.duckdb")]
+    CLI --> DB[("DuckDB
+~/.orbit/graph.duckdb")]
     DB --> Query[CLI query]
 ```
 
-Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires
-Orbit Remote.
+GitLab Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires
+GitLab Orbit Remote.
 
-[Get started with Orbit Local](local/getting-started.md)
+[Get started with GitLab Orbit Local](local/getting-started.md)
 
 ## What GitLab Orbit indexes
 
@@ -111,6 +112,6 @@ GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript,
 
 ## Get started
 
-- [Enable Orbit Remote and run your first query](remote/getting-started.md)
-- [Build a local code graph with Orbit Local](local/getting-started.md)
+- [Enable GitLab Orbit Remote and run your first query](remote/getting-started.md)
+- [Build a local code graph with GitLab Orbit Local](local/getting-started.md)
 - [Set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md)

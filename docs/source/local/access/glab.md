@@ -24,7 +24,7 @@ title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 > [!disclaimer]
 
 The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to install,
-run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors
+run, and integrate GitLab Orbit Local with your AI agent. `glab orbit local` mirrors
 `glab orbit remote`, so the same patterns work whether you query the GitLab
 instance or your local machine.
 
@@ -145,4 +145,4 @@ with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All processing is local.
+GitLab Orbit Local does not consume GitLab Credits. All processing is local.

@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: How Orbit Local builds and queries a code graph on your machine using the GitLab Orbit CLI and DuckDB.
+description: How GitLab Orbit Local builds and queries a code graph on your machine using the GitLab Orbit CLI and DuckDB.
 title: How GitLab Orbit Local works
 ---
 
@@ -22,7 +22,7 @@ title: How GitLab Orbit Local works
 {{< /history >}}
 
 > [!note]
-> Orbit Local is experimental. Capabilities and command shape may
+> GitLab Orbit Local is experimental. Capabilities and command shape may
 > change before GA.
 
 ## Indexing pipeline
@@ -38,7 +38,7 @@ The v2 pipeline runs all language parsers in parallel. Indexing a medium-sized r
 
 ## The graph model
 
-Orbit Local builds a code-only graph. It does not have access to SDLC data (merge requests, pipelines, users) because there is no GitLab connection.
+GitLab Orbit Local builds a code-only graph. It does not have access to SDLC data (merge requests, pipelines, users) because there is no GitLab connection.
 
 Nodes in the local graph:
 
@@ -51,7 +51,7 @@ Edges connect files to their definitions, files to their imports, and definition
 
 ## Query execution
 
-Orbit Local exposes the graph as a DuckDB database. Run any read-only SQL
+GitLab Orbit Local exposes the graph as a DuckDB database. Run any read-only SQL
 against it with `orbit sql`:
 
 1. `orbit sql` opens `~/.orbit/graph.duckdb` read-only.
@@ -67,7 +67,7 @@ The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple
 
 ## Supported languages
 
-All 13 languages supported by Orbit Remote are also supported locally:
+All 13 languages supported by GitLab Orbit Remote are also supported locally:
 Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP,
 and Bash/Shell.
 
@@ -75,4 +75,4 @@ See [What GitLab Orbit indexes](../remote/indexing.md#supported-languages) for t
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All processing is local.
+GitLab Orbit Local does not consume GitLab Credits. All processing is local.

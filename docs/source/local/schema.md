@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Reference for the four node types in the Orbit Local code graph and how they connect.
+description: Reference for the four node types in the GitLab Orbit Local code graph and how they connect.
 title: Schema reference
 ---
 
@@ -22,11 +22,11 @@ title: Schema reference
 {{< /history >}}
 
 > [!note]
-> Orbit Local is experimental. Capabilities and command shape may
+> GitLab Orbit Local is experimental. Capabilities and command shape may
 > change before GA.
 
 GitLab Orbit Local indexes 4 node types - all in the source code domain. There is no
-SDLC layer, because Orbit Local does not connect to GitLab.
+SDLC layer, because GitLab Orbit Local does not connect to GitLab.
 
 To inspect the live DuckDB schema at any time:
 
@@ -52,9 +52,9 @@ Edges in the local graph connect:
 - Files to the symbols they import
 - Imported symbols to the definitions they resolve to in other files
 
-## Differences from Orbit Remote
+## Differences from GitLab Orbit Remote
 
-[Orbit Remote](../remote/schema.md) indexes 28 node types across 6 domains. GitLab Orbit Local
+[GitLab Orbit Remote](../remote/schema.md) indexes 28 node types across 6 domains. GitLab Orbit Local
 covers only the source code domain. Anything that requires GitLab data -
 merge requests, pipelines, users, vulnerabilities, work items - is unavailable.
 

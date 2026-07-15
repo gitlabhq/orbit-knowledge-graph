@@ -35,7 +35,7 @@ query GitLab Orbit from the command line.
 
 Two top-level commands:
 
-- `glab orbit remote`: typed subcommands that call the Orbit Remote REST API.
+- `glab orbit remote`: typed subcommands that call the GitLab Orbit Remote REST API.
   Available in `glab` 1.94 or later.
 - `glab orbit setup`: one-command install of the GitLab Orbit skill and MCP config
   for your AI agent. Planned for a future `glab` release. Until it ships,
@@ -62,7 +62,7 @@ Until it ships, [configure your MCP client manually](mcp.md#connect-your-mcp-cli
 
 ## Query GitLab Orbit from the command line
 
-Use `glab orbit remote` (or the `r` alias) to call the Orbit Remote API directly.
+Use `glab orbit remote` (or the `r` alias) to call the GitLab Orbit Remote API directly.
 Useful for scripting, debugging, and exploring the schema before writing queries.
 Requires `glab` 1.94 or later.
 
