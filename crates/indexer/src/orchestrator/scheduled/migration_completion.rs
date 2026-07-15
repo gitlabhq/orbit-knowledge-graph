@@ -87,11 +87,19 @@ static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
 /// without it, leftover checkpoint rows from disabled namespaces would
 /// inflate the numerator and produce a misleading "approaching 100%" log
 /// line while currently-enabled namespaces were still under-indexed.
-const COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: &str = "\
-SELECT count(DISTINCT project_id) AS ns_count \
-FROM {table:Identifier} FINAL \
-WHERE _deleted = false \
-  AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
+static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|| {
+    let top = gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
+    // Match each row's top-level namespace prefix against the enabled set as a
+    // hash-set probe. The `arrayExists(startsWith(...))` form this replaced ran
+    // a per-row scan of all ~1.8k enabled paths and peaked at 93 GiB on the
+    // gitlab.com graph, tripping the OvercommitTracker and wedging promotion.
+    format!(
+        "SELECT count(DISTINCT project_id) AS ns_count \
+         FROM {{table:Identifier}} FINAL \
+         WHERE _deleted = false \
+           AND extract(traversal_path, '{top}') IN {{paths:Array(String)}}"
+    )
+});
 
 /// Returns every `v<N>_*` object outside the keep-set (active + newest `retired_slots`
 /// retired + every migrating version — a rebuild-rollback migrates *below* active), and
@@ -588,7 +596,7 @@ impl MigrationCompletionChecker {
         }
         let batches = self
             .graph
-            .query(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED)
+            .query(&COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED)
             .param("table", code_table)
             .param("paths", enabled_paths)
             .fetch_arrow()
@@ -891,7 +899,13 @@ mod tests {
             "scoped checkpoint count must take an Array(String) param to filter by enabled namespaces — \
              without it, leftover checkpoint rows from disabled namespaces inflate coverage"
         );
-        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("arrayExists"));
+        assert!(
+            COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED
+                .contains("extract(traversal_path, '^[0-9]+/[0-9]+/') IN {paths:Array(String)}"),
+            "scoped checkpoint count must match the enabled top-level path set as a hash-set probe; \
+             the `arrayExists(startsWith(...))` form it replaced peaked at 93 GiB and OOM-wedged promotion"
+        );
+        assert!(!COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("arrayExists"));
     }
 
     /// Coverage math is informational (the predicate doesn't gate on it),
