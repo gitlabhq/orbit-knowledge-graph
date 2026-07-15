@@ -87,7 +87,7 @@ pub async fn run(
     let mut config = config.clone();
     config
         .engine
-        .resolve_runtime_defaults(gkg_server_config::detect_available_parallelism());
+        .resolve_runtime_defaults(&gkg_server_config::ContainerResources::detect());
     let config = &config;
 
     config.schema.validate()?;

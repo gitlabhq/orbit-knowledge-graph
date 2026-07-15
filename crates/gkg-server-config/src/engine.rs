@@ -10,7 +10,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::resources::{DEFAULT_MAX_CONCURRENT_WORKERS, derive_code_indexing_slots};
+use crate::resources::{
+    ContainerResources, DEFAULT_MAX_CONCURRENT_WORKERS, derive_code_indexing_slots,
+};
 
 // ── Base config types ────────────────────────────────────────────────
 
@@ -365,10 +367,10 @@ pub struct CodeIndexingPipelineConfig {
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane. Defaults to 650.
     #[serde(default = "default_code_indexing_small_repo_max_files")]
     pub small_repo_max_files: usize,
-    /// Concurrent indexing slots for small repositories. Unset = derived from the container CPU count.
+    /// Concurrent indexing slots for small repositories. Unset = derived from the container CPU count, capped by its memory limit.
     #[serde(default)]
     pub small_indexing_slots: Option<usize>,
-    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count.
+    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count, capped by its memory limit.
     #[serde(default)]
     pub big_indexing_slots: Option<usize>,
 }
@@ -402,16 +404,17 @@ impl Default for CodeIndexingPipelineConfig {
 }
 
 impl CodeIndexingPipelineConfig {
-    pub fn resolve_runtime_defaults(&mut self, available_parallelism: usize) {
+    pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
         if self.small_indexing_slots.is_some() && self.big_indexing_slots.is_some() {
             return;
         }
 
-        let slots = derive_code_indexing_slots(available_parallelism);
+        let slots = derive_code_indexing_slots(resources.worker_budget());
         if self.small_indexing_slots.is_none() {
             self.small_indexing_slots = Some(slots.small_indexing_slots);
             info!(
-                available_parallelism,
+                available_parallelism = resources.available_parallelism,
+                memory_limit_bytes = resources.memory_limit_bytes,
                 value = slots.small_indexing_slots,
                 "derived code-indexing pipeline.small_indexing_slots"
             );
@@ -419,7 +422,8 @@ impl CodeIndexingPipelineConfig {
         if self.big_indexing_slots.is_none() {
             self.big_indexing_slots = Some(slots.big_indexing_slots);
             info!(
-                available_parallelism,
+                available_parallelism = resources.available_parallelism,
+                memory_limit_bytes = resources.memory_limit_bytes,
                 value = slots.big_indexing_slots,
                 "derived code-indexing pipeline.big_indexing_slots"
             );
@@ -687,7 +691,7 @@ impl IndexerModule {
 #[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
     /// Maximum concurrent message handlers across all modules. Unset = derived
-    /// from the container CPU count.
+    /// from the container CPU count, capped by its memory limit.
     #[serde(default)]
     pub max_concurrent_workers: Option<usize>,
 

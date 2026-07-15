@@ -408,7 +408,7 @@
       "type": "object",
       "properties": {
         "big_indexing_slots": {
-          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count.",
+          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count, capped by its memory limit.",
           "type": [
             "integer",
             "null"
@@ -489,7 +489,7 @@
           "minimum": 0
         },
         "small_indexing_slots": {
-          "description": "Concurrent indexing slots for small repositories. Unset = derived from the container CPU count.",
+          "description": "Concurrent indexing slots for small repositories. Unset = derived from the container CPU count, capped by its memory limit.",
           "type": [
             "integer",
             "null"
@@ -700,7 +700,7 @@
           }
         },
         "max_concurrent_workers": {
-          "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container CPU count.",
+          "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container CPU count, capped by its memory limit.",
           "type": [
             "integer",
             "null"

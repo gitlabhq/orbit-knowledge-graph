@@ -1,10 +1,15 @@
 use std::collections::HashMap;
 
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
 use tracing::info;
 
 use crate::engine::{EngineConfiguration, IndexerModule};
 
 pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
+
+/// Calibrated on prod's hand-tuned pools: code runs 16 workers in 24 GiB and
+/// sdlc 20 in 32 GiB — both ~1.5 GiB per worker.
+const WORKER_MEMORY_BUDGET_BYTES: u64 = 1536 * 1024 * 1024;
 
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
@@ -15,25 +20,53 @@ const CODE_INDEXING_LANE_SHARE_PERCENT: usize = 50;
 /// Reserve big-repo lanes so a flood of small repos can't starve monorepos (big 2 / small 6).
 const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
 
+/// sysinfo reports an unlimited or unreadable memory ceiling as a near-`u64::MAX` sentinel.
+const CGROUP_UNLIMITED_THRESHOLD_BYTES: u64 = 1 << 62;
+
 pub struct CodeIndexingSlots {
     pub small_indexing_slots: usize,
     pub big_indexing_slots: usize,
 }
 
-/// Cgroup-aware on Linux: reflects the pod CPU quota, not the node core count.
-pub fn detect_available_parallelism() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+#[derive(Debug, Clone)]
+pub struct ContainerResources {
+    /// Cgroup-aware on Linux: reflects the pod CPU quota, not the node core count.
+    pub available_parallelism: usize,
+
+    /// `None` when no limit is readable (unlimited cgroup, or no cgroups — e.g. macOS).
+    pub memory_limit_bytes: Option<u64>,
+}
+
+impl ContainerResources {
+    pub fn detect() -> Self {
+        Self {
+            available_parallelism: std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1),
+            memory_limit_bytes: read_cgroup_memory_limit_bytes(),
+        }
+    }
+
+    /// Available parallelism, capped so a CPU-rich but memory-tight pod cannot
+    /// derive more workers than [`WORKER_MEMORY_BUDGET_BYTES`] each can fit in
+    /// the memory limit (#794 was OOMKilled sdlc pods mid-backfill).
+    pub fn worker_budget(&self) -> usize {
+        let cpu = self.available_parallelism.max(1);
+        match self.memory_limit_bytes {
+            Some(bytes) => cpu.min(memory_worker_cap(bytes)),
+            None => cpu,
+        }
+    }
 }
 
 impl EngineConfiguration {
-    pub fn resolve_runtime_defaults(&mut self, available_parallelism: usize) {
+    pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
         if self.max_concurrent_workers.is_none() {
-            let workers = derive_max_concurrent_workers(available_parallelism);
+            let workers = resources.worker_budget();
             self.max_concurrent_workers = Some(workers);
             info!(
-                available_parallelism,
+                available_parallelism = resources.available_parallelism,
+                memory_limit_bytes = resources.memory_limit_bytes,
                 value = workers,
                 "derived engine.max_concurrent_workers"
             );
@@ -45,10 +78,6 @@ impl EngineConfiguration {
             self.concurrency_groups = groups;
         }
     }
-}
-
-pub fn derive_max_concurrent_workers(available_parallelism: usize) -> usize {
-    available_parallelism.max(1)
 }
 
 pub fn derive_concurrency_groups(
@@ -80,8 +109,8 @@ pub fn derive_concurrency_groups(
     groups
 }
 
-pub fn derive_code_indexing_slots(available_parallelism: usize) -> CodeIndexingSlots {
-    let workers = available_parallelism.max(1);
+pub fn derive_code_indexing_slots(worker_budget: usize) -> CodeIndexingSlots {
+    let workers = worker_budget.max(1);
     let indexing = (workers * CODE_INDEXING_LANE_SHARE_PERCENT / 100).max(1);
     let big = (indexing * CODE_BIG_LANE_SHARE_PERCENT / 100).max(1);
     CodeIndexingSlots {
@@ -90,15 +119,70 @@ pub fn derive_code_indexing_slots(available_parallelism: usize) -> CodeIndexingS
     }
 }
 
+fn memory_worker_cap(memory_limit_bytes: u64) -> usize {
+    usize::try_from(memory_limit_bytes / WORKER_MEMORY_BUDGET_BYTES)
+        .unwrap_or(usize::MAX)
+        .max(1)
+}
+
+/// Drops sysinfo's unlimited/unreadable sentinel, leaving a usable byte limit.
+fn readable_memory_limit_bytes(total_memory: u64) -> Option<u64> {
+    (total_memory < CGROUP_UNLIMITED_THRESHOLD_BYTES).then_some(total_memory)
+}
+
+/// sysinfo resolves the process's cgroup via `/proc/self/cgroup`, so this also
+/// works without a private cgroup namespace; non-Linux yields `None`.
+fn read_cgroup_memory_limit_bytes() -> Option<u64> {
+    let pid = get_current_pid().ok()?;
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::nothing(),
+    );
+    let limits = system.process(pid)?.cgroup_limits()?;
+    readable_memory_limit_bytes(limits.total_memory)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    fn resources(
+        available_parallelism: usize,
+        memory_limit_gib: Option<u64>,
+    ) -> ContainerResources {
+        ContainerResources {
+            available_parallelism,
+            memory_limit_bytes: memory_limit_gib.map(|gib| gib * GIB),
+        }
+    }
+
     #[test]
-    fn max_concurrent_workers_tracks_available_parallelism() {
-        assert_eq!(derive_max_concurrent_workers(20), 20);
-        assert_eq!(derive_max_concurrent_workers(1), 1);
-        assert_eq!(derive_max_concurrent_workers(0), 1);
+    fn worker_budget_is_parallelism_without_a_memory_limit() {
+        assert_eq!(resources(20, None).worker_budget(), 20);
+        assert_eq!(resources(0, None).worker_budget(), 1);
+    }
+
+    #[test]
+    fn worker_budget_reproduces_prod_pool_shapes() {
+        assert_eq!(resources(16, Some(24)).worker_budget(), 16);
+        assert_eq!(resources(8, Some(32)).worker_budget(), 8);
+    }
+
+    #[test]
+    fn memory_limit_caps_the_worker_budget() {
+        assert_eq!(resources(8, Some(4)).worker_budget(), 2);
+        assert_eq!(resources(8, Some(1)).worker_budget(), 1);
+    }
+
+    #[test]
+    fn unlimited_sentinel_reads_as_no_memory_limit() {
+        assert_eq!(readable_memory_limit_bytes(u64::MAX), None);
+        assert_eq!(readable_memory_limit_bytes(1 << 62), None);
+        assert_eq!(readable_memory_limit_bytes(32 * GIB), Some(32 * GIB));
     }
 
     #[test]
@@ -131,11 +215,22 @@ mod tests {
     fn resolve_fills_workers_and_groups() {
         let mut cfg = EngineConfiguration::default();
 
-        cfg.resolve_runtime_defaults(20);
+        cfg.resolve_runtime_defaults(&resources(20, None));
 
         assert_eq!(cfg.max_concurrent_workers(), 20);
         assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&15));
         assert_eq!(cfg.concurrency_groups.get("code"), Some(&5));
+    }
+
+    #[test]
+    fn resolve_caps_workers_by_memory() {
+        let mut cfg = EngineConfiguration::default();
+
+        cfg.resolve_runtime_defaults(&resources(16, Some(6)));
+
+        assert_eq!(cfg.max_concurrent_workers(), 4);
+        assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&3));
+        assert_eq!(cfg.concurrency_groups.get("code"), Some(&1));
     }
 
     #[test]
@@ -154,8 +249,8 @@ mod tests {
 
     #[test]
     fn code_slots_floor_every_lane_at_one() {
-        for parallelism in [0, 1] {
-            let slots = derive_code_indexing_slots(parallelism);
+        for budget in [0, 1] {
+            let slots = derive_code_indexing_slots(budget);
             assert_eq!(slots.small_indexing_slots, 1);
             assert_eq!(slots.big_indexing_slots, 1);
         }
@@ -169,7 +264,7 @@ mod tests {
             ..EngineConfiguration::default()
         };
 
-        cfg.resolve_runtime_defaults(64);
+        cfg.resolve_runtime_defaults(&resources(64, None));
 
         assert_eq!(cfg.max_concurrent_workers(), 4);
         assert_eq!(
