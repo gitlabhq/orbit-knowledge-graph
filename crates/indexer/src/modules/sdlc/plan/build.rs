@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use ontology::{EtlScope, Extract, ExtractQuery, NodeEntity, Ontology, Pipeline, Transform};
 
-use super::extract::{ClickHouseExtractDeclaration, ExtractSpec, compile_extract_spec};
+use super::extract::{ClickHouseExtractDeclaration, ClickHouseExtractPlan, compile_extract_spec};
 use super::transform;
-use super::{Plan, Plans, TransformDeclaration, TransformSpec};
+use super::{ExtractPlan, Plan, Plans, TransformDeclaration, TransformSpec};
 
 pub(in crate::modules::sdlc) struct Sizing<'a> {
     pub global_batch_size: u64,
@@ -168,20 +168,16 @@ fn build_derived_plan(
 fn assemble(
     pipeline: &Pipeline,
     target: String,
-    spec: ExtractSpec,
+    mut extract: ClickHouseExtractPlan,
     transform: TransformSpec,
     sizing: &Sizing<'_>,
 ) -> Plan {
-    let Extract::ClickHouse(extract) = &pipeline.extract;
+    extract.batch_size = sizing.resolve(&pipeline.name, pipeline.scope);
     Plan {
         name: pipeline.name.clone(),
         target,
         scope: pipeline.scope,
-        extract_template: spec.template,
-        watermark_column: spec.watermark,
-        deleted_column: spec.deleted,
-        sort_key: extract.order_by.clone(),
-        batch_size: sizing.resolve(&pipeline.name, pipeline.scope),
+        extract: ExtractPlan::ClickHouse(extract),
         transform,
     }
 }
@@ -216,7 +212,6 @@ impl PlanSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::checkpoint::Checkpoint;
     use crate::modules::sdlc::plan::{
         Cursor, CursorFilter, Plan, TransformSpec, TraversalPathFilter, WatermarkFilter,
     };
@@ -246,7 +241,7 @@ mod tests {
     fn render_namespaced(plan: &Plan, path: &str) -> String {
         plan.prepare()
             .with(WatermarkFilter {
-                column: &plan.watermark_column,
+                column: &plan.extract.get_clickhouse_plan().watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
             })
@@ -258,7 +253,7 @@ mod tests {
     fn render_global(plan: &Plan) -> String {
         plan.prepare()
             .with(WatermarkFilter {
-                column: &plan.watermark_column,
+                column: &plan.extract.get_clickhouse_plan().watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
             })
@@ -358,14 +353,14 @@ mod tests {
             .iter()
             .find(|p| p.name == "WorkItem")
             .expect("WorkItem plan should exist");
-        assert_eq!(work_item.batch_size, 50_000);
+        assert_eq!(work_item.extract.get_clickhouse_plan().batch_size, 50_000);
 
         let group = built
             .namespaced
             .iter()
             .find(|p| p.name == "Group")
             .expect("Group plan should exist");
-        assert_eq!(group.batch_size, 1_000_000);
+        assert_eq!(group.extract.get_clickhouse_plan().batch_size, 1_000_000);
     }
 
     #[test]
@@ -379,20 +374,24 @@ mod tests {
         let mut set = PlanSet::default();
         let plan = |name: &str| {
             Plan {
-            name: name.to_string(),
-            target: name.to_string(),
-            scope: EtlScope::Namespaced,
-            extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
-                "SELECT x AS _version, y AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
-                    .to_string(),
-            )
-            .unwrap(),
-            watermark_column: String::new(),
-            deleted_column: String::new(),
-            sort_key: vec![],
-            batch_size: 1,
-            transform: TransformSpec::DataFusion(vec![]),
-        }
+                name: name.to_string(),
+                target: name.to_string(),
+                scope: EtlScope::Namespaced,
+                extract: crate::modules::sdlc::plan::ExtractPlan::ClickHouse(
+                    crate::modules::sdlc::plan::ClickHouseExtractPlan {
+                    template: crate::modules::sdlc::plan::ExtractTemplate::new(
+                        "SELECT x AS _version, y AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
+                            .to_string(),
+                    )
+                    .unwrap(),
+                    watermark_column: String::new(),
+                    deleted_column: String::new(),
+                    sort_key: vec![],
+                    batch_size: 1,
+                    },
+                ),
+                transform: TransformSpec::DataFusion(vec![]),
+            }
         };
         set.insert(plan("dup")).expect("first insert");
         let err = set.insert(plan("dup")).expect_err("collision should fail");
@@ -449,7 +448,7 @@ mod tests {
         let built = plans(&test_ontology(), 1000);
         for name in ["WorkItem", "Milestone"] {
             let plan = built.namespaced.iter().find(|p| p.name == name).unwrap();
-            let sql = plan.extract_template.as_str();
+            let sql = plan.extract.get_clickhouse_plan().template.as_str();
             for col in ["due_date", "start_date"] {
                 assert!(
                     sql.contains(&format!(
@@ -503,10 +502,14 @@ mod tests {
         let expected = format!("state = {REOPENED_STATE}");
         for plan in &reopened {
             assert!(
-                plan.extract_template.as_str().contains(&expected),
+                plan.extract
+                    .get_clickhouse_plan()
+                    .template
+                    .as_str()
+                    .contains(&expected),
                 "{}: {}",
                 plan.name,
-                plan.extract_template.as_str()
+                plan.extract.get_clickhouse_plan().template.as_str()
             );
         }
         assert!(reopened.iter().any(|p| p.name.ends_with("_MergeRequest")));
@@ -644,20 +647,16 @@ mod tests {
     fn cursor_filter_renders_dnf_in_extract_sql() {
         let built = plans(&test_ontology(), 1000);
         let user = built.global.iter().find(|p| p.name == "User").unwrap();
-        let cursor = Cursor::from_checkpoint(&Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: Some(vec!["42".to_string()]),
-            resume_floor: None,
-        });
+        let cursor = Cursor::from_values(vec!["42".to_string()]);
         let sql = user
             .prepare()
             .with(WatermarkFilter {
-                column: &user.watermark_column,
+                column: &user.extract.get_clickhouse_plan().watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
             })
             .with(CursorFilter {
-                sort_key: &user.sort_key,
+                sort_key: &user.extract.get_clickhouse_plan().sort_key,
                 values: cursor.values(),
             })
             .to_sql()

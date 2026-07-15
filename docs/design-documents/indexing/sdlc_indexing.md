@@ -269,19 +269,34 @@ once, it derives distinct field namespaces from each reference's ID field.
 
 **Pipeline: extract, transform, write**
 
-Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct. The loop works like this:
+Each `EntityHandler` owns a compiled plan and a typed extractor. It passes dispatch context to the
+extractor, then runs the returned source sessions through the shared `Pipeline`. The extractor owns
+source reads and resumability; the pipeline owns transform and graph writes. The loop works like
+this:
 
-1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
-2. Start from the pipeline's resolved extraction SQL template and build a parameterized datalake query, adding the current watermark window and (for namespaced entities) traversal path.
-3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
-4. Read each page out of the datalake in full, buffering its Arrow blocks in memory.
+1. The extractor loads its opaque resume state and selects the source window. The ClickHouse
+   implementation decodes the checkpoint watermark and keyset cursor.
+2. The extractor prepares its source request. `ClickHouseExtractor` starts from the compiled SQL
+   template and adds the current watermark window and traversal path.
+3. Each extraction session pages independently. ClickHouse pages use `LIMIT`, composite sort keys
+   (for example, `ORDER BY traversal_path, id`), and a DNF keyset predicate:
+   `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
+4. The session returns each page as Arrow `RecordBatch` values plus opaque resume state and source
+   statistics.
    ClickHouse encodes Arrow `String` columns with 32-bit offsets, so an output block whose text column (e.g. a dense page of `description`/`note` text) exceeds ~2 GiB fails the read with error code 1002. `max_block_size` bounds the rows per output block, so a small enough block keeps every column under the cap.
-   The happy path pays nothing for this; on a 1002 overflow the extract retry (`Pipeline::extract_batch`) drops `max_block_size` straight to the floor block size and re-reads the page — idempotent from the page's start cursor (point 7) — so no single block can exceed the cap.
+   The happy path pays nothing for this; on a 1002 overflow the ClickHouse session drops
+   `max_block_size` straight to the floor block size and re-reads the page from its starting cursor,
+   so no single block can exceed the cap.
 5. Transform each extracted block with the plan's transform. `datafusion` performs row-wise SQL projections for node rows and edge mappings; a registered Rust transform such as `system_notes` can perform custom parsing or lookups. Output rows are grouped by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
 6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. `engine.handlers.entity_handler.stream_block_size` (rows per wire block on the read side) is tunable per deployment.
    Data-page write durability differs by mode (see **Write durability** below); both modes async-batch to coalesce the many small per-page inserts into fewer parts.
-7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
-8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
+7. Ask the extraction session to save its opaque resume state after graph writes and the overlapping
+   next-page read complete. If the indexer crashes mid-pagination, the next run picks up from the
+   last written page. Re-running a page is idempotent because graph tables use
+   `ReplacingMergeTree`.
+8. Ask the extraction session to mark itself completed after its final page. When all sessions
+   finish, the extractor performs source-level completion work; ClickHouse uses this step to
+   consolidate parallel partition checkpoints.
 
 ```sql
 --- Example extraction query with keyset pagination

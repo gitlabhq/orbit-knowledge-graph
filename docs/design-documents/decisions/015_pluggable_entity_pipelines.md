@@ -1,5 +1,5 @@
 ---
-title: "GKG ADR 015: Pluggable transforms over a shared SDLC pipeline"
+title: "GKG ADR 015: Independent extraction and transformation stages"
 creation-date: "2026-06-03"
 authors: [ "@jgdoyon1" ]
 toc_hide: true
@@ -15,309 +15,168 @@ Accepted
 
 ## Context
 
-Before this change, the SDLC indexer's transform stage was SQL-only. Every entity
-flows through one generic `EntityHandler`
-(`crates/indexer/src/modules/sdlc/handler/entity.rs`) that owns a `Plan` and drives
-a shared `Pipeline` (`crates/indexer/src/modules/sdlc/pipeline.rs`). The runtime
-pipeline still owns extraction, transformation, writing, and checkpointing, but the
-ontology input has been unified: nodes, edges, and derived entities all declare
-top-level `pipelines:` entries with `extract` and `transform` sections. The loader
-resolves those YAML entries into `ontology::etl::Pipeline { extract, transform }`;
-the indexer lowers them into a `Plan` whose `extract_template` is the pipeline's
-resolved SQL template and whose `TransformSpec` decides how rows become graph
-outputs.
+SDLC ontology pipelines declare independent `extract` and `transform` sections. Planning already
+compiled those declarations separately, and Arrow `RecordBatch` field names were their only shared
+contract. The runtime did not preserve the same boundary: the generic `Pipeline` owned ClickHouse
+SQL preparation, keyset pagination, watermark windows, retries, checkpoint cursors, transforms,
+and graph writes.
 
-This is right for entities whose graph shape is a row-wise projection of one
-extracted batch. It is wrong for entities whose transform is **derived at runtime
-and needs to query the datalake again mid-transform** — the driver being the
-SystemNote handler (ADR 013), which parses GFM reference tokens out of free-text
-note bodies, then resolves them to entity IDs with batched `IN`-list lookups
-against `siphon_routes` and the entity tables. A `SELECT … FROM source_data`
-against a single in-memory block cannot express that second hop.
+That coupling prevented a non-ClickHouse source from reusing the existing DataFusion or Rust
+transforms. An API or Git extractor would have needed to emulate ClickHouse query and checkpoint
+internals even though its only useful output is a sequence of Arrow batches.
 
-The trap is to conclude "SystemNote needs its own pipeline." It does not, and it
-must not. **The pipeline is mostly shared, hard-won extraction and writing
-machinery that every SDLC entity needs**, and re-owning it per entity is exactly
-the duplication this ADR exists to prevent. The optimizations that live in the
-pipeline today, none of which are entity-specific:
+The existing runtime also carries performance behavior that must remain shared and unchanged:
 
-| Optimization | Where |
+| Behavior | Required shape |
 |---|---|
-| Keyset pagination with DNF cursor predicate (uses the CH sort-key index) | `CursorFilter` (`plan/mod.rs`), `run_plan` page loop (`pipeline.rs`) |
-| Watermark windowing + traversal-path scoping pushed into extract SQL | `WatermarkFilter`/`TraversalPathFilter` (`plan/mod.rs:94`, `:122`) |
-| Whole-page read with single-page read-ahead — next page's read overlaps current page's writes | `run_plan` `tokio::join!` (`pipeline.rs`) |
-| Adaptive retry: shrink `max_block_size` on a datalake failure down to a floor (an Arrow 2 GiB string-offset overflow drops straight to the floor) | `Pipeline::extract_batch` (`pipeline.rs`) |
-| Lazy, per-destination-table bulk writers (no insert opened for an empty table) | `Pipeline::build_writes` (`pipeline.rs`) |
-| Page-boundary checkpointing + crash-safe cursor resume | `run_plan` (`pipeline.rs`), `Cursor` (`plan/mod.rs:19`) |
-| Idempotent re-processing via `ReplacingMergeTree` | graph DDL |
-| Read/write stats + observer wiring | `PipelineStats` (`pipeline.rs:50`), `PipelineContext` (`pipeline.rs:68`) |
-
-Crucially, the only entity-specific object inside that machinery was the
-`Transformer`, built from a plan's SQL `Transformation` list. Everything wrapped
-around it is generic. That is the seam this ADR replaces with a trait.
-
-ADR 014 named an `EntityPipeline` trait with SystemNotes as the custom-pipeline
-example. Taken literally — one custom *pipeline* implementation per hard entity —
-that framing reintroduces the duplication above. This ADR refines it: the
-extension point is the **transform stage**, not the whole pipeline. There remains
-exactly one pipeline *type*, and a single shared instance, parameterized per run by
-the plan's transform.
+| Initial-load partitioning | Extraction sessions run concurrently |
+| Page buffering | Page N+1 extraction overlaps page N writes |
+| Memory bound | The runner holds roughly two source pages per session |
+| Graph writes | Transformed batches are grouped into one bulk write per destination and page |
+| ClickHouse retries | Block sizes follow the existing halving sequence; Arrow string overflow jumps to the configured minimum |
+| Query behavior | Compiled SQL, parameters, sort keys, and batch sizes do not change |
 
 ## Decision
 
-Keep one generic `Pipeline` that owns all extraction and writing. Make the
-**transform** the single pluggable seam, as a trait that can read the datalake.
-Every SDLC entity — SQL-projected or hand-written Rust — runs on the same
-pipeline; only its transform differs.
+Keep one generic SDLC runner, but make extraction and transformation independent runtime stages.
+Arrow `RecordBatch` values are the only data contract between them.
 
-### The seam: a `BlockTransform` trait
+### Planning boundary
 
-Replace the concrete `Transformer { transforms: Vec<Transformation> }` with a
-trait object the pipeline drives per block, built once per run from the plan's
-transform spec (`Pipeline::run`, `transform.rs`):
+`Plan` contains an `ExtractPlan` and a `TransformSpec`. `ExtractPlan` is a typed enum whose current
+variant is `ClickHouseExtractPlan`. The ClickHouse compiler owns source columns, lookup joins,
+query templates, lifecycle columns, sort keys, and batch sizing. Transform compilation owns only
+the fields and graph outputs it reads from the extracted batches.
+
+The plan builder assembles both outputs but neither compiler imports the other. Adding another
+source requires another `ExtractPlan` variant and source compiler; it does not change transform
+declarations or DataFusion SQL.
+
+### Runtime boundary
+
+The source-neutral runtime uses three contracts in
+`crates/indexer/src/modules/sdlc/extract/mod.rs`:
 
 ```rust
 #[async_trait]
-pub(in crate::modules::sdlc) trait BlockTransform: Send + Sync {
-    fn name(&self) -> &str;
+trait Extractor {
+    async fn start_extraction(
+        &self,
+        context: ExtractRunContext,
+    ) -> Result<ExtractRun, HandlerError>;
+}
 
-    /// Destination tables this transform writes, in output-index order.
-    /// Drives the per-table bulk writers; the transform never opens a writer itself.
-    fn outputs(&self) -> &[String];
+#[async_trait]
+trait ExtractSession {
+    async fn get_next_page(&mut self) -> Result<Option<ExtractPage>, HandlerError>;
+    async fn save_page_resume(&self, resume: &ExtractResume) -> Result<(), HandlerError>;
+    async fn save_completed(&self, durability: WriteDurability) -> Result<(), HandlerError>;
+}
 
-    /// Transform one extracted block into rows for one or more outputs.
-    /// Each `TableBatch.output_index` selects an `outputs()` entry.
-    async fn transform(&self, block: &RecordBatch) -> Result<Vec<TableBatch>, HandlerError>;
+struct ExtractPage {
+    batches: Vec<RecordBatch>,
+    resume: ExtractResume,
+    stats: ExtractPageStats,
+    has_more: bool,
 }
 ```
 
-A transform takes no per-call context. Its dependencies (the datalake handle, any
-config) are captured at construction by the registry factory, and the namespace
-scope for a transform's own lookups travels in the block's `traversal_path` column.
-There is no `TransformContext` parameter threaded through the pipeline.
+An `Extractor` starts one or more sessions. Multiple sessions preserve parallel initial-load
+partitions without exposing source partition types to the runner. Each session owns page creation,
+resume state, and completion persistence. `ExtractRunCompletion` performs source-level work after
+all sessions finish, such as consolidating ClickHouse partition checkpoints.
 
-Two design rules the trait enforces:
+The generic `Pipeline` in `crates/indexer/src/modules/sdlc/pipeline.rs` owns only orchestration:
 
-- **No `SessionContext` on the trait surface.** DataFusion is an implementation
-  detail of the SQL transform and must never leak to a transform that does not run
-  SQL. A non-SQL transform must not be handed a DataFusion session.
-- **Datalake access is granted at construction, not via pipeline ownership.** The
-  multi-hop capability SystemNote needs already exists on `DatalakeQuery`
-  (`datalake.rs`: `query_batches`). The registry factory captures that handle when
-  it builds the transform, so the transform does *not* need to own pagination,
-  checkpointing, or writing to do a second-hop read.
+1. Start source sessions.
+2. Build one transform per session.
+3. Transform each page's Arrow batches.
+4. Bulk-write batches grouped by destination table.
+5. Overlap the next source page with current graph writes.
+6. Persist page progress only after graph writes and the overlapping read complete.
+7. Finish the source run after every session succeeds.
 
-The pipeline drives the transform per block (the page's blocks are fed through it
-one at a time and the output rows are grouped per destination table before a single
-bulk write). Per-block granularity also naturally bounds a transform's enrichment
-`IN`-list to one block rather than a whole page; a transform that needs wider
-batching can buffer internally.
+This keeps extract and transform implementations independent. A memory, API, or Git extractor can
+feed the same `TransformSpec`; a different transform can consume ClickHouse pages without learning
+how ClickHouse pagination or checkpoints work.
 
-### Two implementations of one trait
+### ClickHouse implementation
 
-- **`DataFusionTransform`** — today's SQL behavior, unchanged. Owns a
-  `SessionContext` internally (register/deregister take `&self` via DataFusion's
-  interior mutability, so no `&mut` and no leak), registers the block as
-  `source_data`, runs the ontology-generated SQL list, returns `TableBatch`es.
-  Built from a plan's `TransformSpec::DataFusion(Vec<Transformation>)`.
-- **`SystemNotesTransform`** (ADR 013, follow-up MR) — hand-written Rust. Parses
-  note bodies, collects distinct refs, calls `datalake.query_batches` for the
-  `siphon_routes` and entity-table resolution hops, emits edge rows. No DataFusion.
-  Its datalake handle is captured at construction.
+`ClickHouseExtractor` owns all ClickHouse-specific runtime behavior:
 
-### Extraction and writing are not duplicated — they are reused as-is
+- watermark-window selection and traversal-path filters;
+- initial-load partition range computation;
+- keyset cursor SQL and query parameters;
+- page scan accounting;
+- adaptive `max_block_size` retries;
+- source resume encoding and checkpoint persistence;
+- completed-partition checkpoint consolidation.
 
-SystemNote needs no bespoke extractor: its source is the `SystemNote` pipeline in
-`config/ontology/derived/core/system_note.yaml`, whose extract is an authored
-`system_note.sql.j2` — a `_batch` scan of `siphon_notes` plus a page-bounded join over
-`siphon_system_note_metadata` for the note action. It rides the same keyset
-pagination, watermark window, retry, read-ahead, checkpoint, and streaming-write
-path as every other entity. The only Rust-specific code is the transform body. This
-is the whole point: a new hand-written entity contributes a `BlockTransform` and an
-ontology pipeline, nothing else.
+The generic runner does not inspect SQL, cursors, partition assignments, or checkpoint payloads.
+The handler constructs the typed extractor once and passes only dispatch context to it. There is no
+extractor registry while ClickHouse remains the only production source.
 
-### Output routing
+### Resume compatibility
 
-A transform exposes its destination tables via `outputs() -> &[String]`, and
-`build_writes` opens one bulk writer per non-empty entry, selected by `TableBatch.output_index`.
-`DataFusionTransform` keeps its own dict-encoding (`prepare_batches` over each
-`Transformation`'s `dict_encode_columns`); a Rust transform is responsible for
-emitting batches that conform to `config/graph.sql`. Centralizing dict-encoding in
-the `Loader` so a Rust transform inherits it for free was considered but not
-adopted here; it can follow if Rust transforms find it error-prone.
+`Checkpoint` stores a watermark plus an opaque source resume string. The physical ClickHouse column
+remains `cursor_values`, so this decision requires no DDL migration. New resumes contain a source
+name, version, and source-owned payload. `ClickHouseExtractor` also decodes the previous compact
+`{"c": [...], "f": ...}` cursor format so interrupted runs survive rollout.
 
-### The transform travels in the plan, resolved per run by a registry
+Completed checkpoints continue to store `"null"` or an empty value. Progress checkpoints remain
+fire-and-forget, and completion durability still follows `RunDurability`.
 
-The transform spec lives on the `Plan` itself, as a `TransformSpec`:
+### Transform implementation
 
-```rust
-pub(in crate::modules::sdlc) enum TransformSpec {
-    DataFusion(Vec<Transformation>),  // built-in SQL projection; the default
-    Rust(String),                     // a Rust transform, named, resolved from the registry
-}
-```
-
-`transform.rs` sets it when the plan builder walks each ontology pipeline: node and
-standalone-edge pipelines with `transform.type: datafusion` get `DataFusion(..)`; a
-derived entity pipeline gets `Rust(<transform.type>)`.
-
-### Ontology is a declarative model; the indexer owns all SQL
-
-The ontology crate (`crates/ontology`) is a dumb YAML → declarative model: it holds
-no ClickHouse SQL and no knowledge of runtime markers. `ExtractQuery` is either
-`Generated { filter }` (the indexer builds the SQL from the declaration) or
-`Sql(String)` (the raw content of a co-located `.sql.j2` MiniJinja template, carried
-verbatim — markers unresolved). Derived-entity pipelines are always `Sql`: their rows
-are neither node properties nor edge endpoints, so the indexer has nothing to generate
-a projection from. Eight `.sql.j2` files exist — the seven genuinely complex nodes (Group,
-Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) and the SystemNote
-derived entity; every other node and edge is `generated`.
-
-The indexer's `plan` module is the one entry point that turns that model into runs.
-`plan/build.rs::build_plans` is the **only** place that reads `pipeline.transform`; it
-walks nodes, edge ETL configs, and derived entities, decomposes each pipeline once,
-and hands each stage exactly its inputs so data flows top-down:
-
-- `plan/extract/lookup.rs` is the single point-lookup join convention.
-  `PointLookupJoin::get_from_extract_declaration` turns `extract.lookups` entries into internal `_eN`
-  CTEs, each keyed by the source node's `id`, matched against the declared batch ID
-  column, and path-scoped when both the pipeline and source node are namespaced.
-  The final projection exposes only the stable output field aliases from the extract
-  declaration.
-- `plan/extract/` produces one `ExtractSpec` (validated `ExtractTemplate` +
-  effective watermark/deleted) from a `ClickHouseExtractDeclaration` that owns
-  its source columns, lookup joins, and query configuration. It imports
-  **nothing** from the transform stage. `compile_extract_spec` dispatches
-  `Generated` to `extract/generated.rs` and `Sql` to `extract/sql.rs`; the generated
-  compiler selects a direct projection or lookup-backed query from the declaration,
-  `extract/sql.rs` handles the authored escape hatch. The `RecordBatch` schema produced at
-  runtime is the extract-transform contract; planning does not maintain a second schema model.
-- `plan/transform.rs` exposes an owned, narrow `TransformDeclaration` and builds the `TransformSpec`
-  (node column projection + FK edge rows, a standalone edge row, or a named Rust transform).
-  Edge endpoints map ontology properties to fields in the extracted `RecordBatch`; DataFusion uses
-  those bindings to build denormalized edge tags. Net dependency direction is
-  `build → {extract, transform}`; neither stage imports the other or exchanges planning metadata.
-
-`ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
-unvalidated template cannot reach the runtime. A build-time gate in `gkg-server`'s
-build script (`ontology::etl_sql::validate_authored_etl_sql`) enforces that every
-authored `.sql.j2` file projects `AS _version`/`AS _deleted` and uses
-`{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
-names; projection completeness (order-by and lookup columns) is exercised end-to-end
-by the indexer's Docker integration scenarios.
-
-One shared `Pipeline` is built once in `register_handlers` and Arc-cloned to every
-handler. It is an Arc-bundle of stateless collaborators (`datalake`,
-`checkpoint_store`, `metrics`, `retry_config`), so sharing one instance duplicates
-no logic. The pipeline carries a `TransformRegistry`, supplied via `with_registry`.
-At the start of each run, `Pipeline::run` calls `registry.build(plan)`:
-
-- `TransformSpec::DataFusion(transforms)` builds a `DataFusionTransform` inline.
-- `TransformSpec::Rust(name)` resolves a registered factory by name.
-
-`datafusion` is therefore *not* a registry entry; it is the default arm. The
-registry holds only Rust transforms, which self-register from their own module
-(the same composition pattern as `*::register_handlers`):
-
-```rust
-// register_handlers
-let mut transform_registry = TransformRegistry::default();
-transform::system_notes::register(&mut transform_registry);  // additive; one line per Rust transform
-let transform_registry = Arc::new(transform_registry);
-
-let pipeline = Arc::new(
-    Pipeline::new(datalake.clone(), checkpoint_store.clone(), metrics.clone(), retry.clone())
-        .with_registry(Arc::clone(&transform_registry)),
-);
-
-for plan in plans.namespaced {
-    if !transform_registry.is_registered(&plan.transform) {  // unregistered Rust transform → skip
-        continue;
-    }
-    // … register an EntityHandler that drives this shared pipeline for `plan`
-}
-```
-
-A `Rust` plan whose transform is not registered is skipped at handler registration
-(`is_registered`), so a derived entity stays dormant until its transform lands.
-Because the spec rides in the `Plan`, the transform never has to thread through
-`EntityHandler`'s surface, and the pipeline stays a single shared instance.
-
-**Handler/pipeline split.** The pipeline owns per-page execution (extract,
-transform, write, checkpoint). `EntityHandler` owns the `Plan` and its dispatch
-decisions — watermark derivation, partition-range computation via `self.datalake`,
-request decoding — and passes the plan into `Pipeline::run_plan` per request. The
-plan carries its own `TransformSpec`, so the pipeline resolves the transform
-without the handler holding one.
+`BlockTransform` remains the transform seam. `TransformSpec::DataFusion` builds a
+`DataFusionTransform`; `TransformSpec::Rust` resolves a registered factory. Transform dependencies
+are captured by their factories, and transforms read only the fields present in each extracted
+`RecordBatch`.
 
 ## Consequences
 
 What improves:
 
-- The transform stage is no longer SQL-only, and the extraction/writing
-  optimizations are inherited by every entity with zero duplication — the explicit
-  goal. A new Rust entity is one `BlockTransform` impl plus an extract plan.
-- ADR 013 unblocks with a smaller surface than "a whole custom pipeline":
-  SystemNote becomes an extract plan + one trait impl.
-- No behavior change for existing entities; they run `DataFusionTransform` over the
-  same pipeline, built from the same ontology plans.
+- A source can change without changing transform compilation or execution.
+- A transform can change without changing source pagination or checkpoint behavior.
+- The generic runner no longer imports ClickHouse query, cursor, retry, partition, or checkpoint
+  types.
+- Source-neutral tests can prove concurrency and read/write overlap without ClickHouse.
+- The ClickHouse and in-memory extractors can feed the same unchanged DataFusion transform.
 
 What gets harder:
 
-- A trait boundary where there was a concrete `Transformer`. Mechanical refactor
-  where the `Transformer` was built, plus the `TableBatch` index rename
-  (`transform_index` → `output_index`).
-- Risk of hand-written-transform proliferation. Mitigation: the default stays
-  "express it as an ontology plan + `DataFusionTransform`." A Rust transform is justified
-  only when the projection cannot be SQL — concretely, when it needs multi-hop
-  datalake reads or cross-row work the SQL projection can't do. Document that bar
-  in `crates/indexer/AGENTS.md` beside the reuse checklist.
-
-## Relationship to ADR 014
-
-ADR 014 (Accepted) decided entity-level dispatch and named `EntityPipeline` /
-`SimpleEntityPipeline`, with SystemNotes as the custom example. This ADR refines
-the *granularity* of that extension point: rather than one custom **pipeline** per
-hard entity (which would re-own extraction and writing), the seam is the
-**transform stage**. One shared `Pipeline` runs every entity and resolves each
-plan's transform from its `TransformSpec`; there is no per-entity pipeline impl.
-ADR 014's dispatch model, per-entity NATS subjects, and partitioning are
-unaffected.
+- Source implementations must define resumable page semantics and completion behavior.
+- A run has a small amount of dynamic dispatch per session and page. Row processing remains inside
+  Arrow, DataFusion, and bulk writers rather than crossing the trait boundary per row.
+- ClickHouse rollout must preserve legacy checkpoint decoding until old in-progress cursors are no
+  longer present.
 
 ## Non-goals
 
-- **Per-entity custom pipelines.** Rejected as the duplication source this ADR
-  exists to prevent.
-- **Exposing DataFusion in the trait.** Stays internal to `DataFusionTransform`.
-- **Bespoke extractors/writers for Rust entities.** They reuse the shared pipeline;
-  a different source shape is a different extract plan, not new machinery.
-- **A transform-type taxonomy in the ontology.** The ontology names the transform in
-  each pipeline's `transform.type` (`datafusion` for the built-in path, or a
-  registered Rust transform name), but it does not model transform behavior; whether
-  a named Rust transform resolves is a registration concern. Edge/node kinds remain
-  ontology-declared.
-- **Code and namespace-deletion modules.** Out of scope; they sit outside the SQL
-  plan path already.
+- **An extractor registry.** Typed handler assembly is sufficient for one production source.
+- **A loader seam.** Destination writing remains part of the shared runner.
+- **Ontology changes.** Existing `extract.type: clickhouse` declarations already identify the
+  source compiler; this runtime refactor does not change YAML.
+- **Different ClickHouse SQL.** Source ownership changes where queries run, not how plans compile.
+- **Code and namespace-deletion pipelines.** They remain outside the SDLC entity-plan path.
+
+## Relationship to ADR 014
+
+ADR 014 defines entity-level dispatch and initial-load partitioning. This decision keeps that
+dispatch model and moves source-specific execution behind `Extractor` and `ExtractSession`.
+`EntityHandler` still owns request decoding and observer setup; it no longer computes ClickHouse
+windows or partitions itself.
 
 ## References
 
-- ADR 014 (Entity-level SDLC indexing) — [014_entity_level_indexing.md](014_entity_level_indexing.md)
-- ADR 013 (Materialize edges from system notes); multi-hop resolution shape —
-  [013_system_note_edges.md](013_system_note_edges.md)
-- Shared pipeline + the transform seam: `crates/indexer/src/modules/sdlc/pipeline.rs`
-  (`Pipeline::run`, `Producer`, `Loader`, `Extractor`) and
-  `crates/indexer/src/modules/sdlc/transform.rs` (`BlockTransform`,
-  `DataFusionTransform`, `TransformRegistry`)
-- Ontology pipeline model: `crates/ontology/src/etl.rs` (`Pipeline`, `Extract`,
-  `ExtractQuery`, `Transform`, `EdgeMapping`); YAML loading in
-  `crates/ontology/src/loading/node.rs`; authored `.sql.j2` marker/alias check in
-  `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from
-  `gkg-server`'s build script)
-- Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
-  `Transformation`, `Cursor`, filters); plan building in `plan/build.rs`; point
-  lookups in `plan/extract/lookup.rs`; extract stage in `plan/extract/` (`ExtractSpec`,
-  `ExtractTemplate`, `SourceColumn`); transform building in `plan/transform.rs`
-- Generic handler: `crates/indexer/src/modules/sdlc/handler/entity.rs`
-- Datalake query capability: `crates/indexer/src/modules/sdlc/datalake.rs` (`DatalakeQuery`)
-- Reuse-infra checklist: `crates/indexer/AGENTS.md`
-- SDLC pipeline overview: `docs/design-documents/indexing/sdlc_indexing.md`
+- ADR 014: [014_entity_level_indexing.md](014_entity_level_indexing.md)
+- System-note Rust transform: [013_system_note_edges.md](013_system_note_edges.md)
+- Source contracts: `crates/indexer/src/modules/sdlc/extract/mod.rs`
+- ClickHouse source: `crates/indexer/src/modules/sdlc/extract/clickhouse.rs`
+- Source-neutral runner: `crates/indexer/src/modules/sdlc/pipeline.rs`
+- Handler assembly: `crates/indexer/src/modules/sdlc/handler/entity.rs`
+- Plan assembly: `crates/indexer/src/modules/sdlc/plan/build.rs`
+- Extract compilation: `crates/indexer/src/modules/sdlc/plan/extract/`
+- Transform compilation: `crates/indexer/src/modules/sdlc/plan/transform.rs`
+- SDLC indexing overview: [../indexing/sdlc_indexing.md](../indexing/sdlc_indexing.md)

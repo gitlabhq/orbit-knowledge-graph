@@ -25,18 +25,16 @@ pub enum CheckpointError {
     Store(String),
 }
 
-/// Where a pipeline left off: both time-position (watermark) and page-position (cursor).
+/// Where a pipeline left off: the completed time boundary and an opaque source resume value.
 ///
 /// State machine:
-/// - No entry: first run, start from epoch, no cursor
-/// - `cursor_values: None`: completed, `watermark` becomes the next `last_watermark`
-/// - `cursor_values: Some(...)`: interrupted mid-pagination, resume from cursor
+/// - No entry: first run
+/// - `resume: None`: completed
+/// - `resume: Some(...)`: interrupted during extraction
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Checkpoint {
     pub watermark: DateTime<Utc>,
-    pub cursor_values: Option<Vec<String>>,
-    #[serde(default)]
-    pub resume_floor: Option<DateTime<Utc>>,
+    pub resume: Option<String>,
 }
 
 #[async_trait]
@@ -81,13 +79,12 @@ impl ClickHouseCheckpointStore {
         &self,
         key: &str,
         watermark: &DateTime<Utc>,
-        cursor_values: &Option<Vec<String>>,
-        resume_floor: &Option<DateTime<Utc>>,
+        resume: &Option<String>,
         durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
-        let cursor_json = encode_cursor_column(cursor_values, resume_floor)?;
+        let resume_value = resume.as_deref().unwrap_or("null");
 
         self.insert(
             &format!(
@@ -98,7 +95,7 @@ impl ClickHouseCheckpointStore {
         )
         .param("key", key)
         .param("watermark", formatted_watermark)
-        .param("cursor_values", cursor_json)
+        .param("cursor_values", resume_value)
         .param("version", client_version())
         .execute()
         .await
@@ -147,34 +144,12 @@ fn client_version() -> String {
     Utc::now().format(TIMESTAMP_FORMAT).to_string()
 }
 
-/// The `cursor_values` column as JSON: the sort-key cursor plus the window floor.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct CursorColumn {
-    #[serde(rename = "c")]
-    cursor: Vec<String>,
-    #[serde(rename = "f", default, skip_serializing_if = "Option::is_none")]
-    floor: Option<DateTime<Utc>>,
-}
-
-fn encode_cursor_column(
-    cursor_values: &Option<Vec<String>>,
-    resume_floor: &Option<DateTime<Utc>>,
-) -> Result<String, CheckpointError> {
-    match cursor_values {
-        None => Ok("null".to_string()),
-        Some(cursor) => serde_json::to_string(&CursorColumn {
-            cursor: cursor.clone(),
-            floor: *resume_floor,
-        })
-        .map_err(checkpoint_store_error),
+fn decode_resume_column(raw: &str) -> Option<String> {
+    if raw.is_empty() || raw == "null" {
+        None
+    } else {
+        Some(raw.to_string())
     }
-}
-
-fn decode_cursor_column(raw: &str) -> Result<Option<CursorColumn>, CheckpointError> {
-    if raw.is_empty() {
-        return Ok(None);
-    }
-    serde_json::from_str(raw).map_err(checkpoint_store_error)
 }
 
 fn checkpoint_store_error<E: std::fmt::Display>(err: E) -> CheckpointError {
@@ -226,11 +201,9 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .next()
             .unwrap_or_default();
 
-        let decoded = decode_cursor_column(&cursor_json)?;
         Ok(Some(Checkpoint {
             watermark,
-            cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
-            resume_floor: decoded.and_then(|c| c.floor),
+            resume: decode_resume_column(&cursor_json),
         }))
     }
 
@@ -242,8 +215,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         self.upsert(
             key,
             &checkpoint.watermark,
-            &checkpoint.cursor_values,
-            &checkpoint.resume_floor,
+            &checkpoint.resume,
             WriteDurability::FireAndForget,
         )
         .await
@@ -255,7 +227,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         watermark: &DateTime<Utc>,
         durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
-        self.upsert(key, watermark, &None, &None, durability).await
+        self.upsert(key, watermark, &None, durability).await
     }
 
     async fn load_by_prefix(
@@ -293,16 +265,13 @@ impl CheckpointStore for ClickHouseCheckpointStore {
                 if is_deleted {
                     return None;
                 }
-                Some(decode_cursor_column(&cursor_json).map(|decoded| {
-                    (
-                        key,
-                        Checkpoint {
-                            watermark,
-                            cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
-                            resume_floor: decoded.and_then(|c| c.floor),
-                        },
-                    )
-                }))
+                Some(Ok((
+                    key,
+                    Checkpoint {
+                        watermark,
+                        resume: decode_resume_column(&cursor_json),
+                    },
+                )))
             })
             .collect()
     }
@@ -338,47 +307,42 @@ mod tests {
     fn serialization_roundtrip_completed() {
         let checkpoint = Checkpoint {
             watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
-            cursor_values: None,
-            resume_floor: None,
+            resume: None,
         };
 
         let json = serde_json::to_string(&checkpoint).unwrap();
         let deserialized: Checkpoint = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized, checkpoint);
-        assert!(deserialized.cursor_values.is_none());
+        assert!(deserialized.resume.is_none());
     }
 
     #[test]
     fn serialization_roundtrip_in_progress() {
         let checkpoint = Checkpoint {
             watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
-            cursor_values: Some(vec!["1/2/".to_string(), "42".to_string()]),
-            resume_floor: Some("2024-06-15T11:59:30Z".parse().unwrap()),
+            resume: Some("{\"source\":\"clickhouse\"}".to_string()),
         };
 
         let json = serde_json::to_string(&checkpoint).unwrap();
         let deserialized: Checkpoint = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized, checkpoint);
-        assert_eq!(deserialized.cursor_values.unwrap(), vec!["1/2/", "42"]);
+        assert_eq!(
+            deserialized.resume.as_deref(),
+            Some("{\"source\":\"clickhouse\"}")
+        );
     }
 
     #[test]
-    fn cursor_column_completed_encodes_as_null() {
-        assert_eq!(encode_cursor_column(&None, &None).unwrap(), "null");
-        assert_eq!(decode_cursor_column("null").unwrap(), None);
-        assert_eq!(decode_cursor_column("").unwrap(), None);
+    fn completed_resume_column_decodes_as_none() {
+        assert_eq!(decode_resume_column("null"), None);
+        assert_eq!(decode_resume_column(""), None);
     }
 
     #[test]
-    fn cursor_column_roundtrips_cursor_and_floor() {
-        let cursor = Some(vec!["1/2/".to_string(), "42".to_string()]);
-        let floor: Option<DateTime<Utc>> = Some("2024-06-15T11:59:30Z".parse().unwrap());
-
-        let encoded = encode_cursor_column(&cursor, &floor).unwrap();
-        let decoded = decode_cursor_column(&encoded).unwrap().unwrap();
-        assert_eq!(Some(decoded.cursor), cursor);
-        assert_eq!(decoded.floor, floor);
+    fn opaque_resume_column_roundtrips_without_interpretation() {
+        let resume = "{\"source\":\"git\",\"version\":1}";
+        assert_eq!(decode_resume_column(resume).as_deref(), Some(resume));
     }
 }

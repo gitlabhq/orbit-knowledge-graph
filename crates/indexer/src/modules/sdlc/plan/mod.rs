@@ -3,7 +3,9 @@ pub(in crate::modules::sdlc) mod extract;
 mod transform;
 
 pub(in crate::modules::sdlc) use build::{Sizing, build_plans};
+#[cfg(test)]
 pub(in crate::modules::sdlc) use extract::ExtractTemplate;
+pub(in crate::modules::sdlc) use extract::{ClickHouseExtractPlan, ExtractPlan};
 pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec, Transformation};
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
@@ -16,7 +18,6 @@ use ontology::sql_template;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;
-use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::handler::HandlerError;
 
@@ -30,13 +31,8 @@ impl Cursor {
         Self { values: Vec::new() }
     }
 
-    pub fn from_checkpoint(checkpoint: &Checkpoint) -> Self {
-        match &checkpoint.cursor_values {
-            Some(values) => Self {
-                values: values.clone(),
-            },
-            None => Self::first_page(),
-        }
+    pub fn from_values(values: Vec<String>) -> Self {
+        Self { values }
     }
 
     pub fn is_first_page(&self) -> bool {
@@ -67,14 +63,6 @@ impl Cursor {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { values })
-    }
-
-    pub fn to_checkpoint_values(&self) -> Option<Vec<String>> {
-        if self.values.is_empty() {
-            None
-        } else {
-            Some(self.values.clone())
-        }
     }
 }
 
@@ -237,11 +225,7 @@ pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
     pub target: String,
     pub scope: EtlScope,
-    pub extract_template: ExtractTemplate,
-    pub watermark_column: String,
-    pub deleted_column: String,
-    pub sort_key: Vec<String>,
-    pub batch_size: u64,
+    pub extract: ExtractPlan,
     pub transform: TransformSpec,
 }
 
@@ -253,10 +237,17 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
     batch_size: u64,
 }
 
+#[cfg(test)]
 impl Plan {
     pub fn prepare(&self) -> PreparedQuery {
+        self.extract.get_clickhouse_plan().prepare()
+    }
+}
+
+impl ClickHouseExtractPlan {
+    pub fn prepare(&self) -> PreparedQuery {
         PreparedQuery {
-            template: self.extract_template.as_str().to_string(),
+            template: self.template.as_str().to_string(),
             filters: Vec::new(),
             params: serde_json::Map::new(),
             batch_size: self.batch_size,
@@ -340,19 +331,21 @@ mod tests {
             name: "Test".to_string(),
             target: "Test".to_string(),
             scope: EtlScope::Namespaced,
-            extract_template: ExtractTemplate::new(format!(
-                "SELECT id, name, _siphon_watermark AS _version, \
-                 _siphon_deleted AS _deleted \
-                 FROM source_table \
-                 WHERE 1=1 {{{{filters}}}} \
-                 ORDER BY {sort_key_sql} \
-                 LIMIT {{{{batch_size}}}}"
-            ))
-            .expect("valid template"),
-            watermark_column: "_siphon_watermark".to_string(),
-            deleted_column: "_siphon_deleted".to_string(),
-            sort_key,
-            batch_size,
+            extract: ExtractPlan::ClickHouse(ClickHouseExtractPlan {
+                template: ExtractTemplate::new(format!(
+                    "SELECT id, name, _siphon_watermark AS _version, \
+                     _siphon_deleted AS _deleted \
+                     FROM source_table \
+                     WHERE 1=1 {{{{filters}}}} \
+                     ORDER BY {sort_key_sql} \
+                     LIMIT {{{{batch_size}}}}"
+                ))
+                .expect("valid template"),
+                watermark_column: "_siphon_watermark".to_string(),
+                deleted_column: "_siphon_deleted".to_string(),
+                sort_key,
+                batch_size,
+            }),
             transform: TransformSpec::DataFusion(vec![]),
         }
     }
@@ -361,28 +354,6 @@ mod tests {
     fn first_page_cursor_is_first_page() {
         let cursor = Cursor::first_page();
         assert!(cursor.is_first_page());
-    }
-
-    #[test]
-    fn cursor_from_completed_checkpoint_is_first_page() {
-        let checkpoint = Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: None,
-            resume_floor: None,
-        };
-        let cursor = Cursor::from_checkpoint(&checkpoint);
-        assert!(cursor.is_first_page());
-    }
-
-    #[test]
-    fn cursor_from_in_progress_checkpoint_has_values() {
-        let checkpoint = Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: Some(vec!["42".to_string()]),
-            resume_floor: None,
-        };
-        let cursor = Cursor::from_checkpoint(&checkpoint);
-        assert!(!cursor.is_first_page());
     }
 
     #[test]
@@ -404,10 +375,7 @@ mod tests {
         let cursor = Cursor::first_page();
         let sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let advanced = cursor.advance(&batch, &sort_key).unwrap();
-        assert_eq!(
-            advanced.to_checkpoint_values(),
-            Some(vec!["1/4/".to_string(), "30".to_string()])
-        );
+        assert_eq!(advanced.values(), ["1/4/".to_string(), "30".to_string()]);
     }
 
     #[test]
@@ -509,7 +477,7 @@ mod tests {
     fn watermark_filter_adds_range_and_params() {
         let plan = test_plan(vec!["id"], 500);
         let prepared = plan.prepare().with(WatermarkFilter {
-            column: &plan.watermark_column,
+            column: &plan.extract.get_clickhouse_plan().watermark_column,
             last: Utc::now(),
             current: Utc::now(),
         });
@@ -534,7 +502,7 @@ mod tests {
         let sql = plan
             .prepare()
             .with(Some(DeletedFilter {
-                column: &plan.deleted_column,
+                column: &plan.extract.get_clickhouse_plan().deleted_column,
             }))
             .to_sql()
             .expect("renders extract SQL");
@@ -571,7 +539,7 @@ mod tests {
     #[test]
     fn cursor_filter_appends_pagination_clause() {
         let plan = test_plan(vec!["traversal_path", "id"], 1000);
-        let sort_key = plan.sort_key.clone();
+        let sort_key = plan.extract.get_clickhouse_plan().sort_key.clone();
         let values = vec!["1/2/".to_string(), "42".to_string()];
         let sql = plan
             .prepare()
@@ -594,7 +562,7 @@ mod tests {
         let sql = plan
             .prepare()
             .with(WatermarkFilter {
-                column: &plan.watermark_column,
+                column: &plan.extract.get_clickhouse_plan().watermark_column,
                 last: Utc::now(),
                 current: Utc::now(),
             })

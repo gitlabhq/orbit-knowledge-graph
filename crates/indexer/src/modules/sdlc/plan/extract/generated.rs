@@ -5,7 +5,7 @@ use ontology::{DataType, EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::super::build::PlanError;
 use super::lookup::PointLookupJoin;
-use super::{ClickHouseExtractDeclaration, ExtractSpec, SourceColumn};
+use super::{ClickHouseExtractDeclaration, ClickHouseExtractPlan, SourceColumn};
 
 struct SelectColumn {
     expression: String,
@@ -15,7 +15,7 @@ struct SelectColumn {
 pub(in crate::modules::sdlc) fn compile_generated_extract(
     declaration: &ClickHouseExtractDeclaration,
     filter: Option<&str>,
-) -> Result<ExtractSpec, PlanError> {
+) -> Result<ClickHouseExtractPlan, PlanError> {
     let filter = resolve_filter(declaration, filter)?;
     let sql = if declaration.lookup_joins.is_empty() {
         render_single_table_sql(

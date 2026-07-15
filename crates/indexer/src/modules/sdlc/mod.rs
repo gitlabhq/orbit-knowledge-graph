@@ -1,4 +1,5 @@
 mod datalake;
+mod extract;
 mod handler;
 mod metrics;
 pub(crate) mod observer;
@@ -84,15 +85,8 @@ pub async fn register_handlers(
     );
     let transform_registry = Arc::new(transform_registry);
 
-    let pipeline = Arc::new(
-        Pipeline::new(
-            Arc::clone(&datalake),
-            Arc::clone(&checkpoint_store),
-            metrics.clone(),
-            config.engine.datalake_retry.clone(),
-        )
-        .with_registry(Arc::clone(&transform_registry)),
-    );
+    let pipeline =
+        Arc::new(Pipeline::new(metrics.clone()).with_registry(Arc::clone(&transform_registry)));
 
     let global_policy = sdlc_dispatch_topic_policy()
         .with_optional_override(config.engine.topics.get(GLOBAL_HANDLER_TOPIC));
@@ -110,16 +104,23 @@ pub async fn register_handlers(
             continue;
         }
         let strategy = partition_strategies.get(&plan.name).cloned();
+        let extractor: Arc<dyn extract::Extractor> = Arc::new(extract::ClickHouseExtractor::new(
+            plan.name.clone(),
+            plan.extract.get_clickhouse_plan().clone(),
+            Arc::clone(&datalake),
+            Arc::clone(&checkpoint_store),
+            metrics.clone(),
+            config.engine.datalake_retry.clone(),
+            strategy,
+        ));
         registry.register_handler(Box::new(EntityHandler::new(
             plan,
             EtlScope::Global,
             Arc::clone(&pipeline),
+            extractor,
             Arc::clone(&writer),
-            Arc::clone(&datalake),
-            Arc::clone(&checkpoint_store),
             metrics.clone(),
             global_subscription.clone(),
-            strategy,
             analytics.clone(),
         )));
         global_count += 1;
@@ -130,16 +131,23 @@ pub async fn register_handlers(
             continue;
         }
         let strategy = partition_strategies.get(&plan.name).cloned();
+        let extractor: Arc<dyn extract::Extractor> = Arc::new(extract::ClickHouseExtractor::new(
+            plan.name.clone(),
+            plan.extract.get_clickhouse_plan().clone(),
+            Arc::clone(&datalake),
+            Arc::clone(&checkpoint_store),
+            metrics.clone(),
+            config.engine.datalake_retry.clone(),
+            strategy,
+        ));
         registry.register_handler(Box::new(EntityHandler::new(
             plan,
             EtlScope::Namespaced,
             Arc::clone(&pipeline),
+            extractor,
             Arc::clone(&writer),
-            Arc::clone(&datalake),
-            Arc::clone(&checkpoint_store),
             metrics.clone(),
             namespace_subscription.clone(),
-            strategy,
             analytics.clone(),
         )));
         namespaced_count += 1;
@@ -216,7 +224,7 @@ mod tests {
             "derived entities name a custom transform, not data_fusion: {:?}",
             system_note.transform
         );
-        let template = system_note.extract_template.as_str();
+        let template = system_note.extract.get_clickhouse_plan().template.as_str();
         let normalized_template = template.split_whitespace().collect::<Vec<_>>().join(" ");
 
         // #830: the metadata join is bounded by the page CTE, not inlined
@@ -249,7 +257,10 @@ mod tests {
             "enrichment CTE must prune by page and namespace and drop tombstoned rows: {template}"
         );
         assert!(template.contains("ORDER BY traversal_path, id"));
-        assert_eq!(system_note.watermark_column, "_siphon_watermark");
+        assert_eq!(
+            system_note.extract.get_clickhouse_plan().watermark_column,
+            "_siphon_watermark"
+        );
     }
 
     #[test]

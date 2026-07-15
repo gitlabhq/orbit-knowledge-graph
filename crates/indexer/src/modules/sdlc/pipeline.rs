@@ -2,41 +2,22 @@
 //! each destination table, overlapping the next page's read with the writes.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use arrow::record_batch::RecordBatch;
-use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use serde_json::Value;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
-use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_with};
+use crate::durability::RunDurability;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
-use crate::observer::{IndexingMode, IndexingObserver};
+use crate::observer::IndexingObserver;
 
-use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
+use super::extract::{ExtractRunContext, ExtractSession, Extractor};
 use super::metrics::SdlcMetrics;
-use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
+use super::plan::Plan;
 use super::transform::{BlockTransform, TransformRegistry};
-use crate::checkpoint::{Checkpoint, CheckpointStore};
-use crate::durability::RunDurability;
-use gkg_server_config::DatalakeRetryConfig;
-
-const MAX_RETRIES: u32 = 3;
-
-/// Retry a datalake page read, shrinking the block size each time so an oversized page self-corrects.
-const DATALAKE_EXTRACT_RETRY: RetryPolicy = RetryPolicy {
-    mode: RetryMode::Local,
-    backoff: Backoff::Fixed(&[
-        Duration::from_millis(100),
-        Duration::from_millis(200),
-        Duration::from_millis(400),
-    ]),
-    max_attempts: MAX_RETRIES + 1,
-    dead_letter: false,
-};
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
@@ -71,31 +52,6 @@ impl PipelineStats {
     }
 }
 
-/// One extracted page and the cost of fetching it. Carried across loop
-/// iterations because the next page is read while the current one is written.
-struct Page {
-    batches: Vec<RecordBatch>,
-    scan_stats: ScanStats,
-    extract_elapsed: Duration,
-}
-
-impl Page {
-    fn is_empty(&self) -> bool {
-        self.batches.is_empty()
-    }
-
-    fn rows(&self) -> u64 {
-        self.batches.iter().map(|b| b.num_rows() as u64).sum()
-    }
-
-    fn bytes(&self) -> u64 {
-        self.batches
-            .iter()
-            .map(|b| b.get_array_memory_size() as u64)
-            .sum()
-    }
-}
-
 pub(in crate::modules::sdlc) struct PipelineContext {
     pub writer: Arc<crate::clickhouse::ClickHouseWriter>,
     pub progress: ProgressNotifier,
@@ -103,25 +59,14 @@ pub(in crate::modules::sdlc) struct PipelineContext {
 }
 
 pub(in crate::modules::sdlc) struct Pipeline {
-    datalake: Arc<dyn DatalakeQuery>,
-    checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
-    retry_config: DatalakeRetryConfig,
     registry: Arc<TransformRegistry>,
 }
 
 impl Pipeline {
-    pub fn new(
-        datalake: Arc<dyn DatalakeQuery>,
-        checkpoint_store: Arc<dyn CheckpointStore>,
-        metrics: SdlcMetrics,
-        retry_config: DatalakeRetryConfig,
-    ) -> Self {
+    pub fn new(metrics: SdlcMetrics) -> Self {
         Self {
-            datalake,
-            checkpoint_store,
             metrics,
-            retry_config,
             registry: Arc::new(TransformRegistry::default()),
         }
     }
@@ -137,55 +82,65 @@ impl Pipeline {
         &self,
         context: &PipelineContext,
         plan: &Plan,
-        base_query: PreparedQuery,
-        position_key: &str,
-        window: WindowBounds,
+        extractor: &dyn Extractor,
+        extract_context: ExtractRunContext,
+    ) -> Result<PipelineStats, HandlerError> {
+        let extract_run = extractor.start_extraction(extract_context).await?;
+        {
+            let mut observer = context.observer.lock().unwrap();
+            observer.set_indexing_mode(extract_run.indexing_mode);
+        }
+        let durability = RunDurability::for_mode(extract_run.indexing_mode);
+        let mut session_futures = FuturesUnordered::new();
+        for session in extract_run.sessions {
+            session_futures.push(self.run_extract_session(context, plan, session, durability));
+        }
+
+        let mut stats = PipelineStats::default();
+        let mut errors = Vec::new();
+        while let Some(result) = session_futures.next().await {
+            match result {
+                Ok(session_stats) => stats.merge(session_stats),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        if !errors.is_empty() {
+            return Err(HandlerError::Processing(format!(
+                "extract session failures: {}",
+                errors.join("; ")
+            )));
+        }
+        extract_run.completion.finish_extraction().await?;
+        Ok(stats)
+    }
+
+    async fn run_extract_session(
+        &self,
+        context: &PipelineContext,
+        plan: &Plan,
+        mut session: Box<dyn ExtractSession>,
         durability: RunDurability,
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
-        let checkpoint = self.load_checkpoint(position_key).await;
-        let mut cursor = Cursor::from_checkpoint(&checkpoint);
-
-        if !cursor.is_first_page() {
-            info!("resuming from saved cursor");
-        }
-
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
-        let params = base_query.params();
         let mut stats = PipelineStats::default();
+        let mut page = session.get_next_page().await?;
+        let mut page_number = 0_u64;
 
-        let mut page = self
-            .extract_batch(
-                transform.name(),
-                &self.page_sql(&base_query, &plan.sort_key, &cursor)?,
-                params.clone(),
-            )
-            .await?;
-        stats.extract_ms += page.extract_elapsed.as_millis() as u64;
-
-        let mut page_number: u64 = 0;
-        while !page.is_empty() {
+        while let Some(current_page) = page {
             page_number += 1;
-
-            let rows_in_page = page.rows();
-            let bytes_in_page = page.bytes();
+            let rows_in_page = current_page.rows();
+            let bytes_in_page = current_page.bytes();
             stats.read_rows += rows_in_page;
             stats.read_bytes += bytes_in_page;
-            stats.scanned_rows += page.scan_stats.scanned_rows;
-            stats.scanned_bytes += page.scan_stats.scanned_bytes;
-
-            cursor = cursor.advance(
-                page.batches
-                    .last()
-                    .expect("non-empty page has a last block"),
-                &plan.sort_key,
-            )?;
-            let has_more = rows_in_page >= plan.batch_size;
+            stats.scanned_rows += current_page.stats.scanned_rows;
+            stats.scanned_bytes += current_page.stats.scanned_bytes;
+            stats.extract_ms += current_page.stats.elapsed_ms;
 
             let transform_start = Instant::now();
             let grouped = self
-                .transform_page(transform.as_ref(), &page.batches)
+                .transform_page(transform.as_ref(), &current_page.batches)
                 .await?;
             let transform_elapsed = transform_start.elapsed();
             self.metrics
@@ -224,14 +179,10 @@ impl Pipeline {
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
 
-            // Overlap the next page's read with this page's writes; peak memory is roughly two pages.
-            let (write_elapsed, next_page) = if has_more {
-                let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor)?;
-                let (write_result, extract_result) = tokio::join!(
-                    drain_writes,
-                    self.extract_batch(transform.name(), &next_sql, params.clone()),
-                );
-                (write_result?, Some(extract_result?))
+            let (write_elapsed, next_page) = if current_page.has_more {
+                let (write_result, extract_result) =
+                    tokio::join!(drain_writes, session.get_next_page(),);
+                (write_result?, extract_result?)
             } else {
                 (drain_writes.await?, None)
             };
@@ -240,38 +191,24 @@ impl Pipeline {
             info!(
                 page = page_number,
                 rows = rows_in_page,
-                scanned_rows = page.scan_stats.scanned_rows,
-                extract_ms = page.extract_elapsed.as_millis() as u64,
+                scanned_rows = current_page.stats.scanned_rows,
+                extract_ms = current_page.stats.elapsed_ms,
                 transform_ms = transform_elapsed.as_millis() as u64,
                 write_ms = write_elapsed.as_millis() as u64,
                 "page indexed"
             );
 
-            self.save_batch_progress(position_key, window, &cursor, &context.progress)
-                .await?;
-
-            let Some(next) = next_page else {
-                break;
-            };
-            stats.extract_ms += next.extract_elapsed.as_millis() as u64;
-            page = next;
+            session.save_page_resume(&current_page.resume).await?;
+            context.progress.notify_in_progress().await;
+            page = next_page;
         }
 
-        self.checkpoint_store
-            .save_completed(position_key, &window.target, durability.completion)
-            .await
-            .map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to mark {} as completed: {err}",
-                    plan.name
-                ))
-            })?;
+        session.save_completed(durability.completion).await?;
 
         let elapsed = started_at.elapsed();
         stats.duration_ms = elapsed.as_millis() as u64;
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
-        self.metrics.record_watermark_lag(&window.target);
 
         {
             let mut observer = context.observer.lock().unwrap();
@@ -301,91 +238,6 @@ impl Pipeline {
         Ok(stats)
     }
 
-    fn page_sql(
-        &self,
-        base_query: &PreparedQuery,
-        sort_key: &[String],
-        cursor: &Cursor,
-    ) -> Result<String, HandlerError> {
-        base_query
-            .clone()
-            .with(CursorFilter {
-                sort_key,
-                values: cursor.values(),
-            })
-            .to_sql()
-    }
-
-    /// Reads a page, retrying with a smaller block size so a datalake failure
-    /// self-corrects instead of bouncing the message to the dead letter stream.
-    async fn extract_batch(
-        &self,
-        transform_name: &str,
-        sql: &str,
-        params: Value,
-    ) -> Result<Page, HandlerError> {
-        drive_with(
-            &DATALAKE_EXTRACT_RETRY,
-            None::<u64>,
-            |block_size, attempt| {
-                let query_start = Instant::now();
-                let fut = self
-                    .datalake
-                    .query_batches_with_summary(sql, params.clone(), block_size);
-                let metrics = &self.metrics;
-                let retry_config = &self.retry_config;
-                async move {
-                    match fut.await {
-                        Ok((batches, scan_stats)) => {
-                            let extract_elapsed = query_start.elapsed();
-                            let bytes: u64 = batches
-                                .iter()
-                                .map(|b| b.get_array_memory_size() as u64)
-                                .sum();
-                            metrics.record_datalake_query(
-                                transform_name,
-                                extract_elapsed.as_secs_f64(),
-                                bytes,
-                            );
-                            Step::Done(Page {
-                                batches,
-                                scan_stats,
-                                extract_elapsed,
-                            })
-                        }
-                        Err(err) => {
-                            warn!(
-                                attempt,
-                                max_retries = MAX_RETRIES,
-                                max_block_size = ?block_size,
-                                %err,
-                                "datalake query failed, retrying with smaller block size"
-                            );
-                            // An overflow only clears once blocks are small, and each halving step
-                            // re-scans the page, so jump straight to the floor.
-                            let next = if is_arrow_string_overflow(&err) {
-                                retry_config.halving_min_block_size
-                            } else {
-                                match block_size {
-                                    Some(size) => {
-                                        (size / 2).max(retry_config.halving_min_block_size)
-                                    }
-                                    None => retry_config.halving_initial_block_size,
-                                }
-                            };
-                            DATALAKE_EXTRACT_RETRY.retry_or_give_up(
-                                attempt,
-                                Some(next),
-                                HandlerError::Processing(format!("datalake query failed: {err}")),
-                            )
-                        }
-                    }
-                }
-            },
-        )
-        .await
-    }
-
     /// Groups output rows by destination table so each table is written as one bulk insert.
     async fn transform_page(
         &self,
@@ -400,758 +252,280 @@ impl Pipeline {
         }
         Ok(grouped)
     }
-
-    async fn save_batch_progress(
-        &self,
-        position_key: &str,
-        window: WindowBounds,
-        cursor: &Cursor,
-        progress: &ProgressNotifier,
-    ) -> Result<(), HandlerError> {
-        self.checkpoint_store
-            .save_progress(
-                position_key,
-                &Checkpoint {
-                    watermark: window.target,
-                    cursor_values: cursor.to_checkpoint_values(),
-                    resume_floor: window.floor,
-                },
-            )
-            .await
-            .map_err(|err| {
-                HandlerError::Processing(format!("failed to save cursor for {position_key}: {err}"))
-            })?;
-        progress.notify_in_progress().await;
-        Ok(())
-    }
-
-    async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
-        match self.checkpoint_store.load(position_key).await {
-            Ok(Some(checkpoint)) => checkpoint,
-            Ok(None) => Checkpoint {
-                watermark: DateTime::<Utc>::UNIX_EPOCH,
-                cursor_values: None,
-                resume_floor: None,
-            },
-            Err(err) => {
-                warn!(
-                    position_key,
-                    %err,
-                    "failed to load checkpoint, starting from epoch"
-                );
-                Checkpoint {
-                    watermark: DateTime::<Utc>::UNIX_EPOCH,
-                    cursor_values: None,
-                    resume_floor: None,
-                }
-            }
-        }
-    }
-}
-
-/// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::modules::sdlc) struct WindowBounds {
-    pub target: DateTime<Utc>,
-    pub floor: Option<DateTime<Utc>>,
-}
-
-impl WindowBounds {
-    pub fn indexing_mode(&self) -> IndexingMode {
-        match self.floor {
-            Some(_) => IndexingMode::Incremental,
-            None => IndexingMode::Full,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::plan::{TransformSpec, Transformation};
-    use super::*;
-    use crate::checkpoint::CheckpointError;
-    use crate::durability::WriteDurability;
-    use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
-    use crate::modules::sdlc::test_helpers::test_metrics;
-    use crate::observer::NoOpObserver;
-    use crate::testkit::test_writer;
-    use arrow::array::{BooleanArray, Int64Array, StringArray};
-    use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
-    use async_trait::async_trait;
-    use std::collections::HashSet;
-    use std::sync::Mutex;
+    use std::collections::{HashSet, VecDeque};
+    use std::sync::{Arc, Mutex};
 
-    fn simple_plan(name: &str) -> Plan {
-        simple_plan_with_batch_size(name, 1000)
+    use arrow::array::{Int64Array, StringArray};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    use tokio::sync::Barrier;
+
+    use super::*;
+    use crate::durability::WriteDurability;
+    use crate::modules::sdlc::extract::{
+        ExtractPage, ExtractPageStats, ExtractResume, ExtractRun, ExtractRunCompletion,
+        ExtractSession, Extractor, MemoryExtractor,
+    };
+    use crate::modules::sdlc::plan::{
+        ClickHouseExtractPlan, ExtractPlan, ExtractTemplate, TransformSpec, Transformation,
+    };
+    use crate::modules::sdlc::test_helpers::test_metrics;
+    use crate::observer::{IndexingMode, NoOpObserver};
+    use crate::testkit::test_writer;
+
+    struct RecordingExtractor {
+        sessions: Mutex<Option<Vec<Box<dyn ExtractSession>>>>,
+        completion_events: Arc<Mutex<Vec<&'static str>>>,
     }
 
-    fn simple_plan_with_batch_size(name: &str, batch_size: u64) -> Plan {
+    struct RecordingExtractSession {
+        pages: VecDeque<ExtractPage>,
+        events: Arc<Mutex<Vec<&'static str>>>,
+        first_page_barrier: Option<Arc<Barrier>>,
+    }
+
+    struct RecordingExtractCompletion {
+        events: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    fn simple_plan() -> Plan {
         Plan {
-            name: name.to_string(),
-            target: name.to_string(),
+            name: "Test".to_string(),
+            target: "Test".to_string(),
             scope: ontology::EtlScope::Namespaced,
-            extract_template: crate::modules::sdlc::plan::ExtractTemplate::new(
-                "SELECT id, name, _siphon_watermark AS _version, \
-                 _siphon_deleted AS _deleted \
-                 FROM source_table \
-                 WHERE 1=1 {{filters}} \
-                 ORDER BY id LIMIT {{batch_size}}"
-                    .to_string(),
-            )
-            .expect("valid template"),
-            watermark_column: "_siphon_watermark".to_string(),
-            deleted_column: "_siphon_deleted".to_string(),
-            sort_key: vec!["id".to_string()],
-            batch_size,
+            extract: ExtractPlan::ClickHouse(ClickHouseExtractPlan {
+                template: ExtractTemplate::new(
+                    "SELECT id, name, _siphon_watermark AS _version, _siphon_deleted AS _deleted FROM source_table WHERE 1=1 {{filters}} ORDER BY id LIMIT {{batch_size}}".to_string(),
+                )
+                .expect("valid template"),
+                watermark_column: "_siphon_watermark".to_string(),
+                deleted_column: "_siphon_deleted".to_string(),
+                sort_key: vec!["id".to_string()],
+                batch_size: 2,
+            }),
             transform: TransformSpec::DataFusion(vec![Transformation {
                 sql: format!(
                     "SELECT id, name FROM {}",
                     crate::modules::sdlc::plan::SOURCE_DATA_TABLE
                 ),
-                destination_table: format!("gl_{}", name.to_lowercase()),
+                destination_table: "gl_test".to_string(),
                 dict_encode_columns: HashSet::new(),
             }]),
         }
     }
 
-    fn test_watermark() -> DateTime<Utc> {
-        "2024-06-15T12:00:00Z".parse().unwrap()
-    }
-
-    fn test_window() -> WindowBounds {
-        WindowBounds {
-            target: test_watermark(),
-            floor: None,
+    fn extract_page(ids: &[i64], has_more: bool) -> ExtractPage {
+        let names = ids
+            .iter()
+            .map(|id| format!("name-{id}"))
+            .collect::<Vec<_>>();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(ids.to_vec())),
+                Arc::new(StringArray::from(names)),
+            ],
+        )
+        .expect("valid batch");
+        ExtractPage {
+            batches: vec![batch],
+            row_count: ids.len() as u64,
+            resume: ExtractResume::from_source_payload("memory", 1, &ids).unwrap(),
+            stats: ExtractPageStats {
+                scanned_rows: ids.len() as u64,
+                scanned_bytes: 100,
+                elapsed_ms: 2,
+            },
+            has_more,
         }
     }
 
-    fn base_query(plan: &Plan) -> PreparedQuery {
-        plan.prepare()
-            .with(crate::modules::sdlc::plan::WatermarkFilter {
-                column: &plan.watermark_column,
-                last: DateTime::<Utc>::UNIX_EPOCH,
-                current: test_watermark(),
-            })
-    }
-
-    fn position_key(plan: &Plan) -> String {
-        format!("test.{}", plan.name)
-    }
-
-    fn test_batch(rows: usize) -> RecordBatch {
-        test_batch_range(1, rows)
-    }
-
-    fn test_batch_range(start_id: i64, count: usize) -> RecordBatch {
-        let schema = Arc::new(Schema::new(vec![
-            ArrowField::new("id", ArrowDataType::Int64, false),
-            ArrowField::new("name", ArrowDataType::Utf8, true),
-            ArrowField::new("_version", ArrowDataType::Int64, false),
-            ArrowField::new("_deleted", ArrowDataType::Boolean, false),
-        ]));
-
-        let ids: Vec<i64> = (start_id..start_id + count as i64).collect();
-        let names: Vec<Option<&str>> = (0..count).map(|_| Some("test")).collect();
-        let versions: Vec<i64> = ids.clone();
-        let deleted: Vec<bool> = vec![false; count];
-
-        RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(Int64Array::from(ids)),
-                Arc::new(StringArray::from(names)),
-                Arc::new(Int64Array::from(versions)),
-                Arc::new(BooleanArray::from(deleted)),
-            ],
-        )
-        .unwrap()
-    }
-
-    use crate::modules::sdlc::test_helpers::EmptyDatalake;
-    use crate::modules::sdlc::test_helpers::FailingDatalake;
-    use crate::nats::ProgressNotifier;
-
-    fn noop_context() -> PipelineContext {
+    fn pipeline_context() -> PipelineContext {
         PipelineContext {
             writer: test_writer(),
-            progress: ProgressNotifier::noop(),
+            progress: crate::nats::ProgressNotifier::noop(),
             observer: Arc::new(Mutex::new(NoOpObserver)),
         }
     }
 
-    struct MultiBatchDatalake {
-        call_count: Mutex<u32>,
-        batch_size: usize,
-    }
-
-    #[async_trait]
-    impl DatalakeQuery for MultiBatchDatalake {
-        async fn query_arrow(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(futures::stream::empty()))
-        }
-
-        async fn query_batches(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            let mut count = self.call_count.lock().unwrap();
-            *count += 1;
-
-            let rows = if *count == 1 {
-                self.batch_size
-            } else {
-                self.batch_size / 2
-            };
-
-            // Two blocks per page so the cursor must come from the last block's
-            // last row, not from row order.
-            let first = rows / 2;
-            let second = rows - first;
-            Ok(vec![
-                test_batch_range(1, first),
-                test_batch_range(first as i64 + 1, second),
-            ])
-        }
-    }
-
-    struct RecordingCheckpointStore {
-        state: Mutex<Option<Checkpoint>>,
-        progress_history: Mutex<Vec<Checkpoint>>,
-    }
-
-    impl RecordingCheckpointStore {
-        fn new() -> Self {
-            Self {
-                state: Mutex::new(None),
-                progress_history: Mutex::new(Vec::new()),
-            }
-        }
-
-        fn current_state(&self) -> Option<Checkpoint> {
-            self.state.lock().unwrap().clone()
-        }
-
-        fn progress_history(&self) -> Vec<Checkpoint> {
-            self.progress_history.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl CheckpointStore for RecordingCheckpointStore {
-        async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
-            Ok(self.state.lock().unwrap().clone())
-        }
-
-        async fn save_progress(
-            &self,
-            _key: &str,
-            checkpoint: &Checkpoint,
-        ) -> Result<(), CheckpointError> {
-            self.progress_history
-                .lock()
-                .unwrap()
-                .push(checkpoint.clone());
-            *self.state.lock().unwrap() = Some(checkpoint.clone());
-            Ok(())
-        }
-
-        async fn save_completed(
-            &self,
-            _key: &str,
-            watermark: &DateTime<Utc>,
-            _durability: WriteDurability,
-        ) -> Result<(), CheckpointError> {
-            *self.state.lock().unwrap() = Some(Checkpoint {
-                watermark: *watermark,
-                cursor_values: None,
-                resume_floor: None,
-            });
-            Ok(())
-        }
-
-        async fn load_by_prefix(
-            &self,
-            _prefix: &str,
-        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
-            Ok(Vec::new())
-        }
-
-        async fn consolidate(
-            &self,
-            _parent_key: &str,
-            _watermark: &DateTime<Utc>,
-        ) -> Result<(), CheckpointError> {
-            Ok(())
+    fn extract_run_context() -> ExtractRunContext {
+        ExtractRunContext {
+            position_key: "ns.1.Test".to_string(),
+            requested_watermark: "2026-07-15T00:00:00Z".parse().unwrap(),
+            traversal_path: Some("1/".to_string()),
         }
     }
 
     #[tokio::test]
-    async fn empty_datalake_completes_without_error() {
-        let pipeline = Pipeline::new(
-            Arc::new(EmptyDatalake),
-            Arc::new(RecordingCheckpointStore::new()),
-            test_metrics(),
-            Default::default(),
-        );
-        let plan = simple_plan("Test");
-
-        let result = pipeline
+    async fn memory_extractor_runs_the_unchanged_datafusion_transform() {
+        let extractor = MemoryExtractor::new(vec![extract_page(&[1, 2], false)]);
+        let stats = Pipeline::new(test_metrics())
             .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn multi_batch_paginates_and_completes() {
-        let store = Arc::new(RecordingCheckpointStore::new());
-        let plan = simple_plan_with_batch_size("Test", 10);
-
-        let pipeline = Pipeline::new(
-            Arc::new(MultiBatchDatalake {
-                call_count: Mutex::new(0),
-                batch_size: 10,
-            }),
-            store.clone(),
-            test_metrics(),
-            Default::default(),
-        );
-        let result = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-
-        assert!(result.is_ok());
-
-        let history = store.progress_history();
-        assert_eq!(history.len(), 2, "should checkpoint after each batch");
-        assert_eq!(
-            history[0].cursor_values.as_deref(),
-            Some(vec!["10".to_string()].as_slice()),
-            "first checkpoint should record cursor from batch 1 (last id=10)"
-        );
-        assert_eq!(
-            history[1].cursor_values.as_deref(),
-            Some(vec!["5".to_string()].as_slice()),
-            "second checkpoint should record cursor from batch 2 (last id=5)"
-        );
-
-        let final_state = store.current_state().unwrap();
-        assert!(final_state.cursor_values.is_none(), "should be completed");
-    }
-
-    #[tokio::test]
-    async fn datalake_failure_surfaces_as_error() {
-        let pipeline = Pipeline::new(
-            Arc::new(FailingDatalake),
-            Arc::new(RecordingCheckpointStore::new()),
-            test_metrics(),
-            Default::default(),
-        );
-        let plan = simple_plan("Failing");
-
-        let result = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-
-        assert!(result.is_err());
-    }
-
-    struct RecordingDatalake {
-        calls: Mutex<Vec<Option<u64>>>,
-        responses: Mutex<Vec<Result<Vec<RecordBatch>, &'static str>>>,
-    }
-
-    impl RecordingDatalake {
-        fn with_responses(responses: Vec<Result<Vec<RecordBatch>, &'static str>>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-
-        fn observed_block_sizes(&self) -> Vec<Option<u64>> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl DatalakeQuery for RecordingDatalake {
-        async fn query_arrow(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(futures::stream::empty()))
-        }
-
-        async fn query_batches(
-            &self,
-            _sql: &str,
-            _params: Value,
-            max_block_size: Option<u64>,
-        ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            self.calls.lock().unwrap().push(max_block_size);
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                return Ok(vec![]);
-            }
-            match responses.remove(0) {
-                Ok(batches) => Ok(batches),
-                Err(msg) => Err(DatalakeError::Query(msg.to_string())),
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn extract_first_attempt_uses_datalake_default() {
-        let datalake = Arc::new(RecordingDatalake::with_responses(vec![Ok(vec![
-            test_batch(1),
-        ])]));
-        let pipeline = Pipeline::new(
-            datalake.clone(),
-            Arc::new(RecordingCheckpointStore::new()),
-            test_metrics(),
-            Default::default(),
-        );
-
-        let plan = simple_plan("Test");
-        let _ = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-
-        let observed = datalake.observed_block_sizes();
-        assert_eq!(
-            observed.first().copied(),
-            Some(None),
-            "first attempt should pass None so the datalake default applies; observed: {observed:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn extract_halves_max_block_size_on_each_retry() {
-        let datalake = Arc::new(RecordingDatalake::with_responses(vec![
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
-            Ok(vec![test_batch(1)]),
-        ]));
-        let pipeline = Pipeline::new(
-            datalake.clone(),
-            Arc::new(RecordingCheckpointStore::new()),
-            test_metrics(),
-            DatalakeRetryConfig {
-                halving_initial_block_size: 8_000,
-                halving_min_block_size: 1024,
-            },
-        );
-
-        let plan = simple_plan("Test");
-        let result = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-        assert!(result.is_ok(), "should recover after halving: {result:?}");
-
-        let observed = datalake.observed_block_sizes();
-        assert_eq!(
-            observed,
-            vec![None, Some(8_000), Some(4_000), Some(2_000)],
-            "block size should halve on each retry; observed: {observed:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn extract_halving_respects_min_block_size_floor() {
-        let datalake = Arc::new(RecordingDatalake::with_responses(vec![
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
-            Ok(vec![test_batch(1)]),
-        ]));
-        let pipeline = Pipeline::new(
-            datalake.clone(),
-            Arc::new(RecordingCheckpointStore::new()),
-            test_metrics(),
-            DatalakeRetryConfig {
-                halving_initial_block_size: 4_096,
-                halving_min_block_size: 2_048,
-            },
-        );
-
-        let plan = simple_plan("Test");
-        let _ = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-
-        let observed = datalake.observed_block_sizes();
-        assert_eq!(
-            observed,
-            vec![None, Some(4_096), Some(2_048), Some(2_048)],
-            "halving should clamp at the configured floor; observed: {observed:?}"
-        );
-    }
-
-    struct OverflowingDatalake {
-        calls: Mutex<Vec<Option<u64>>>,
-        recover_at_block_size: u64,
-    }
-
-    impl OverflowingDatalake {
-        fn observed_block_sizes(&self) -> Vec<Option<u64>> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    #[async_trait]
-    impl DatalakeQuery for OverflowingDatalake {
-        async fn query_arrow(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(futures::stream::empty()))
-        }
-
-        async fn query_batches(
-            &self,
-            _sql: &str,
-            _params: Value,
-            max_block_size: Option<u64>,
-        ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            self.calls.lock().unwrap().push(max_block_size);
-
-            let small_enough =
-                matches!(max_block_size, Some(size) if size <= self.recover_at_block_size);
-            if small_enough {
-                Ok(vec![test_batch_range(1, 5)])
-            } else {
-                Err(DatalakeError::Query(
-                    "Code: 1002. DB::Exception: Error with a Arrow column \"String\": \
-                     Capacity error: array cannot contain more than 2147483646 bytes"
-                        .to_string(),
-                ))
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn arrow_overflow_drops_straight_to_floor_block_size() {
-        let datalake = Arc::new(OverflowingDatalake {
-            calls: Mutex::new(Vec::new()),
-            recover_at_block_size: 8_000,
-        });
-        let pipeline = Pipeline::new(
-            datalake.clone(),
-            Arc::new(RecordingCheckpointStore::new()),
-            test_metrics(),
-            DatalakeRetryConfig {
-                halving_initial_block_size: 8_000,
-                halving_min_block_size: 1_024,
-            },
-        );
-
-        let plan = simple_plan("Test");
-        let result = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-
-        assert!(
-            result.is_ok(),
-            "arrow overflow should self-correct: {result:?}"
-        );
-        assert_eq!(
-            datalake.observed_block_sizes(),
-            vec![None, Some(1_024)],
-            "an Arrow overflow skips gradual halving and drops to the floor block size"
-        );
-    }
-
-    #[tokio::test]
-    async fn resumes_from_stored_cursor() {
-        let store = Arc::new(RecordingCheckpointStore {
-            state: Mutex::new(Some(Checkpoint {
-                watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
-                cursor_values: Some(vec!["5".to_string()]),
-                resume_floor: None,
-            })),
-            progress_history: Mutex::new(Vec::new()),
-        });
-
-        let pipeline = Pipeline::new(
-            Arc::new(EmptyDatalake),
-            store,
-            test_metrics(),
-            Default::default(),
-        );
-        let plan = simple_plan("Test");
-
-        let result = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
-            )
-            .await;
-
-        assert!(result.is_ok());
-    }
-
-    struct StatsDatalake {
-        rows: usize,
-        scan_stats: ScanStats,
-        calls: Mutex<u32>,
-    }
-
-    #[async_trait]
-    impl DatalakeQuery for StatsDatalake {
-        async fn query_arrow(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(futures::stream::empty()))
-        }
-
-        async fn query_batches(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            Ok(vec![])
-        }
-
-        async fn query_batches_with_summary(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
-            let mut calls = self.calls.lock().unwrap();
-            *calls += 1;
-            if *calls == 1 {
-                Ok((vec![test_batch(self.rows)], self.scan_stats))
-            } else {
-                Ok((vec![], ScanStats::default()))
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn run_plan_reports_resource_stats() {
-        let datalake = Arc::new(StatsDatalake {
-            rows: 5,
-            // ClickHouse scanned far more rows than the page returns; read_rows
-            // must track the 5 returned while scanned_rows carries the cost.
-            scan_stats: ScanStats {
-                scanned_rows: 1000,
-                scanned_bytes: 64_000,
-            },
-            calls: Mutex::new(0),
-        });
-        let pipeline = Pipeline::new(
-            datalake,
-            Arc::new(RecordingCheckpointStore::new()),
-            test_metrics(),
-            Default::default(),
-        );
-        let plan = simple_plan("Test");
-
-        let stats = pipeline
-            .run_plan(
-                &noop_context(),
-                &plan,
-                base_query(&plan),
-                &position_key(&plan),
-                test_window(),
-                RunDurability::for_mode(IndexingMode::Incremental),
+                &pipeline_context(),
+                &simple_plan(),
+                &extractor,
+                extract_run_context(),
             )
             .await
-            .expect("run should succeed");
+            .expect("memory extraction should complete");
 
-        assert_eq!(
-            stats.read_rows, 5,
-            "read rows count the rows actually returned"
-        );
-        assert!(
-            stats.read_bytes > 0,
-            "read bytes reflect the data actually returned"
-        );
-        assert_eq!(
-            stats.scanned_rows, 1000,
-            "scanned rows come from the summary"
-        );
-        assert_eq!(
-            stats.scanned_bytes, 64_000,
-            "scanned bytes come from the summary"
-        );
-        assert_eq!(
-            stats.written_rows, 5,
-            "transform emits the 5 extracted rows"
-        );
-        assert!(
-            stats.written_bytes > 0,
-            "written bytes reflect the batch size"
-        );
+        assert_eq!(stats.read_rows, 2);
+        assert_eq!(stats.written_rows, 2);
+        assert_eq!(stats.scanned_rows, 2);
+        assert_eq!(stats.extract_ms, 2);
+    }
+
+    #[tokio::test]
+    async fn next_page_starts_before_current_resume_is_saved() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let extractor = RecordingExtractor::new(vec![RecordingExtractSession {
+            pages: vec![extract_page(&[1, 2], true), extract_page(&[3], false)].into(),
+            events: Arc::clone(&events),
+            first_page_barrier: None,
+        }]);
+
+        Pipeline::new(test_metrics())
+            .run_plan(
+                &pipeline_context(),
+                &simple_plan(),
+                &extractor,
+                extract_run_context(),
+            )
+            .await
+            .expect("pipeline should complete");
+
+        let events = events.lock().unwrap();
+        let second_read = events
+            .iter()
+            .position(|event| *event == "read")
+            .and_then(|first| {
+                events[first + 1..]
+                    .iter()
+                    .position(|event| *event == "read")
+                    .map(|position| first + position + 1)
+            })
+            .expect("second page should be read");
+        let first_save = events
+            .iter()
+            .position(|event| *event == "save")
+            .expect("first resume should be saved");
+        assert!(second_read < first_save, "events: {events:?}");
+    }
+
+    #[tokio::test]
+    async fn extract_sessions_run_concurrently() {
+        let barrier = Arc::new(Barrier::new(2));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sessions = (0..2)
+            .map(|_| RecordingExtractSession {
+                pages: vec![extract_page(&[1], false)].into(),
+                events: Arc::clone(&events),
+                first_page_barrier: Some(Arc::clone(&barrier)),
+            })
+            .collect();
+        let extractor = RecordingExtractor::new(sessions);
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            Pipeline::new(test_metrics()).run_plan(
+                &pipeline_context(),
+                &simple_plan(),
+                &extractor,
+                extract_run_context(),
+            ),
+        )
+        .await
+        .expect("sessions should reach the barrier concurrently")
+        .expect("pipeline should complete");
+    }
+
+    impl RecordingExtractor {
+        fn new(sessions: Vec<RecordingExtractSession>) -> Self {
+            Self {
+                sessions: Mutex::new(Some(
+                    sessions
+                        .into_iter()
+                        .map(|session| Box::new(session) as Box<dyn ExtractSession>)
+                        .collect(),
+                )),
+                completion_events: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Extractor for RecordingExtractor {
+        async fn start_extraction(
+            &self,
+            _context: ExtractRunContext,
+        ) -> Result<ExtractRun, HandlerError> {
+            Ok(ExtractRun {
+                indexing_mode: IndexingMode::Full,
+                sessions: self.sessions.lock().unwrap().take().unwrap_or_default(),
+                completion: Box::new(RecordingExtractCompletion {
+                    events: Arc::clone(&self.completion_events),
+                }),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl ExtractSession for RecordingExtractSession {
+        async fn get_next_page(&mut self) -> Result<Option<ExtractPage>, HandlerError> {
+            if let Some(barrier) = self.first_page_barrier.take() {
+                barrier.wait().await;
+            }
+            self.events.lock().unwrap().push("read");
+            Ok(self.pages.pop_front())
+        }
+
+        async fn save_page_resume(&self, _resume: &ExtractResume) -> Result<(), HandlerError> {
+            self.events.lock().unwrap().push("save");
+            Ok(())
+        }
+
+        async fn save_completed(&self, _durability: WriteDurability) -> Result<(), HandlerError> {
+            self.events.lock().unwrap().push("complete");
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl ExtractRunCompletion for RecordingExtractCompletion {
+        async fn finish_extraction(self: Box<Self>) -> Result<(), HandlerError> {
+            self.events.lock().unwrap().push("finish");
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn pipeline_stats_merge_sums_counters_and_keeps_longest_duration() {
+        let mut total = PipelineStats {
+            read_rows: 10,
+            duration_ms: 20,
+            ..PipelineStats::default()
+        };
+        total.merge(PipelineStats {
+            read_rows: 5,
+            duration_ms: 10,
+            ..PipelineStats::default()
+        });
+        assert_eq!(total.read_rows, 15);
+        assert_eq!(total.duration_ms, 20);
+    }
+
+    #[test]
+    fn extract_context_watermark_parses_as_utc() {
+        let context = extract_run_context();
+        let _: DateTime<Utc> = context.requested_watermark;
     }
 }

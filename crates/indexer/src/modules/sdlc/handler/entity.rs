@@ -3,24 +3,19 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
-use tokio::task::JoinSet;
-use tracing::{Instrument, debug, info, info_span};
+use tracing::{Instrument, debug, info_span};
 use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
-use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+use crate::checkpoint::namespace_position_key;
 
-use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::modules::sdlc::datalake::DatalakeQuery;
+use crate::modules::sdlc::extract::{ExtractRunContext, Extractor};
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
-use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats, WindowBounds};
-use crate::modules::sdlc::plan::{
-    DeletedFilter, Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter,
-};
-use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
+use crate::modules::sdlc::plan::Plan;
+use crate::observer::{self, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
@@ -29,12 +24,10 @@ pub struct EntityHandler {
     plan: Plan,
     scope: EtlScope,
     pipeline: Arc<Pipeline>,
+    extractor: Arc<dyn Extractor>,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
-    datalake: Arc<dyn DatalakeQuery>,
-    checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
     subscription: Subscription,
-    partition_strategy: Option<PartitionStrategy>,
     analytics: IndexingAnalytics,
 }
 
@@ -63,12 +56,10 @@ impl EntityHandler {
         plan: Plan,
         scope: EtlScope,
         pipeline: Arc<Pipeline>,
+        extractor: Arc<dyn Extractor>,
         writer: Arc<crate::clickhouse::ClickHouseWriter>,
-        datalake: Arc<dyn DatalakeQuery>,
-        checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
         subscription: Subscription,
-        partition_strategy: Option<PartitionStrategy>,
         analytics: IndexingAnalytics,
     ) -> Self {
         let handler_name = format!("entity.{}", plan.name.to_lowercase());
@@ -77,12 +68,10 @@ impl EntityHandler {
             plan,
             scope,
             pipeline,
+            extractor,
             writer,
-            datalake,
-            checkpoint_store,
             metrics,
             subscription,
-            partition_strategy,
             analytics,
         }
     }
@@ -135,15 +124,6 @@ impl EntityHandler {
         observer.set_namespace(request.namespace_id);
 
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
-        let parent_checkpoint = self
-            .checkpoint_store
-            .load(&checkpoint_key)
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?;
-        let window = pull_window(parent_checkpoint.as_ref(), request.watermark);
-
-        let mode = window.indexing_mode();
-        observer.set_indexing_mode(mode);
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
         let pipeline_context = PipelineContext {
@@ -152,100 +132,19 @@ impl EntityHandler {
             observer: Arc::clone(&observer),
         };
 
-        let base_query = self
-            .plan
-            .prepare()
-            .with(WatermarkFilter {
-                column: &self.plan.watermark_column,
-                last: window.floor.unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
-                current: window.target,
-            })
-            .with(
-                request
-                    .traversal_path
-                    .as_deref()
-                    .map(|path| TraversalPathFilter { path }),
+        let result = self
+            .pipeline
+            .run_plan(
+                &pipeline_context,
+                &self.plan,
+                self.extractor.as_ref(),
+                ExtractRunContext {
+                    position_key: checkpoint_key,
+                    requested_watermark: request.watermark,
+                    traversal_path: request.traversal_path.clone(),
+                },
             )
-            .with((mode == IndexingMode::Full).then_some(DeletedFilter {
-                column: &self.plan.deleted_column,
-            }));
-
-        let should_partition = self.partition_strategy.is_some() && parent_checkpoint.is_none();
-        let ranges = if should_partition {
-            self.partition_strategy
-                .as_ref()
-                .unwrap()
-                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_deref())
-                .await?
-        } else {
-            Vec::new()
-        };
-
-        let durability = RunDurability::for_mode(mode);
-
-        let result = if ranges.is_empty() {
-            self.pipeline
-                .run_plan(
-                    &pipeline_context,
-                    &self.plan,
-                    base_query,
-                    &checkpoint_key,
-                    window,
-                    durability,
-                )
-                .await
-        } else {
-            info!(
-                entity = %self.plan.name,
-                partitions = ranges.len(),
-                "running partitioned initial load"
-            );
-
-            let partition_result = self
-                .run_partitions(
-                    base_query.into_partitions(ranges),
-                    &checkpoint_key,
-                    window,
-                    durability,
-                    &context,
-                    &pipeline_context,
-                )
-                .await;
-
-            match partition_result {
-                Ok(stats) => {
-                    let partition_checkpoints = self
-                        .checkpoint_store
-                        .load_by_prefix(&format!(
-                            "{checkpoint_key}{}",
-                            PartitionAssignment::CHECKPOINT_PREFIX
-                        ))
-                        .await
-                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
-
-                    match consolidated_watermark(&partition_checkpoints, request.watermark) {
-                        Ok(watermark) => self
-                            .checkpoint_store
-                            .consolidate(&checkpoint_key, &watermark)
-                            .await
-                            .map(|()| stats)
-                            .map_err(|err| HandlerError::Processing(err.to_string())),
-                        // Leaving the parent absent re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
-                        Err(incomplete) => {
-                            info!(
-                                entity = %self.plan.name,
-                                checkpoint = %checkpoint_key,
-                                incomplete = incomplete.len(),
-                                partitions = %incomplete.join(", "),
-                                "partitions still in progress; deferring consolidation to next dispatch"
-                            );
-                            Ok(stats)
-                        }
-                    }
-                }
-                Err(e) => Err(e),
-            }
-        };
+            .await;
 
         match &result {
             Ok(stats) => {
@@ -269,119 +168,6 @@ impl EntityHandler {
 
         result.map(|_| ())
     }
-
-    async fn run_partitions(
-        &self,
-        partitions: Vec<(
-            crate::modules::sdlc::partitioning::PartitionAssignment,
-            PreparedQuery,
-        )>,
-        checkpoint_key: &str,
-        window: WindowBounds,
-        durability: RunDurability,
-        context: &HandlerContext,
-        parent_pipeline_context: &PipelineContext,
-    ) -> Result<PipelineStats, HandlerError> {
-        let mut set: JoinSet<Result<PipelineStats, HandlerError>> = JoinSet::new();
-        for (assignment, query) in partitions {
-            let position_key = format!("{checkpoint_key}{}", assignment.position_suffix());
-
-            let existing = self
-                .checkpoint_store
-                .load(&position_key)
-                .await
-                .map_err(|err| HandlerError::Processing(err.to_string()))?;
-            if let Some(cp) = existing.as_ref()
-                && cp.cursor_values.is_none()
-            {
-                info!(partition = %position_key, "skipping already-completed partition");
-                continue;
-            }
-
-            let plan = self.plan.clone();
-            let pipeline = Arc::clone(&self.pipeline);
-            let partition_context = PipelineContext {
-                writer: Arc::clone(&self.writer),
-                progress: context.progress.clone(),
-                observer: Arc::clone(&parent_pipeline_context.observer),
-            };
-
-            set.spawn(async move {
-                pipeline
-                    .run_plan(
-                        &partition_context,
-                        &plan,
-                        query,
-                        &position_key,
-                        window,
-                        durability,
-                    )
-                    .await
-            });
-        }
-
-        let mut errors = Vec::new();
-        let mut total = PipelineStats::default();
-        while let Some(result) = set.join_next().await {
-            match result {
-                Ok(Ok(stats)) => total.merge(stats),
-                Ok(Err(err)) => errors.push(err.to_string()),
-                Err(join_err) => errors.push(format!("partition task panicked: {join_err}")),
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(total)
-        } else {
-            Err(HandlerError::Processing(format!(
-                "partition failures: {}",
-                errors.join("; ")
-            )))
-        }
-    }
-}
-
-/// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
-fn pull_window(
-    parent_checkpoint: Option<&Checkpoint>,
-    request_watermark: DateTime<Utc>,
-) -> WindowBounds {
-    match parent_checkpoint {
-        Some(checkpoint) if checkpoint.cursor_values.is_some() => WindowBounds {
-            target: checkpoint.watermark,
-            floor: checkpoint.resume_floor,
-        },
-        Some(checkpoint) => WindowBounds {
-            target: request_watermark,
-            floor: Some(checkpoint.watermark),
-        },
-        None => WindowBounds {
-            target: request_watermark,
-            floor: None,
-        },
-    }
-}
-
-/// Parent watermark for a finished partitioned load, or the partitions still
-/// mid-pull: consolidating past a cursored partition silently drops its id range.
-fn consolidated_watermark(
-    partition_checkpoints: &[(String, Checkpoint)],
-    fallback: DateTime<Utc>,
-) -> Result<DateTime<Utc>, Vec<String>> {
-    let incomplete: Vec<String> = partition_checkpoints
-        .iter()
-        .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
-        .map(|(key, _)| key.clone())
-        .collect();
-    if !incomplete.is_empty() {
-        return Err(incomplete);
-    }
-
-    Ok(partition_checkpoints
-        .iter()
-        .map(|(_, checkpoint)| checkpoint.watermark)
-        .min()
-        .unwrap_or(fallback))
 }
 
 fn serialization_error(error: SerializationError) -> HandlerError {
@@ -476,8 +262,9 @@ impl Handler for EntityHandler {
 mod tests {
     use super::*;
 
+    use crate::modules::sdlc::extract::MemoryExtractor;
     use crate::modules::sdlc::plan::build_plans;
-    use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
+    use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
@@ -510,33 +297,21 @@ mod tests {
         };
         let plan = scope_plans
             .into_iter()
-            .find(|p| p.name == entity_name)
+            .find(|plan| plan.name == entity_name)
             .unwrap_or_else(|| panic!("entity plan not found: {entity_name}"));
-
-        let datalake: Arc<dyn DatalakeQuery> = Arc::new(EmptyDatalake);
-        let checkpoint_store: Arc<dyn CheckpointStore> = Arc::new(MockCheckpointStore);
-        let pipeline = Arc::new(Pipeline::new(
-            Arc::clone(&datalake),
-            Arc::clone(&checkpoint_store),
-            test_metrics(),
-            Default::default(),
-        ));
         let subscription = match scope {
             EtlScope::Global => GlobalIndexingRequest::subscription(),
             EtlScope::Namespaced => NamespaceIndexingRequest::subscription(),
         };
 
-        let writer = crate::testkit::test_writer();
         EntityHandler::new(
             plan,
             scope,
-            pipeline,
-            writer,
-            datalake,
-            checkpoint_store,
+            Arc::new(Pipeline::new(test_metrics())),
+            Arc::new(MemoryExtractor::new(Vec::new())),
+            crate::testkit::test_writer(),
             test_metrics(),
             subscription,
-            None,
             IndexingAnalytics::disabled(),
         )
     }
@@ -544,21 +319,17 @@ mod tests {
     #[tokio::test]
     async fn global_entity_handler_processes_request() {
         let handler = build_handler("User", EtlScope::Global);
-        assert_eq!(handler.name(), "entity.user");
-
         let envelope = TestEnvelopeFactory::simple(
             &serde_json::json!({ "watermark": "2024-01-21T00:00:00Z" }).to_string(),
         );
 
-        let result = handler.handle(handler_context(), envelope).await;
-        assert!(result.is_ok());
+        assert_eq!(handler.name(), "entity.user");
+        assert!(handler.handle(handler_context(), envelope).await.is_ok());
     }
 
     #[tokio::test]
     async fn namespaced_entity_handler_processes_request() {
         let handler = build_handler("MergeRequest", EtlScope::Namespaced);
-        assert_eq!(handler.name(), "entity.mergerequest");
-
         let envelope = TestEnvelopeFactory::simple(
             &serde_json::json!({
                 "namespace": 100,
@@ -568,8 +339,8 @@ mod tests {
             .to_string(),
         );
 
-        let result = handler.handle(handler_context(), envelope).await;
-        assert!(result.is_ok());
+        assert_eq!(handler.name(), "entity.mergerequest");
+        assert!(handler.handle(handler_context(), envelope).await.is_ok());
     }
 
     #[test]
@@ -581,7 +352,7 @@ mod tests {
 
     fn indexing_request_with_targets<const N: usize>(targets: [&str; N]) -> IndexingRequest {
         IndexingRequest {
-            watermark: ts("2024-01-21T00:00:00Z"),
+            watermark: "2024-01-21T00:00:00Z".parse().unwrap(),
             scope_key: "global".to_string(),
             traversal_path: None,
             namespace_id: None,
@@ -589,141 +360,5 @@ mod tests {
             campaign_id: None,
             targets: targets.iter().map(|target| target.to_string()).collect(),
         }
-    }
-
-    fn ts(s: &str) -> DateTime<Utc> {
-        s.parse().unwrap()
-    }
-
-    #[test]
-    fn pull_window_missing_checkpoint_starts_from_beginning() {
-        let now = ts("2026-06-07T22:00:00Z");
-        assert_eq!(
-            pull_window(None, now),
-            WindowBounds {
-                target: now,
-                floor: None
-            }
-        );
-    }
-
-    #[test]
-    fn pull_window_completed_advances_to_now() {
-        let now = ts("2026-06-07T22:00:00Z");
-        let completed = Checkpoint {
-            watermark: ts("2026-06-07T21:59:30Z"),
-            cursor_values: None,
-            resume_floor: None,
-        };
-        assert_eq!(
-            pull_window(Some(&completed), now),
-            WindowBounds {
-                target: now,
-                floor: Some(ts("2026-06-07T21:59:30Z")),
-            }
-        );
-    }
-
-    #[test]
-    fn pull_window_resume_keeps_original_window() {
-        let now = ts("2026-06-07T22:05:00Z");
-        let in_progress = Checkpoint {
-            watermark: ts("2026-06-07T22:00:00Z"),
-            cursor_values: Some(vec!["1/65957873/".to_string(), "42".to_string()]),
-            resume_floor: Some(ts("2026-06-07T21:59:30Z")),
-        };
-        assert_eq!(
-            pull_window(Some(&in_progress), now),
-            WindowBounds {
-                target: ts("2026-06-07T22:00:00Z"),
-                floor: Some(ts("2026-06-07T21:59:30Z")),
-            }
-        );
-    }
-
-    #[test]
-    fn pull_window_resume_without_floor_starts_from_beginning() {
-        let now = ts("2026-06-07T22:05:00Z");
-        let legacy = Checkpoint {
-            watermark: ts("2026-06-07T22:00:00Z"),
-            cursor_values: Some(vec!["42".to_string()]),
-            resume_floor: None,
-        };
-        assert_eq!(
-            pull_window(Some(&legacy), now),
-            WindowBounds {
-                target: ts("2026-06-07T22:00:00Z"),
-                floor: None,
-            }
-        );
-    }
-
-    fn completed_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
-        (
-            key.to_string(),
-            Checkpoint {
-                watermark: ts(watermark),
-                cursor_values: None,
-                resume_floor: None,
-            },
-        )
-    }
-
-    fn cursored_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
-        (
-            key.to_string(),
-            Checkpoint {
-                watermark: ts(watermark),
-                cursor_values: Some(vec!["42".to_string()]),
-                resume_floor: Some(ts(watermark)),
-            },
-        )
-    }
-
-    #[test]
-    fn consolidated_watermark_all_complete_returns_min() {
-        let partitions = vec![
-            completed_partition("ns.7.Job.p1of3", "2026-06-07T22:00:00Z"),
-            completed_partition("ns.7.Job.p2of3", "2026-06-07T21:30:00Z"),
-            completed_partition("ns.7.Job.p3of3", "2026-06-07T22:15:00Z"),
-        ];
-        assert_eq!(
-            consolidated_watermark(&partitions, ts("2026-06-07T23:00:00Z")),
-            Ok(ts("2026-06-07T21:30:00Z"))
-        );
-    }
-
-    #[test]
-    fn consolidated_watermark_any_cursored_returns_incomplete_keys() {
-        let partitions = vec![
-            completed_partition("ns.7.Job.p1of3", "2026-06-07T22:00:00Z"),
-            cursored_partition("ns.7.Job.p2of3", "2026-06-07T21:30:00Z"),
-            cursored_partition("ns.7.Job.p3of3", "2026-06-07T22:15:00Z"),
-        ];
-        assert_eq!(
-            consolidated_watermark(&partitions, ts("2026-06-07T23:00:00Z")),
-            Err(vec![
-                "ns.7.Job.p2of3".to_string(),
-                "ns.7.Job.p3of3".to_string()
-            ])
-        );
-    }
-
-    #[test]
-    fn consolidated_watermark_empty_returns_fallback() {
-        let fallback = ts("2026-06-07T23:00:00Z");
-        assert_eq!(consolidated_watermark(&[], fallback), Ok(fallback));
-    }
-
-    #[tokio::test]
-    async fn subscriptions_match_scope() {
-        let global = build_handler("User", EtlScope::Global);
-        assert_eq!(global.subscription(), GlobalIndexingRequest::subscription());
-
-        let namespaced = build_handler("MergeRequest", EtlScope::Namespaced);
-        assert_eq!(
-            namespaced.subscription(),
-            NamespaceIndexingRequest::subscription()
-        );
     }
 }

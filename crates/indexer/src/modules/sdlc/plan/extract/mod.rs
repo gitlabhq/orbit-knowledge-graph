@@ -19,11 +19,26 @@ use lookup::PointLookupJoin;
 pub(super) const FILTERS_MARKER: &str = "{{filters}}";
 pub(super) const BATCH_SIZE_MARKER: &str = "{{batch_size}}";
 
-#[derive(Debug)]
-pub(in crate::modules::sdlc) struct ExtractSpec {
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) struct ClickHouseExtractPlan {
     pub template: ExtractTemplate,
-    pub watermark: String,
-    pub deleted: String,
+    pub watermark_column: String,
+    pub deleted_column: String,
+    pub sort_key: Vec<String>,
+    pub batch_size: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) enum ExtractPlan {
+    ClickHouse(ClickHouseExtractPlan),
+}
+
+impl ExtractPlan {
+    pub fn get_clickhouse_plan(&self) -> &ClickHouseExtractPlan {
+        match self {
+            Self::ClickHouse(plan) => plan,
+        }
+    }
 }
 
 /// Validated template — the only way a `Plan` gets its `extract_template`.
@@ -50,7 +65,7 @@ pub(super) struct SourceColumn {
 
 pub(super) fn compile_extract_spec(
     declaration: &ClickHouseExtractDeclaration,
-) -> Result<ExtractSpec, PlanError> {
+) -> Result<ClickHouseExtractPlan, PlanError> {
     match &declaration.query {
         ExtractQuery::Generated { filter } => {
             generated::compile_generated_extract(declaration, filter.as_deref())
@@ -165,11 +180,13 @@ impl ClickHouseExtractDeclaration {
         }
     }
 
-    fn build_spec(&self, sql: String) -> Result<ExtractSpec, PlanError> {
-        Ok(ExtractSpec {
+    fn build_spec(&self, sql: String) -> Result<ClickHouseExtractPlan, PlanError> {
+        Ok(ClickHouseExtractPlan {
             template: ExtractTemplate::new(sql)?,
-            watermark: self.watermark.clone(),
-            deleted: self.deleted.clone(),
+            watermark_column: self.watermark.clone(),
+            deleted_column: self.deleted.clone(),
+            sort_key: self.order_by.clone(),
+            batch_size: 0,
         })
     }
 }

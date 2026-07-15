@@ -358,8 +358,7 @@ mod tests {
     fn checkpoint_at(watermark: DateTime<Utc>) -> Checkpoint {
         Checkpoint {
             watermark,
-            cursor_values: None,
-            resume_floor: None,
+            resume: None,
         }
     }
 

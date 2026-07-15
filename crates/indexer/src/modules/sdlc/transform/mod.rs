@@ -31,7 +31,6 @@ pub(in crate::modules::sdlc) struct TableBatch {
 /// factory; the namespace scope travels in the block's `traversal_path` column.
 #[async_trait]
 pub(in crate::modules::sdlc) trait BlockTransform: Send + Sync {
-    fn name(&self) -> &str;
     fn outputs(&self) -> &[String];
     async fn transform(&self, block: &RecordBatch) -> Result<Vec<TableBatch>, HandlerError>;
 }
@@ -99,10 +98,6 @@ impl DataFusionTransform {
 
 #[async_trait]
 impl BlockTransform for DataFusionTransform {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
     fn outputs(&self) -> &[String] {
         &self.outputs
     }

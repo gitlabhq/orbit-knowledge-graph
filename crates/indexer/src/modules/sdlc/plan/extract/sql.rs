@@ -7,13 +7,14 @@ use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use ontology::sql_template;
 
 use super::{
-    BATCH_SIZE_MARKER, ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate, FILTERS_MARKER,
+    BATCH_SIZE_MARKER, ClickHouseExtractDeclaration, ClickHouseExtractPlan, ExtractTemplate,
+    FILTERS_MARKER,
 };
 
 pub(in crate::modules::sdlc) fn compile_authored_extract(
     declaration: &ClickHouseExtractDeclaration,
     raw: &str,
-) -> Result<ExtractSpec, PlanError> {
+) -> Result<ClickHouseExtractPlan, PlanError> {
     let rendered = sql_template::render(
         raw,
         sql_template::context! {
@@ -33,10 +34,12 @@ pub(in crate::modules::sdlc) fn compile_authored_extract(
     let deleted = aliased_expression(&rendered, DELETED_COLUMN)
         .unwrap_or_else(|| declaration.deleted.clone());
 
-    Ok(ExtractSpec {
+    Ok(ClickHouseExtractPlan {
         template: ExtractTemplate::new(rendered)?,
-        watermark,
-        deleted,
+        watermark_column: watermark,
+        deleted_column: deleted,
+        sort_key: declaration.order_by.clone(),
+        batch_size: 0,
     })
 }
 
@@ -79,9 +82,9 @@ mod tests {
         )
         .expect("valid authored SQL");
         assert!(!spec.template.as_str().contains("{{watermark_column}}"));
-        assert_eq!(spec.watermark, "namespace._siphon_watermark");
+        assert_eq!(spec.watermark_column, "namespace._siphon_watermark");
         assert_eq!(
-            spec.deleted,
+            spec.deleted_column,
             "(namespace._siphon_deleted OR namespace.type != 'Group')"
         );
     }

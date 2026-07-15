@@ -84,10 +84,6 @@ impl SystemNotesTransform {
 
 #[async_trait]
 impl BlockTransform for SystemNotesTransform {
-    fn name(&self) -> &str {
-        TRANSFORM_NAME
-    }
-
     fn outputs(&self) -> &[String] {
         &self.outputs
     }
