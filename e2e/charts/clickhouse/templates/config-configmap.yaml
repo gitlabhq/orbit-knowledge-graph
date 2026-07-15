@@ -19,6 +19,10 @@ data:
         <merge_tree>
             <merge_max_block_size>1024</merge_max_block_size>
         </merge_tree>
+
+        <access_control_improvements>
+            <select_from_system_db_requires_grant>true</select_from_system_db_requires_grant>
+        </access_control_improvements>
     </clickhouse>
   low_memory_users.xml: |
     <?xml version="1.0"?>
