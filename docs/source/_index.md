@@ -62,12 +62,12 @@ flowchart LR
 
     SDLC -- CDC --> DIP[Data Insights Platform]
     DIP --> CH[(ClickHouse)]
-    Code -- Rails API --> GitLab Orbit[GitLab Orbit service]
-    CH <--> GitLab Orbit
+    Code -- Rails API --> Orbit[GitLab Orbit service]
+    CH <--> Orbit
 
-    GitLab Orbit --> REST[REST API]
-    GitLab Orbit --> MCP[MCP tools]
-    GitLab Orbit --> DAP[GitLab Duo Agent Platform]
+    Orbit --> REST[REST API]
+    Orbit --> MCP[MCP tools]
+    Orbit --> DAP[GitLab Duo Agent Platform]
 ```
 
 GitLab Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
@@ -86,8 +86,7 @@ flowchart LR
     accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI.
 
     Repo[Local repository] --> CLI["orbit CLI"]
-    CLI --> DB[("DuckDB
-~/.orbit/graph.duckdb")]
+    CLI --> DB[("DuckDB\n~/.orbit/graph.duckdb")]
     DB --> Query[CLI query]
 ```
 
