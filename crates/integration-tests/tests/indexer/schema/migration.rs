@@ -6,7 +6,6 @@ use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
 use indexer::modules::code::config::CodeTableNames;
-use indexer::orchestrator::dispatch::DispatchOutcome;
 use indexer::orchestrator::scheduled::{CodeStaleSweep, migration_completion};
 use indexer::schema::migration;
 use indexer::schema::version::{
@@ -1011,10 +1010,7 @@ impl MigrationScenario {
             self.ctx.config.build_client(),
         )));
         CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store)
-            .run_after_drain(&DispatchOutcome {
-                dispatched: 0,
-                skipped: 0,
-            })
+            .run_for_drained(&["1/100/".to_string()])
             .await
             .expect("sweep failed");
     }

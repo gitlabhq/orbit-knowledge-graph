@@ -43,7 +43,7 @@ use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
-use crate::orchestrator::scheduled::code_stale_sweep::CHECKPOINT_KEY as CODE_STALE_SWEEP_CHECKPOINT_KEY;
+use crate::orchestrator::scheduled::code_stale_sweep::CHECKPOINT_KEY_PREFIX as CODE_STALE_SWEEP_CHECKPOINT_KEY_PREFIX;
 use crate::schema::invalidation::find_invalidated_pipelines;
 use crate::schema::invalidation::{
     TableMigrationAction, classify_tables_for_scope, get_migration_scope_for_table_writers,
@@ -80,12 +80,13 @@ WHERE _deleted = false \
   )";
 
 /// Clones the active checkpoint for a code migration: SDLC cursors (including `dispatch.%`) are
-/// kept so SDLC does not re-sweep, but the code stale-sweep gate is dropped so the sweep re-fires
-/// and tombstones the cloned shared-edge code rows once the code backfill drains.
+/// kept so SDLC does not re-sweep, but the per-namespace code stale-sweep gates are dropped so
+/// each namespace re-sweeps and tombstones its cloned shared-edge code rows once its backfill
+/// drains.
 const SEED_CODE_CHECKPOINT_SQL: &str = "\
 INSERT INTO {new_table:Identifier} \
 SELECT * FROM {old_table:Identifier} FINAL \
-WHERE _deleted = false AND key != {sweep_gate_key:String}";
+WHERE _deleted = false AND NOT startsWith(key, {sweep_gate_prefix:String})";
 
 #[derive(Debug, Error)]
 pub enum MigrationError {
@@ -669,7 +670,7 @@ async fn seed_code_scope_checkpoint(
         .query(SEED_CODE_CHECKPOINT_SQL)
         .param("new_table", &new_table.name)
         .param("old_table", &old_table)
-        .param("sweep_gate_key", CODE_STALE_SWEEP_CHECKPOINT_KEY)
+        .param("sweep_gate_prefix", CODE_STALE_SWEEP_CHECKPOINT_KEY_PREFIX)
         .execute()
         .await
         .map_err(|e| MigrationError::Ddl {

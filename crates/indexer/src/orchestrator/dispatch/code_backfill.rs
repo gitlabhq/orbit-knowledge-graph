@@ -80,28 +80,34 @@ impl CodeBackfill {
         &self.metrics
     }
 
-    /// Active-backfill body: dispatch code indexing for every enabled namespace.
-    ///
-    /// Coverage-driven: for each namespace, the project list is filtered
-    /// against the indexer's current-version checkpoint table so only
-    /// un-indexed work is published. Once a namespace's projects are fully
-    /// checkpointed, this produces no publishes for it.
-    pub async fn dispatch_enabled(&self, dispatch_id: Uuid) -> Result<DispatchOutcome, TaskError> {
+    /// Dispatches code indexing for every enabled namespace, publishing only
+    /// un-checkpointed projects and reporting fully-checkpointed namespaces
+    /// as drained.
+    pub async fn dispatch_enabled(
+        &self,
+        dispatch_id: Uuid,
+    ) -> Result<(DispatchOutcome, Vec<String>), TaskError> {
         let enabled = self.fetch_enabled_namespaces().await?;
         self.dispatch_for_namespaces(&enabled, dispatch_id).await
     }
 
+    /// Returns the dispatch outcome and the traversal paths of namespaces
+    /// with no pending projects this tick (every project checkpointed).
     pub async fn dispatch_for_namespaces(
         &self,
         namespaces: &[(i64, String)],
         dispatch_id: Uuid,
-    ) -> Result<DispatchOutcome, TaskError> {
+    ) -> Result<(DispatchOutcome, Vec<String>), TaskError> {
         let mut all_pending: Vec<PendingProject> = Vec::new();
+        let mut drained_paths: Vec<String> = Vec::new();
         for (namespace_id, traversal_path) in namespaces {
-            all_pending.extend(
-                self.fetch_pending_for_namespace(*namespace_id, traversal_path)
-                    .await?,
-            );
+            let pending = self
+                .fetch_pending_for_namespace(*namespace_id, traversal_path)
+                .await?;
+            if pending.is_empty() {
+                drained_paths.push(traversal_path.clone());
+            }
+            all_pending.extend(pending);
         }
         // Shuffle the flat project list so the NATS queue is interleaved
         // across namespaces; otherwise FIFO consumption processes one
@@ -122,7 +128,7 @@ impl CodeBackfill {
             );
         }
 
-        Ok(outcome)
+        Ok((outcome, drained_paths))
     }
 
     /// Returns the set of project IDs whose checkpoint row already exists

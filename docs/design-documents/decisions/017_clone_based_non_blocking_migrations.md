@@ -64,7 +64,7 @@ would corrupt data:
 - A rebuilt table has writers outside the scope, whose rows the clone would drop.
 
 `code` is the exception: it clones `gl_edge` intact because the code stale sweep
-tombstones code's own edge rows as the re-index drains. So a code bump touches
+tombstones code's own edge rows as each namespace's re-index drains. So a code bump touches
 only code.
 
 `classify_tables_for_scope` then marks each table `CloneFromActive` or
@@ -80,7 +80,7 @@ sweep re-dispatches any pipeline with no completed checkpoint:
 - **Selective SDLC**: copy completed checkpoints for unchanged pipelines, drop the
   invalidated ones plus the `dispatch.*` cursors (`seed_sdlc_checkpoint`).
 - **Code**: clone the checkpoint intact (keeping `dispatch.*`) and drop only
-  `maintenance.code_stale_sweep` (`seed_code_scope_checkpoint`).
+  the per-namespace `maintenance.code_stale_sweep.*` gates (`seed_code_scope_checkpoint`).
 - **Full**: empty checkpoint table, so everything backfills.
 
 Control tables like `gkg_schema_version` are never prefixed, cloned, or dropped.
