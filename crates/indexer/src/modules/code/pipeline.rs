@@ -157,7 +157,7 @@ impl CodeIndexingPipeline {
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
-        let fc = pipeline_config.fetch_concurrency();
+        let fc = pipeline_config.fetch_concurrency;
         let small = pipeline_config.small_indexing_slots();
         let big = pipeline_config.big_indexing_slots();
         let writer = BufferedWriter::spawn(

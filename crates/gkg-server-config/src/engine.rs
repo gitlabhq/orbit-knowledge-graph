@@ -232,6 +232,10 @@ impl Default for EntityHandlerConfig {
     }
 }
 
+fn default_fetch_concurrency() -> usize {
+    10
+}
+
 fn default_partition_min_rows() -> u64 {
     50_000_000
 }
@@ -337,9 +341,9 @@ pub struct CodeIndexingPipelineConfig {
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
     /// many repositories can be downloaded simultaneously in the pipelined
-    /// code indexer. 0 = no limit. Unset = derived from the container CPU count.
-    #[serde(default)]
-    pub fetch_concurrency: Option<usize>,
+    /// code indexer. 0 = no limit. Defaults to 10.
+    #[serde(default = "default_fetch_concurrency")]
+    pub fetch_concurrency: usize,
     /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.
     #[serde(default = "default_code_indexing_write_channel_capacity")]
     pub write_channel_capacity: usize,
@@ -383,7 +387,7 @@ impl Default for CodeIndexingPipelineConfig {
             per_file_ssa_timeout_ms: default_code_indexing_per_file_ssa_timeout_ms(),
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
             job_timeout_secs: default_code_indexing_job_timeout_secs(),
-            fetch_concurrency: None,
+            fetch_concurrency: default_fetch_concurrency(),
             write_channel_capacity: default_code_indexing_write_channel_capacity(),
             write_slice_rows: default_code_indexing_write_slice_rows(),
             write_buffer_age_secs: default_code_indexing_write_buffer_age_secs(),
@@ -399,22 +403,11 @@ impl Default for CodeIndexingPipelineConfig {
 
 impl CodeIndexingPipelineConfig {
     pub fn resolve_runtime_defaults(&mut self, available_parallelism: usize) {
-        if self.fetch_concurrency.is_some()
-            && self.small_indexing_slots.is_some()
-            && self.big_indexing_slots.is_some()
-        {
+        if self.small_indexing_slots.is_some() && self.big_indexing_slots.is_some() {
             return;
         }
 
         let slots = derive_code_indexing_slots(available_parallelism);
-        if self.fetch_concurrency.is_none() {
-            self.fetch_concurrency = Some(slots.fetch_concurrency);
-            info!(
-                available_parallelism,
-                value = slots.fetch_concurrency,
-                "derived code-indexing pipeline.fetch_concurrency"
-            );
-        }
         if self.small_indexing_slots.is_none() {
             self.small_indexing_slots = Some(slots.small_indexing_slots);
             info!(
@@ -431,10 +424,6 @@ impl CodeIndexingPipelineConfig {
                 "derived code-indexing pipeline.big_indexing_slots"
             );
         }
-    }
-
-    pub fn fetch_concurrency(&self) -> usize {
-        self.fetch_concurrency.unwrap_or(0)
     }
 
     pub fn small_indexing_slots(&self) -> usize {

@@ -9,14 +9,13 @@ pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
 
-/// Half the workers index, half prefetch archives (code pool ran 8 + 8 at 16 workers).
+/// Half the (CPU-bound) workers index; code pool ran 8 of 16. Fetch stays a static I/O default.
 const CODE_INDEXING_LANE_SHARE_PERCENT: usize = 50;
 
 /// Reserve big-repo lanes so a flood of small repos can't starve monorepos (big 2 / small 6).
 const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
 
 pub struct CodeIndexingSlots {
-    pub fetch_concurrency: usize,
     pub small_indexing_slots: usize,
     pub big_indexing_slots: usize,
 }
@@ -88,7 +87,6 @@ pub fn derive_code_indexing_slots(available_parallelism: usize) -> CodeIndexingS
     CodeIndexingSlots {
         big_indexing_slots: big,
         small_indexing_slots: indexing.saturating_sub(big).max(1),
-        fetch_concurrency: workers.saturating_sub(indexing).max(1),
     }
 }
 
@@ -143,7 +141,6 @@ mod tests {
     #[test]
     fn code_slots_reproduce_historical_split_on_sixteen_cores() {
         let slots = derive_code_indexing_slots(16);
-        assert_eq!(slots.fetch_concurrency, 8);
         assert_eq!(slots.small_indexing_slots, 6);
         assert_eq!(slots.big_indexing_slots, 2);
     }
@@ -151,7 +148,6 @@ mod tests {
     #[test]
     fn code_slots_scale_down_on_a_small_pod() {
         let slots = derive_code_indexing_slots(4);
-        assert_eq!(slots.fetch_concurrency, 2);
         assert_eq!(slots.small_indexing_slots, 1);
         assert_eq!(slots.big_indexing_slots, 1);
     }
@@ -160,7 +156,6 @@ mod tests {
     fn code_slots_floor_every_lane_at_one() {
         for parallelism in [0, 1] {
             let slots = derive_code_indexing_slots(parallelism);
-            assert_eq!(slots.fetch_concurrency, 1);
             assert_eq!(slots.small_indexing_slots, 1);
             assert_eq!(slots.big_indexing_slots, 1);
         }
