@@ -10,7 +10,6 @@ use ontology::{
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
-use super::EnrichedFieldSource;
 use super::SOURCE_DATA_TABLE;
 
 pub(in crate::modules::sdlc) enum TransformDeclaration {
@@ -48,7 +47,6 @@ pub(in crate::modules::sdlc) struct Transformation {
 
 /// A node property denormalized onto an edge row as a tag; opaque to `build.rs`.
 pub(super) struct DenormalizedColumnProjection {
-    /// Source MemTable column (e.g. an enrichment `_e0_state`).
     source_column: String,
     edge_column: String,
     /// Tag key prefix; values become `"status:failed"` tokens.
@@ -107,7 +105,6 @@ impl TransformDeclaration {
 
 pub(super) fn build_transform_spec(
     transform_declaration: TransformDeclaration,
-    enriched_fields: &[EnrichedFieldSource],
     ontology: &Ontology,
 ) -> TransformSpec {
     match transform_declaration {
@@ -118,13 +115,7 @@ pub(super) fn build_transform_spec(
             relationship_kind,
             mapping,
             scope,
-        } => edge_transform(
-            &relationship_kind,
-            &mapping,
-            scope,
-            enriched_fields,
-            ontology,
-        ),
+        } => edge_transform(&relationship_kind, &mapping, scope, ontology),
         TransformDeclaration::Rust(name) => TransformSpec::Rust(name),
     }
 }
@@ -158,10 +149,9 @@ fn edge_transform(
     relationship_kind: &str,
     mapping: &EdgeMapping,
     scope: EtlScope,
-    enriched_fields: &[EnrichedFieldSource],
     ontology: &Ontology,
 ) -> TransformSpec {
-    let denormalized = enriched_denormalized_columns(relationship_kind, enriched_fields, ontology);
+    let denormalized = standalone_edge_denormalized_columns(relationship_kind, mapping, ontology);
     let filters = vec![
         EdgeFilter::IsNotNull(mapping.source.field.clone()),
         EdgeFilter::IsNotNull(mapping.target.field.clone()),
@@ -249,37 +239,36 @@ fn edge_transformation(
     }
 }
 
-fn enriched_denormalized_columns(
+fn standalone_edge_denormalized_columns(
     relationship_kind: &str,
-    enriched_fields: &[EnrichedFieldSource],
+    mapping: &EdgeMapping,
     ontology: &Ontology,
 ) -> Vec<DenormalizedColumnProjection> {
-    let mut columns = Vec::new();
-    for field in enriched_fields {
-        let Some(node) = ontology.get_node(&field.node_kind) else {
+    let mut projections = Vec::new();
+    for (node_ref, direction) in [
+        (&mapping.source, DenormDirection::Source),
+        (&mapping.target, DenormDirection::Target),
+    ] {
+        let NodeRefKind::Literal(node_kind) = &node_ref.kind else {
             continue;
         };
-        if let Some(dp) = ontology.denormalized_properties().iter().find(|dp| {
-            dp.relationship_kind == relationship_kind
-                && dp.direction == field.direction
-                && dp.node_kind == field.node_kind
-                && {
-                    let ontology_field = node.fields.iter().find(|f| f.name == dp.property_name);
-                    let source_column = ontology_field
-                        .and_then(|f| f.column_name())
-                        .unwrap_or(&dp.property_name);
-                    source_column == field.source_node_column
-                }
-        }) {
-            columns.push(DenormalizedColumnProjection {
-                source_column: field.batch_field_name.clone(),
-                edge_column: dp.edge_column.clone(),
-                tag_key: dp.tag_key.clone(),
-                enum_mapping: dp.enum_values.clone(),
-            });
+        for (property_name, input_field) in &node_ref.property_inputs {
+            if let Some(property) = ontology.denormalized_properties().iter().find(|property| {
+                property.relationship_kind == relationship_kind
+                    && property.direction == direction
+                    && property.node_kind == *node_kind
+                    && property.property_name == *property_name
+            }) {
+                projections.push(DenormalizedColumnProjection {
+                    source_column: input_field.clone(),
+                    edge_column: property.edge_column.clone(),
+                    tag_key: property.tag_key.clone(),
+                    enum_mapping: property.enum_values.clone(),
+                });
+            }
         }
     }
-    columns
+    projections
 }
 
 fn fk_denormalized_columns(
@@ -668,6 +657,33 @@ mod tests {
     }
 
     #[test]
+    fn standalone_edge_property_inputs_select_denormalized_tag_fields() {
+        let ontology = test_ontology();
+        let pipeline = ontology
+            .get_edge_etl("APPROVED")
+            .and_then(|pipelines| pipelines.first())
+            .expect("APPROVED pipeline");
+        let mapping = pipeline
+            .transform
+            .edges()
+            .first()
+            .expect("APPROVED edge mapping");
+
+        let projections = standalone_edge_denormalized_columns("APPROVED", mapping, &ontology);
+
+        assert!(projections.iter().any(|projection| {
+            projection.source_column == "user_state"
+                && projection.edge_column == "source_tags"
+                && projection.tag_key == "state"
+        }));
+        assert!(projections.iter().any(|projection| {
+            projection.source_column == "merge_request_state_id"
+                && projection.edge_column == "target_tags"
+                && projection.tag_key == "state"
+        }));
+    }
+
+    #[test]
     fn fk_edge_transform_outgoing_literal() {
         let mapping = literal_mapping("id", "Group", "owner_id", "User", "owns");
         let sql = fk_edge_transform(&mapping, "Group", true, &test_ontology()).sql;
@@ -688,18 +704,18 @@ mod tests {
         let edge = EdgeMapping {
             source: NodeRef {
                 field: "noteable_id".to_string(),
+                property_inputs: indexmap::IndexMap::new(),
+                enrich: false,
                 kind: NodeRefKind::Derived {
                     column: "noteable_type".to_string(),
                     mapping,
                 },
-                enrich: vec![],
-                enrich_source: None,
             },
             target: NodeRef {
                 field: "id".to_string(),
                 kind: NodeRefKind::Literal("Note".to_string()),
-                enrich: vec![],
-                enrich_source: None,
+                property_inputs: indexmap::IndexMap::new(),
+                enrich: false,
             },
             label: "HAS_NOTE".to_string(),
             array_field: None,
@@ -720,14 +736,14 @@ mod tests {
             source: NodeRef {
                 field: "assignees".to_string(),
                 kind: NodeRefKind::Literal("User".to_string()),
-                enrich: vec![],
-                enrich_source: None,
+                property_inputs: indexmap::IndexMap::new(),
+                enrich: false,
             },
             target: NodeRef {
                 field: "id".to_string(),
                 kind: NodeRefKind::Literal("MergeRequest".to_string()),
-                enrich: vec![],
-                enrich_source: None,
+                property_inputs: indexmap::IndexMap::new(),
+                enrich: false,
             },
             label: "assigned".to_string(),
             array_field: Some("user_id".to_string()),
@@ -749,14 +765,14 @@ mod tests {
             source: NodeRef {
                 field: from_field.to_string(),
                 kind: NodeRefKind::Literal(from_kind.to_string()),
-                enrich: vec![],
-                enrich_source: None,
+                property_inputs: indexmap::IndexMap::new(),
+                enrich: false,
             },
             target: NodeRef {
                 field: to_field.to_string(),
                 kind: NodeRefKind::Literal(to_kind.to_string()),
-                enrich: vec![],
-                enrich_source: None,
+                property_inputs: indexmap::IndexMap::new(),
+                enrich: false,
             },
             label: label.to_string(),
             array_field: None,

@@ -341,14 +341,14 @@ mod tests {
             source: NodeRef {
                 field: "user_id".to_string(),
                 kind: NodeRefKind::Literal("User".to_string()),
-                enrich: vec![],
-                enrich_source: None,
+                property_inputs: Default::default(),
+                enrich: false,
             },
             target: NodeRef {
                 field: "id".to_string(),
                 kind: NodeRefKind::Literal("MergeRequest".to_string()),
-                enrich: vec![],
-                enrich_source: None,
+                property_inputs: Default::default(),
+                enrich: false,
             },
             label: relationship_kind.to_string(),
             array_field: None,
@@ -450,12 +450,12 @@ mod tests {
         let polymorphic = EdgeMapping {
             source: NodeRef {
                 field: "noteable_id".to_string(),
+                property_inputs: Default::default(),
+                enrich: false,
                 kind: NodeRefKind::Derived {
                     column: "noteable_type".to_string(),
                     mapping: Default::default(),
                 },
-                enrich: vec![],
-                enrich_source: None,
             },
             ..mapping("HAS_NOTE")
         };

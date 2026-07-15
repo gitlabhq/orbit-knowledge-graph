@@ -135,8 +135,13 @@ preventable feedback (see #2772, !1416). Check each of these first:
   in `modules/code/arrow_converter.rs` (also `crates/duckdb-client/src/converter.rs`). Do not
   hardcode them; hardcoded specs silently drift from `config/graph.sql`.
 - **Extraction SQL:** declare the source shape in ontology pipelines. Use `query: generated` for
-  single-table projections and enriching edges (the indexer builds the SQL from the entity's
-  fields + the transform's edge mappings), with an `extract.filter` for row predicates; use a
+  single-table projections and extracts with point lookups. Generated extracts list only their base
+  table; lookup tables resolve from the referenced node pipelines. Nodes may declare
+  `enrichment_props`. A slim lookup with only `node` and `id` expands source columns and stable
+  aliases from that contract; an endpoint with `enrich: true` independently expands its property
+  bindings from the same contract. Same-node references derive distinct field namespaces from
+  their ID fields. Explicit lookup `fields` and endpoint `properties` remain escape hatches. The
+  indexer builds lookup joins without reading transform mappings. Use an `extract.filter` for row predicates; use a
   co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex joins or
   materialized arrays, so rows you discard never cross the wire. The ontology carries a `.sql.j2`
   file's raw content verbatim as `ExtractQuery::Sql`; the indexer's `plan/extract/sql.rs` renders
@@ -147,10 +152,10 @@ preventable feedback (see #2772, !1416). Check each of these first:
   decomposes each pipeline and hands `extract/` transform-neutral inputs (it produces an
   `ExtractSpec` with a validated `ExtractTemplate`) and `transform.rs` an owned, narrow
   `TransformDeclaration`; Arrow `RecordBatch` schemas are the runtime extract-transform contract,
-  not a duplicated planning type. `ExtractSpec` temporarily carries `EnrichedFieldSource` entries
-  for generated edge tags until enrichment aliases move into the extract declaration;
-  `extract/enrichment.rs` derives the edge-endpoint `_eN` joins. `extract/` imports nothing from
-  `transform`. None of this lives in the ontology crate.
+  not a duplicated planning type. Transform endpoint property bindings determine which batch
+  fields form denormalized edge tags; no extraction metadata side channel exists.
+  `extract/lookup.rs` derives its internal `_eN` joins only from the extract declaration.
+  `extract/` imports nothing from `transform`. None of the SQL generation lives in the ontology crate.
 - **Concurrency:** independent datalake lookups (routes / MR / work-item) should run concurrently
   (e.g. `tokio::try_join!`), not sequentially.
 - **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding

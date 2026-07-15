@@ -1,7 +1,7 @@
 //! Turns a pipeline's declarative `Extract` into the templated ClickHouse query the runtime consumes.
 
-mod enrichment;
 pub(super) mod generated;
+mod lookup;
 pub(super) mod sql;
 
 use std::collections::HashSet;
@@ -12,10 +12,8 @@ use ontology::{
     constants::{DELETED_COLUMN, VERSION_COLUMN},
 };
 
-pub(in crate::modules::sdlc) use enrichment::EnrichmentJoin;
-
-use super::EnrichedFieldSource;
 use super::build::PlanError;
+pub(in crate::modules::sdlc) use lookup::PointLookupJoin;
 
 pub(super) const FILTERS_MARKER: &str = "{{filters}}";
 pub(super) const BATCH_SIZE_MARKER: &str = "{{batch_size}}";
@@ -25,7 +23,6 @@ pub(in crate::modules::sdlc) struct ExtractSpec {
     pub template: ExtractTemplate,
     pub watermark: String,
     pub deleted: String,
-    pub enriched_fields: Vec<EnrichedFieldSource>,
 }
 
 /// Validated template — the only way a `Plan` gets its `extract_template`.
@@ -133,16 +130,11 @@ impl ExtractDecl {
         }
     }
 
-    fn build_spec(
-        &self,
-        sql: String,
-        enriched_fields: Vec<EnrichedFieldSource>,
-    ) -> Result<ExtractSpec, PlanError> {
+    fn build_spec(&self, sql: String) -> Result<ExtractSpec, PlanError> {
         Ok(ExtractSpec {
             template: ExtractTemplate::new(sql)?,
             watermark: self.watermark.clone(),
             deleted: self.deleted.clone(),
-            enriched_fields,
         })
     }
 }

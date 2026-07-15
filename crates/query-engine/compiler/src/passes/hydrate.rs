@@ -309,6 +309,7 @@ mod tests {
             destination_table: "gl_test".to_string(),
             fields,
             primary_keys: vec!["id".to_string()],
+            enrichment_props: vec![],
             default_columns: vec![],
             sort_key: vec!["id".to_string()],
             pipelines: vec![],

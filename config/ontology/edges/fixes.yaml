@@ -13,18 +13,15 @@ pipelines:
   - name: FIXES_siphon_vulnerability_merge_request_links_Vulnerability
     extract:
       type: clickhouse
-      tables: [siphon_vulnerability_merge_request_links, merge_requests, siphon_vulnerabilities]
+      tables: [siphon_vulnerability_merge_request_links]
       order_by: [traversal_path, id]
       query: generated
+      lookups:
+        - { node: MergeRequest, id: merge_request_id }
+        - { node: Vulnerability, id: vulnerability_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: merge_request_id
-            kind: MergeRequest
-            enrich: [state_id, merge_status, draft, squash, discussion_locked]
-          to:
-            field: vulnerability_id
-            kind: Vulnerability
-            enrich: [state, severity, report_type, resolved_on_default_branch, present_on_default_branch]
+        - from: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          to: { field: vulnerability_id, kind: Vulnerability, enrich: true }
           label: FIXES

@@ -6,6 +6,7 @@ description: A specific occurrence of a vulnerability detected in a project
 label: uuid
 destination_table: gl_vulnerability_occurrence
 default_columns: [id, uuid, name, severity, report_type]
+enrichment_props: [severity, report_type, detection_method]
 
 style:
   size: 28

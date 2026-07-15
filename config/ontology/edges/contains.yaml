@@ -47,18 +47,15 @@ pipelines:
   - name: CONTAINS_siphon_work_item_parent_links_WorkItem
     extract:
       type: clickhouse
-      tables: [siphon_work_item_parent_links, work_items]
+      tables: [siphon_work_item_parent_links]
       order_by: [traversal_path, work_item_parent_id, id]
       query: generated
+      lookups:
+        - { node: WorkItem, id: work_item_parent_id }
+        - { node: WorkItem, id: work_item_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: work_item_parent_id
-            kind: WorkItem
-            enrich: [state_id, work_item_type_id, confidential]
-          to:
-            field: work_item_id
-            kind: WorkItem
-            enrich: [state_id, work_item_type_id, confidential]
+        - from: { field: work_item_parent_id, kind: WorkItem, enrich: true }
+          to: { field: work_item_id, kind: WorkItem, enrich: true }
           label: CONTAINS

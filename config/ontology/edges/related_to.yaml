@@ -23,18 +23,15 @@ pipelines:
   - name: RELATED_TO_siphon_issue_links_WorkItem
     extract:
       type: clickhouse
-      tables: [siphon_issue_links, work_items]
+      tables: [siphon_issue_links]
       order_by: [traversal_path, source_id, id]
       query: generated
+      lookups:
+        - { node: WorkItem, id: source_id }
+        - { node: WorkItem, id: target_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: source_id
-            kind: WorkItem
-            enrich: [state_id, work_item_type_id, confidential]
-          to:
-            field: target_id
-            kind: WorkItem
-            enrich: [state_id, work_item_type_id, confidential]
+        - from: { field: source_id, kind: WorkItem, enrich: true }
+          to: { field: target_id, kind: WorkItem, enrich: true }
           label: RELATED_TO

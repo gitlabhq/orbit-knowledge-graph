@@ -6,6 +6,7 @@ description: A deployment of a specific commit to a CI/CD environment
 label: id
 destination_table: gl_deployment
 default_columns: [id, iid, status, ref, sha]
+enrichment_props: [status, tag, archived]
 
 style:
   size: 26
