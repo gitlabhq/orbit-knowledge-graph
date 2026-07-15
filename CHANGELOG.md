@@ -1,3 +1,13 @@
+## [0.88.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.88.0...v0.88.1) (2026-07-15)
+
+### Fixes
+
+* **indexer:** count code coverage by top-level path set, not per-row arrayExists ([3cb24f6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3cb24f6264ff690b183ad63c6d0e58ddde9955e6)) by Jean-Gabriel Doyon
+
+### Other
+
+* replace standalone "Orbit" with "GitLab Orbit" in docs/source ([4cc3a7f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4cc3a7fe023c127d6ba98a5e49ac9c02e76433ef)) by Fiona Neill
+
 ## [0.88.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.87.0...v0.88.0) (2026-07-15)
 
 ### Features
