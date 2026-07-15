@@ -47,13 +47,12 @@ impl ContainerResources {
         }
     }
 
-    /// Available parallelism, capped so a CPU-rich but memory-tight pod cannot
-    /// derive more workers than [`WORKER_MEMORY_BUDGET_BYTES`] each can fit in
-    /// the memory limit (#794 was OOMKilled sdlc pods mid-backfill).
-    pub fn worker_budget(&self) -> usize {
+    /// The memory limit caps the CPU count because a CPU-rich but memory-tight
+    /// pod must not over-provision workers (#794 was OOMKilled sdlc pods).
+    pub fn derive_worker_budget(&self) -> usize {
         let cpu = self.available_parallelism.max(1);
         match self.memory_limit_bytes {
-            Some(bytes) => cpu.min(memory_worker_cap(bytes)),
+            Some(bytes) => cpu.min(max_workers_for_memory_limit(bytes)),
             None => cpu,
         }
     }
@@ -62,7 +61,7 @@ impl ContainerResources {
 impl EngineConfiguration {
     pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
         if self.max_concurrent_workers.is_none() {
-            let workers = resources.worker_budget();
+            let workers = resources.derive_worker_budget();
             self.max_concurrent_workers = Some(workers);
             info!(
                 available_parallelism = resources.available_parallelism,
@@ -119,14 +118,13 @@ pub fn derive_code_indexing_slots(worker_budget: usize) -> CodeIndexingSlots {
     }
 }
 
-fn memory_worker_cap(memory_limit_bytes: u64) -> usize {
+fn max_workers_for_memory_limit(memory_limit_bytes: u64) -> usize {
     usize::try_from(memory_limit_bytes / WORKER_MEMORY_BUDGET_BYTES)
         .unwrap_or(usize::MAX)
         .max(1)
 }
 
-/// Drops sysinfo's unlimited/unreadable sentinel, leaving a usable byte limit.
-fn readable_memory_limit_bytes(total_memory: u64) -> Option<u64> {
+fn memory_limit_if_bounded(total_memory: u64) -> Option<u64> {
     (total_memory < CGROUP_UNLIMITED_THRESHOLD_BYTES).then_some(total_memory)
 }
 
@@ -141,7 +139,7 @@ fn read_cgroup_memory_limit_bytes() -> Option<u64> {
         ProcessRefreshKind::nothing(),
     );
     let limits = system.process(pid)?.cgroup_limits()?;
-    readable_memory_limit_bytes(limits.total_memory)
+    memory_limit_if_bounded(limits.total_memory)
 }
 
 #[cfg(test)]
@@ -162,27 +160,27 @@ mod tests {
 
     #[test]
     fn worker_budget_is_parallelism_without_a_memory_limit() {
-        assert_eq!(resources(20, None).worker_budget(), 20);
-        assert_eq!(resources(0, None).worker_budget(), 1);
+        assert_eq!(resources(20, None).derive_worker_budget(), 20);
+        assert_eq!(resources(0, None).derive_worker_budget(), 1);
     }
 
     #[test]
     fn worker_budget_reproduces_prod_pool_shapes() {
-        assert_eq!(resources(16, Some(24)).worker_budget(), 16);
-        assert_eq!(resources(8, Some(32)).worker_budget(), 8);
+        assert_eq!(resources(16, Some(24)).derive_worker_budget(), 16);
+        assert_eq!(resources(8, Some(32)).derive_worker_budget(), 8);
     }
 
     #[test]
     fn memory_limit_caps_the_worker_budget() {
-        assert_eq!(resources(8, Some(4)).worker_budget(), 2);
-        assert_eq!(resources(8, Some(1)).worker_budget(), 1);
+        assert_eq!(resources(8, Some(4)).derive_worker_budget(), 2);
+        assert_eq!(resources(8, Some(1)).derive_worker_budget(), 1);
     }
 
     #[test]
     fn unlimited_sentinel_reads_as_no_memory_limit() {
-        assert_eq!(readable_memory_limit_bytes(u64::MAX), None);
-        assert_eq!(readable_memory_limit_bytes(1 << 62), None);
-        assert_eq!(readable_memory_limit_bytes(32 * GIB), Some(32 * GIB));
+        assert_eq!(memory_limit_if_bounded(u64::MAX), None);
+        assert_eq!(memory_limit_if_bounded(1 << 62), None);
+        assert_eq!(memory_limit_if_bounded(32 * GIB), Some(32 * GIB));
     }
 
     #[test]

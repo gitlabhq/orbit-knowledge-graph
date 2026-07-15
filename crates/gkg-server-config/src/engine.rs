@@ -409,7 +409,7 @@ impl CodeIndexingPipelineConfig {
             return;
         }
 
-        let slots = derive_code_indexing_slots(resources.worker_budget());
+        let slots = derive_code_indexing_slots(resources.derive_worker_budget());
         if self.small_indexing_slots.is_none() {
             self.small_indexing_slots = Some(slots.small_indexing_slots);
             info!(
