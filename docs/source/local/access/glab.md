@@ -36,7 +36,7 @@ Two top-level commands:
 - `glab orbit local`: wraps the managed `orbit` binary to index and query the
   local graph.
 - `glab orbit setup`: guided onboarding that verifies access, installs the
-  Orbit skill, and installs the local binary.
+  GitLab Orbit skill, and installs the local binary.
 
 ## Prerequisites
 
@@ -63,8 +63,8 @@ glab orbit local help
 
 ## Set up your AI agent
 
-`glab orbit setup` runs a guided onboarding: it verifies that Orbit is
-reachable, installs the Orbit skill so AI coding agents can discover it, and
+`glab orbit setup` runs a guided onboarding: it verifies that GitLab Orbit is
+reachable, installs the GitLab Orbit skill so AI coding agents can discover it, and
 installs the local `orbit` binary.
 
 ```shell

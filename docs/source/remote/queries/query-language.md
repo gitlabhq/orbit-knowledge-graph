@@ -126,7 +126,7 @@ A node selector names one entity type in the ontology.
 |-------|------|-------------|
 | `id` | `string` | Local alias for the node. Relationships, aggregations, path, and neighbors refer to this alias. |
 | `entity` | `string` | Ontology node type, such as `Project`, `User`, `MergeRequest`, `File`, or `Definition`. |
-| `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, Orbit returns the entity's default columns. |
+| `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, GitLab Orbit returns the entity's default columns. |
 | `filters` | `object` | Property filters. |
 | `node_ids` | `array` | Exact IDs to match. Accepts integers or digit strings. Maximum 500. |
 | `id_range` | `object` | Inclusive ID range with `start` and `end`. |
@@ -242,7 +242,7 @@ Using these operators on other properties falls back to a full string scan, whic
 ## Columns and virtual columns
 
 Most columns come from indexed graph tables in ClickHouse. Some columns are
-virtual: Orbit fetches them from another service after the graph query returns.
+virtual: GitLab Orbit fetches them from another service after the graph query returns.
 
 Request virtual columns explicitly in `columns`. The `dynamic_columns` option
 used by `path_finding` and `neighbors` excludes virtual columns because they
@@ -592,7 +592,7 @@ Virtual columns still require an explicit request in a traversal query.
 
 ## Validation limits
 
-Orbit rejects broad or ambiguous queries before compiling SQL.
+GitLab Orbit rejects broad or ambiguous queries before compiling SQL.
 
 | Limit | Value |
 |-------|-------|

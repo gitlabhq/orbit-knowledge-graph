@@ -45,7 +45,7 @@ GitLab Orbit indexes the following GitLab objects and their relationships:
 | Security | Vulnerabilities, security findings, security scans, scanners, CVE/CWE identifiers |
 
 SDLC data is updated continuously via change data capture. Changes in your GitLab instance
-appear in Orbit within minutes.
+appear in GitLab Orbit within minutes.
 
 ## Source code
 

@@ -37,7 +37,7 @@ Two top-level commands:
 
 - `glab orbit remote`: typed subcommands that call the Orbit Remote REST API.
   Available in `glab` 1.94 or later.
-- `glab orbit setup`: one-command install of the Orbit skill and MCP config
+- `glab orbit setup`: one-command install of the GitLab Orbit skill and MCP config
   for your AI agent. Planned for a future `glab` release. Until it ships,
   [configure your MCP client manually](mcp.md#connect-your-mcp-client).
 

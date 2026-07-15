@@ -94,7 +94,7 @@ for details.
 
 | Method | Best for | Setup |
 |---|---|---|
-| [The Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit local --install` |
+| [The GitLab Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit local --install` |
 | [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
 | [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-local -- orbit mcp serve` |
 

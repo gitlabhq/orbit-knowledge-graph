@@ -39,7 +39,7 @@ Query the graph to answer questions your instance cannot answer directly:
 - Where are the open critical vulnerabilities, and which pipelines introduced them?
 - Which projects depend on this library?
 
-*Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.*
+*GitLab Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.*
 
 For a click-through demo, see [GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/).
 <!-- Demo published on 2026-06-30 -->
@@ -52,8 +52,8 @@ pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 
 ```mermaid
 flowchart LR
-    accTitle: Orbit Remote architecture
-    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and GitLab Duo Agent Platform.
+    accTitle: GitLab Orbit Remote architecture
+    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. GitLab Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and GitLab Duo Agent Platform.
 
     subgraph GitLab["GitLab instance"]
         SDLC[SDLC data]
@@ -62,12 +62,12 @@ flowchart LR
 
     SDLC -- CDC --> DIP[Data Insights Platform]
     DIP --> CH[(ClickHouse)]
-    Code -- Rails API --> Orbit[Orbit service]
-    CH <--> Orbit
+    Code -- Rails API --> GitLab Orbit[GitLab Orbit service]
+    CH <--> GitLab Orbit
 
-    Orbit --> REST[REST API]
-    Orbit --> MCP[MCP tools]
-    Orbit --> DAP[GitLab Duo Agent Platform]
+    GitLab Orbit --> REST[REST API]
+    GitLab Orbit --> MCP[MCP tools]
+    GitLab Orbit --> DAP[GitLab Duo Agent Platform]
 ```
 
 Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.

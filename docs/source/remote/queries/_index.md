@@ -134,4 +134,4 @@ path and returns the raw file text.
 ```
 
 For the full syntax, available fields, and validation rules, see
-[Orbit query language](query-language.md).
+[GitLab Orbit query language](query-language.md).

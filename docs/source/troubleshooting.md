@@ -52,7 +52,7 @@ glab orbit local index /path/to/your/repo
 containing `Could not set lock on file`.
 
 **Cause:** Another `orbit` process is already running and holds the DuckDB
-write lock. Orbit retries automatically with exponential backoff, but fails if
+write lock. GitLab Orbit retries automatically with exponential backoff, but fails if
 the lock is not released within the retry window.
 
 **Resolution:** Wait for the other process to finish, or stop it:
@@ -115,7 +115,7 @@ glab auth login
 
 ### `insufficient_scope` on the MCP endpoint
 
-**Symptoms:** Connecting to the Orbit MCP endpoint fails with
+**Symptoms:** Connecting to the GitLab Orbit MCP endpoint fails with
 `insufficient_scope`.
 
 **Cause:** The personal access token or OAuth token does not include the

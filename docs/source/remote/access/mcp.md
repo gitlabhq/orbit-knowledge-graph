@@ -51,7 +51,7 @@ supports the Model Context Protocol.
 
 Configure your MCP client to point at `https://gitlab.com/api/v4/orbit/mcp`.
 
-**Claude Code** supports the Orbit endpoint over the built-in HTTP transport.
+**Claude Code** supports the GitLab Orbit endpoint over the built-in HTTP transport.
 Register it with one command:
 
 ```shell
@@ -68,7 +68,7 @@ authenticate with GitLab. No JSON config edit required.
 > `claude mcp add --transport http` command shown above instead.
 
 Some clients only support local stdio MCP servers. For those,
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the Orbit endpoint
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the GitLab Orbit endpoint
 as a local command.
 
 **Cursor, Codex, and other JSON-config clients** — add to your agent's MCP config:
@@ -102,7 +102,7 @@ as a local command.
 > in a single array. Using a separate `args` field or omitting `type` causes a
 > `ConfigInvalidError`.
 
-**Gemini CLI** — supports the Orbit endpoint over native HTTP transport. Add to
+**Gemini CLI** — supports the GitLab Orbit endpoint over native HTTP transport. Add to
 `~/.gemini/settings.json`:
 
 ```json
@@ -174,7 +174,7 @@ In your AI agent, ask:
 
 You should get typed results back with project names and paths. If you do, you're
 connected. If not, run `glab auth status` to confirm you're authenticated, and
-check that Orbit is enabled on at least one of your groups.
+check that GitLab Orbit is enabled on at least one of your groups.
 
 ## Billing
 
@@ -228,7 +228,7 @@ You can also pass raw JSON queries directly if you want precise control over res
 
 ### "Failed to connect" in Claude Code
 
-Claude Code has built-in HTTP MCP support. If you registered Orbit with
+Claude Code has built-in HTTP MCP support. If you registered GitLab Orbit with
 `npx mcp-remote` instead of `--transport http`, the `mcp-remote` wrapper
 creates a local stdio process that conflicts with the native transport.
 

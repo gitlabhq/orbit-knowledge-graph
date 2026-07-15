@@ -112,7 +112,7 @@ Rank the most frequent job failures across your organization:
 }
 ```
 
-Find failing jobs that recur across multiple projects. Orbit has no
+Find failing jobs that recur across multiple projects. GitLab Orbit has no
 distinct-count function, so group by job name and project together: a job name
 that appears under three or more projects is a shared-template hot spot.
 

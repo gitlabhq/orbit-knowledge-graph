@@ -56,11 +56,11 @@ API calls consume GitLab Credits from your subscription. Each call to
 
 ## Query endpoint
 
-Execute a graph query using the Orbit query DSL.
+Execute a graph query using the GitLab Orbit query DSL.
 
 The request body contains:
 
-- `query`: The Orbit query object.
+- `query`: The GitLab Orbit query object.
 - `format`: Optional response format. Use `raw` for structured JSON, or `llm`
   for compact text optimized for AI agents. Default: `llm`.
 

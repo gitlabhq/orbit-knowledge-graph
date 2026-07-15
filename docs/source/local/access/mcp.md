@@ -101,7 +101,7 @@ Any MCP client can connect by running `orbit mcp serve` (or
 
 ## Using the tools
 
-Once connected, instruct your AI agent to use Orbit directly.
+Once connected, instruct your AI agent to use GitLab Orbit directly.
 
 Discover the schema:
 > "Use `get_graph_schema` to show me what tables are in my local graph."
