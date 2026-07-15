@@ -89,10 +89,6 @@ static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
 /// line while currently-enabled namespaces were still under-indexed.
 static COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: LazyLock<String> = LazyLock::new(|| {
     let top = gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
-    // Match each row's top-level namespace prefix against the enabled set as a
-    // hash-set probe. The `arrayExists(startsWith(...))` form this replaced ran
-    // a per-row scan of all ~1.8k enabled paths and peaked at 93 GiB on the
-    // gitlab.com graph, tripping the OvercommitTracker and wedging promotion.
     format!(
         "SELECT count(DISTINCT project_id) AS ns_count \
          FROM {{table:Identifier}} FINAL \
