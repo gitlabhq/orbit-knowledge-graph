@@ -20,6 +20,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_packages_build_infos]
+      fields: [package_id, pipeline_id]
       order_by: [traversal_path, id]
       query: generated
     transform:
@@ -36,6 +37,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_packages_package_file_build_infos]
+      fields: [package_file_id, pipeline_id]
       order_by: [traversal_path, id]
       query: generated
     transform:

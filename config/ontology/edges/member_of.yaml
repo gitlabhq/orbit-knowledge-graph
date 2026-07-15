@@ -52,6 +52,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_members]
+      fields: [user_id, source_id, source_type]
       order_by: [traversal_path, id]
       query: generated
       lookups:

@@ -103,7 +103,7 @@ impl TransformDeclaration {
     }
 }
 
-pub(super) fn build_transform_spec(
+pub(super) fn compile_transform_spec(
     transform_declaration: TransformDeclaration,
     ontology: &Ontology,
 ) -> TransformSpec {

@@ -6,30 +6,32 @@ use super::super::build::PlanError;
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 use ontology::sql_template;
 
-use super::{BATCH_SIZE_MARKER, ExtractDecl, ExtractSpec, ExtractTemplate, FILTERS_MARKER};
+use super::{
+    BATCH_SIZE_MARKER, ClickHouseExtractDeclaration, ExtractSpec, ExtractTemplate, FILTERS_MARKER,
+};
 
-pub(in crate::modules::sdlc) fn build(
-    decl: &ExtractDecl,
+pub(in crate::modules::sdlc) fn compile_authored_extract(
+    declaration: &ClickHouseExtractDeclaration,
     raw: &str,
 ) -> Result<ExtractSpec, PlanError> {
     let rendered = sql_template::render(
         raw,
         sql_template::context! {
-            watermark_column => decl.watermark,
-            deleted_column => decl.deleted,
+            watermark_column => declaration.watermark,
+            deleted_column => declaration.deleted,
             // Re-emit the per-page markers unchanged so `PreparedQuery::to_sql` renders them at extraction time.
             filters => FILTERS_MARKER,
             batch_size => BATCH_SIZE_MARKER,
         },
     )
     .map_err(|e| {
-        PlanError::MalformedTemplate(format!("authored SQL for '{}': {e}", decl.entity))
+        PlanError::MalformedTemplate(format!("authored SQL for '{}': {e}", declaration.entity))
     })?;
 
-    let watermark =
-        aliased_expression(&rendered, VERSION_COLUMN).unwrap_or_else(|| decl.watermark.clone());
-    let deleted =
-        aliased_expression(&rendered, DELETED_COLUMN).unwrap_or_else(|| decl.deleted.clone());
+    let watermark = aliased_expression(&rendered, VERSION_COLUMN)
+        .unwrap_or_else(|| declaration.watermark.clone());
+    let deleted = aliased_expression(&rendered, DELETED_COLUMN)
+        .unwrap_or_else(|| declaration.deleted.clone());
 
     Ok(ExtractSpec {
         template: ExtractTemplate::new(rendered)?,
@@ -55,20 +57,23 @@ mod tests {
     use super::*;
     use ontology::EtlScope;
 
-    fn group_decl() -> ExtractDecl {
-        ExtractDecl {
+    fn group_decl() -> ClickHouseExtractDeclaration {
+        ClickHouseExtractDeclaration {
             entity: "Group".to_string(),
             scope: EtlScope::Namespaced,
             table: "t".to_string(),
+            source_columns: vec![],
             watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
+            query: ontology::ExtractQuery::Sql(String::new()),
+            lookup_joins: vec![],
         }
     }
 
     #[test]
     fn markers_are_substituted_and_aliases_recovered() {
-        let spec = build(
+        let spec = compile_authored_extract(
             &group_decl(),
             "SELECT namespace.{{watermark_column}} AS _version, (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )
@@ -83,7 +88,7 @@ mod tests {
 
     #[test]
     fn unresolved_marker_is_rejected() {
-        let err = build(
+        let err = compile_authored_extract(
             &group_decl(),
             "SELECT {{typo_column}} AS _version, x AS _deleted FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
         )

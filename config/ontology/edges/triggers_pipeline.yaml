@@ -15,6 +15,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_ci_sources_pipelines]
+      fields: [source_job_id, pipeline_id]
       order_by: [traversal_path, id, partition_id]
       query: generated
       lookups:

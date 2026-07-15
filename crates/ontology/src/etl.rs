@@ -32,6 +32,7 @@ pub enum Extract {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClickHouseExtract {
     pub tables: Vec<String>,
+    pub fields: Vec<String>,
     pub order_by: Vec<String>,
     pub watermark: String,
     pub deleted: String,

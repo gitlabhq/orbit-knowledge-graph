@@ -28,6 +28,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_resource_state_events]
+      fields: [user_id, merge_request_id]
       order_by: [traversal_path, id]
       filter: "state = 5"
       query: generated
@@ -44,6 +45,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_resource_state_events]
+      fields: [user_id, issue_id]
       order_by: [traversal_path, id]
       filter: "state = 5"
       query: generated

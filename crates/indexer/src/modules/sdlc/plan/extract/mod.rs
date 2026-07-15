@@ -1,19 +1,20 @@
 //! Turns a pipeline's declarative `Extract` into the templated ClickHouse query the runtime consumes.
 
-pub(super) mod generated;
+mod generated;
 mod lookup;
-pub(super) mod sql;
+mod sql;
 
 use std::collections::HashSet;
 
+use indexmap::IndexSet;
 use ontology::sql_template;
 use ontology::{
-    DataType, EtlScope, Extract, NodeEntity, Pipeline,
-    constants::{DELETED_COLUMN, VERSION_COLUMN},
+    ClickHouseExtract, DataType, EtlScope, Extract, ExtractQuery, NodeEntity, Pipeline,
+    constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN},
 };
 
 use super::build::PlanError;
-pub(in crate::modules::sdlc) use lookup::PointLookupJoin;
+use lookup::PointLookupJoin;
 
 pub(super) const FILTERS_MARKER: &str = "{{filters}}";
 pub(super) const BATCH_SIZE_MARKER: &str = "{{batch_size}}";
@@ -28,6 +29,35 @@ pub(in crate::modules::sdlc) struct ExtractSpec {
 /// Validated template — the only way a `Plan` gets its `extract_template`.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct ExtractTemplate(String);
+
+pub(super) struct ClickHouseExtractDeclaration {
+    pub entity: String,
+    pub scope: EtlScope,
+    pub table: String,
+    pub source_columns: Vec<SourceColumn>,
+    pub order_by: Vec<String>,
+    pub watermark: String,
+    pub deleted: String,
+    pub query: ExtractQuery,
+    pub lookup_joins: Vec<PointLookupJoin>,
+}
+
+pub(super) struct SourceColumn {
+    pub name: String,
+    pub data_type: DataType,
+    pub binary: bool,
+}
+
+pub(super) fn compile_extract_spec(
+    declaration: &ClickHouseExtractDeclaration,
+) -> Result<ExtractSpec, PlanError> {
+    match &declaration.query {
+        ExtractQuery::Generated { filter } => {
+            generated::compile_generated_extract(declaration, filter.as_deref())
+        }
+        ExtractQuery::Sql(raw) => sql::compile_authored_extract(declaration, raw),
+    }
+}
 
 impl ExtractTemplate {
     pub fn new(sql: String) -> Result<Self, PlanError> {
@@ -67,24 +97,7 @@ impl ExtractTemplate {
     }
 }
 
-/// A typed source column; `data_type` drives dialect rendering (uuid → string, date clamp)
-/// and `binary` marks a bytea source that must be UTF8-guarded.
-pub(super) struct SourceColumn {
-    pub name: String,
-    pub data_type: DataType,
-    pub binary: bool,
-}
-
 impl SourceColumn {
-    /// A column selected verbatim — the name is already the source expression.
-    pub(super) fn bare(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            data_type: DataType::String,
-            binary: false,
-        }
-    }
-
     pub(super) fn from_node(node: &NodeEntity) -> Vec<SourceColumn> {
         node.fields
             .iter()
@@ -98,35 +111,57 @@ impl SourceColumn {
             .collect()
     }
 
-    pub(super) fn bare_all(columns: &[String]) -> Vec<SourceColumn> {
-        columns
-            .iter()
-            .map(|c| SourceColumn::bare(c.as_str()))
+    fn from_field_names(fields: impl IntoIterator<Item = String>) -> Vec<SourceColumn> {
+        fields
+            .into_iter()
+            .map(|name| SourceColumn {
+                name,
+                data_type: DataType::String,
+                binary: false,
+            })
             .collect()
     }
 }
 
-/// The narrow view strategies receive; deliberately excludes the pipeline's `query` and transform.
-pub(super) struct ExtractDecl {
-    pub entity: String,
-    pub scope: EtlScope,
-    pub table: String,
-    pub watermark: String,
-    pub deleted: String,
-    pub order_by: Vec<String>,
-}
-
-impl ExtractDecl {
-    /// The single ontology→indexer conversion point — nothing below the `*_plan` fns sees the pipeline.
-    pub(super) fn of(pipeline: &Pipeline) -> Self {
+impl ClickHouseExtractDeclaration {
+    pub(super) fn from_node_pipeline(node: &NodeEntity, pipeline: &Pipeline) -> Self {
         let Extract::ClickHouse(extract) = &pipeline.extract;
-        ExtractDecl {
+        Self::from_pipeline_and_source_columns(
+            pipeline,
+            extract,
+            SourceColumn::from_node(node),
+            Vec::new(),
+        )
+    }
+
+    pub(super) fn from_edge_pipeline(pipeline: &Pipeline) -> Self {
+        let Extract::ClickHouse(extract) = &pipeline.extract;
+        let lookup_joins = PointLookupJoin::get_from_extract_declaration(extract, pipeline.scope);
+        let source_columns = get_edge_source_columns(extract, lookup_joins.is_empty());
+        Self::from_pipeline_and_source_columns(pipeline, extract, source_columns, lookup_joins)
+    }
+
+    pub(super) fn from_derived_pipeline(pipeline: &Pipeline) -> Self {
+        let Extract::ClickHouse(extract) = &pipeline.extract;
+        Self::from_pipeline_and_source_columns(pipeline, extract, Vec::new(), Vec::new())
+    }
+
+    fn from_pipeline_and_source_columns(
+        pipeline: &Pipeline,
+        extract: &ClickHouseExtract,
+        source_columns: Vec<SourceColumn>,
+        lookup_joins: Vec<PointLookupJoin>,
+    ) -> Self {
+        Self {
             entity: pipeline.name.clone(),
             scope: pipeline.scope,
             table: extract.tables.first().cloned().unwrap_or_default(),
+            source_columns,
             watermark: extract.watermark.clone(),
             deleted: extract.deleted.clone(),
             order_by: extract.order_by.clone(),
+            query: extract.query.clone(),
+            lookup_joins,
         }
     }
 
@@ -137,4 +172,19 @@ impl ExtractDecl {
             deleted: self.deleted.clone(),
         })
     }
+}
+
+fn get_edge_source_columns(
+    extract: &ClickHouseExtract,
+    uses_single_table_query: bool,
+) -> Vec<SourceColumn> {
+    let mut source_columns: IndexSet<String> = extract.fields.iter().cloned().collect();
+    if uses_single_table_query {
+        source_columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
+        source_columns.insert(DEFAULT_PRIMARY_KEY.to_string());
+    } else {
+        source_columns.extend(extract.order_by.iter().cloned());
+        source_columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
+    }
+    SourceColumn::from_field_names(source_columns)
 }

@@ -24,6 +24,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_issue_links]
+      fields: [source_id, target_id]
       order_by: [traversal_path, source_id, id]
       query: generated
       lookups:

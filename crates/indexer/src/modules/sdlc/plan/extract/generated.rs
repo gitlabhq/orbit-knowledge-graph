@@ -5,68 +5,61 @@ use ontology::{DataType, EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::super::build::PlanError;
 use super::lookup::PointLookupJoin;
-use super::{ExtractDecl, ExtractSpec, SourceColumn};
+use super::{ClickHouseExtractDeclaration, ExtractSpec, SourceColumn};
 
-pub(in crate::modules::sdlc) enum Shape {
-    Node {
-        columns: Vec<SourceColumn>,
-    },
-    SingleTable {
-        columns: Vec<String>,
-    },
-    WithLookups {
-        batch_columns: Vec<SourceColumn>,
-        joins: Vec<PointLookupJoin>,
-    },
+struct SelectColumn {
+    expression: String,
+    output: String,
 }
 
-pub(in crate::modules::sdlc) fn build(
-    decl: &ExtractDecl,
-    shape: Shape,
+pub(in crate::modules::sdlc) fn compile_generated_extract(
+    declaration: &ClickHouseExtractDeclaration,
     filter: Option<&str>,
 ) -> Result<ExtractSpec, PlanError> {
-    let filter = resolve_filter(decl, filter)?;
-    let sql = match shape {
-        Shape::Node { columns } => render_node(decl, &columns, filter.as_deref()),
-        Shape::SingleTable { columns } => render_single_table(decl, &columns, filter.as_deref()),
-        Shape::WithLookups {
-            batch_columns,
-            joins,
-        } => render_with_lookups(decl, &batch_columns, &joins, filter.as_deref()),
+    let filter = resolve_filter(declaration, filter)?;
+    let sql = if declaration.lookup_joins.is_empty() {
+        render_single_table_sql(
+            declaration,
+            &declaration
+                .source_columns
+                .iter()
+                .map(SelectColumn::typed)
+                .collect::<Vec<_>>(),
+            filter.as_deref(),
+        )
+    } else {
+        render_with_lookups(
+            declaration,
+            &declaration.source_columns,
+            &declaration.lookup_joins,
+            filter.as_deref(),
+        )
     };
-    decl.build_spec(sql)
+    declaration.build_spec(sql)
 }
 
 /// Substitutes `{{watermark_column}}`/`{{deleted_column}}` and rejects any other `{{marker}}`.
-fn resolve_filter(decl: &ExtractDecl, filter: Option<&str>) -> Result<Option<String>, PlanError> {
+fn resolve_filter(
+    declaration: &ClickHouseExtractDeclaration,
+    filter: Option<&str>,
+) -> Result<Option<String>, PlanError> {
     let Some(filter) = filter else {
         return Ok(None);
     };
     let rendered = sql_template::render(
         filter,
         sql_template::context! {
-            watermark_column => decl.watermark,
-            deleted_column => decl.deleted,
+            watermark_column => declaration.watermark,
+            deleted_column => declaration.deleted,
         },
     )
-    .map_err(|e| PlanError::MalformedTemplate(format!("filter for '{}': {e}", decl.entity)))?;
+    .map_err(|e| {
+        PlanError::MalformedTemplate(format!("filter for '{}': {e}", declaration.entity))
+    })?;
     Ok(Some(rendered))
 }
 
-/// One SELECT-list entry; `output` is used to dedupe against later stragglers.
-struct SelectColumn {
-    expression: String,
-    output: String,
-}
-
 impl SelectColumn {
-    fn bare(name: &str) -> Self {
-        Self {
-            expression: name.to_string(),
-            output: name.to_string(),
-        }
-    }
-
     fn typed(column: &SourceColumn) -> Self {
         let name = &column.name;
         let expression = match column.data_type {
@@ -86,18 +79,8 @@ impl SelectColumn {
     }
 }
 
-fn render_node(decl: &ExtractDecl, columns: &[SourceColumn], filter: Option<&str>) -> String {
-    let select: Vec<SelectColumn> = columns.iter().map(SelectColumn::typed).collect();
-    render_single_table_sql(decl, &select, filter)
-}
-
-fn render_single_table(decl: &ExtractDecl, columns: &[String], filter: Option<&str>) -> String {
-    let select: Vec<SelectColumn> = columns.iter().map(|c| SelectColumn::bare(c)).collect();
-    render_single_table_sql(decl, &select, filter)
-}
-
 fn render_single_table_sql(
-    decl: &ExtractDecl,
+    declaration: &ClickHouseExtractDeclaration,
     columns: &[SelectColumn],
     filter: Option<&str>,
 ) -> String {
@@ -108,16 +91,16 @@ fn render_single_table_sql(
             select_columns.push(column.expression.clone());
         }
     }
-    for column in &decl.order_by {
+    for column in &declaration.order_by {
         if seen.insert(column.clone()) {
             select_columns.push(column.clone());
         }
     }
-    select_columns.push(format!("{} AS _version", decl.watermark));
-    select_columns.push(format!("{} AS _deleted", decl.deleted));
+    select_columns.push(format!("{} AS _version", declaration.watermark));
+    select_columns.push(format!("{} AS _deleted", declaration.deleted));
 
     let mut where_clause =
-        if decl.scope == EtlScope::Namespaced && seen.contains(TRAVERSAL_PATH_COLUMN) {
+        if declaration.scope == EtlScope::Namespaced && seen.contains(TRAVERSAL_PATH_COLUMN) {
             "startsWith(traversal_path, {traversal_path:String})".to_string()
         } else {
             "1=1".to_string()
@@ -129,21 +112,21 @@ fn render_single_table_sql(
     format!(
         "SELECT {} FROM {} WHERE {} {{{{filters}}}} ORDER BY {} LIMIT {{{{batch_size}}}}",
         select_columns.join(", "),
-        decl.table,
+        declaration.table,
         where_clause,
-        decl.order_by.join(", ")
+        declaration.order_by.join(", ")
     )
 }
 
 fn render_with_lookups(
-    decl: &ExtractDecl,
+    declaration: &ClickHouseExtractDeclaration,
     batch_columns: &[SourceColumn],
     joins: &[PointLookupJoin],
     filter: Option<&str>,
 ) -> String {
-    let watermark = &decl.watermark;
-    let deleted = &decl.deleted;
-    let source = &decl.table;
+    let watermark = &declaration.watermark;
+    let deleted = &declaration.deleted;
+    let source = &declaration.table;
 
     let mut where_clause = "startsWith(traversal_path, {traversal_path:String})".to_string();
     if let Some(filter) = filter {
@@ -160,7 +143,7 @@ fn render_with_lookups(
     let mut ctes = vec![format!(
         "_batch AS (SELECT\n    {}\n  FROM {source}\n  WHERE {where_clause} {{{{filters}}}}\n  ORDER BY {}\n  LIMIT {{{{batch_size}}}})",
         batch_select.join(",\n    "),
-        decl.order_by.join(", "),
+        declaration.order_by.join(", "),
     )];
 
     let mut final_cols: Vec<String> = batch_columns

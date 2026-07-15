@@ -76,6 +76,8 @@ struct ExtractYaml {
     #[serde(rename = "type")]
     source_type: ExtractSourceYaml,
     tables: Vec<String>,
+    #[serde(default)]
+    fields: Vec<String>,
     order_by: Vec<String>,
     query: String,
     /// Extra `_batch` WHERE predicate appended to the traversal-path scope, e.g.
@@ -679,6 +681,12 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
             b.name
         )));
     }
+    if !b.extract.fields.is_empty() && !generated {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': extract.fields requires query: generated",
+            b.name
+        )));
+    }
     if !b.extract.lookups.is_empty() && !generated {
         return Err(OntologyError::Validation(format!(
             "pipeline '{}': extract.lookups requires query: generated",
@@ -706,6 +714,7 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
     let extract = match b.extract.source_type {
         ExtractSourceYaml::ClickHouse => Extract::ClickHouse(ClickHouseExtract {
             tables: b.extract.tables,
+            fields: b.extract.fields,
             order_by: b.extract.order_by,
             watermark,
             deleted,
@@ -1272,6 +1281,37 @@ mod tests {
     }
 
     #[test]
+    fn node_rejects_fields_on_sql_query() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  fields: [author_id]
+                  order_by: [id]
+                  query: test_node.sql
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("fields on an authored .sql query should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.fields requires query: generated"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
     fn node_rejects_duplicate_lookup_output_fields() {
         let result = parse_test_node(
             r#"
@@ -1607,6 +1647,10 @@ mod tests {
         let Extract::ClickHouse(member_extract) = &member.extract;
         let mapping = &member.transform.edges()[0];
         assert!(matches!(mapping.source.kind, NodeRefKind::Literal(ref k) if k == "User"));
+        assert_eq!(
+            member_extract.fields,
+            ["user_id", "source_id", "source_type"]
+        );
         assert_eq!(member_extract.lookups.len(), 1);
         assert_eq!(member_extract.lookups[0].node_kind, "User");
         assert!(matches!(mapping.target.kind, NodeRefKind::Derived { .. }));

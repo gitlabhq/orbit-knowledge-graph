@@ -1709,6 +1709,14 @@
           "minItems": 1,
           "description": "Datalake tables read by authored SQL, or the single base table used by a generated extract."
         },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "Base source fields published by a generated extract."
+        },
         "order_by": {
           "type": "array",
           "items": {
