@@ -9,17 +9,12 @@ pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
 
-/// Code jobs overlap a Gitaly download with indexing, so only half the worker
-/// budget indexes; the other half prefetches archives. Reproduces the pre-config
-/// shape where a 16-worker code pool ran 8 indexing lanes + 8 fetch lanes.
+/// Half the workers index, half prefetch archives (code pool ran 8 + 8 at 16 workers).
 const CODE_INDEXING_LANE_SHARE_PERCENT: usize = 50;
 
-/// Reserve a quarter of the indexing lanes for big repos so a flood of small
-/// repos can't starve monorepos (preserves the historical big 2 / small 6).
+/// Reserve big-repo lanes so a flood of small repos can't starve monorepos (big 2 / small 6).
 const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
 
-/// Concurrency slots for the code-indexing pipeline, derived from the container
-/// CPU count when unset.
 pub struct CodeIndexingSlots {
     pub fetch_concurrency: usize,
     pub small_indexing_slots: usize,

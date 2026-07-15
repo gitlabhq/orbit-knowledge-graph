@@ -398,8 +398,6 @@ impl Default for CodeIndexingPipelineConfig {
 }
 
 impl CodeIndexingPipelineConfig {
-    /// Fills each unset concurrency slot from the container CPU count; an
-    /// explicit value always wins.
     pub fn resolve_runtime_defaults(&mut self, available_parallelism: usize) {
         if self.fetch_concurrency.is_some()
             && self.small_indexing_slots.is_some()
@@ -435,17 +433,14 @@ impl CodeIndexingPipelineConfig {
         }
     }
 
-    /// Resolved fetch concurrency; 0 (unbounded) when unset and unresolved.
     pub fn fetch_concurrency(&self) -> usize {
         self.fetch_concurrency.unwrap_or(0)
     }
 
-    /// Resolved small-repo indexing slots; 0 (unbounded) when unset and unresolved.
     pub fn small_indexing_slots(&self) -> usize {
         self.small_indexing_slots.unwrap_or(0)
     }
 
-    /// Resolved big-repo indexing slots; 0 (unbounded) when unset and unresolved.
     pub fn big_indexing_slots(&self) -> usize {
         self.big_indexing_slots.unwrap_or(0)
     }
