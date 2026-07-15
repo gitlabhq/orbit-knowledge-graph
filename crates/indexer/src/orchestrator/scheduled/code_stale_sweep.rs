@@ -118,7 +118,8 @@ impl CodeStaleSweep {
 }
 
 // FINAL scans tombstone only live survivors; a superseded row's tombstone is
-// a no-op anyway, and skipping them cut the prod write from 2.7B to ~2.9M rows.
+// a no-op anyway (any row at or after the watermark outranks it), so raw-parts
+// scans write orders of magnitude more rows for the same post-merge state.
 fn node_sweep(table: &str, checkpoint_table: &str) -> String {
     format!(
         r#"
@@ -225,8 +226,8 @@ mod tests {
         let sql = node_sweep("v9_gl_file", "v9_code_indexing_checkpoint");
         assert!(
             sql.contains("FROM v9_gl_file AS s FINAL"),
-            "a raw-parts scan emits a tombstone per superseded part row — 2.7B \
-             no-op writes at prod scale — instead of one per surviving stale key: {sql}"
+            "a raw-parts scan emits a no-op tombstone per superseded part row \
+             instead of one per surviving stale key: {sql}"
         );
         assert!(sql.contains("s._deleted = false"), "{sql}");
         assert!(
