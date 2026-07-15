@@ -85,7 +85,6 @@ engine:
         per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
         job_timeout_secs: 250
-        fetch_concurrency: 10
         write_channel_capacity: 8
         write_slice_rows: 1000000
         write_buffer_age_secs: 60
@@ -93,8 +92,6 @@ engine:
         write_max_flush_age_secs: 120
         write_max_concurrent: 4
         small_repo_max_files: 650
-        small_indexing_slots: 6
-        big_indexing_slots: 2
 
 health_check:
   bind_address: "0.0.0.0:4201"

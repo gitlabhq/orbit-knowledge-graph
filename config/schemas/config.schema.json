@@ -66,9 +66,9 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
-              "big_indexing_slots": 2,
+              "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
-              "fetch_concurrency": 10,
+              "fetch_concurrency": null,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
@@ -78,7 +78,7 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": 6,
+              "small_indexing_slots": null,
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
@@ -408,10 +408,13 @@
       "type": "object",
       "properties": {
         "big_indexing_slots": {
-          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.",
-          "type": "integer",
+          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 2,
+          "default": null,
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
@@ -422,10 +425,13 @@
           "minimum": 0
         },
         "fetch_concurrency": {
-          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit. Defaults to 10.",
-          "type": "integer",
+          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit. Unset = derived from the container CPU count.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 10,
+          "default": null,
           "minimum": 0
         },
         "job_timeout_secs": {
@@ -486,10 +492,13 @@
           "minimum": 0
         },
         "small_indexing_slots": {
-          "description": "Concurrent indexing slots for small repositories. Defaults to 6.",
-          "type": "integer",
+          "description": "Concurrent indexing slots for small repositories. Unset = derived from the container CPU count.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 6,
+          "default": null,
           "minimum": 0
         },
         "small_repo_max_files": {
@@ -556,9 +565,9 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
-            "big_indexing_slots": 2,
+            "big_indexing_slots": null,
             "cross_file_resolve_timeout_ms": 180000,
-            "fetch_concurrency": 10,
+            "fetch_concurrency": null,
             "job_timeout_secs": 250,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
@@ -568,7 +577,7 @@
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
             "per_file_walk_timeout_ms": 100,
-            "small_indexing_slots": 6,
+            "small_indexing_slots": null,
             "small_repo_max_files": 650,
             "worker_threads": 0,
             "write_buffer_age_secs": 60,
@@ -661,9 +670,9 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
-                "big_indexing_slots": 2,
+                "big_indexing_slots": null,
                 "cross_file_resolve_timeout_ms": 180000,
-                "fetch_concurrency": 10,
+                "fetch_concurrency": null,
                 "job_timeout_secs": 250,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
@@ -673,7 +682,7 @@
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
                 "per_file_walk_timeout_ms": 100,
-                "small_indexing_slots": 6,
+                "small_indexing_slots": null,
                 "small_repo_max_files": 650,
                 "worker_threads": 0,
                 "write_buffer_age_secs": 60,
@@ -911,9 +920,9 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
-              "big_indexing_slots": 2,
+              "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
-              "fetch_concurrency": 10,
+              "fetch_concurrency": null,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
@@ -923,7 +932,7 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": 6,
+              "small_indexing_slots": null,
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,

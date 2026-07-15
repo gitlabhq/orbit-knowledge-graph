@@ -8,8 +8,9 @@ use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
-use crate::resources::DEFAULT_MAX_CONCURRENT_WORKERS;
+use crate::resources::{DEFAULT_MAX_CONCURRENT_WORKERS, derive_code_indexing_slots};
 
 // ── Base config types ────────────────────────────────────────────────
 
@@ -231,10 +232,6 @@ impl Default for EntityHandlerConfig {
     }
 }
 
-fn default_fetch_concurrency() -> usize {
-    10
-}
-
 fn default_partition_min_rows() -> u64 {
     50_000_000
 }
@@ -303,14 +300,6 @@ fn default_code_indexing_small_repo_max_files() -> usize {
     650
 }
 
-fn default_code_indexing_small_indexing_slots() -> usize {
-    6
-}
-
-fn default_code_indexing_big_indexing_slots() -> usize {
-    2
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -348,9 +337,9 @@ pub struct CodeIndexingPipelineConfig {
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
     /// many repositories can be downloaded simultaneously in the pipelined
-    /// code indexer. 0 = no limit. Defaults to 10.
-    #[serde(default = "default_fetch_concurrency")]
-    pub fetch_concurrency: usize,
+    /// code indexer. 0 = no limit. Unset = derived from the container CPU count.
+    #[serde(default)]
+    pub fetch_concurrency: Option<usize>,
     /// In-flight batches the streaming sink holds before back-pressuring the parser. Defaults to 8.
     #[serde(default = "default_code_indexing_write_channel_capacity")]
     pub write_channel_capacity: usize,
@@ -372,12 +361,12 @@ pub struct CodeIndexingPipelineConfig {
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane. Defaults to 650.
     #[serde(default = "default_code_indexing_small_repo_max_files")]
     pub small_repo_max_files: usize,
-    /// Concurrent indexing slots for small repositories. Defaults to 6.
-    #[serde(default = "default_code_indexing_small_indexing_slots")]
-    pub small_indexing_slots: usize,
-    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.
-    #[serde(default = "default_code_indexing_big_indexing_slots")]
-    pub big_indexing_slots: usize,
+    /// Concurrent indexing slots for small repositories. Unset = derived from the container CPU count.
+    #[serde(default)]
+    pub small_indexing_slots: Option<usize>,
+    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count.
+    #[serde(default)]
+    pub big_indexing_slots: Option<usize>,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -394,7 +383,7 @@ impl Default for CodeIndexingPipelineConfig {
             per_file_ssa_timeout_ms: default_code_indexing_per_file_ssa_timeout_ms(),
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
             job_timeout_secs: default_code_indexing_job_timeout_secs(),
-            fetch_concurrency: default_fetch_concurrency(),
+            fetch_concurrency: None,
             write_channel_capacity: default_code_indexing_write_channel_capacity(),
             write_slice_rows: default_code_indexing_write_slice_rows(),
             write_buffer_age_secs: default_code_indexing_write_buffer_age_secs(),
@@ -402,13 +391,65 @@ impl Default for CodeIndexingPipelineConfig {
             write_max_flush_age_secs: default_code_indexing_write_max_flush_age_secs(),
             write_max_concurrent: default_code_indexing_write_max_concurrent(),
             small_repo_max_files: default_code_indexing_small_repo_max_files(),
-            small_indexing_slots: default_code_indexing_small_indexing_slots(),
-            big_indexing_slots: default_code_indexing_big_indexing_slots(),
+            small_indexing_slots: None,
+            big_indexing_slots: None,
         }
     }
 }
 
 impl CodeIndexingPipelineConfig {
+    /// Fills each unset concurrency slot from the container CPU count; an
+    /// explicit value always wins.
+    pub fn resolve_runtime_defaults(&mut self, available_parallelism: usize) {
+        if self.fetch_concurrency.is_some()
+            && self.small_indexing_slots.is_some()
+            && self.big_indexing_slots.is_some()
+        {
+            return;
+        }
+
+        let slots = derive_code_indexing_slots(available_parallelism);
+        if self.fetch_concurrency.is_none() {
+            self.fetch_concurrency = Some(slots.fetch_concurrency);
+            info!(
+                available_parallelism,
+                value = slots.fetch_concurrency,
+                "derived code-indexing pipeline.fetch_concurrency"
+            );
+        }
+        if self.small_indexing_slots.is_none() {
+            self.small_indexing_slots = Some(slots.small_indexing_slots);
+            info!(
+                available_parallelism,
+                value = slots.small_indexing_slots,
+                "derived code-indexing pipeline.small_indexing_slots"
+            );
+        }
+        if self.big_indexing_slots.is_none() {
+            self.big_indexing_slots = Some(slots.big_indexing_slots);
+            info!(
+                available_parallelism,
+                value = slots.big_indexing_slots,
+                "derived code-indexing pipeline.big_indexing_slots"
+            );
+        }
+    }
+
+    /// Resolved fetch concurrency; 0 (unbounded) when unset and unresolved.
+    pub fn fetch_concurrency(&self) -> usize {
+        self.fetch_concurrency.unwrap_or(0)
+    }
+
+    /// Resolved small-repo indexing slots; 0 (unbounded) when unset and unresolved.
+    pub fn small_indexing_slots(&self) -> usize {
+        self.small_indexing_slots.unwrap_or(0)
+    }
+
+    /// Resolved big-repo indexing slots; 0 (unbounded) when unset and unresolved.
+    pub fn big_indexing_slots(&self) -> usize {
+        self.big_indexing_slots.unwrap_or(0)
+    }
+
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))

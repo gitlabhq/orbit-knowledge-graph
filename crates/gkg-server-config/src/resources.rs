@@ -9,6 +9,23 @@ pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
 
+/// Code jobs overlap a Gitaly download with indexing, so only half the worker
+/// budget indexes; the other half prefetches archives. Reproduces the pre-config
+/// shape where a 16-worker code pool ran 8 indexing lanes + 8 fetch lanes.
+const CODE_INDEXING_LANE_SHARE_PERCENT: usize = 50;
+
+/// Reserve a quarter of the indexing lanes for big repos so a flood of small
+/// repos can't starve monorepos (preserves the historical big 2 / small 6).
+const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
+
+/// Concurrency slots for the code-indexing pipeline, derived from the container
+/// CPU count when unset.
+pub struct CodeIndexingSlots {
+    pub fetch_concurrency: usize,
+    pub small_indexing_slots: usize,
+    pub big_indexing_slots: usize,
+}
+
 /// Cgroup-aware on Linux: reflects the pod CPU quota, not the node core count.
 pub fn detect_available_parallelism() -> usize {
     std::thread::available_parallelism()
@@ -69,6 +86,17 @@ pub fn derive_concurrency_groups(
     groups
 }
 
+pub fn derive_code_indexing_slots(available_parallelism: usize) -> CodeIndexingSlots {
+    let workers = available_parallelism.max(1);
+    let indexing = (workers * CODE_INDEXING_LANE_SHARE_PERCENT / 100).max(1);
+    let big = (indexing * CODE_BIG_LANE_SHARE_PERCENT / 100).max(1);
+    CodeIndexingSlots {
+        big_indexing_slots: big,
+        small_indexing_slots: indexing.saturating_sub(big).max(1),
+        fetch_concurrency: workers.saturating_sub(indexing).max(1),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +143,32 @@ mod tests {
         assert_eq!(cfg.max_concurrent_workers(), 20);
         assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&15));
         assert_eq!(cfg.concurrency_groups.get("code"), Some(&5));
+    }
+
+    #[test]
+    fn code_slots_reproduce_historical_split_on_sixteen_cores() {
+        let slots = derive_code_indexing_slots(16);
+        assert_eq!(slots.fetch_concurrency, 8);
+        assert_eq!(slots.small_indexing_slots, 6);
+        assert_eq!(slots.big_indexing_slots, 2);
+    }
+
+    #[test]
+    fn code_slots_scale_down_on_a_small_pod() {
+        let slots = derive_code_indexing_slots(4);
+        assert_eq!(slots.fetch_concurrency, 2);
+        assert_eq!(slots.small_indexing_slots, 1);
+        assert_eq!(slots.big_indexing_slots, 1);
+    }
+
+    #[test]
+    fn code_slots_floor_every_lane_at_one() {
+        for parallelism in [0, 1] {
+            let slots = derive_code_indexing_slots(parallelism);
+            assert_eq!(slots.fetch_concurrency, 1);
+            assert_eq!(slots.small_indexing_slots, 1);
+            assert_eq!(slots.big_indexing_slots, 1);
+        }
     }
 
     #[test]

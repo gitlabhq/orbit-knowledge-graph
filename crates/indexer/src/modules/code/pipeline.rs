@@ -157,9 +157,9 @@ impl CodeIndexingPipeline {
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
-        let fc = pipeline_config.fetch_concurrency;
-        let small = pipeline_config.small_indexing_slots;
-        let big = pipeline_config.big_indexing_slots;
+        let fc = pipeline_config.fetch_concurrency();
+        let small = pipeline_config.small_indexing_slots();
+        let big = pipeline_config.big_indexing_slots();
         let writer = BufferedWriter::spawn(
             writer,
             BufferedWriterConfig {
@@ -193,8 +193,8 @@ impl CodeIndexingPipeline {
     /// every indexing lane. Returns `None` when any limit is unbounded (0), so the global
     /// default applies.
     pub fn max_inflight(&self) -> Option<usize> {
-        let small = self.pipeline_config.small_indexing_slots;
-        let big = self.pipeline_config.big_indexing_slots;
+        let small = self.pipeline_config.small_indexing_slots();
+        let big = self.pipeline_config.big_indexing_slots();
         if self.fetch_concurrency == 0 || small == 0 || big == 0 {
             return None;
         }

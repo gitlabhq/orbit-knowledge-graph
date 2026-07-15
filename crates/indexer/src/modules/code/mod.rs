@@ -99,7 +99,8 @@ pub async fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-    let pipeline_config = code_indexing_task_config.pipeline.clone();
+    let mut pipeline_config = code_indexing_task_config.pipeline.clone();
+    pipeline_config.resolve_runtime_defaults(gkg_server_config::detect_available_parallelism());
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
         writer,
