@@ -85,8 +85,11 @@ for pod in $($KC get pods -n "$NS_GKG" -o jsonpath='{.items[*].metadata.name}' 2
 done
 
 if [ "$result" = "pass" ]; then
-  log "Tests passed"
-  exit 0
+  if bash "$(dirname "${BASH_SOURCE[0]}")/assert-refreshable-views.sh"; then
+    log "Tests passed"
+    exit 0
+  fi
+  result=fail
 fi
 
 log "Tests $result"
