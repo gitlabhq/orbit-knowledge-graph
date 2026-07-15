@@ -15,6 +15,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_deployment_merge_requests]
+      fields: [merge_request_id, deployment_id]
       order_by: [traversal_path, deployment_id, merge_request_id]
       query: generated
       lookups:

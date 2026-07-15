@@ -76,6 +76,8 @@ struct ExtractYaml {
     #[serde(rename = "type")]
     source_type: ExtractSourceYaml,
     tables: Vec<String>,
+    #[serde(default)]
+    fields: Vec<String>,
     order_by: Vec<String>,
     query: String,
     /// Extra `_batch` WHERE predicate appended to the traversal-path scope, e.g.
@@ -489,6 +491,7 @@ impl NodeYaml {
                 )));
             }
         }
+        validate_generated_node_transform_source_fields(&name, &fields, &pipelines)?;
         let has_traversal_path = fields
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
@@ -552,6 +555,44 @@ impl IndexerYaml {
     }
 }
 
+fn validate_generated_node_transform_source_fields(
+    node_name: &str,
+    fields: &[Field],
+    pipelines: &[Pipeline],
+) -> Result<(), OntologyError> {
+    let source_fields = fields
+        .iter()
+        .filter_map(Field::column_name)
+        .collect::<HashSet<_>>();
+    for pipeline in pipelines {
+        let Extract::ClickHouse(extract) = &pipeline.extract;
+        if !matches!(extract.query, ExtractQuery::Generated { .. }) {
+            continue;
+        }
+        for endpoint in pipeline
+            .transform
+            .edges()
+            .iter()
+            .flat_map(|edge| [&edge.source, &edge.target])
+        {
+            for required_field in
+                std::iter::once(endpoint.field.as_str()).chain(match &endpoint.kind {
+                    NodeRefKind::Derived { column, .. } => Some(column.as_str()),
+                    NodeRefKind::Literal(_) => None,
+                })
+            {
+                if !source_fields.contains(required_field) {
+                    return Err(OntologyError::Validation(format!(
+                        "node '{node_name}' pipeline '{}' transform reads undeclared source field '{required_field}'",
+                        pipeline.name
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct PipelineOptions<'a> {
     pub yaml_path: &'a str,
     pub allow_rust_transform: bool,
@@ -575,6 +616,11 @@ impl PipelineYaml {
             extract,
             transform,
         } = self;
+        if !extract.fields.is_empty() {
+            return Err(OntologyError::Validation(format!(
+                "entity '{entity_name}' pipeline '{name}': extract.fields is only supported for edge pipelines"
+            )));
+        }
         let transform = transform.into_transform()?;
         if matches!(transform, Transform::Rust(_)) && !options.allow_rust_transform {
             return Err(OntologyError::Validation(format!(
@@ -679,6 +725,12 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
             b.name
         )));
     }
+    if !b.extract.fields.is_empty() && !generated {
+        return Err(OntologyError::Validation(format!(
+            "pipeline '{}': extract.fields requires query: generated",
+            b.name
+        )));
+    }
     if !b.extract.lookups.is_empty() && !generated {
         return Err(OntologyError::Validation(format!(
             "pipeline '{}': extract.lookups requires query: generated",
@@ -706,6 +758,7 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
     let extract = match b.extract.source_type {
         ExtractSourceYaml::ClickHouse => Extract::ClickHouse(ClickHouseExtract {
             tables: b.extract.tables,
+            fields: b.extract.fields,
             order_by: b.extract.order_by,
             watermark,
             deleted,
@@ -1272,6 +1325,71 @@ mod tests {
     }
 
     #[test]
+    fn node_rejects_extract_fields() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  fields: [author_id]
+                  order_by: [id]
+                  query: generated
+                transform:
+                  type: datafusion
+            "#,
+        );
+        let err = result.expect_err("node extract fields should be rejected");
+        assert!(
+            err.to_string()
+                .contains("extract.fields is only supported for edge pipelines"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn generated_node_rejects_undeclared_transform_source_fields() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            pipelines:
+              - name: TestNode
+                extract:
+                  type: clickhouse
+                  tables: [source_table]
+                  order_by: [id]
+                  query: generated
+                transform:
+                  type: datafusion
+                  edges:
+                    - from: { field: id, kind: TestNode }
+                      to: { field: project_id, kind: Project }
+                      label: IN_PROJECT
+            "#,
+        );
+        let err = result.expect_err("undeclared transform source fields should be rejected");
+        assert!(
+            err.to_string()
+                .contains("transform reads undeclared source field 'project_id'"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
     fn node_rejects_duplicate_lookup_output_fields() {
         let result = parse_test_node(
             r#"
@@ -1607,6 +1725,10 @@ mod tests {
         let Extract::ClickHouse(member_extract) = &member.extract;
         let mapping = &member.transform.edges()[0];
         assert!(matches!(mapping.source.kind, NodeRefKind::Literal(ref k) if k == "User"));
+        assert_eq!(
+            member_extract.fields,
+            ["user_id", "source_id", "source_type"]
+        );
         assert_eq!(member_extract.lookups.len(), 1);
         assert_eq!(member_extract.lookups[0].node_kind, "User");
         assert!(matches!(mapping.target.kind, NodeRefKind::Derived { .. }));

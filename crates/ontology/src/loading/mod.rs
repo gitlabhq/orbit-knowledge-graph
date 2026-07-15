@@ -1304,6 +1304,7 @@ mod tests {
                 scope: EtlScope::Namespaced,
                 extract: Extract::ClickHouse(crate::etl::ClickHouseExtract {
                     tables: vec!["siphon_notes".to_string()],
+                    fields: vec![],
                     order_by: vec![],
                     watermark: "w".to_string(),
                     deleted: "d".to_string(),
@@ -1389,6 +1390,7 @@ mod tests {
             scope: EtlScope::Namespaced,
             extract: Extract::ClickHouse(crate::etl::ClickHouseExtract {
                 tables: vec!["siphon_x".to_string()],
+                fields: vec![],
                 order_by: vec![],
                 watermark: "w".to_string(),
                 deleted: "d".to_string(),

@@ -2,14 +2,9 @@
 
 use std::collections::HashMap;
 
-use indexmap::IndexSet;
-use ontology::{
-    EdgeMapping, EtlScope, Extract, ExtractQuery, NodeEntity, NodeRefKind, Ontology, Pipeline,
-    Transform,
-    constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN},
-};
+use ontology::{EtlScope, Extract, ExtractQuery, NodeEntity, Ontology, Pipeline, Transform};
 
-use super::extract::{ExtractDecl, ExtractSpec, PointLookupJoin, SourceColumn, generated, sql};
+use super::extract::{ClickHouseExtractDeclaration, ExtractSpec, compile_extract_spec};
 use super::transform;
 use super::{Plan, Plans, TransformDeclaration, TransformSpec};
 
@@ -88,24 +83,11 @@ fn build_node_plan(
     ontology: &Ontology,
     sizing: &Sizing<'_>,
 ) -> Result<Plan, PlanError> {
-    let Extract::ClickHouse(extract) = &pipeline.extract;
-    let decl = ExtractDecl::of(pipeline);
+    let extract_declaration = ClickHouseExtractDeclaration::from_node_pipeline(node, pipeline);
     let transform_declaration =
         TransformDeclaration::from_node_entity_and_edge_mappings(node, pipeline.transform.edges());
-
-    let spec = match &extract.query {
-        ExtractQuery::Generated { filter } => {
-            let mut columns = SourceColumn::from_node(node);
-            columns.extend(SourceColumn::bare_all(&edge_fk_columns(
-                pipeline.transform.edges(),
-            )));
-
-            generated::build(&decl, generated::Shape::Node { columns }, filter.as_deref())?
-        }
-        ExtractQuery::Sql(raw) => sql::build(&decl, raw)?,
-    };
-
-    let transform = transform::build_transform_spec(transform_declaration, ontology);
+    let spec = compile_extract_spec(&extract_declaration)?;
+    let transform = transform::compile_transform_spec(transform_declaration, ontology);
 
     Ok(assemble(
         pipeline,
@@ -141,38 +123,9 @@ fn build_edge_plan(
         scope: pipeline.scope,
     };
 
-    let Extract::ClickHouse(extract) = &pipeline.extract;
-    let decl = ExtractDecl::of(pipeline);
-
-    let spec = match &extract.query {
-        ExtractQuery::Generated { filter } => {
-            let joins = PointLookupJoin::get_from_extract_declaration(extract, pipeline.scope);
-            if joins.is_empty() {
-                generated::build(
-                    &decl,
-                    generated::Shape::SingleTable {
-                        columns: edge_single_table_columns(mapping),
-                    },
-                    filter.as_deref(),
-                )?
-            } else {
-                generated::build(
-                    &decl,
-                    generated::Shape::WithLookups {
-                        batch_columns: SourceColumn::bare_all(&edge_batch_columns(
-                            mapping,
-                            &extract.order_by,
-                        )),
-                        joins,
-                    },
-                    filter.as_deref(),
-                )?
-            }
-        }
-        ExtractQuery::Sql(raw) => sql::build(&decl, raw)?,
-    };
-
-    let transform = transform::build_transform_spec(transform_declaration, ontology);
+    let extract_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
+    let spec = compile_extract_spec(&extract_declaration)?;
+    let transform = transform::compile_transform_spec(transform_declaration, ontology);
 
     Ok(assemble(
         pipeline,
@@ -194,14 +147,14 @@ fn build_derived_plan(
         ));
     };
     let Extract::ClickHouse(extract) = &pipeline.extract;
-    let decl = ExtractDecl::of(pipeline);
-    let ExtractQuery::Sql(raw) = &extract.query else {
+    let ExtractQuery::Sql(_) = &extract.query else {
         return Err(PlanError::DerivedRequiresSql(pipeline.name.clone()));
     };
-    let spec = sql::build(&decl, raw)?;
+    let extract_declaration = ClickHouseExtractDeclaration::from_derived_pipeline(pipeline);
+    let spec = compile_extract_spec(&extract_declaration)?;
 
     let transform_declaration = TransformDeclaration::Rust(name.clone());
-    let transform = transform::build_transform_spec(transform_declaration, ontology);
+    let transform = transform::compile_transform_spec(transform_declaration, ontology);
 
     Ok(assemble(
         pipeline,
@@ -210,42 +163,6 @@ fn build_derived_plan(
         transform,
         sizing,
     ))
-}
-
-/// FK node-ref columns the edges need; overlaps with node fields are dropped by render-time dedup.
-fn edge_fk_columns(edges: &[EdgeMapping]) -> Vec<String> {
-    let mut columns = IndexSet::new();
-    for mapping in edges {
-        columns.extend(node_ref_columns(mapping));
-    }
-    columns.into_iter().collect()
-}
-
-/// Both node-ref fields plus, for `Derived` node refs, the column the kind is derived from.
-fn node_ref_columns(mapping: &EdgeMapping) -> IndexSet<String> {
-    let mut columns = IndexSet::new();
-    columns.insert(mapping.source.field.clone());
-    columns.insert(mapping.target.field.clone());
-    for node_ref in [&mapping.source, &mapping.target] {
-        if let NodeRefKind::Derived { column, .. } = &node_ref.kind {
-            columns.insert(column.clone());
-        }
-    }
-    columns
-}
-
-fn edge_single_table_columns(mapping: &EdgeMapping) -> Vec<String> {
-    let mut columns = node_ref_columns(mapping);
-    columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
-    columns.insert(DEFAULT_PRIMARY_KEY.to_string());
-    columns.into_iter().collect()
-}
-
-fn edge_batch_columns(mapping: &EdgeMapping, order_by: &[String]) -> Vec<String> {
-    let mut columns = node_ref_columns(mapping);
-    columns.extend(order_by.iter().cloned());
-    columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
-    columns.into_iter().collect()
 }
 
 fn assemble(
@@ -357,6 +274,69 @@ mod tests {
         assert!(global.contains(&"User"));
         assert!(namespaced.contains(&"Group"));
         assert!(namespaced.contains(&"Project"));
+    }
+
+    #[test]
+    fn changing_transform_fields_does_not_change_extract_compilation() {
+        let ontology = test_ontology();
+        let (_, pipeline) = ontology
+            .edge_etl_configs()
+            .find(|(_, pipeline)| pipeline.name == "APPROVED_siphon_approvals_MergeRequest")
+            .expect("APPROVED pipeline");
+        let original_declaration = ClickHouseExtractDeclaration::from_edge_pipeline(pipeline);
+        let original_extract =
+            compile_extract_spec(&original_declaration).expect("original extract");
+
+        let mut changed_pipeline = pipeline.clone();
+        let Transform::DataFusion { edges } = &mut changed_pipeline.transform else {
+            panic!("APPROVED should use datafusion");
+        };
+        edges[0].source.field = "different_user_id".to_string();
+        let changed_declaration =
+            ClickHouseExtractDeclaration::from_edge_pipeline(&changed_pipeline);
+        let changed_extract = compile_extract_spec(&changed_declaration).expect("changed extract");
+
+        assert_eq!(
+            original_extract.template.as_str(),
+            changed_extract.template.as_str()
+        );
+    }
+
+    #[test]
+    fn changing_extract_fields_does_not_change_transform_compilation() {
+        let ontology = test_ontology();
+        let (relationship_kind, pipeline) = ontology
+            .edge_etl_configs()
+            .find(|(_, pipeline)| pipeline.name == "APPROVED_siphon_approvals_MergeRequest")
+            .expect("APPROVED pipeline");
+        let overrides = HashMap::new();
+        let sizing = Sizing {
+            global_batch_size: 1_000_000,
+            namespaced_batch_size: 1_000_000,
+            overrides: &overrides,
+        };
+        let original_plan = build_edge_plan(relationship_kind, pipeline, &ontology, &sizing)
+            .expect("original plan");
+
+        let mut changed_pipeline = pipeline.clone();
+        let Extract::ClickHouse(extract) = &mut changed_pipeline.extract;
+        extract.fields.push("unused_source_field".to_string());
+        let changed_plan =
+            build_edge_plan(relationship_kind, &changed_pipeline, &ontology, &sizing)
+                .expect("changed plan");
+
+        let TransformSpec::DataFusion(original_transforms) = original_plan.transform else {
+            panic!("APPROVED should use datafusion");
+        };
+        let TransformSpec::DataFusion(changed_transforms) = changed_plan.transform else {
+            panic!("APPROVED should use datafusion");
+        };
+        assert_eq!(original_transforms.len(), changed_transforms.len());
+        for (original, changed) in original_transforms.iter().zip(&changed_transforms) {
+            assert_eq!(original.sql, changed.sql);
+            assert_eq!(original.destination_table, changed.destination_table);
+            assert_eq!(original.dict_encode_columns, changed.dict_encode_columns);
+        }
     }
 
     #[test]

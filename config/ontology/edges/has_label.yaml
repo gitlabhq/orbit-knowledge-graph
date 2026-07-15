@@ -20,6 +20,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_label_links]
+      fields: [target_id, label_id, target_type]
       order_by: [traversal_path, target_id, id]
       query: generated
     transform:

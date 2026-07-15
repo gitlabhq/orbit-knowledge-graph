@@ -20,6 +20,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_merge_request_assignees]
+      fields: [user_id, merge_request_id]
       order_by: [traversal_path, merge_request_id, id]
       query: generated
       lookups:
@@ -35,6 +36,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_issue_assignees]
+      fields: [user_id, issue_id]
       order_by: [traversal_path, issue_id, user_id]
       query: generated
       lookups:

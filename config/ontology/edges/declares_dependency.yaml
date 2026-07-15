@@ -15,6 +15,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_packages_dependency_links]
+      fields: [package_id, dependency_id]
       order_by: [traversal_path, id]
       query: generated
     transform:

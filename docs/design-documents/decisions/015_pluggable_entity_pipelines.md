@@ -185,12 +185,11 @@ and hands each stage exactly its inputs so data flows top-down:
   The final projection exposes only the stable output field aliases from the extract
   declaration.
 - `plan/extract/` produces one `ExtractSpec` (validated `ExtractTemplate` +
-  effective watermark/deleted) from `&ontology::Extract` plus transform-neutral
-  inputs such as typed source columns and `_batch` column lists. It imports
-  **nothing** from the transform stage.
-  `build.rs` matches exhaustively on `ExtractQuery`: `Generated` dispatches to
-  `generated::build` with a `generated::Shape` (`Node`, `SingleTable`, or `WithLookups`),
-  `Sql` dispatches to `sql::build`; `extract/generated.rs` renders SQL,
+  effective watermark/deleted) from a `ClickHouseExtractDeclaration` that owns
+  its source columns, lookup joins, and query configuration. It imports
+  **nothing** from the transform stage. `compile_extract_spec` dispatches
+  `Generated` to `extract/generated.rs` and `Sql` to `extract/sql.rs`; the generated
+  compiler selects a direct projection or lookup-backed query from the declaration,
   `extract/sql.rs` handles the authored escape hatch. The `RecordBatch` schema produced at
   runtime is the extract-transform contract; planning does not maintain a second schema model.
 - `plan/transform.rs` exposes an owned, narrow `TransformDeclaration` and builds the `TransformSpec`

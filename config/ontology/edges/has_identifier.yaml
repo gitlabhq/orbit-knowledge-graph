@@ -20,6 +20,7 @@ pipelines:
     extract:
       type: clickhouse
       tables: [siphon_vulnerability_occurrence_identifiers]
+      fields: [occurrence_id, identifier_id]
       order_by: [traversal_path, id]
       query: generated
       lookups:

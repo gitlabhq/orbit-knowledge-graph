@@ -244,10 +244,12 @@ The term-ack path assumes the worker is alive to term the message. When a worker
 
 ETL plans come from ontology pipelines declared on nodes, edges, and derived entities. A pipeline has `name`, `extract`, and `transform` sections; the loader turns each one into the in-memory `Pipeline { extract, transform }` model before the indexer lowers it into a runnable `Plan`. Node pipelines emit node rows plus FK-derived edges from their `transform.edges` list. Edge pipelines emit standalone edges. Derived-entity pipelines emit no node rows and must name a Rust transform.
 
-Each `extract` declares a `type` (currently only `clickhouse`, a required field so a future non-ClickHouse source has a seam), its source `tables`, keyset `order_by`, `query`, an optional `filter` (a `_batch` WHERE predicate such as `state = 5` for `REOPENED`), and optional `lookups`. Generated extracts declare exactly one base table; authored SQL may declare every table it reads. A point lookup names the source node and batch ID column, while its table resolves from the node's pipeline. Nodes may declare `enrichment_props`; omitting lookup `fields` expands source columns and stable aliases from that node contract. Explicit `fields` remain available for non-contract mappings. Two forms of `query`:
+Each `extract` declares a `type` (currently only `clickhouse`, a required field so a future non-ClickHouse source has a seam), its source `tables`, keyset `order_by`, `query`, an optional `filter` (a `_batch` WHERE predicate such as `state = 5` for `REOPENED`), optional base `fields`, and optional `lookups`. Generated extracts declare exactly one base table; authored SQL may declare every table it reads.
+
+Generated node projections come from their database-backed properties, while generated standalone edges publish their base `RecordBatch` fields through `extract.fields`. A point lookup names the source node and batch ID column, while its table resolves from the node's pipeline. Nodes may declare `enrichment_props`; omitting lookup `fields` expands source columns and stable aliases from that node contract. Explicit lookup `fields` remain available for non-contract mappings. Two forms of `query`:
 
 - `query: generated` — the indexer builds the SQL from the pipeline declaration. The shape follows from what is being extracted:
-  - a node or edge without `extract.lookups` becomes a single-table projection (requires one source table);
+  - a node or edge without `extract.lookups` becomes a single-table projection (requires one source table); standalone-edge columns come from `extract.fields`, while node columns come from property source metadata;
   - a declaration with `extract.lookups` becomes a `_batch` CTE over its base table plus one internal `_eN` CTE per point lookup. Each lookup uses `argMax` against the source node's base datalake table, is keyed by `id IN (SELECT DISTINCT <batch ID column> FROM _batch)`, and emits stable output field aliases declared explicitly or expanded from `enrichment_props`. The internal `_eN` names are not part of the `RecordBatch` contract.
 - a `.sql.j2` MiniJinja template next to the YAML — the seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) whose extracts own multi-table joins, materialized arrays, or hex/SHA decoding that are not mechanically derivable, and the SystemNote derived entity. Derived-entity pipelines are always authored SQL: their rows are neither node properties nor edge endpoints, so there is nothing to generate a projection from.
 
@@ -255,13 +257,15 @@ For the `.sql.j2` form the indexer renders `{{watermark_column}}` / `{{deleted_c
 
 The Arrow `RecordBatch` schema is the runtime contract between extraction and transformation.
 DataFusion registers each extracted batch with its own schema, so planning does not duplicate a
-partial Arrow schema. The owned `TransformDeclaration` contains only transform planning inputs.
+partial Arrow schema. A `ClickHouseExtractDeclaration` owns source columns, lookup joins, and query
+configuration, while the owned `TransformDeclaration` contains only transform planning inputs.
 Literal edge endpoints map ontology properties to input fields through explicit `properties` maps
 or `enrich: true`, which expands independently from the referenced node's `enrichment_props`.
 DataFusion reads those fields from `source_data` when it builds denormalized edge tags. Extraction
-publishes fields but does not identify endpoint direction or graph properties. Extract and transform
-meet only through the resulting `RecordBatch` field names. When a stage references the same node
-kind more than once, it derives distinct field namespaces from each reference's ID field.
+publishes fields but does not identify endpoint direction or graph properties. Each compiler accepts
+only its owned declaration; the plan builder assembles their outputs. Extract and transform meet only
+through the resulting `RecordBatch` field names. When a stage references the same node kind more than
+once, it derives distinct field namespaces from each reference's ID field.
 
 **Pipeline: extract, transform, write**
 
