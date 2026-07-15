@@ -13,11 +13,11 @@ sources:
   edges/auto_canceled_by.yaml: 0092ac71c24199f2a08fab5074514afc44478f7edbe722786d93589ac83439da
   edges/built_by.yaml: 8a9aef3a9be62357ba3af46179a913514dffe49f9b9f8730749190c7a4fe14eb
   edges/calls.yaml: 986707c116136e54d0dc4c95f9ecc93b3c53c57908615d215a94e70fe0173b4f
-  edges/child_of.yaml: f1fad750e6d87ef8d235ca9c43f5f2df43ac3f0dfb67af80c5897893918825f6
+  edges/child_of.yaml: 18eee96f6c2b69b6464a7c147bbb98a873d139bd5a7f8d733b58e2fcc3ffe236
   edges/closed.yaml: 9d1005042ccd32ba00dd18e6810967494135b140c186374f2b29f97d6a91be8f
   edges/closes.yaml: 0d19a20a9aecae862915da7338661871884aab774749814b02d59848ce98a74e
   edges/confirmed_by.yaml: afad3472c01655cb5db20d105bcbd7e11a839979093025cc2101b6feb442a22a
-  edges/contains.yaml: 5ab5353780d8e49014e471e0e05310fa527c39f7edfbfdeae7989e690a840577
+  edges/contains.yaml: d39e47be01098482edb9c05b891497fca52790ce3648ffb7cc50c02d72a935f4
   edges/created_for_mr.yaml: 21908e2057ab5f1bc3b41d8db38c924f635c9c735c4faf4aac1eca98ff737018
   edges/creator.yaml: befc95b0e9045697d17e19836568a91d88c6af246d6043e412d19a9d5927aa0f
   edges/declares_dependency.yaml: 843fdb931eb82180ca91396e96ee4ccf2724c80ba1e25613072853c0e9be4e89
@@ -54,7 +54,7 @@ sources:
   edges/on_branch.yaml: 35cc994703218cf6d80544d876d125878cd271273064015f25f5f1385a1b25af
   edges/owner.yaml: 0a557d698e7ba2cc98c192a0d1c7c773fbb4cf30b8710adb439634028f3d3812
   edges/ran_by.yaml: 6c44859e11471a0f1bf05b4b8ff522b74158f70c44237d1151b8bfa0f36b9c6b
-  edges/related_to.yaml: d93ecd21ae59764f9aff6fa5f916ef36888723b90776d6bb124aaabe001ffd71
+  edges/related_to.yaml: e40b4a13fb74afde4a43aa49241a79f01e7720999c4b587e7a0ab385305cd40f
   edges/reopened.yaml: cc3698dbaadb9c279c2351d4c9b44d13515d379aaf64677b01ffa4dce146e751
   edges/resolved_by.yaml: 5ce6b0532221b5089cd7e51fe4f128e4cd134a9dabd6f668e89578ff4ac26d50
   edges/reviewer.yaml: 7e1b78ad484a8ec5d82d0c3592e4f4d1eb07937d2f05f4e634e56bc7f75e2f9f

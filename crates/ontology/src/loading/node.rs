@@ -92,8 +92,6 @@ struct ExtractLookupYaml {
     id: String,
     #[serde(default)]
     fields: IndexMap<String, String>,
-    #[serde(default)]
-    prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -153,8 +151,6 @@ struct EndpointYaml {
     properties: IndexMap<String, String>,
     #[serde(default)]
     enrich: bool,
-    #[serde(default)]
-    prefix: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -691,12 +687,6 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
     }
     let mut lookup_output_fields = HashSet::new();
     for lookup in &b.extract.lookups {
-        if lookup.prefix.is_some() && !lookup.fields.is_empty() {
-            return Err(OntologyError::Validation(format!(
-                "pipeline '{}': extract lookup '{}' sets prefix with explicit fields; use one",
-                b.name, lookup.node
-            )));
-        }
         for output_field in lookup.fields.values() {
             if !lookup_output_fields.insert(output_field) {
                 return Err(OntologyError::Validation(format!(
@@ -850,7 +840,6 @@ impl ExtractLookupYaml {
             node_kind: self.node,
             batch_id_column: self.id,
             output_fields: self.fields,
-            prefix: self.prefix,
             resolved_source: None,
         }
     }
@@ -876,17 +865,10 @@ impl EndpointYaml {
                 self.field
             )));
         }
-        if !self.enrich && self.prefix.is_some() {
-            return Err(OntologyError::Validation(format!(
-                "transform endpoint '{}' sets prefix without enrich: true",
-                self.field
-            )));
-        }
         Ok(NodeRef {
             field: self.field,
             property_inputs: self.properties,
             enrich: self.enrich,
-            prefix: self.prefix,
             kind: match self.kind {
                 EndpointKindYaml::Literal(lit) => NodeRefKind::Literal(lit),
                 EndpointKindYaml::Derived { derive, mapping } => NodeRefKind::Derived {
@@ -1325,75 +1307,6 @@ mod tests {
             err.to_string()
                 .contains("extract.lookups output field 'user_state' is declared more than once"),
             "got: {err}"
-        );
-    }
-
-    #[test]
-    fn node_rejects_lookup_prefix_with_explicit_fields() {
-        let result = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id: {type: int64, source: id}
-            pipelines:
-              - name: TestNode
-                extract:
-                  type: clickhouse
-                  tables: [source_table]
-                  order_by: [id]
-                  query: generated
-                  lookups:
-                    - node: User
-                      id: author_id
-                      prefix: author_
-                      fields:
-                        state: user_state
-                transform:
-                  type: datafusion
-            "#,
-        );
-        let error = result.expect_err("lookup prefix with explicit fields should be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("sets prefix with explicit fields; use one"),
-            "got: {error}"
-        );
-    }
-
-    #[test]
-    fn node_rejects_endpoint_prefix_without_enrichment_contract() {
-        let result = parse_test_node(
-            r#"
-            node_type: entity
-            domain: test
-            destination_table: gl_test
-            properties:
-              id: {type: int64, source: id}
-              user_id: {type: int64, source: user_id}
-            pipelines:
-              - name: TestNode
-                extract:
-                  type: clickhouse
-                  tables: [source_table]
-                  order_by: [id]
-                  query: generated
-                transform:
-                  type: datafusion
-                  edges:
-                    - from: {field: user_id, kind: User, prefix: author_}
-                      to: {field: id, kind: TestNode}
-                      label: AUTHORED
-            "#,
-        );
-        let error = result.expect_err("endpoint prefix without enrich should be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("sets prefix without enrich: true"),
-            "got: {error}"
         );
     }
 

@@ -18,10 +18,10 @@ pipelines:
       query: generated
       lookups:
         - { node: Pipeline, id: pipeline_id }
-        - { node: Pipeline, id: source_pipeline_id, prefix: source_pipeline_ }
+        - { node: Pipeline, id: source_pipeline_id }
     transform:
       type: datafusion
       edges:
         - from: { field: pipeline_id, kind: Pipeline, enrich: true }
-          to: { field: source_pipeline_id, kind: Pipeline, enrich: true, prefix: source_pipeline_ }
+          to: { field: source_pipeline_id, kind: Pipeline, enrich: true }
           label: CHILD_OF

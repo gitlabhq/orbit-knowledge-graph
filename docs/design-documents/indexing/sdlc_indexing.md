@@ -260,8 +260,8 @@ Literal edge endpoints map ontology properties to input fields through explicit 
 or `enrich: true`, which expands independently from the referenced node's `enrichment_props`.
 DataFusion reads those fields from `source_data` when it builds denormalized edge tags. Extraction
 publishes fields but does not identify endpoint direction or graph properties. Extract and transform
-meet only through the resulting `RecordBatch` field names. Same-node self-edges use matching
-`prefix` values on their lookup and endpoint declarations to keep both sides distinct.
+meet only through the resulting `RecordBatch` field names. When a stage references the same node
+kind more than once, it derives distinct field namespaces from each reference's ID field.
 
 **Pipeline: extract, transform, write**
 

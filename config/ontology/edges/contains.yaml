@@ -51,11 +51,11 @@ pipelines:
       order_by: [traversal_path, work_item_parent_id, id]
       query: generated
       lookups:
-        - { node: WorkItem, id: work_item_parent_id, prefix: work_item_parent_ }
+        - { node: WorkItem, id: work_item_parent_id }
         - { node: WorkItem, id: work_item_id }
     transform:
       type: datafusion
       edges:
-        - from: { field: work_item_parent_id, kind: WorkItem, enrich: true, prefix: work_item_parent_ }
+        - from: { field: work_item_parent_id, kind: WorkItem, enrich: true }
           to: { field: work_item_id, kind: WorkItem, enrich: true }
           label: CONTAINS

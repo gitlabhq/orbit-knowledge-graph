@@ -1591,10 +1591,6 @@
           "type": "boolean",
           "default": false,
           "description": "Carry the referenced node's enrichment_props onto this endpoint. Requires a matching extract lookup and a literal kind. Mutually exclusive with explicit properties."
-        },
-        "prefix": {
-          "type": "string",
-          "description": "Batch-field namespace; must match the extract lookup's prefix. Defaults to the node's snake_case name. Set on same-node self-edges to disambiguate."
         }
       },
       "required": [
@@ -1686,10 +1682,6 @@
             "type": "string"
           },
           "description": "Source node columns mapped to stable output field names. Escape hatch; omit to derive from the node's enrichment_props."
-        },
-        "prefix": {
-          "type": "string",
-          "description": "Batch-field namespace for derived fields; must match the transform endpoint's prefix. Defaults to the node's snake_case name."
         }
       },
       "required": [

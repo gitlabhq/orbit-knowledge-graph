@@ -44,7 +44,6 @@ pub struct ClickHouseExtractLookup {
     pub node_kind: String,
     pub batch_id_column: String,
     pub output_fields: IndexMap<String, String>,
-    pub prefix: Option<String>,
     pub resolved_source: Option<ClickHouseExtractLookupSource>,
 }
 
@@ -96,13 +95,6 @@ impl Transform {
             Self::Rust(_) => &[],
         }
     }
-
-    pub fn edges_mut(&mut self) -> &mut [EdgeMapping] {
-        match self {
-            Self::DataFusion { edges } => edges,
-            Self::Rust(_) => &mut [],
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,7 +112,6 @@ pub struct NodeRef {
     pub kind: NodeRefKind,
     pub property_inputs: IndexMap<String, String>,
     pub enrich: bool,
-    pub prefix: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

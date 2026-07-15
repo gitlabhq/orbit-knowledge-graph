@@ -588,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn self_edge_enrich_derives_distinct_prefixed_aliases_per_endpoint() {
+    fn self_edge_enrich_derives_distinct_aliases_from_endpoint_fields() {
         let built = plans(&test_ontology(), 1_000_000);
         let plan = built
             .namespaced

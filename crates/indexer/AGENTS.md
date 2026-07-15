@@ -139,8 +139,8 @@ preventable feedback (see #2772, !1416). Check each of these first:
   table; lookup tables resolve from the referenced node pipelines. Nodes may declare
   `enrichment_props`. A slim lookup with only `node` and `id` expands source columns and stable
   aliases from that contract; an endpoint with `enrich: true` independently expands its property
-  bindings from the same contract. Same-node self-edges set matching `prefix` values on the lookup
-  and endpoint. Explicit lookup `fields` and endpoint `properties` remain escape hatches. The
+  bindings from the same contract. Same-node references derive distinct field namespaces from
+  their ID fields. Explicit lookup `fields` and endpoint `properties` remain escape hatches. The
   indexer builds lookup joins without reading transform mappings. Use an `extract.filter` for row predicates; use a
   co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex joins or
   materialized arrays, so rows you discard never cross the wire. The ontology carries a `.sql.j2`

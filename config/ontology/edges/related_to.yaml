@@ -27,11 +27,11 @@ pipelines:
       order_by: [traversal_path, source_id, id]
       query: generated
       lookups:
-        - { node: WorkItem, id: source_id, prefix: source_ }
-        - { node: WorkItem, id: target_id, prefix: target_ }
+        - { node: WorkItem, id: source_id }
+        - { node: WorkItem, id: target_id }
     transform:
       type: datafusion
       edges:
-        - from: { field: source_id, kind: WorkItem, enrich: true, prefix: source_ }
-          to: { field: target_id, kind: WorkItem, enrich: true, prefix: target_ }
+        - from: { field: source_id, kind: WorkItem, enrich: true }
+          to: { field: target_id, kind: WorkItem, enrich: true }
           label: RELATED_TO
