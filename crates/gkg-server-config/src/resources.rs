@@ -47,8 +47,7 @@ impl ContainerResources {
         }
     }
 
-    /// The memory limit caps the CPU count because a CPU-rich but memory-tight
-    /// pod must not over-provision workers (#794 was OOMKilled sdlc pods).
+    /// The memory limit caps the CPU count so a memory-tight pod cannot derive more workers than it can feed.
     pub fn derive_worker_budget(&self) -> usize {
         let cpu = self.available_parallelism.max(1);
         match self.memory_limit_bytes {
