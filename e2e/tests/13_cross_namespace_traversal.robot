@@ -34,7 +34,7 @@ Project Scoped Neighbors Returns Cross Namespace Related Issue
     [Tags]    cross-namespace
     ${center}=    Create Dictionary    id=wi    entity=WorkItem    node_ids=${{[int($XNS_ISSUE_ID_A)]}}
     ${dir}=    Create Dictionary    node=wi    direction=both
-    ${query}=    Create Dictionary    query_type=neighbors    node=${center}    neighbors=${dir}    limit=${100}
+    ${query}=    Create Dictionary    query_type=neighbors    nodes=${{[${center}]}}    neighbors=${dir}    limit=${100}
     Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
 
 Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops

@@ -39,7 +39,7 @@ Orbit Query Node
     [Arguments]    ${entity}    ${node_id}
     ${headers}=    GitLab Auth Headers
     ${node}=    Create Dictionary    id=n    entity=${entity}    node_ids=${{[${node_id}]}}
-    ${query}=    Create Dictionary    query_type=traversal    node=${node}
+    ${query}=    Create Dictionary    query_type=traversal    nodes=${{[${node}]}}
     ${body}=    Create Dictionary    query=${query}
     ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp.json()}
@@ -242,7 +242,7 @@ Orbit Search Nodes With Filters
     [Arguments]    ${entity}    ${filters}    ${limit}=30
     ${limit_int}=    Convert To Integer    ${limit}
     ${node}=    Create Dictionary    id=n    entity=${entity}    filters=${filters}
-    ${query}=    Create Dictionary    query_type=traversal    node=${node}    limit=${limit_int}
+    ${query}=    Create Dictionary    query_type=traversal    nodes=${{[${node}]}}    limit=${limit_int}
     ${resp}=    Orbit Query    ${query}
     RETURN    ${resp}
 
