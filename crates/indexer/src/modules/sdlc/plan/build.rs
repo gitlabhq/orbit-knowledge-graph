@@ -9,7 +9,7 @@ use ontology::{
     constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN},
 };
 
-use super::extract::{EnrichmentJoin, ExtractDecl, ExtractSpec, SourceColumn, generated, sql};
+use super::extract::{ExtractDecl, ExtractSpec, PointLookupJoin, SourceColumn, generated, sql};
 use super::transform;
 use super::{Plan, Plans, TransformDeclaration, TransformSpec};
 
@@ -105,8 +105,7 @@ fn build_node_plan(
         ExtractQuery::Sql(raw) => sql::build(&decl, raw)?,
     };
 
-    let transform =
-        transform::build_transform_spec(transform_declaration, &spec.enriched_fields, ontology);
+    let transform = transform::build_transform_spec(transform_declaration, ontology);
 
     Ok(assemble(
         pipeline,
@@ -147,7 +146,7 @@ fn build_edge_plan(
 
     let spec = match &extract.query {
         ExtractQuery::Generated { filter } => {
-            let joins = EnrichmentJoin::from_mapping(mapping, pipeline.scope);
+            let joins = PointLookupJoin::get_from_extract_declaration(extract, pipeline.scope);
             if joins.is_empty() {
                 generated::build(
                     &decl,
@@ -159,7 +158,7 @@ fn build_edge_plan(
             } else {
                 generated::build(
                     &decl,
-                    generated::Shape::Enriched {
+                    generated::Shape::WithLookups {
                         batch_columns: SourceColumn::bare_all(&edge_batch_columns(
                             mapping,
                             &extract.order_by,
@@ -173,8 +172,7 @@ fn build_edge_plan(
         ExtractQuery::Sql(raw) => sql::build(&decl, raw)?,
     };
 
-    let transform =
-        transform::build_transform_spec(transform_declaration, &spec.enriched_fields, ontology);
+    let transform = transform::build_transform_spec(transform_declaration, ontology);
 
     Ok(assemble(
         pipeline,
@@ -203,8 +201,7 @@ fn build_derived_plan(
     let spec = sql::build(&decl, raw)?;
 
     let transform_declaration = TransformDeclaration::Rust(name.clone());
-    let transform =
-        transform::build_transform_spec(transform_declaration, &spec.enriched_fields, ontology);
+    let transform = transform::build_transform_spec(transform_declaration, ontology);
 
     Ok(assemble(
         pipeline,
@@ -537,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn enriched_standalone_edge_extract_sql() {
+    fn standalone_edge_extract_sql_with_lookups() {
         let built = plans(&test_ontology(), 1_000_000);
         let plan = built
             .namespaced
@@ -553,6 +550,13 @@ mod tests {
         assert!(normalized.contains("LEFT JOIN _e0"), "sql: {sql}");
         assert!(normalized.contains("argMax("), "sql: {sql}");
         assert!(normalized.contains("GROUP BY id"), "sql: {sql}");
+        assert!(normalized.contains("_e0.state AS user_state"), "sql: {sql}");
+        assert!(
+            normalized.contains("_e1.state_id AS work_item_state_id"),
+            "sql: {sql}"
+        );
+        assert!(!normalized.contains("AS _e0_state"), "sql: {sql}");
+        assert!(!normalized.contains("AS _e1_state_id"), "sql: {sql}");
         assert!(
             normalized.contains("id IN (SELECT DISTINCT issue_id FROM _batch)"),
             "sql: {sql}"
@@ -580,6 +584,30 @@ mod tests {
         assert!(
             transforms[0].sql.contains("target_tags"),
             "transform should produce target_tags"
+        );
+    }
+
+    #[test]
+    fn self_edge_enrich_derives_distinct_aliases_from_endpoint_fields() {
+        let built = plans(&test_ontology(), 1_000_000);
+        let plan = built
+            .namespaced
+            .iter()
+            .find(|p| render_namespaced(p, "1/2/").contains("siphon_issue_links"))
+            .expect("siphon_issue_links plan");
+
+        let normalized = normalize(&render_namespaced(plan, "1/2/"));
+        assert!(
+            normalized.contains("_e0.state_id AS source_state_id"),
+            "sql: {normalized}"
+        );
+        assert!(
+            normalized.contains("_e1.state_id AS target_state_id"),
+            "sql: {normalized}"
+        );
+        assert!(
+            normalized.contains("_e0.confidential AS source_confidential"),
+            "sql: {normalized}"
         );
     }
 

@@ -12,18 +12,15 @@ pipelines:
   - name: APPROVED_siphon_approvals_MergeRequest
     extract:
       type: clickhouse
-      tables: [siphon_approvals, siphon_users, merge_requests]
+      tables: [siphon_approvals]
       order_by: [traversal_path, merge_request_id, id]
       query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: MergeRequest, id: merge_request_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: user_id
-            kind: User
-            enrich: [state, private_profile, admin, auditor, external, user_type]
-          to:
-            field: merge_request_id
-            kind: MergeRequest
-            enrich: [state_id, merge_status, draft, squash, discussion_locked]
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: merge_request_id, kind: MergeRequest, enrich: true }
           label: APPROVED

@@ -14,18 +14,15 @@ pipelines:
   - name: DEPLOYED_TO_siphon_deployment_merge_requests_Deployment
     extract:
       type: clickhouse
-      tables: [siphon_deployment_merge_requests, merge_requests, siphon_deployments]
+      tables: [siphon_deployment_merge_requests]
       order_by: [traversal_path, deployment_id, merge_request_id]
       query: generated
+      lookups:
+        - { node: MergeRequest, id: merge_request_id }
+        - { node: Deployment, id: deployment_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: merge_request_id
-            kind: MergeRequest
-            enrich: [state_id, merge_status, draft, squash, discussion_locked]
-          to:
-            field: deployment_id
-            kind: Deployment
-            enrich: [status, tag, archived]
+        - from: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          to: { field: deployment_id, kind: Deployment, enrich: true }
           label: DEPLOYED_TO

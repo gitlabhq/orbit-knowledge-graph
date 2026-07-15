@@ -6,6 +6,7 @@ description: A CI/CD job that executes scripts within a pipeline stage
 label: name
 destination_table: gl_job
 default_columns: [id, name, status, ref]
+enrichment_props: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
 
 style:
   size: 24

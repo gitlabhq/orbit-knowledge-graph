@@ -19,17 +19,14 @@ pipelines:
   - name: HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier
     extract:
       type: clickhouse
-      tables: [siphon_vulnerability_occurrence_identifiers, siphon_vulnerability_occurrences]
+      tables: [siphon_vulnerability_occurrence_identifiers]
       order_by: [traversal_path, id]
       query: generated
+      lookups:
+        - { node: VulnerabilityOccurrence, id: occurrence_id }
     transform:
       type: datafusion
       edges:
-        - from:
-            field: occurrence_id
-            kind: VulnerabilityOccurrence
-            enrich: [severity, report_type, detection_method]
-          to:
-            field: identifier_id
-            kind: VulnerabilityIdentifier
+        - from: { field: occurrence_id, kind: VulnerabilityOccurrence, enrich: true }
+          to: { field: identifier_id, kind: VulnerabilityIdentifier }
           label: HAS_IDENTIFIER
