@@ -20,6 +20,13 @@ const CODE_INDEXING_LANE_SHARE_PERCENT: usize = 50;
 /// Reserve big-repo lanes so a flood of small repos can't starve monorepos (big 2 / small 6).
 const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
 
+/// Calibrated on prod: the hand-tuned 500k-row datalake page runs in the 32 GiB sdlc pool.
+const DATALAKE_BATCH_MEMORY_ANCHOR_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+const DATALAKE_BATCH_AT_ANCHOR: u64 = 500_000;
+
+/// Matches the retry loop's known-safe re-read block size (`engine::default_halving_initial_block_size`).
+const MIN_DATALAKE_BATCH_SIZE: u64 = 100_000;
+
 pub struct CodeIndexingSlots {
     pub small_indexing_slots: usize,
     pub big_indexing_slots: usize,
@@ -48,6 +55,13 @@ impl ContainerResources {
             None => cpu,
         }
     }
+
+    pub fn derive_datalake_batch_size(&self) -> u64 {
+        match self.memory_limit_bytes {
+            Some(bytes) => datalake_batch_size_for_memory_limit(bytes),
+            None => DATALAKE_BATCH_AT_ANCHOR,
+        }
+    }
 }
 
 impl EngineConfiguration {
@@ -68,6 +82,10 @@ impl EngineConfiguration {
             info!(?groups, "derived engine.concurrency_groups");
             self.concurrency_groups = groups;
         }
+
+        self.handlers
+            .entity_handler
+            .resolve_runtime_defaults(resources);
     }
 }
 
@@ -114,6 +132,14 @@ fn max_workers_for_memory_limit(memory_limit_bytes: u64) -> usize {
     usize::try_from(memory_limit_bytes / WORKER_MEMORY_BUDGET_BYTES)
         .unwrap_or(usize::MAX)
         .max(1)
+}
+
+fn datalake_batch_size_for_memory_limit(memory_limit_bytes: u64) -> u64 {
+    let scaled = u128::from(memory_limit_bytes) * u128::from(DATALAKE_BATCH_AT_ANCHOR)
+        / u128::from(DATALAKE_BATCH_MEMORY_ANCHOR_BYTES);
+    u64::try_from(scaled)
+        .unwrap_or(u64::MAX)
+        .max(MIN_DATALAKE_BATCH_SIZE)
 }
 
 /// The cgroup limit where one applies (containers), otherwise total RAM (VMs, bare metal, macOS/Windows).
@@ -180,6 +206,49 @@ mod tests {
             2
         );
         assert_eq!(container_resources(8, Some(GIB)).derive_worker_budget(), 1);
+    }
+
+    #[test]
+    fn datalake_batch_scales_with_memory_and_floors_at_the_safe_reread_block_size() {
+        assert_eq!(
+            container_resources(20, Some(32 * GIB)).derive_datalake_batch_size(),
+            500_000
+        );
+        assert_eq!(
+            container_resources(8, Some(64 * GIB)).derive_datalake_batch_size(),
+            1_000_000
+        );
+        assert_eq!(
+            container_resources(8, Some(16 * GIB)).derive_datalake_batch_size(),
+            250_000
+        );
+        assert_eq!(
+            container_resources(8, Some(4 * GIB)).derive_datalake_batch_size(),
+            100_000
+        );
+        assert_eq!(
+            container_resources(8, None).derive_datalake_batch_size(),
+            500_000
+        );
+    }
+
+    #[test]
+    fn resolve_fills_entity_handler_batch_size_from_memory() {
+        let mut cfg = EngineConfiguration::default();
+
+        cfg.resolve_runtime_defaults(&container_resources(8, Some(16 * GIB)));
+
+        assert_eq!(cfg.handlers.entity_handler.datalake_batch_size(), 250_000);
+    }
+
+    #[test]
+    fn resolve_keeps_explicit_entity_handler_batch_size() {
+        let mut cfg = EngineConfiguration::default();
+        cfg.handlers.entity_handler.datalake_batch_size = Some(999);
+
+        cfg.resolve_runtime_defaults(&container_resources(8, Some(64 * GIB)));
+
+        assert_eq!(cfg.handlers.entity_handler.datalake_batch_size(), 999);
     }
 
     #[test]

@@ -121,10 +121,11 @@ The worker pool limits how many messages are processed concurrently. It uses a t
 
 ### Resource-derived defaults
 
-Both fields derive from the container's resources at startup when left unset; an explicit config value (YAML or env var) always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
+These fields derive from the container's resources at startup when left unset; an explicit config value (YAML or env var) always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
 
 - `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit), capped by the cgroup memory limit at 1.5 GiB per worker so a CPU-rich but memory-tight pod cannot derive more workers than it can feed. The budget is calibrated on production's hand-tuned pools (code: 16 workers in 24 GiB, sdlc: 20 in 32 GiB). No readable memory limit (unlimited cgroup, bare metal, macOS) means CPU alone decides.
 - `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap; a pool spanning both the SDLC and code groups splits the cap 75% / 25% (the historical universal-pool ratio of sdlc 12 / code 4 out of 16). Namespace deletion shares the sdlc group.
+- `handlers.entity-handler.datalake_batch_size` unset → the SDLC datalake page size scales with the cgroup memory limit, anchored at prod's 32 GiB sdlc pool (its hand-tuned 500k page), floored at 100k rows so a memory-scarce host can't OOM on a full page. No readable memory limit means the 500k anchor default. `batch_size_overrides` still apply on top per entity.
 
 On a 16-core universal pool this reproduces the previous hardcoded defaults exactly (16 workers, sdlc 12 / code 4).
 
@@ -195,7 +196,7 @@ engine:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `engine.handlers.entity-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+| `engine.handlers.entity-handler.datalake_batch_size` | derived | Rows per datalake extraction query (see [Resource-derived defaults](#resource-derived-defaults)) |
 | `engine.handlers.entity-handler.batch_size_overrides.<Entity>` | None | Per-entity override for datalake batch size |
 | `engine.handlers.entity-handler.partition_overrides.<Entity>` | None | Number of partitions for initial load parallelism |
 

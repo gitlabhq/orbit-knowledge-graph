@@ -16,7 +16,7 @@ pub fn create_test_indexer_config(clickhouse_config: &ClickHouseConfiguration) -
         engine: EngineConfiguration {
             handlers: HandlersConfiguration {
                 entity_handler: EntityHandlerConfig {
-                    datalake_batch_size: 1,
+                    datalake_batch_size: Some(1),
                     ..EntityHandlerConfig::default()
                 },
                 ..HandlersConfiguration::default()
