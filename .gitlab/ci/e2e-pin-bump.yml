@@ -15,6 +15,8 @@ e2e-pin-bump:
   before_script:
     - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
     - apk add --no-cache bash curl python3 git coreutils yq
-    - glab auth login --hostname "$CI_SERVER_HOST" --token "$AUTOMATION_BOT_TOKEN"
+    # The project-level GITLAB_TOKEN variable outranks glab auth login config,
+    # so override it or glab acts as that token's bot.
+    - export GITLAB_TOKEN="$AUTOMATION_BOT_TOKEN"
   script:
     - bash scripts/ci/open-e2e-bump-mr.sh
