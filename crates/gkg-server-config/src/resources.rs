@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
+use sysinfo::{MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
 use tracing::info;
 
 use crate::engine::{EngineConfiguration, IndexerModule};
@@ -20,8 +20,6 @@ const CODE_INDEXING_LANE_SHARE_PERCENT: usize = 50;
 /// Reserve big-repo lanes so a flood of small repos can't starve monorepos (big 2 / small 6).
 const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
 
-const SYSINFO_UNLIMITED_SENTINEL_THRESHOLD_BYTES: u64 = 1 << 62;
-
 pub struct CodeIndexingSlots {
     pub small_indexing_slots: usize,
     pub big_indexing_slots: usize,
@@ -39,7 +37,7 @@ impl ContainerResources {
             available_parallelism: std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1),
-            memory_limit_bytes: read_cgroup_memory_limit_bytes(),
+            memory_limit_bytes: read_memory_ceiling_bytes(),
         }
     }
 
@@ -118,17 +116,24 @@ fn max_workers_for_memory_limit(memory_limit_bytes: u64) -> usize {
         .max(1)
 }
 
-fn read_cgroup_memory_limit_bytes() -> Option<u64> {
-    let pid = get_current_pid().ok()?;
+/// Effective memory ceiling for this process: the cgroup limit where one
+/// applies (containers; an unlimited cgroup resolves to the machine's RAM),
+/// otherwise total RAM (VMs, bare metal, macOS/Windows).
+fn read_memory_ceiling_bytes() -> Option<u64> {
     let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        false,
-        ProcessRefreshKind::nothing(),
-    );
-    let limits = system.process(pid)?.cgroup_limits()?;
-    (limits.total_memory < SYSINFO_UNLIMITED_SENTINEL_THRESHOLD_BYTES)
-        .then_some(limits.total_memory)
+    if let Ok(pid) = get_current_pid() {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            false,
+            ProcessRefreshKind::nothing(),
+        );
+        if let Some(limits) = system.process(pid).and_then(|p| p.cgroup_limits()) {
+            return Some(limits.total_memory);
+        }
+    }
+    system.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
+    let total_ram = system.total_memory();
+    (total_ram > 0).then_some(total_ram)
 }
 
 #[cfg(test)]
@@ -145,6 +150,11 @@ mod tests {
             available_parallelism,
             memory_limit_bytes,
         }
+    }
+
+    #[test]
+    fn detect_finds_a_memory_ceiling_on_every_supported_host() {
+        assert!(ContainerResources::detect().memory_limit_bytes.is_some());
     }
 
     #[test]
