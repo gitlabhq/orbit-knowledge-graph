@@ -1,0 +1,47 @@
+# Scheduled e2e pin bumper.
+#
+# Opens (or refreshes) a merge request that bumps the e2e upstream pins in
+# e2e/config/versions.yaml — siphon chart + image, the GitLab devel chart,
+# ref, and CNG image digests, and the gkg image — to the latest published
+# builds. The e2e job runs automatically on the bot MR's pipeline (rule in
+# .gitlab-ci.yml), so the MR is red when a bump breaks the suite.
+#
+# Credentials: the automation-bot project access token, provisioned by
+# infra-mgmt terraform (environments/release-platform/knowledge-graph.tf) and
+# read from the Vault `ci` mount below — nothing to create by hand.
+#
+# Setup (one-time):
+#   1. Create a pipeline schedule (Project → CI/CD → Schedules; daily) with a
+#      variable SCHEDULE_ONLY=e2e-pin-bump. That marker makes the schedule run
+#      only this job (see .skip-on-solo-schedule in .gitlab-ci.yml).
+#   2. To rehearse without side effects, run the schedule once with
+#      DRY_RUN=true set on the schedule; remove it to go live.
+e2e-pin-bump:
+  stage: review
+  image: registry.gitlab.com/gitlab-org/cli:v1.102.0
+  tags:
+    - saas-linux-small-amd64
+  # Run independently of stage order; on the solo schedule this is the only job.
+  needs: []
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    AUTOMATION_BOT_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/automation-bot/token@ci
+      token: $VAULT_ID_TOKEN
+  variables:
+    DRY_RUN: "false"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-pin-bump"
+  before_script:
+    - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
+    # yq comes from the Alpine package repo (checksummed by apk), not a raw
+    # GitHub binary download.
+    - apk add --no-cache bash curl python3 git coreutils yq
+    - glab auth login --hostname "$CI_SERVER_HOST" --token "$AUTOMATION_BOT_TOKEN"
+  script:
+    - bash scripts/ci/open-e2e-bump-mr.sh

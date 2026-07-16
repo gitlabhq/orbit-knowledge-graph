@@ -50,6 +50,7 @@ include:
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
+  - local: .gitlab/ci/e2e-pin-bump.yml
   - local: .gitlab/ci/comment-guard.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
@@ -1220,6 +1221,10 @@ e2e:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Scheduled pin-bump MRs (see .gitlab/ci/e2e-pin-bump.yml) exist to be
+    # validated, so e2e runs automatically and blocks: a red bot MR means the
+    # bump broke the suite.
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'automation/e2e-pin-bump'
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
