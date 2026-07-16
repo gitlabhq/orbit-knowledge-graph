@@ -66,12 +66,23 @@ git remote set-url origin "https://oauth2:${TOKEN}@${SERVER_HOST}/${PROJECT_PATH
 git push --force origin "HEAD:${BRANCH}"
 
 existing=$(glab api \
-  "projects/${PROJECT_ID}/merge_requests?source_branch=${BRANCH}&state=opened" \
+  "projects/${PROJECT_ID}/merge_requests?source_branch=${BRANCH}&target_branch=${DEFAULT_BRANCH}&state=opened" \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["web_url"] if d else "")')
 
 if [ -n "$existing" ]; then
   log "Refreshed existing MR: $existing"
   exit 0
+fi
+
+# Quick actions silently ignore unknown usernames, so an invalid assignee
+# would leave bot MRs unassigned with no error. Validate it up front and
+# assign nobody (loudly) rather than fail the bump.
+assign_line=""
+if glab api "users?username=${ASSIGNEE}" \
+  | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then
+  assign_line="/assign ${ASSIGNEE}"
+else
+  log "WARNING: assignee '${ASSIGNEE}' not found; opening the MR unassigned."
 fi
 
 body="$(cat <<EOF
@@ -91,7 +102,7 @@ The \`e2e\` job runs automatically on the pipeline of this MR and must be green 
 
 - [x] This merge request does not introduce any performance regression.
 
-/assign ${ASSIGNEE}
+${assign_line}
 /label ~"group::context-systems" ~"Category:Orbit"
 /label ~"type::maintenance"
 EOF
