@@ -783,7 +783,7 @@ mod tests {
         let query = r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"node": "u", "direction": "outgoing"},
+            "neighbors": {"direction": "outgoing"},
             "limit": 10
         }"#;
 
@@ -804,7 +804,7 @@ mod tests {
         let query = r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]}],
-            "neighbors": {"node": "mr", "direction": "both"},
+            "neighbors": {"direction": "both"},
             "cursor": {"page_size": 20}
         }"#;
 
@@ -1484,7 +1484,7 @@ mod tests {
                 r#"{
                     "query_type": "neighbors",
                     "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"title": {"op": "contains", "value": "fix"}}}],
-                    "neighbors": {"node": "mr", "direction": "both"},
+                    "neighbors": {"direction": "both"},
                     "limit": 10
                 }"#,
             ),

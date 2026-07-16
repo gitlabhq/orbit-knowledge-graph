@@ -848,7 +848,6 @@ pub enum PathType {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputNeighbors {
-    pub node: String,
     #[serde(default)]
     pub direction: Direction,
     #[serde(default)]
@@ -1214,14 +1213,13 @@ mod tests {
             r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
-            "neighbors": {"node": "u", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         )
         .unwrap();
 
         assert_eq!(input.query_type, QueryType::Neighbors);
         let neighbors = input.neighbors.unwrap();
-        assert_eq!(neighbors.node, "u");
         assert_eq!(neighbors.direction, Direction::Both);
     }
 
@@ -1240,7 +1238,7 @@ mod tests {
             r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"node": "u"},
+            "neighbors": {},
             "options": {"dynamic_columns": "*"}
         }"#,
         )
@@ -1255,7 +1253,7 @@ mod tests {
             r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"node": "u"},
+            "neighbors": {},
             "options": {"dynamic_columns": "default"}
         }"#,
         )

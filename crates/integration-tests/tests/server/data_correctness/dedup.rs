@@ -449,7 +449,7 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [9310]}],
-            "neighbors": {"node": "mr", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         &dedup_svc(),
     )
@@ -491,7 +491,7 @@ pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
         r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [9311]}],
-            "neighbors": {"node": "mr", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         &dedup_svc(),
     )

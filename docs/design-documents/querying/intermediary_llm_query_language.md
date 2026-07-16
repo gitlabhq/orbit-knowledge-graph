@@ -296,7 +296,6 @@ Find all nodes connected to a given node. Neighbors queries take exactly one nod
   "query_type": "neighbors",
   "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
   "neighbors": {
-    "node": "u",
     "direction": "both",
     "rel_types": ["AUTHORED", "MEMBER_OF"]
   },
@@ -306,7 +305,6 @@ Find all nodes connected to a given node. Neighbors queries take exactly one nod
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `node` | `string` | Node variable ID to find neighbors for (required). |
 | `direction` | `string` | `outgoing`, `incoming`, or `both` (default: `both`). |
 | `rel_types` | `array` | Relationship types to traverse. If omitted, all types are considered. |
 

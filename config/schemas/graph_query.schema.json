@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v6",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v7",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -704,13 +704,8 @@
     },
     "NeighborsConfig": {
       "type": "object",
-      "description": "Configuration for neighbors queries",
-      "required": ["node"],
+      "description": "Configuration for neighbors queries. The center is the query's single node.",
       "properties": {
-        "node": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Node variable ID to find neighbors for"
-        },
         "direction": {
           "$ref": "#/$defs/Direction",
           "description": "Direction to traverse relationships (outgoing, incoming, or both)",

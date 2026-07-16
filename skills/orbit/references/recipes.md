@@ -349,7 +349,7 @@ Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
       "entity": "Project",
       "filters": {"full_path": {"op": "eq", "value": "gitlab-org/cli"}}
     }],
-    "neighbors": {"node": "p", "direction": "outgoing"},
+    "neighbors": {"direction": "outgoing"},
     "limit": 20
   }
 }

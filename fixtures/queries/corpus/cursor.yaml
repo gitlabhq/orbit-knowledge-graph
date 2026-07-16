@@ -110,7 +110,6 @@
         "node_ids": "$sample:3"
       }],
       "neighbors": {
-        "node": "mr",
         "direction": "both"
       },
       "cursor": {
@@ -131,7 +130,6 @@
         "node_ids": "$sample"
       }],
       "neighbors": {
-        "node": "p",
         "direction": "outgoing",
         "rel_types": [
           "CONTAINS"

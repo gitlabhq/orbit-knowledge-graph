@@ -571,7 +571,6 @@ node must be bounded by `node_ids`, filters, or a narrow `id_range`.
     "node_ids": [12345]
   }],
   "neighbors": {
-    "node": "mr",
     "direction": "both",
     "rel_types": ["AUTHORED", "IN_PROJECT", "HAS_DIFF"]
   },

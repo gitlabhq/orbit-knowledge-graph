@@ -357,8 +357,10 @@ fn infer_wildcard_relationship_kinds(input: &mut Input, ontology: &Ontology) {
         );
     }
 
-    if let Some(neighbors) = input.neighbors.as_mut()
-        && let Some(center_entity) = entity_for.get(neighbors.node.as_str()).copied()
+    if input.query_type == QueryType::Neighbors
+        && let Some(neighbors) = input.neighbors.as_mut()
+        && let [center] = input.nodes.as_slice()
+        && let Some(center_entity) = center.entity.as_deref()
     {
         specialize_wildcard(
             &mut neighbors.rel_types,
