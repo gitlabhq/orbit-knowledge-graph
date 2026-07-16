@@ -1,16 +1,7 @@
-# Opens the gl-infra/argocd/apps MR that bumps orbit-stg and orbit-prd to the
-# version this tag pipeline is building, then posts a review request through
-# SLACK_WEBHOOK (bound to #f_orbit, same channel as the release announcements).
-# Runs after release-manifest so the multi-arch image exists before Argo could
-# ever pull it.
-#
-# The bot token is terraformed in infra-mgmt (release-platform environment,
-# infra-mgmt!3039) and shared into argocd/apps as Developer (infra-mgmt!3040):
-# it can push branches and open MRs there, never merge.
-#
-# DRY_RUN defaults to true so the first post-merge releases rehearse visibly
-# in the job log (diff, MR body, webhook visibility) without touching
-# argocd/apps; flip the default to "false" here once a rehearsal looks right.
+# Opens the argocd-apps MR bumping orbit-stg + orbit-prd to this tag, then
+# pings Slack (#f_orbit). Ordered after release-manifest so the image exists
+# before the bump can merge. Bot token (infra-mgmt!3039/!3040) can open MRs on
+# argocd/apps, never merge. Flip DRY_RUN to "false" after a good rehearsal.
 release-deploy-mr:
   extends: .automation-bot
   stage: release
