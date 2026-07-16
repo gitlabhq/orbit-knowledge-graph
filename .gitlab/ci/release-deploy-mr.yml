@@ -16,6 +16,6 @@ release-deploy-mr:
   before_script:
     - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
     - apk add --no-cache bash git curl jq coreutils
-    - glab auth login --hostname "$CI_SERVER_HOST" --token "$AUTOMATION_BOT_TOKEN"
+    - export GITLAB_TOKEN="$AUTOMATION_BOT_TOKEN"
   script:
     - bash scripts/ci/create-deploy-mr.sh
