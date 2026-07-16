@@ -1,23 +1,8 @@
 #!/usr/bin/env bash
 #
-# Open (or refresh) a merge request that bumps the e2e upstream pins to
-# current. Runs from a scheduled pipeline (see .gitlab/ci/e2e-pin-bump.yml).
-# Keeps the e2e harness from drifting behind the siphon, GitLab, and gkg
-# builds we ship against — the drift that has silently broken e2e before.
-#
-# What it does, idempotently:
-#   1. Runs the three bump scripts under e2e/scripts/.
-#   2. If versions.yaml is unchanged, exits 0 (nothing to bump).
-#   3. Force-pushes a single rolling branch and opens an MR, or refreshes the
-#      one already open for that branch.
-#
-# State lives in the branch + MR, so reruns converge instead of piling up MRs.
-# The e2e job runs automatically on this branch's MR pipeline (see the rule in
-# .gitlab-ci.yml), so a red bot MR means the bump broke the suite.
-# Set DRY_RUN=true to log the diff without pushing or opening anything.
-#
-# Required env: AUTOMATION_BOT_TOKEN (Vault-provided, api + write_repository).
-# glab is already authenticated by the job's before_script.
+# Open (or refresh) the rolling e2e pin-bump MR. Runs from a scheduled
+# pipeline (.gitlab/ci/e2e-pin-bump.yml); DRY_RUN=true logs the diff and
+# stops before pushing.
 
 set -euo pipefail
 
@@ -54,14 +39,11 @@ fi
 git config user.name "Orbit automation bot"
 git config user.email "orbit-automation-bot@noreply.${SERVER_HOST}"
 
-# Rolling branch off the current default-branch HEAD: each run carries latest
-# main + latest pins, so the MR diff is always exactly the pin delta.
 git checkout -B "$BRANCH"
 git add "$VERSIONS"
 git commit -m "chore(e2e): auto-bump siphon, gitlab, and gkg pins to current"
 
-# Named remote so the token never appears as a command-line argument git
-# could echo back into the job log (same pattern as the semantic-release job).
+# Named remote so git never echoes the token back into the job log.
 git remote set-url origin "https://oauth2:${TOKEN}@${SERVER_HOST}/${PROJECT_PATH}.git"
 git push --force origin "HEAD:${BRANCH}"
 
@@ -74,9 +56,7 @@ if [ -n "$existing" ]; then
   exit 0
 fi
 
-# Quick actions silently ignore unknown usernames, so an invalid assignee
-# would leave bot MRs unassigned with no error. Validate it up front and
-# assign nobody (loudly) rather than fail the bump.
+# Quick actions silently ignore unknown usernames.
 assign_line=""
 if glab api "users?username=${ASSIGNEE}" \
   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)'; then

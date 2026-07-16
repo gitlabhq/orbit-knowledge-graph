@@ -1,30 +1,15 @@
 #!/usr/bin/env bash
-# Bump the pinned siphon helm chart + container image to the latest published
-# versions. Run manually to catch up to current siphon, or from the scheduled
-# e2e-pin-bump pipeline (scripts/ci/open-e2e-bump-mr.sh). The output is
-# committed so every CI run uses the same snapshot.
-#
-# Both pins live in e2e/config/versions.yaml under .siphon.{chart,image.tag}:
-#   - chart: helmfile.yaml.gotmpl pulls siphon/siphon from the `stable` channel.
-#   - image.tag: values/siphon.yaml.gotmpl renders it as the deployed image tag.
-#
-# The CDC config embeds output from the image's `schema generate-values`;
-# sync-cdc-tables.sh regenerates it at setup.sh time, so nothing beyond
-# versions.yaml is committed here.
-#
-# All siphon sources are public, so no token is needed.
-#
-# Usage:
-#   e2e/scripts/bump-siphon-pins.sh
-#   git diff -- e2e/config/versions.yaml
+# Bump the pinned siphon chart + image in e2e/config/versions.yaml to the
+# latest published versions. sync-cdc-tables.sh regenerates the CDC config
+# from the new image at setup.sh time, so nothing else needs committing.
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 VERSIONS="$E2E_DIR/config/versions.yaml"
 
-# Helm `stable` channel project publishing the siphon chart, matching the
-# repository URL in helmfile.yaml.gotmpl.
+# gitlab-org/analytics-section/platform-insights/siphon-helm-charts, matching
+# the repository URL in helmfile.yaml.gotmpl.
 CHART_PROJECT="76780115"
 
 command -v yq >/dev/null 2>&1 || { echo "yq (mikefarah v4+) required"; exit 1; }
@@ -37,8 +22,7 @@ CHART_VERSION=$(curl -sSL --fail \
   && { echo "Failed to resolve latest siphon chart version"; exit 1; }
 log "  chart: $CHART_VERSION"
 
-# The image is versioned independently of the chart (chart appVersion is null);
-# tags follow `0.0.<N>-beta`. Pick the numerically highest N across all pages.
+# The image is versioned independently of the chart (chart appVersion is null).
 IMAGE_REPO=$(yq -r '.siphon.image.repository' "$VERSIONS")
 IMAGE_PATH=${IMAGE_REPO#registry.gitlab.com/}
 IMAGE_PROJECT_ENC=$(printf '%s' "$IMAGE_PATH" | sed 's#/#%2F#g')

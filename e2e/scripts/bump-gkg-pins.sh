@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-# Bump the pinned gkg image tag to the latest release. The pin lives in
-# e2e/config/versions.yaml under .gkg.image.tag; CI overrides it with an
-# inline build via E2E_GKG_IMAGE/E2E_GKG_TAG, so this pin only drives local
-# runs — but keeping it current means local e2e matches the deployed release.
-#
-# The gkg chart pin is deliberately NOT bumped here: chart-line moves can
-# change the values schema and need a reviewed values update (see !2062).
-#
-# Usage:
-#   e2e/scripts/bump-gkg-pins.sh
-#   git diff -- e2e/config/versions.yaml
+# Bump the pinned gkg image tag in e2e/config/versions.yaml to the latest
+# release. The chart pin stays manual: chart-line moves can change the values
+# schema and need a reviewed values update (see !2062).
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
