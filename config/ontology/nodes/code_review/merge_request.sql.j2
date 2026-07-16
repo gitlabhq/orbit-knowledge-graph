@@ -54,29 +54,21 @@ SELECT
 FROM (
   SELECT
     *,
-    if(
-      isValidUTF8(decoded_sha_bytes),
-      decoded_sha_bytes,
-      lower(hex(decoded_sha_bytes))
-    ) AS decoded_sha
-  FROM (
-    SELECT
-      *,
-      coalesce(
-        if(
-          startsWith(merged_commit_sha, '\\x'),
-          unhex(substring(merged_commit_sha, 3)),
-          nullIf(merged_commit_sha, '')
-        ),
-        nullIf(merge_commit_sha, ''),
-        if(
-          startsWith(squash_commit_sha, '\\x'),
-          substring(squash_commit_sha, 3),
-          lower(hex(nullIf(squash_commit_sha, '')))
-        )
-      ) AS decoded_sha_bytes
-    FROM merge_requests
-  )
+    coalesce(
+      if(
+        startsWith(merged_commit_sha, '\\x'),
+        unhex(substring(merged_commit_sha, 3)),
+        nullIf(merged_commit_sha, '')
+      ),
+      nullIf(merge_commit_sha, ''),
+      if(
+        startsWith(squash_commit_sha, '\\x'),
+        substring(squash_commit_sha, 3),
+        lower(hex(nullIf(squash_commit_sha, '')))
+      )
+    ) AS decoded_sha_bytes,
+    if(isValidUTF8(decoded_sha_bytes), decoded_sha_bytes, lower(hex(decoded_sha_bytes))) AS decoded_sha
+  FROM merge_requests
 ) AS m
 LEFT JOIN (
   SELECT

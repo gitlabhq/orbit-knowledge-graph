@@ -18,7 +18,7 @@
 migrations:
 - version: 84
   scope: none
-  note: Adds an isValidUTF8 guard to decoded_sha; a no-op for every valid-UTF8 value already written. Raw-binary bytea SHAs previously failed the extraction page's Arrow decode and produced no row, so no indexed row changes; stuck pipelines catch up from their un-advanced watermark.
+  note: isValidUTF8 guard on decoded_sha; a no-op for every value already written (raw-binary SHAs previously failed the decode and produced no row), so no indexed row changes.
 - version: 83
   scope: none
   note: Source-owned base projections and independent stage compilation preserve all 47 serialized plans byte-identically.
