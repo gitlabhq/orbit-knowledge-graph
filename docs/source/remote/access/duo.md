@@ -26,7 +26,7 @@ title: Use GitLab Orbit with GitLab Duo Agent Platform
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-GitLab Orbit is integrated into GitLab Duo Agent Platform. Agents call GitLab Orbit's graph tools (`get_graph_schema`, `query_graph`) automatically when a question is best answered by traversing your SDLC graph - cross-project dependencies, blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When GitLab Orbit doesn't have the answer, the agent falls back to its existing tools.
+GitLab Orbit is integrated into GitLab Duo Agent Platform. Agents call GitLab Orbit's command tools (`list_commands`, `invoke_command`) automatically, running commands such as `get_graph_schema` and `query_graph`, when a question is best answered by traversing your SDLC graph - cross-project dependencies, blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When GitLab Orbit doesn't have the answer, the agent falls back to its existing tools.
 
 ## Prerequisites
 
