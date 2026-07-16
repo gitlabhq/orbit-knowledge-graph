@@ -52,6 +52,7 @@ pub async fn register_handlers(
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
+    resources: &gkg_server_config::ContainerResources,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -100,7 +101,7 @@ pub async fn register_handlers(
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
     let mut pipeline_config = code_indexing_task_config.pipeline.clone();
-    pipeline_config.resolve_runtime_defaults(&gkg_server_config::ContainerResources::detect());
+    pipeline_config.resolve_runtime_defaults(resources);
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
         writer,

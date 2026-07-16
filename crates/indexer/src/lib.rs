@@ -84,10 +84,9 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
+    let resources = gkg_server_config::ContainerResources::detect();
     let mut config = config.clone();
-    config
-        .engine
-        .resolve_runtime_defaults(&gkg_server_config::ContainerResources::detect());
+    config.engine.resolve_runtime_defaults(&resources);
     let config = &config;
 
     config.schema.validate()?;
@@ -196,6 +195,7 @@ pub async fn run(
             &ontology,
             writer.clone(),
             analytics.clone(),
+            &resources,
         )
         .await?;
     } else {
