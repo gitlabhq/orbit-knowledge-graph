@@ -1,11 +1,13 @@
 # KG #924: MERGED_AT_COMMIT uses COALESCE(merged_commit_sha, merge_commit_sha,
-# squash_commit_sha), gated on merged state. The squash leg is format-robust
-# across siphon!475:
+# squash_commit_sha), gated on merged state. Every leg is format-robust across
+# siphon!475, which switched bytea replication from `\x`-prefixed text to raw
+# binary bytes:
 #   pre-fix:  `\x`-prefixed text -> strip `\x` (payload is already the hex SHA)
 #   post-fix: raw binary bytes (no `\x`) -> lower(hex()) to produce hex SHA
 #
 # Decodes:
-#   merged: \x3162...3865 -> unhex -> 1bcbab0dc35d8b5c823f92bc4bcdb9414384008e
+#   merged (pre-fix):  \x3162...3865 -> unhex -> 1bcbab0dc35d8b5c823f92bc4bcdb9414384008e
+#   merged (post-fix): <20 raw bytes of 0xde 0xad ...> -> lower(hex()) -> deadbeef...abcd
 #   squash (pre-fix):  \xfeedface...beef -> strip \x -> feedface...beef
 #   squash (post-fix): <20 raw bytes of 0xaa 0xbb ...> -> lower(hex()) -> aabbcc...eeff
 description: MERGED_AT_COMMIT decodes bytea SHAs, walks the COALESCE fallback, and gates on merged state
@@ -25,6 +27,7 @@ seed:
     # column, matching how ClickHouse stores decoded bytea after the fix.
     - { id: 6, iid: 106, title: Squash MR post-fix, source_branch: f, target_branch: main, state_id: 3, merge_status: merged, draft: true, squash: true, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: null, squash_commit_sha: { sql: "unhex('aabbccdd11223344556677889900aabbccddeeff')" }, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
     - { id: 7, iid: 107, title: SHA-256 merge commit MR, source_branch: g, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: "\\x30313233343536373839616263646566303132333435363738396162636465663031323334353637383961626364656630313233343536373839616263646566", squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
+    - { id: 8, iid: 108, title: Merge MR post-fix, source_branch: h, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: { sql: "unhex('deadbeefcafebabe00000000000000000000abcd')" }, squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
     - { id: 4, iid: 104, title: FF merge MR, source_branch: d, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: null, merged_commit_sha: null, squash_commit_sha: null, author_id: 1, merge_user_id: 1, traversal_path: "1/100/1000/" }
     # A SHA alone is insufficient; closed MRs must not emit merged-at edges.
     - { id: 5, iid: 105, title: Closed-with-SHA MR, source_branch: e, target_branch: main, state_id: 2, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, merge_commit_sha: closedEEE1234567890abcdef1234567890abcdef, merged_commit_sha: null, squash_commit_sha: null, author_id: 1, merge_user_id: null, traversal_path: "1/100/1000/" }
@@ -32,22 +35,24 @@ seed:
 expect:
   nodes:
     gl_commit:
-      count: 5
+      count: 6
       rows:
         - { id: 5015523325471845587, sha: 1bcbab0dc35d8b5c823f92bc4bcdb9414384008e, project_id: 1000, traversal_path: "1/100/1000/" }
         - { id: 876732883036923400, sha: mergeBBB1234567890abcdef1234567890abcdef12, project_id: 1000, traversal_path: "1/100/1000/" }
         - { id: 1917434886983984365, sha: feedface0000000000000000000000000000beef, project_id: 1000, traversal_path: "1/100/1000/" }
         - { id: 1207523767217532627, sha: aabbccdd11223344556677889900aabbccddeeff, project_id: 1000, traversal_path: "1/100/1000/" }
         - { id: 3580685093083329072, sha: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, project_id: 1000, traversal_path: "1/100/1000/" }
+        - { sha: deadbeefcafebabe00000000000000000000abcd, project_id: 1000, traversal_path: "1/100/1000/" }
   edges:
     - kind: MERGED_AT_COMMIT
       from: MergeRequest
       to: Commit
       traversal_path: "1/100/1000/"
-      count: 5
+      count: 6
       rows:
         - { source_id: 1, source_kind: MergeRequest, target_id: 5015523325471845587, target_kind: Commit }
         - { source_id: 2, source_kind: MergeRequest, target_id: 876732883036923400, target_kind: Commit }
         - { source_id: 3, source_kind: MergeRequest, target_id: 1917434886983984365, target_kind: Commit }
         - { source_id: 6, source_kind: MergeRequest, target_id: 1207523767217532627, target_kind: Commit }
         - { source_id: 7, source_kind: MergeRequest, target_id: 3580685093083329072, target_kind: Commit }
+        - { source_id: 8, source_kind: MergeRequest, target_kind: Commit }
