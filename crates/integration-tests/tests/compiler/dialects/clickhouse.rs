@@ -342,7 +342,7 @@ fn neighbors_query() {
     let json = r#"{
         "query_type": "neighbors",
         "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]}],
-        "neighbors": {"node": "u", "direction": "both"}
+        "neighbors": {"direction": "both"}
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -667,7 +667,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
             "entity": "File",
             "filters": {"path": {"op": "contains", "value": "labkit"}}
         }],
-        "neighbors": {"node": "f", "direction": "both"}
+        "neighbors": {"direction": "both"}
     }"#;
     let result = compile(json, &ontology, &test_ctx()).unwrap();
     let rendered = result.base.render();
@@ -688,7 +688,7 @@ fn multi_table_neighbors_scans_all_tables() {
     let json = r#"{
         "query_type": "neighbors",
         "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-        "neighbors": {"node": "p", "direction": "both"}
+        "neighbors": {"direction": "both"}
     }"#;
     let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v6",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v7",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",

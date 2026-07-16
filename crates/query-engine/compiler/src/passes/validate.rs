@@ -1216,7 +1216,7 @@ mod tests {
             r#"{
                 "query_type": "neighbors",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
         );
 
@@ -1384,15 +1384,6 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "ghost", "max_depth": 2,
                          "rel_types": ["CONTAINS"]}
-            }"#,
-            "undefined node \"ghost\"",
-        );
-
-        assert_rejects(
-            r#"{
-                "query_type": "neighbors",
-                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"node": "ghost", "direction": "both"}
             }"#,
             "undefined node \"ghost\"",
         );
@@ -2205,21 +2196,21 @@ mod tests {
             r#"{
                 "query_type": "neighbors",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
         );
         assert_ok(
             r#"{
                 "query_type": "neighbors",
                 "nodes": [{"id": "u", "entity": "User", "filters": {"username": "root"}}],
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
         );
         assert_rejects(
             r#"{
                 "query_type": "neighbors",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "neighbors": {"node": "u", "direction": "both"}
+                "neighbors": {"direction": "both"}
             }"#,
             "center node",
         );

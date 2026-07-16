@@ -331,7 +331,7 @@ pub(super) async fn neighbors_cross_namespace_no_false_positives(ctx: &TestConte
         r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
-            "neighbors": {"node": "g", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
         ctx_101,

@@ -1213,7 +1213,7 @@ mod tests {
             r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
-            "neighbors": {"node": "u", "direction": "both"}
+            "neighbors": {"direction": "both"}
         }"#,
         )
         .unwrap();
@@ -1238,7 +1238,7 @@ mod tests {
             r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"node": "u"},
+            "neighbors": {},
             "options": {"dynamic_columns": "*"}
         }"#,
         )
@@ -1253,7 +1253,7 @@ mod tests {
             r#"{
             "query_type": "neighbors",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-            "neighbors": {"node": "u"},
+            "neighbors": {},
             "options": {"dynamic_columns": "default"}
         }"#,
         )
