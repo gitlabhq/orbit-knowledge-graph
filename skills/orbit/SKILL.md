@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.17.6
+version: 0.18.0
 license: MIT
 metadata:
   audience: developers
@@ -82,9 +82,9 @@ shorthand equality (`{"state": "opened"}`) or the operator form
 plus text-token operators (`token_match`, `all_tokens`, `any_tokens`) for
 text-indexed properties — see [`query_language.md`](references/query_language.md).
 
-`query_type` dictates the top-level shape: `neighbors` and single-node
-`traversal` use `node` (singular); multi-node `traversal`, `aggregation`, and
-`path_finding` use `nodes` (array) plus `relationships`.
+All queries declare node selectors in the `nodes` array — a 1-element array
+for `neighbors` and single-node `traversal`; multi-node `traversal`,
+`aggregation`, and `path_finding` add `relationships`.
 
 - For multi-hop **traversal** edges, set `relationships[].max_hops` (and
   optionally `min_hops`). Default 1, max 3.

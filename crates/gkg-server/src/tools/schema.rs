@@ -268,7 +268,7 @@ mod tests {
     fn query_schema_accepts_single_node_scalar_aggregation() {
         let errors = validate_query_schema(serde_json::json!({
             "query_type": "aggregation",
-            "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}],
             "aggregations": [
                 {"function": "count", "target": "mr", "alias": "open_mr_count"}
             ],

@@ -220,7 +220,7 @@ mod tests {
     fn merge_request_node_ids_yield_mr_scope() {
         let n = node(
             "MergeRequest",
-            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [492857469, 492764321]}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [492857469, 492764321]}], "limit": 1}"#,
         );
         assert_eq!(
             ontology_keys(&n, &ontology()),
@@ -271,7 +271,7 @@ mod tests {
     fn project_node_ids_yields_project_scope() {
         let n = node(
             "Project",
-            r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [42]}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [42]}], "limit": 1}"#,
         );
         let keys = ontology_keys(&n, &ontology());
         assert_eq!(keys, vec![PathResolutionKey::id("Project", 42)]);
@@ -281,7 +281,7 @@ mod tests {
     fn project_eq_id_filter_yields_project_scope() {
         let n = node(
             "Project",
-            r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 7}}}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 7}}}], "limit": 1}"#,
         );
         let keys = ontology_keys(&n, &ontology());
         assert_eq!(keys[0], PathResolutionKey::id("Project", 7));
@@ -292,7 +292,7 @@ mod tests {
     fn group_node_ids_yields_group_scope() {
         let n = node(
             "Group",
-            r#"{"query_type": "traversal", "node": {"id": "g", "entity": "Group", "node_ids": [9]}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group", "node_ids": [9]}], "limit": 1}"#,
         );
         let keys = ontology_keys(&n, &ontology());
         assert_eq!(keys[0], PathResolutionKey::id("Group", 9));
@@ -303,7 +303,7 @@ mod tests {
         let o = ontology();
         let n = node(
             "Project",
-            r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "group/project"}}}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "group/project"}}}], "limit": 1}"#,
         );
         let keys = ontology_keys(&n, &o);
         assert_eq!(
@@ -322,7 +322,7 @@ mod tests {
     fn multi_id_yields_one_key_per_id() {
         let n = node(
             "Project",
-            r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [1, 2, 3]}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1, 2, 3]}], "limit": 1}"#,
         );
         assert_eq!(
             ontology_keys(&n, &ontology()),
@@ -368,7 +368,7 @@ mod tests {
     fn non_scoping_entity_is_skipped() {
         let n = node(
             "User",
-            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "node_ids": [1]}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}], "limit": 1}"#,
         );
         assert!(ontology_keys(&n, &ontology()).is_empty());
     }
@@ -397,11 +397,11 @@ mod tests {
         let o = ontology();
         let project = node(
             "Project",
-            r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [42]}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [42]}], "limit": 1}"#,
         );
         let group = node(
             "Group",
-            r#"{"query_type": "traversal", "node": {"id": "g", "entity": "Group", "node_ids": [9]}, "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group", "node_ids": [9]}], "limit": 1}"#,
         );
 
         let anchor_fks = o.anchor_fk_mappings();
@@ -431,13 +431,13 @@ mod tests {
     fn only_traversal_and_aggregation_scope_to_tight_prefix() {
         let qt = |json: &str| validate_normalize(json, &ontology()).unwrap().query_type;
         assert!(scopes_query_type(qt(
-            r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [1]}, "limit": 1}"#
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "limit": 1}"#
         )));
         assert!(scopes_query_type(qt(
             r#"{"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "group_by": [{"kind": "node", "node": "p"}], "aggregations": [{"function": "count", "target": "p"}], "limit": 1}"#
         )));
         assert!(!scopes_query_type(qt(
-            r#"{"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [1]}, "neighbors": {"node": "p", "direction": "both"}}"#
+            r#"{"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "neighbors": {"node": "p", "direction": "both"}}"#
         )));
         assert!(!scopes_query_type(qt(
             r#"{"query_type": "path_finding", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}, {"id": "wi", "entity": "WorkItem", "node_ids": [9]}], "path": {"type": "shortest", "from": "p", "to": "wi", "max_depth": 3, "rel_types": ["CONTAINS"]}}"#
@@ -450,7 +450,7 @@ mod tests {
         use query_engine::pipeline::{NoOpObserver, TypeMap};
 
         let mut ctx = QueryPipelineContext {
-            query_json: r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [42]}, "limit": 1}"#.to_string(),
+            query_json: r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [42]}], "limit": 1}"#.to_string(),
             compiled: None,
             ontology: Arc::new(Ontology::load_embedded().unwrap()),
             security_context: Some(SecurityContext::new(1, vec!["1/".into()]).unwrap()),

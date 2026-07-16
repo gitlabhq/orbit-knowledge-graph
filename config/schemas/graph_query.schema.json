@@ -1,21 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v5",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v6",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
-  "required": ["query_type"],
+  "required": ["query_type", "nodes"],
   "properties": {
     "query_type": {
       "$ref": "#/$defs/QueryType"
     },
-    "node": {
-      "$ref": "#/$defs/NodeSelector",
-      "description": "Single node selector"
-    },
     "nodes": {
       "type": "array",
-      "description": "Array of nodes for traversal, aggregation, path_finding queries",
+      "description": "Node selectors for the query. Single-node queries use a 1-element array.",
       "minItems": 1,
       "maxItems": 5,
       "items": {
@@ -105,33 +101,13 @@
         }
       },
       "then": {
-        "required": ["node"],
-        "not": {
-          "required": ["nodes"]
-        }
-      },
-      "else": {
-        "oneOf": [
-          {
-            "required": ["nodes"],
-            "not": { "required": ["node"] }
-          },
-          {
-            "required": ["node"],
-            "not": { "required": ["nodes"] },
-            "description": "Single-node traversal: 1 node, 0 relationships"
-          }
-        ]
-      }
-    },
-    {
-      "if": {
+        "required": ["neighbors"],
         "properties": {
-          "query_type": { "const": "neighbors" }
+          "nodes": {
+            "maxItems": 1,
+            "description": "Neighbors queries take exactly 1 node: the center"
+          }
         }
-      },
-      "then": {
-        "required": ["neighbors"]
       }
     },
     {
@@ -207,7 +183,7 @@
         }
       },
       "then": {
-        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal requires only a node.",
+        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal requires exactly 1 node and no relationships.",
         "oneOf": [
           {
             "required": ["relationships"],
@@ -223,8 +199,12 @@
             }
           },
           {
-            "required": ["node"],
             "not": { "required": ["relationships"] },
+            "properties": {
+              "nodes": {
+                "maxItems": 1
+              }
+            },
             "description": "Single-node traversal (table scan)"
           }
         ]

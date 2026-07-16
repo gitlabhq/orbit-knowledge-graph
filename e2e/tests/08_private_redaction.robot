@@ -57,7 +57,7 @@ Victim Node Count Is
     ...                count equals ${expected}.
     [Arguments]    ${entity}    ${node_id}    ${expected}
     ${node}=    Create Dictionary    id=n    entity=${entity}    node_ids=${{[int($node_id)]}}
-    ${query}=    Create Dictionary    query_type=traversal    node=${node}
+    ${query}=    Create Dictionary    query_type=traversal    nodes=${{[${node}]}}
     ${resp}=    Orbit Query With Token    ${query}    ${VICTIM_PAT}
     Should Be Equal As Integers    ${resp["row_count"]}    ${expected}
     ...    ${entity} ${node_id}: victim saw ${resp["row_count"]} rows, expected ${expected}

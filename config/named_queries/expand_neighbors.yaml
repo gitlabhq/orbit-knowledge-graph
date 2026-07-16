@@ -12,10 +12,10 @@ parameters:
     example: 100
 query:
   query_type: neighbors
-  node:
-    id: center
-    entity: { $param: entity }
-    node_ids: { $param: node_ids }
+  nodes:
+    - id: center
+      entity: { $param: entity }
+      node_ids: { $param: node_ids }
   neighbors:
     node: center
     direction: both

@@ -4,11 +4,11 @@ default: true
 bindings: [current_user_id]
 query:
   query_type: neighbors
-  node:
-    id: me
-    entity: User
-    node_ids:
-      - { $binding: current_user_id }
+  nodes:
+    - id: me
+      entity: User
+      node_ids:
+        - { $binding: current_user_id }
   neighbors:
     node: me
     direction: both
