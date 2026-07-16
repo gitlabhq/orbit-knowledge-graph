@@ -1,3 +1,9 @@
+## [0.90.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.89.0...v0.90.0) (2026-07-16)
+
+### Features
+
+* **ci:** go live with the release deploy MR and mute scans on solo schedules ([ab72632](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ab72632eab7d56fe457222424a7e707ba4a821f0)) by Jean-Gabriel Doyon
+
 ## [0.89.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.88.1...v0.89.0) (2026-07-16)
 
 ### Features
