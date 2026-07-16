@@ -174,3 +174,24 @@ local-cli-publish:
     - apk add --no-cache bash curl coreutils
   script:
     - bash ./scripts/upload-local-cli-release.sh
+
+local-cli-publish-npm:
+  extends:
+    - .local-cli-release-rules
+  stage: publish
+  image: node:24
+  tags:
+    - saas-linux-medium-amd64
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: "npm:registry.npmjs.org"
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  needs:
+    - local-cli-build-linux-musl-amd64
+    - local-cli-build-linux-musl-arm64
+    - local-cli-code-sign
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
+  script:
+    - ./scripts/publish-npm.sh

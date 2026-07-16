@@ -38,6 +38,8 @@ This adds `orbit` to your `PATH`. Open a new terminal, then verify the install:
 orbit help
 ```
 
+You can also install from npm with `npm install -g @gitlab/orbit`.
+
 If you already use the GitLab CLI (`glab`), you can instead install a managed
 binary with `glab orbit local --install`. That binary is invoked as
 `glab orbit local <command>` rather than `orbit` directly - see
