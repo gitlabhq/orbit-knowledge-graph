@@ -31,7 +31,7 @@ expect:
         - { id: 1917434886983984365, sha: feedface0000000000000000000000000000beef, project_id: 1000, traversal_path: "1/100/1000/" }
         - { id: 1207523767217532627, sha: aabbccdd11223344556677889900aabbccddeeff, project_id: 1000, traversal_path: "1/100/1000/" }
         - { id: 3580685093083329072, sha: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef, project_id: 1000, traversal_path: "1/100/1000/" }
-        - { sha: deadbeefcafebabe00000000000000000000abcd, project_id: 1000, traversal_path: "1/100/1000/" }
+        - { id: 5378813118756142495, sha: deadbeefcafebabe00000000000000000000abcd, project_id: 1000, traversal_path: "1/100/1000/" }
   edges:
     - kind: MERGED_AT_COMMIT
       from: MergeRequest
@@ -44,4 +44,4 @@ expect:
         - { source_id: 3, source_kind: MergeRequest, target_id: 1917434886983984365, target_kind: Commit }
         - { source_id: 6, source_kind: MergeRequest, target_id: 1207523767217532627, target_kind: Commit }
         - { source_id: 7, source_kind: MergeRequest, target_id: 3580685093083329072, target_kind: Commit }
-        - { source_id: 8, source_kind: MergeRequest, target_kind: Commit }
+        - { source_id: 8, source_kind: MergeRequest, target_id: 5378813118756142495, target_kind: Commit }
