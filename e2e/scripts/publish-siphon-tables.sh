@@ -40,6 +40,7 @@ for attempt in 1 2 3 4 5; do
     fetched=true
     break
   fi
+  [[ "$attempt" -lt 5 ]] || break
   log "fetch attempt $attempt failed; retrying in 30s"
   sleep 30
 done
