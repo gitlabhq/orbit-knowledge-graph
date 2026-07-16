@@ -80,24 +80,16 @@ impl CodeBackfill {
         &self.metrics
     }
 
-    /// Dispatches code indexing for every enabled namespace, publishing only
-    /// un-checkpointed projects and reporting fully-checkpointed namespaces
-    /// as drained.
-    pub async fn dispatch_enabled(
-        &self,
-        dispatch_id: Uuid,
-    ) -> Result<(DispatchOutcome, Vec<String>), TaskError> {
+    pub async fn dispatch_enabled(&self, dispatch_id: Uuid) -> Result<DispatchOutcome, TaskError> {
         let enabled = self.fetch_enabled_namespaces().await?;
         self.dispatch_for_namespaces(&enabled, dispatch_id).await
     }
 
-    /// Returns the dispatch outcome and the traversal paths of namespaces
-    /// with no pending projects this tick (every project checkpointed).
     pub async fn dispatch_for_namespaces(
         &self,
         namespaces: &[(i64, String)],
         dispatch_id: Uuid,
-    ) -> Result<(DispatchOutcome, Vec<String>), TaskError> {
+    ) -> Result<DispatchOutcome, TaskError> {
         let mut all_pending: Vec<PendingProject> = Vec::new();
         let mut drained_paths: Vec<String> = Vec::new();
         for (namespace_id, traversal_path) in namespaces {
@@ -113,7 +105,8 @@ impl CodeBackfill {
         // across namespaces; otherwise FIFO consumption processes one
         // namespace's entire batch before any other namespace gets a turn.
         all_pending.shuffle(&mut rand::rng());
-        let outcome = self.publish_pending(&all_pending, dispatch_id).await?;
+        let mut outcome = self.publish_pending(&all_pending, dispatch_id).await?;
+        outcome.drained_paths = drained_paths;
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
             self.metrics
@@ -128,7 +121,7 @@ impl CodeBackfill {
             );
         }
 
-        Ok((outcome, drained_paths))
+        Ok(outcome)
     }
 
     /// Returns the set of project IDs whose checkpoint row already exists
@@ -218,10 +211,7 @@ impl CodeBackfill {
         projects: &[PendingProject],
         dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
-        let mut outcome = DispatchOutcome {
-            dispatched: 0,
-            skipped: 0,
-        };
+        let mut outcome = DispatchOutcome::default();
         let campaign_id = self.campaign.current();
 
         for project in projects {

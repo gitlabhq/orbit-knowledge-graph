@@ -79,10 +79,6 @@ WHERE _deleted = false \
     OR (splitByChar('.', key)[1] = 'global' AND splitByChar('.', key)[2] IN {global_plans:Array(String)}) \
   )";
 
-/// Clones the active checkpoint for a code migration: SDLC cursors (including `dispatch.%`) are
-/// kept so SDLC does not re-sweep, but the per-namespace code stale-sweep gates are dropped so
-/// each namespace re-sweeps and tombstones its cloned shared-edge code rows once its backfill
-/// drains.
 const SEED_CODE_CHECKPOINT_SQL: &str = "\
 INSERT INTO {new_table:Identifier} \
 SELECT * FROM {old_table:Identifier} FINAL \

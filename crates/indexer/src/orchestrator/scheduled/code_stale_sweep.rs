@@ -1,8 +1,3 @@
-//! Per-namespace sweep of stale code rows (died-run leftovers, clone-migration
-//! carryover) once a namespace's backfill drains. A per-namespace maintenance
-//! checkpoint makes each namespace sweep once per schema version, so stragglers
-//! in one namespace never block the sweep of another.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -58,9 +53,6 @@ impl CodeStaleSweep {
         }
     }
 
-    /// Sweeps each not-yet-swept namespace in `drained_paths`. Drained means
-    /// no un-checkpointed projects, so no watermark can tombstone rows of a
-    /// project that simply hasn't been indexed yet.
     pub async fn run_for_drained(&self, drained_paths: &[String]) -> Result<(), TaskError> {
         if drained_paths.is_empty() {
             return Ok(());
@@ -83,7 +75,6 @@ impl CodeStaleSweep {
         Ok(())
     }
 
-    // Serial on purpose: concurrent statements concentrate the read load.
     async fn sweep_namespace(&self, traversal_path: &str) -> Result<(), TaskError> {
         let started = Utc::now();
         for (table, sql) in &self.statements {
@@ -117,9 +108,6 @@ impl CodeStaleSweep {
     }
 }
 
-// FINAL scans tombstone only live survivors; a superseded row's tombstone is
-// a no-op anyway (any row at or after the watermark outranks it), so raw-parts
-// scans write orders of magnitude more rows for the same post-merge state.
 fn node_sweep(table: &str, checkpoint_table: &str) -> String {
     format!(
         r#"
@@ -145,8 +133,6 @@ fn node_sweep(table: &str, checkpoint_table: &str) -> String {
 }
 
 fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
-    // gl_code_edge carries project_id + branch, so it joins the checkpoint
-    // table exactly like a node table.
     if edge_table.contains("code_edge") {
         return format!(
             r#"
@@ -180,10 +166,6 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
         .map(|kind| format!("'{kind}'"))
         .join(", ");
 
-    // The shared edge table has no project_id/branch columns. Code-written
-    // rows are identified by their source kind, and the watermark comes from
-    // a per-traversal-path aggregate: min() so a second checkpointed branch
-    // under the same path can never out-version another branch's live rows.
     format!(
         r#"
         INSERT INTO {edge_table}

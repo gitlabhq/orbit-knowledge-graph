@@ -106,7 +106,7 @@ impl Route for EnabledNamespacesRoute {
             .namespace_indexing
             .dispatch_for_namespaces(&sdlc_requests, chrono::Utc::now(), ctx.campaign_id.clone())
             .await?;
-        let (code, _) = self
+        let code = self
             .code_backfill
             .dispatch_for_namespaces(&enabled, ctx.dispatch_id)
             .await?;
