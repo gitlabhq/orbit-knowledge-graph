@@ -1,7 +1,8 @@
 # Opens the gl-infra/argocd/apps MR that bumps orbit-stg and orbit-prd to the
-# version this tag pipeline is building, then tells #f_orbit_dev the MR is
-# ready for review. Runs after release-manifest so the multi-arch image exists
-# before Argo could ever pull it.
+# version this tag pipeline is building, then posts a review request through
+# SLACK_WEBHOOK (bound to #f_orbit, same channel as the release announcements).
+# Runs after release-manifest so the multi-arch image exists before Argo could
+# ever pull it.
 #
 # The bot token is terraformed in infra-mgmt (release-platform environment,
 # infra-mgmt!3039) and shared into argocd/apps as Developer (infra-mgmt!3040):
