@@ -1,15 +1,4 @@
-# KG #924: MERGED_AT_COMMIT uses COALESCE(merged_commit_sha, merge_commit_sha,
-# squash_commit_sha), gated on merged state. Every leg is format-robust across
-# siphon!475, which switched bytea replication from `\x`-prefixed text to raw
-# binary bytes:
-#   pre-fix:  `\x`-prefixed text -> strip `\x` (payload is already the hex SHA)
-#   post-fix: raw binary bytes (no `\x`) -> lower(hex()) to produce hex SHA
-#
-# Decodes:
-#   merged (pre-fix):  \x3162...3865 -> unhex -> 1bcbab0dc35d8b5c823f92bc4bcdb9414384008e
-#   merged (post-fix): <20 raw bytes of 0xde 0xad ...> -> lower(hex()) -> deadbeef...abcd
-#   squash (pre-fix):  \xfeedface...beef -> strip \x -> feedface...beef
-#   squash (post-fix): <20 raw bytes of 0xaa 0xbb ...> -> lower(hex()) -> aabbcc...eeff
+# KG #924: every COALESCE leg must decode bytea SHAs in both `\x`-text and post-siphon!475 raw-binary form; a raw-binary leg left un-hex-encoded breaks the Arrow UTF-8 decode.
 description: MERGED_AT_COMMIT decodes bytea SHAs, walks the COALESCE fallback, and gates on merged state
 scope: { namespace: 100 }
 
