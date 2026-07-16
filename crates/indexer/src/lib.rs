@@ -84,6 +84,12 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
+    let mut config = config.clone();
+    config
+        .engine
+        .resolve_runtime_defaults(gkg_server_config::detect_available_parallelism());
+    let config = &config;
+
     config.schema.validate()?;
     config.engine.validate()?;
 

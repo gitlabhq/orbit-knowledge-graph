@@ -21,7 +21,7 @@ use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
-use gkg_server_config::SubscriptionConfig;
+use gkg_server_config::{IndexerModule, SubscriptionConfig};
 use metrics::CodeMetrics;
 use repository::RepositoryResolver;
 
@@ -34,7 +34,7 @@ pub use repository::{
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
-const CODE_CONCURRENCY_GROUP: &str = "code";
+const CODE_CONCURRENCY_GROUP: &str = IndexerModule::Code.concurrency_group();
 
 pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
@@ -99,7 +99,8 @@ pub async fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-    let pipeline_config = code_indexing_task_config.pipeline.clone();
+    let mut pipeline_config = code_indexing_task_config.pipeline.clone();
+    pipeline_config.resolve_runtime_defaults(gkg_server_config::detect_available_parallelism());
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
         writer,

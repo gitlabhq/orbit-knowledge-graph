@@ -116,14 +116,23 @@ The worker pool limits how many messages are processed concurrently. It uses a t
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
-| `engine.max_concurrent_workers` | `GKG_ENGINE__MAX_CONCURRENT_WORKERS` | `16` | Global concurrency cap |
-| `engine.concurrency_groups` | | `{}` | Named group limits |
+| `engine.max_concurrent_workers` | `GKG_ENGINE__MAX_CONCURRENT_WORKERS` | derived | Global concurrency cap |
+| `engine.concurrency_groups` | | derived | Named group limits |
+
+### Resource-derived defaults
+
+Both fields derive from the container's resources at startup when left unset; an explicit config value (YAML or env var) always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
+
+- `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit).
+- `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap; a pool spanning both the SDLC and code groups splits the cap 75% / 25% (the historical universal-pool ratio of sdlc 12 / code 4 out of 16). Namespace deletion shares the sdlc group.
+
+On a 16-core universal pool this reproduces the previous hardcoded defaults exactly (16 workers, sdlc 12 / code 4).
 
 ### How concurrency groups work
 
 Each handler can declare a `concurrency_group`. When a message arrives, the handler acquires the group semaphore first, then the global semaphore. Both are released after processing.
 
-This prevents one handler type from monopolizing all workers. For example, with 16 global workers, you can cap SDLC at 12 and code at 4:
+This prevents one handler type from monopolizing all workers. To pin explicit values instead of deriving them, e.g. 16 global workers capped at SDLC 12 and code 4:
 
 ```yaml
 engine:
@@ -166,10 +175,10 @@ Helm chart). They apply with no `engine.topics` config at all:
 
 | Topic | concurrency_group | max_attempts | retry_interval_secs | dead_letter_on_exhaustion |
 |-------|-------------------|--------------|---------------------|---------------------------|
-| `global-handler` | `sdlc` | 1 | 60 | — |
-| `namespace-handler` | `sdlc` | 1 | 60 | — |
+| `global-handler` | `sdlc` | 1 | — | — |
+| `namespace-handler` | `sdlc` | 1 | — | — |
 | `code-indexing-task` | `code` | 5 | 60 | true |
-| `namespace-deletion` | `code` | 1 | — | — |
+| `namespace-deletion` | `sdlc` | 1 | — | — |
 
 To override a single field, e.g. raise code retries to 8:
 

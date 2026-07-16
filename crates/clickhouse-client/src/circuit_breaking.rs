@@ -105,7 +105,7 @@ impl CircuitBreakingQuery {
 
     pub async fn fetch_arrow_streamed(
         self,
-        max_block_size: u64,
+        max_block_size: Option<u64>,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
         self.breaker
             .call_transient(|| self.inner.fetch_arrow_streamed(max_block_size))

@@ -8,6 +8,9 @@ use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::info;
+
+use crate::resources::{DEFAULT_MAX_CONCURRENT_WORKERS, derive_code_indexing_slots};
 
 // ── Base config types ────────────────────────────────────────────────
 
@@ -152,10 +155,6 @@ fn default_datalake_batch_size() -> u64 {
     500_000
 }
 
-fn default_stream_block_size() -> u64 {
-    65_536
-}
-
 fn default_system_notes_resolve_lookup_batch_size() -> usize {
     1_000
 }
@@ -214,13 +213,6 @@ pub struct EntityHandlerConfig {
     #[serde(default = "default_partition_min_rows")]
     pub partition_min_rows: u64,
 
-    /// Rows per block streamed from the datalake (`max_block_size`). Larger blocks
-    /// amortize per-batch write round-trips (more throughput) at the cost of peak
-    /// memory per in-flight block.
-    #[serde(default = "default_stream_block_size")]
-    #[schemars(range(min = 1))]
-    pub stream_block_size: u64,
-
     /// Maximum number of items bound into each SystemNote resolver lookup.
     #[serde(default = "default_system_notes_resolve_lookup_batch_size")]
     #[schemars(range(min = 1))]
@@ -234,7 +226,6 @@ impl Default for EntityHandlerConfig {
             batch_size_overrides: HashMap::new(),
             partition_overrides: HashMap::new(),
             partition_min_rows: default_partition_min_rows(),
-            stream_block_size: default_stream_block_size(),
             system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
             ),
         }
@@ -313,14 +304,6 @@ fn default_code_indexing_small_repo_max_files() -> usize {
     650
 }
 
-fn default_code_indexing_small_indexing_slots() -> usize {
-    6
-}
-
-fn default_code_indexing_big_indexing_slots() -> usize {
-    2
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -382,12 +365,12 @@ pub struct CodeIndexingPipelineConfig {
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane. Defaults to 650.
     #[serde(default = "default_code_indexing_small_repo_max_files")]
     pub small_repo_max_files: usize,
-    /// Concurrent indexing slots for small repositories. Defaults to 6.
-    #[serde(default = "default_code_indexing_small_indexing_slots")]
-    pub small_indexing_slots: usize,
-    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.
-    #[serde(default = "default_code_indexing_big_indexing_slots")]
-    pub big_indexing_slots: usize,
+    /// Concurrent indexing slots for small repositories. Unset = derived from the container CPU count.
+    #[serde(default)]
+    pub small_indexing_slots: Option<usize>,
+    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count.
+    #[serde(default)]
+    pub big_indexing_slots: Option<usize>,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -412,13 +395,45 @@ impl Default for CodeIndexingPipelineConfig {
             write_max_flush_age_secs: default_code_indexing_write_max_flush_age_secs(),
             write_max_concurrent: default_code_indexing_write_max_concurrent(),
             small_repo_max_files: default_code_indexing_small_repo_max_files(),
-            small_indexing_slots: default_code_indexing_small_indexing_slots(),
-            big_indexing_slots: default_code_indexing_big_indexing_slots(),
+            small_indexing_slots: None,
+            big_indexing_slots: None,
         }
     }
 }
 
 impl CodeIndexingPipelineConfig {
+    pub fn resolve_runtime_defaults(&mut self, available_parallelism: usize) {
+        if self.small_indexing_slots.is_some() && self.big_indexing_slots.is_some() {
+            return;
+        }
+
+        let slots = derive_code_indexing_slots(available_parallelism);
+        if self.small_indexing_slots.is_none() {
+            self.small_indexing_slots = Some(slots.small_indexing_slots);
+            info!(
+                available_parallelism,
+                value = slots.small_indexing_slots,
+                "derived code-indexing pipeline.small_indexing_slots"
+            );
+        }
+        if self.big_indexing_slots.is_none() {
+            self.big_indexing_slots = Some(slots.big_indexing_slots);
+            info!(
+                available_parallelism,
+                value = slots.big_indexing_slots,
+                "derived code-indexing pipeline.big_indexing_slots"
+            );
+        }
+    }
+
+    pub fn small_indexing_slots(&self) -> usize {
+        self.small_indexing_slots.unwrap_or(0)
+    }
+
+    pub fn big_indexing_slots(&self) -> usize {
+        self.big_indexing_slots.unwrap_or(0)
+    }
+
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
@@ -655,27 +670,29 @@ impl IndexerModule {
     pub fn all() -> Vec<IndexerModule> {
         vec![Self::Sdlc, Self::Code, Self::NamespaceDeletion]
     }
+
+    /// Name of the concurrency group this module's handlers subscribe under.
+    /// Single source for group names so derived caps can't drift from subscription groups.
+    pub const fn concurrency_group(self) -> &'static str {
+        match self {
+            Self::Sdlc | Self::NamespaceDeletion => "sdlc",
+            Self::Code => "code",
+        }
+    }
 }
 
-/// ETL engine configuration.
-///
-/// # Defaults
-///
-/// - `max_concurrent_workers`: 16
-/// - `concurrency_groups`: empty
-/// - `topics`: empty (each module applies its own declared default policy; an
-///   entry here is a field-wise override on top of that default)
-/// - `handlers`: defaults for all handlers
-/// - `modules`: all variants of [`IndexerModule`] (universal indexer)
+/// ETL engine configuration. Scale fields left unset derive from the
+/// container's resources at startup; an explicit value always wins.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
-    /// Maximum concurrent message handlers across all modules. Defaults to 16.
-    #[serde(default = "EngineConfiguration::default_max_concurrent_workers")]
-    pub max_concurrent_workers: usize,
+    /// Maximum concurrent message handlers across all modules. Unset = derived
+    /// from the container CPU count.
+    #[serde(default)]
+    pub max_concurrent_workers: Option<usize>,
 
-    /// Named concurrency groups with their limits.
-    /// Subscriptions reference these by name via `SubscriptionConfig::concurrency_group`.
+    /// Named concurrency groups with their limits. Empty = derived from the
+    /// enabled `modules` and the worker cap.
     #[serde(default)]
     pub concurrency_groups: HashMap<String, usize>,
 
@@ -693,9 +710,7 @@ pub struct EngineConfiguration {
     #[serde(default)]
     pub datalake_retry: DatalakeRetryConfig,
 
-    /// Modules whose handlers this indexer process should register. Defaults to all
-    /// modules for backward compatibility (universal indexer). Set to a subset to
-    /// run a specialised pool, e.g. `[code]` for a code-only Deployment.
+    /// Modules whose handlers this process registers. Unset = all modules.
     #[serde(default = "IndexerModule::all")]
     pub modules: Vec<IndexerModule>,
 }
@@ -703,7 +718,7 @@ pub struct EngineConfiguration {
 impl Default for EngineConfiguration {
     fn default() -> Self {
         EngineConfiguration {
-            max_concurrent_workers: Self::default_max_concurrent_workers(),
+            max_concurrent_workers: None,
             concurrency_groups: HashMap::new(),
             topics: HashMap::new(),
             handlers: HandlersConfiguration::default(),
@@ -714,8 +729,9 @@ impl Default for EngineConfiguration {
 }
 
 impl EngineConfiguration {
-    fn default_max_concurrent_workers() -> usize {
-        16
+    pub fn max_concurrent_workers(&self) -> usize {
+        self.max_concurrent_workers
+            .unwrap_or(DEFAULT_MAX_CONCURRENT_WORKERS)
     }
 
     /// Returns whether `module` is enabled in this configuration.
@@ -729,9 +745,6 @@ impl EngineConfiguration {
             return Err(EngineConfigError::NoModulesEnabled);
         }
         let entity_handler = &self.handlers.entity_handler;
-        if entity_handler.stream_block_size == 0 {
-            return Err(EngineConfigError::ZeroStreamBlockSize);
-        }
         if entity_handler.system_notes_resolve_lookup_batch_size == 0 {
             return Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize);
         }
@@ -746,9 +759,6 @@ pub enum EngineConfigError {
          leave it unset to register all modules (universal indexer)"
     )]
     NoModulesEnabled,
-
-    #[error("engine.handlers.entity_handler.stream_block_size must be at least 1")]
-    ZeroStreamBlockSize,
 
     #[error(
         "engine.handlers.entity_handler.system_notes_resolve_lookup_batch_size must be at least 1"
@@ -917,28 +927,16 @@ modules: [sdlc, namespace_deletion]
     }
 
     #[test]
-    fn entity_handler_streaming_knobs_default_to_pre_tunable_constants() {
+    fn system_notes_lookup_batch_size_defaults_to_pre_tunable_constant() {
         let cfg = EntityHandlerConfig::default();
-        assert_eq!(cfg.stream_block_size, 65_536);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 1_000);
     }
 
     #[test]
-    fn entity_handler_streaming_knobs_override_from_yaml() {
-        let yaml = "stream_block_size: 262144\nsystem_notes_resolve_lookup_batch_size: 2048\n";
+    fn system_notes_lookup_batch_size_overrides_from_yaml() {
+        let yaml = "system_notes_resolve_lookup_batch_size: 2048\n";
         let cfg: EntityHandlerConfig = serde_yaml::from_str(yaml).expect("valid yaml");
-        assert_eq!(cfg.stream_block_size, 262_144);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
-    }
-
-    #[test]
-    fn zero_stream_block_size_fails_validation() {
-        let mut cfg = EngineConfiguration::default();
-        cfg.handlers.entity_handler.stream_block_size = 0;
-        assert!(matches!(
-            cfg.validate(),
-            Err(EngineConfigError::ZeroStreamBlockSize)
-        ));
     }
 
     #[test]
