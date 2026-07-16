@@ -6,8 +6,11 @@
 #
 # The bot token is terraformed in infra-mgmt (release-platform environment,
 # infra-mgmt!3039) and shared into argocd/apps as Developer (infra-mgmt!3040):
-# it can push branches and open MRs there, never merge. Rehearse by re-running
-# this job on an existing tag pipeline with DRY_RUN=true.
+# it can push branches and open MRs there, never merge.
+#
+# DRY_RUN defaults to true so the first post-merge releases rehearse visibly
+# in the job log (diff, MR body, webhook visibility) without touching
+# argocd/apps; flip the default to "false" here once a rehearsal looks right.
 release-deploy-mr:
   stage: release
   image: registry.gitlab.com/gitlab-org/cli:v1.102.0
@@ -24,7 +27,7 @@ release-deploy-mr:
       vault: access_tokens/${VAULT_SECRETS_PATH}/automation-bot/token@ci
       token: $VAULT_ID_TOKEN
   variables:
-    DRY_RUN: "false"
+    DRY_RUN: "true"
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
