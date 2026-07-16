@@ -23,6 +23,7 @@ data:
     GRANT SELECT, INSERT, ALTER, CREATE, DROP, TRUNCATE, OPTIMIZE, dictGet ON gkg.* TO gkg_app;
     GRANT SELECT ON information_schema.* TO gkg_app;
     GRANT SELECT ON system.tables TO gkg_app;
+    GRANT SELECT ON system.parts TO gkg_app;
 
     GRANT SELECT, dictGet ON gkg.* TO gkg_reader_app;
     GRANT SELECT ON system.query_log TO gkg_reader_app;
