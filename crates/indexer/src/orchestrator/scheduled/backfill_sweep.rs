@@ -62,7 +62,11 @@ impl ScheduledTask for CodeBackfillSweep {
 
         match result {
             Ok(outcome) => {
-                if let Err(error) = self.stale_sweep.run_after_drain(&outcome).await {
+                if let Err(error) = self
+                    .stale_sweep
+                    .run_for_drained(&outcome.drained_paths)
+                    .await
+                {
                     warn!(%error, "post-backfill stale sweep failed, retrying next tick");
                 }
             }

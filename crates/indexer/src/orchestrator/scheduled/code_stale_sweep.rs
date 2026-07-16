@@ -1,30 +1,24 @@
-//! One-shot batch sweep of stale code rows after the backfill drains.
-//!
-//! Per-task stale cleanup is skipped on first-time indexing, so rows left
-//! behind by runs that died before checkpointing survive a backfill. This
-//! sweep tombstones them in one batch statement per code table, keyed on
-//! each project's code-indexing checkpoint watermark, the first time a
-//! backfill sweep tick finds nothing left to dispatch. A maintenance
-//! checkpoint makes it run once per schema version.
-
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
-use futures::future::try_join_all;
 use tracing::{debug, info};
 
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::durability::WriteDurability;
 use crate::modules::code::config::CodeTableNames;
-use crate::orchestrator::dispatch::DispatchOutcome;
 use crate::orchestrator::scheduled::TaskError;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
-pub(crate) const CHECKPOINT_KEY: &str = "maintenance.code_stale_sweep";
+pub(crate) const CHECKPOINT_KEY_PREFIX: &str = "maintenance.code_stale_sweep";
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+
+fn namespace_checkpoint_key(traversal_path: &str) -> String {
+    format!("{CHECKPOINT_KEY_PREFIX}.{traversal_path}")
+}
 
 pub struct CodeStaleSweep {
     graph: ArrowClickHouseClient,
@@ -59,55 +53,61 @@ impl CodeStaleSweep {
         }
     }
 
-    pub async fn run_after_drain(&self, outcome: &DispatchOutcome) -> Result<(), TaskError> {
-        if outcome.dispatched != 0 || outcome.skipped != 0 {
-            debug!(
-                dispatched = outcome.dispatched,
-                skipped = outcome.skipped,
-                "post-backfill stale sweep deferred: backfill not yet drained"
-            );
+    pub async fn run_for_drained(&self, drained_paths: &[String]) -> Result<(), TaskError> {
+        if drained_paths.is_empty() {
             return Ok(());
         }
-        if self
+        let swept: HashSet<String> = self
             .checkpoint_store
-            .load(CHECKPOINT_KEY)
+            .load_by_prefix(CHECKPOINT_KEY_PREFIX)
             .await
             .map_err(TaskError::new)?
-            .is_some()
-        {
-            return Ok(());
-        }
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
 
+        for path in drained_paths {
+            if swept.contains(&namespace_checkpoint_key(path)) {
+                continue;
+            }
+            self.sweep_namespace(path).await?;
+        }
+        Ok(())
+    }
+
+    async fn sweep_namespace(&self, traversal_path: &str) -> Result<(), TaskError> {
         let started = Utc::now();
-        try_join_all(self.statements.iter().map(|(table, sql)| async move {
+        for (table, sql) in &self.statements {
             let statement_start = Instant::now();
             self.graph
                 .query(sql)
+                .param("path", traversal_path)
                 .execute()
                 .await
-                .map_err(|e| TaskError::new(format!("stale sweep on {table}: {e}")))?;
-            info!(
+                .map_err(|e| {
+                    TaskError::new(format!("stale sweep on {table} for {traversal_path}: {e}"))
+                })?;
+            debug!(
                 table,
+                traversal_path,
                 duration_ms = statement_start.elapsed().as_millis() as u64,
-                "post-backfill stale sweep statement complete"
+                "stale sweep statement complete"
             );
-            Ok::<(), TaskError>(())
-        }))
-        .await?;
+        }
 
         self.checkpoint_store
-            .save_completed(CHECKPOINT_KEY, &started, WriteDurability::Durable)
+            .save_completed(
+                &namespace_checkpoint_key(traversal_path),
+                &started,
+                WriteDurability::Durable,
+            )
             .await
             .map_err(TaskError::new)?;
-        info!("post-backfill stale sweep complete");
+        info!(traversal_path, "post-backfill stale sweep complete");
         Ok(())
     }
 }
 
-// Every sweep scans raw parts, never FINAL: a tombstone at `watermark - 1µs`
-// is outranked by any surviving row versioned at or after the watermark, so
-// superseded-but-live ids can only receive no-op tombstones that the next
-// merge collapses.
 fn node_sweep(table: &str, checkpoint_table: &str) -> String {
     format!(
         r#"
@@ -119,20 +119,20 @@ fn node_sweep(table: &str, checkpoint_table: &str) -> String {
             s.id,
             cp.indexed_at - toIntervalMicrosecond(1) AS _version,
             true AS _deleted
-        FROM {table} AS s
+        FROM {table} AS s FINAL
         INNER JOIN {checkpoint_table} AS cp FINAL
             ON cp.traversal_path = s.traversal_path
            AND cp.project_id = s.project_id
            AND cp.branch = s.branch
-        WHERE cp._deleted = false
+        WHERE startsWith(s.traversal_path, {{path:String}})
+          AND s._deleted = false
+          AND cp._deleted = false
           AND s._version < cp.indexed_at
         "#
     )
 }
 
 fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
-    // gl_code_edge carries project_id + branch, so it joins the checkpoint
-    // table exactly like a node table.
     if edge_table.contains("code_edge") {
         return format!(
             r#"
@@ -149,12 +149,14 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
                 s.target_kind,
                 cp.indexed_at - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
-            FROM {edge_table} AS s
+            FROM {edge_table} AS s FINAL
             INNER JOIN {checkpoint_table} AS cp FINAL
                 ON cp.traversal_path = s.traversal_path
                AND cp.project_id = s.project_id
                AND cp.branch = s.branch
-            WHERE cp._deleted = false
+            WHERE startsWith(s.traversal_path, {{path:String}})
+              AND s._deleted = false
+              AND cp._deleted = false
               AND s._version < cp.indexed_at
             "#
         );
@@ -164,10 +166,6 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
         .map(|kind| format!("'{kind}'"))
         .join(", ");
 
-    // The shared edge table has no project_id/branch columns. Code-written
-    // rows are identified by their source kind, and the watermark comes from
-    // a per-traversal-path aggregate: min() so a second checkpointed branch
-    // under the same path can never out-version another branch's live rows.
     format!(
         r#"
         INSERT INTO {edge_table}
@@ -181,14 +179,16 @@ fn edge_sweep(edge_table: &str, checkpoint_table: &str) -> String {
             s.target_kind,
             w.watermark - toIntervalMicrosecond(1) AS _version,
             true AS _deleted
-        FROM {edge_table} AS s
+        FROM {edge_table} AS s FINAL
         INNER JOIN (
             SELECT traversal_path, min(indexed_at) AS watermark
             FROM {checkpoint_table} FINAL
-            WHERE _deleted = false
+            WHERE _deleted = false AND startsWith(traversal_path, {{path:String}})
             GROUP BY traversal_path
         ) AS w ON w.traversal_path = s.traversal_path
-        WHERE s.source_kind IN ({code_source_kinds})
+        WHERE startsWith(s.traversal_path, {{path:String}})
+          AND s._deleted = false
+          AND s.source_kind IN ({code_source_kinds})
           AND s._version < w.watermark
         "#
     )
@@ -204,16 +204,34 @@ mod tests {
     }
 
     #[test]
-    fn node_sweep_joins_checkpoint_watermark_without_final_scan() {
+    fn node_sweep_tombstones_only_final_survivors() {
         let sql = node_sweep("v9_gl_file", "v9_code_indexing_checkpoint");
-        assert!(sql.contains("FROM v9_gl_file AS s"), "{sql}");
-        assert!(!sql.contains("v9_gl_file AS s FINAL"), "{sql}");
+        assert!(
+            sql.contains("FROM v9_gl_file AS s FINAL"),
+            "a raw-parts scan emits a no-op tombstone per superseded part row \
+             instead of one per surviving stale key: {sql}"
+        );
+        assert!(sql.contains("s._deleted = false"), "{sql}");
         assert!(
             sql.contains("v9_code_indexing_checkpoint AS cp FINAL"),
             "{sql}"
         );
         assert!(sql.contains("s._version < cp.indexed_at"), "{sql}");
         assert!(sql.contains("cp._deleted = false"), "{sql}");
+    }
+
+    #[test]
+    fn sweeps_scope_to_the_namespace_path_for_pk_pruning() {
+        for sql in [
+            node_sweep("v9_gl_file", "v9_cp"),
+            edge_sweep("v9_gl_code_edge", "v9_cp"),
+            edge_sweep("v9_gl_edge", "v9_cp"),
+        ] {
+            assert!(
+                sql.contains("startsWith(s.traversal_path, {path:String})"),
+                "the checkpoint join alone does not prune the source scan: {sql}"
+            );
+        }
     }
 
     #[test]
@@ -238,6 +256,16 @@ mod tests {
         assert!(
             !sql.contains("UNION ALL"),
             "the shared edge sweep must not scan node tables: {sql}"
+        );
+    }
+
+    #[test]
+    fn namespace_checkpoint_keys_share_the_seed_drop_prefix() {
+        let key = namespace_checkpoint_key("1/9970/");
+        assert!(
+            key.starts_with(CHECKPOINT_KEY_PREFIX),
+            "SEED_CODE_CHECKPOINT_SQL drops sweep gates by this prefix; a key \
+             outside it would survive a code migration and suppress the re-sweep: {key}"
         );
     }
 

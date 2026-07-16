@@ -80,12 +80,6 @@ impl CodeBackfill {
         &self.metrics
     }
 
-    /// Active-backfill body: dispatch code indexing for every enabled namespace.
-    ///
-    /// Coverage-driven: for each namespace, the project list is filtered
-    /// against the indexer's current-version checkpoint table so only
-    /// un-indexed work is published. Once a namespace's projects are fully
-    /// checkpointed, this produces no publishes for it.
     pub async fn dispatch_enabled(&self, dispatch_id: Uuid) -> Result<DispatchOutcome, TaskError> {
         let enabled = self.fetch_enabled_namespaces().await?;
         self.dispatch_for_namespaces(&enabled, dispatch_id).await
@@ -97,17 +91,23 @@ impl CodeBackfill {
         dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
         let mut all_pending: Vec<PendingProject> = Vec::new();
+        let mut drained_paths: Vec<String> = Vec::new();
         for (namespace_id, traversal_path) in namespaces {
-            all_pending.extend(
-                self.fetch_pending_for_namespace(*namespace_id, traversal_path)
-                    .await?,
-            );
+            let pending = self
+                .fetch_pending_for_namespace(*namespace_id, traversal_path)
+                .await?;
+            if pending.is_empty() {
+                drained_paths.push(traversal_path.clone());
+            }
+            all_pending.extend(pending);
         }
         // Shuffle the flat project list so the NATS queue is interleaved
         // across namespaces; otherwise FIFO consumption processes one
         // namespace's entire batch before any other namespace gets a turn.
         all_pending.shuffle(&mut rand::rng());
-        let outcome = self.publish_pending(&all_pending, dispatch_id).await?;
+        let outcome = self
+            .publish_pending(&all_pending, drained_paths, dispatch_id)
+            .await?;
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
             self.metrics
@@ -210,11 +210,12 @@ impl CodeBackfill {
     pub async fn publish_pending(
         &self,
         projects: &[PendingProject],
+        drained_paths: Vec<String>,
         dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
         let mut outcome = DispatchOutcome {
-            dispatched: 0,
-            skipped: 0,
+            drained_paths,
+            ..Default::default()
         };
         let campaign_id = self.campaign.current();
 
@@ -353,7 +354,7 @@ mod tests {
 
         projects.shuffle(&mut rand::rng());
         let outcome = backfill
-            .publish_pending(&projects, Uuid::new_v4())
+            .publish_pending(&projects, Vec::new(), Uuid::new_v4())
             .await
             .unwrap();
         assert_eq!(outcome.dispatched, 200);
