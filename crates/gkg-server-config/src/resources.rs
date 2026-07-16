@@ -137,7 +137,9 @@ fn max_workers_for_memory_limit(memory_limit_bytes: u64) -> usize {
 fn datalake_batch_size_for_memory_limit(memory_limit_bytes: u64) -> u64 {
     let scaled = u128::from(memory_limit_bytes) * u128::from(DATALAKE_BATCH_AT_ANCHOR)
         / u128::from(DATALAKE_BATCH_MEMORY_ANCHOR_BYTES);
-    (scaled as u64).max(MIN_DATALAKE_BATCH_SIZE)
+    u64::try_from(scaled)
+        .unwrap_or(u64::MAX)
+        .max(MIN_DATALAKE_BATCH_SIZE)
 }
 
 /// The cgroup limit where one applies (containers), otherwise total RAM (VMs, bare metal, macOS/Windows).
@@ -228,6 +230,25 @@ mod tests {
             container_resources(8, None).derive_datalake_batch_size(),
             500_000
         );
+    }
+
+    #[test]
+    fn resolve_fills_entity_handler_batch_size_from_memory() {
+        let mut cfg = EngineConfiguration::default();
+
+        cfg.resolve_runtime_defaults(&container_resources(8, Some(16 * GIB)));
+
+        assert_eq!(cfg.handlers.entity_handler.datalake_batch_size(), 250_000);
+    }
+
+    #[test]
+    fn resolve_keeps_explicit_entity_handler_batch_size() {
+        let mut cfg = EngineConfiguration::default();
+        cfg.handlers.entity_handler.datalake_batch_size = Some(999);
+
+        cfg.resolve_runtime_defaults(&container_resources(8, Some(64 * GIB)));
+
+        assert_eq!(cfg.handlers.entity_handler.datalake_batch_size(), 999);
     }
 
     #[test]
