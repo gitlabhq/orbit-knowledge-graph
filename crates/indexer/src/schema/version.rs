@@ -122,8 +122,6 @@ fn write_migrating_version_query(
         .expect("write_migrating_version query must be valid")
 }
 
-/// A unique dedup token defeats ClickHouse insert-block dedup, which would otherwise silently
-/// drop a re-inserted `(version, status)` block and wedge a re-migration after rollback+redeploy.
 async fn write_version(query: ArrowQuery) -> Result<(), SchemaVersionError> {
     query
         .with_setting("insert_deduplication_token", Uuid::new_v4().to_string())
