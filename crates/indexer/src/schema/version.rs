@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use arrow::datatypes::UInt32Type;
-use clickhouse_client::ArrowClickHouseClient;
+use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
 use gkg_utils::arrow::ArrowUtils;
 use query_engine::compiler::ast::ddl::{ColumnDef, ColumnType, CreateTable, Engine};
 use query_engine::compiler::emit_create_table;
@@ -15,6 +15,7 @@ use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
 use tokio::time::Instant;
+use uuid::Uuid;
 
 use crate::engine::retry::{Backoff, RetryMode, RetryPolicy, Step, drive_until};
 use tracing::{info, warn};
@@ -121,6 +122,14 @@ fn write_migrating_version_query(
         .expect("write_migrating_version query must be valid")
 }
 
+async fn write_version(query: ArrowQuery) -> Result<(), SchemaVersionError> {
+    query
+        .with_setting("insert_deduplication_token", Uuid::new_v4().to_string())
+        .execute()
+        .await?;
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum SchemaVersionError {
     #[error("ClickHouse error: {0}")]
@@ -187,8 +196,7 @@ pub async fn write_schema_version(
     for (name, param) in &params {
         query = query.param(name, &param.value);
     }
-    query.execute().await?;
-    Ok(())
+    write_version(query).await
 }
 
 /// Records a schema version as `migrating` in ClickHouse.
@@ -205,8 +213,7 @@ pub async fn write_migrating_version(
     for (name, param) in &params {
         query = query.param(name, &param.value);
     }
-    query.execute().await?;
-    Ok(())
+    write_version(query).await
 }
 
 const READ_MIGRATING_VERSION: &str = "\
@@ -272,36 +279,21 @@ pub async fn mark_version_active(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
-    graph
-        .query(WRITE_ACTIVE_VERSION)
-        .param("version", version)
-        .execute()
-        .await?;
-    Ok(())
+    write_version(graph.query(WRITE_ACTIVE_VERSION).param("version", version)).await
 }
 
 pub async fn mark_version_retired(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
-    graph
-        .query(WRITE_RETIRED_VERSION)
-        .param("version", version)
-        .execute()
-        .await?;
-    Ok(())
+    write_version(graph.query(WRITE_RETIRED_VERSION).param("version", version)).await
 }
 
 pub async fn mark_version_dropped(
     graph: &ArrowClickHouseClient,
     version: u32,
 ) -> Result<(), SchemaVersionError> {
-    graph
-        .query(WRITE_DROPPED_VERSION)
-        .param("version", version)
-        .execute()
-        .await?;
-    Ok(())
+    write_version(graph.query(WRITE_DROPPED_VERSION).param("version", version)).await
 }
 
 const LIST_VERSION_OBJECTS: &str = "\

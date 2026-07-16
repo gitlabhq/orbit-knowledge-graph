@@ -672,6 +672,36 @@ async fn read_active_version_returns_some_after_write() {
 }
 
 #[tokio::test]
+async fn repeated_status_write_survives_insert_block_dedup() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+
+    // non_replicated_deduplication_window makes a single-node table dedup like Cloud's SharedMergeTree.
+    ctx.execute(
+        "CREATE TABLE gkg_schema_version \
+         (version UInt32, \
+          status Enum8('active' = 1, 'migrating' = 2, 'retired' = 3, 'dropped' = 4), \
+          created_at DateTime DEFAULT now()) \
+         ENGINE = ReplacingMergeTree(created_at) ORDER BY version \
+         SETTINGS non_replicated_deduplication_window = 1000",
+    )
+    .await;
+
+    write_migrating_version(&client, 83).await.unwrap();
+    write_migrating_version(&client, 83).await.unwrap();
+
+    let result = ctx
+        .query("SELECT toInt64(count()) AS c FROM gkg_schema_version")
+        .await;
+    let counts = i64::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        counts,
+        vec![2],
+        "both writes must persist; insert-block dedup must not drop the re-inserted (version, status) block"
+    );
+}
+
+#[tokio::test]
 async fn wait_until_ready_returns_when_version_active() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
