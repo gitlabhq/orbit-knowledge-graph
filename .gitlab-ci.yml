@@ -116,6 +116,22 @@ stages:
       junit:
         - target/nextest/ci/junit.xml
 
+# Identity for jobs acting as the Orbit automation bot (infra-mgmt!3039): the
+# glab image plus the bot token from Vault, readable on protected refs only.
+# Extend it and add your own rules, needs, and script.
+.automation-bot:
+  image: registry.gitlab.com/gitlab-org/cli:v1.102.0
+  tags:
+    - saas-linux-small-amd64
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    AUTOMATION_BOT_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/automation-bot/token@ci
+      token: $VAULT_ID_TOKEN
+
 # "Solo" scheduled pipelines run exactly one job and skip the rest of the CI
 # suite. A schedule opts in by setting SCHEDULE_ONLY=<job-name>: the named job
 # gates on that value, and every shared job/anchor references this guard so it
