@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 84
+  scope: none
+  note: isValidUTF8 guard on decoded_sha; a no-op for every value already written (raw-binary SHAs previously failed the decode and produced no row), so no indexed row changes.
 - version: 83
   scope: none
   note: Source-owned base projections and independent stage compilation preserve all 47 serialized plans byte-identically.

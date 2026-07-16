@@ -20,7 +20,8 @@ FROM (
         substring(squash_commit_sha, 3),
         lower(hex(nullIf(squash_commit_sha, '')))
       )
-    ) AS decoded_sha
+    ) AS decoded_sha_bytes,
+    if(isValidUTF8(decoded_sha_bytes), decoded_sha_bytes, lower(hex(decoded_sha_bytes))) AS decoded_sha
   FROM merge_requests
 ) AS m
 WHERE m.state_id = 3

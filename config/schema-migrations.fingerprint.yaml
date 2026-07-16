@@ -71,7 +71,7 @@ sources:
   nodes/ci/pipeline.yaml: 3e5b52d5b27ff487402e7f9be9f5cb82e2a641e5c8d69c2d8e14e2d1a5f3fc83
   nodes/ci/runner.yaml: e5f201ca5120527233e5c7fa7fb6325ca59fae01ca29ceab59489dd84a677e5b
   nodes/ci/stage.yaml: 250d85222dd293460a61ab9ba6c9129861848e89fbd9c96ffc42d7bd084639b3
-  nodes/code_review/merge_request.sql.j2: 18b0b48db4df912abaec37c1dd7c33c54e33e5e6559ac5743f9063badcd16e93
+  nodes/code_review/merge_request.sql.j2: 6eb9a97039a810715a96862bfbed22ce0cdaceb30b9e6d124ee41b08833d07e4
   nodes/code_review/merge_request.yaml: 6741bb8e848508f2ca9746e053e25ed57681dcdb4db4456470a60870160c72d7
   nodes/code_review/merge_request_diff.yaml: 669505ce845b69f6f8d0e53bac5cf1b549d3cc8a96631b3658e6ed9d0dcdba52
   nodes/code_review/merge_request_diff_file.sql.j2: 08925206e14aabe5235473c27d93780b8178c032c69f3c55204edd2e78622162
@@ -98,7 +98,7 @@ sources:
   nodes/security/security_scan.yaml: 7876f0ac680d32e14e16cb4ba33a15ee1ea3b50fe6435de671e92570996adf37
   nodes/security/vulnerability.yaml: 6c08d0fe9c97ee47bc54d06d473d3f96135dd1151b8aa925ac139a15f1ac7e4c
   nodes/source_code/branch.yaml: a0f4d719ebe9f7002a2d77e38c32fe3c4c77d2b84f706a3bdad0cb3f7bc02a23
-  nodes/source_code/commit.sql.j2: 9f12ecfb80f3a2a8d5ccb505077c29d78f9d8507ec7aa2c6679d580eb2667038
+  nodes/source_code/commit.sql.j2: d50aa3a787d71a34556c815b96a7a35aea78e54251730b319f21b50f09017d27
   nodes/source_code/commit.yaml: 310e2699d39dc4187f535803d986eabe28f1c8cfd407a2ade43496257bfa6f17
   nodes/source_code/definition.yaml: 527659659fa212555b5f8658ce0e7713cc467850eb835573caf89589d25a3b50
   nodes/source_code/directory.yaml: 93e0f3eea8548ef5e83b1ea021445238412b59ce8d6d7a9b0d27ab43d669b2bd
