@@ -1,0 +1,36 @@
+# Opens the gl-infra/argocd/apps MR that bumps orbit-stg and orbit-prd to the
+# version this tag pipeline is building, then tells #f_orbit_dev the MR is
+# ready for review. Runs after release-manifest so the multi-arch image exists
+# before Argo could ever pull it.
+#
+# The bot token is terraformed in infra-mgmt (release-platform environment,
+# infra-mgmt!3039) and shared into argocd/apps as Developer (infra-mgmt!3040):
+# it can push branches and open MRs there, never merge. Rehearse by re-running
+# this job on an existing tag pipeline with DRY_RUN=true.
+release-deploy-mr:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/cli:v1.102.0
+  tags:
+    - saas-linux-small-amd64
+  needs:
+    - release-manifest
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    AUTOMATION_BOT_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/automation-bot/token@ci
+      token: $VAULT_ID_TOKEN
+  variables:
+    DRY_RUN: "false"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  before_script:
+    - test -n "${AUTOMATION_BOT_TOKEN}" || (echo "Missing AUTOMATION_BOT_TOKEN from Vault" && exit 1)
+    - apk add --no-cache bash git curl jq coreutils
+    - glab auth login --hostname "$CI_SERVER_HOST" --token "$AUTOMATION_BOT_TOKEN"
+  script:
+    - bash scripts/ci/create-deploy-mr.sh

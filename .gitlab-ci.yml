@@ -51,6 +51,7 @@ include:
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
   - local: .gitlab/ci/e2e-pin-bump.yml
+  - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/comment-guard.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
@@ -1012,9 +1013,12 @@ semantic-release:
     - job: build-proto-gem
       optional: true
   rules:
-    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
+    # Daily schedule with SCHEDULE_ONLY=auto-release cuts the release
+    # unattended; semantic-release exits cleanly when nothing is releasable.
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "auto-release"
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
