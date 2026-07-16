@@ -114,6 +114,9 @@ pub enum DispatcherError {
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::MigrationError),
 
+    #[error("schema version error: {0}")]
+    SchemaVersion(#[from] crate::schema::version::SchemaVersionError),
+
     #[error("health server failed: {0}")]
     Health(#[from] std::io::Error),
 }
