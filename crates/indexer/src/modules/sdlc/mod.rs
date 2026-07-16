@@ -65,8 +65,8 @@ pub async fn register_handlers(
     let plans = plan::build_plans(
         ontology,
         plan::Sizing {
-            global_batch_size: entity_handler_config.datalake_batch_size,
-            namespaced_batch_size: entity_handler_config.datalake_batch_size,
+            global_batch_size: entity_handler_config.datalake_batch_size(),
+            namespaced_batch_size: entity_handler_config.datalake_batch_size(),
             overrides: &entity_handler_config.batch_size_overrides,
         },
     )

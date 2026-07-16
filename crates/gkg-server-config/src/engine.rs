@@ -202,8 +202,11 @@ impl Default for DatalakeRetryConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EntityHandlerConfig {
-    #[serde(default = "default_datalake_batch_size")]
-    pub datalake_batch_size: u64,
+    /// Rows per SDLC datalake page (also the ClickHouse `max_block_size`). Unset =
+    /// derived from the container memory limit (prod's 32 GiB sdlc pool anchors
+    /// the tuned 500k page), floored at 100k.
+    #[serde(default)]
+    pub datalake_batch_size: Option<u64>,
 
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
@@ -224,13 +227,33 @@ pub struct EntityHandlerConfig {
 impl Default for EntityHandlerConfig {
     fn default() -> Self {
         Self {
-            datalake_batch_size: default_datalake_batch_size(),
+            datalake_batch_size: None,
             batch_size_overrides: HashMap::new(),
             partition_overrides: HashMap::new(),
             partition_min_rows: default_partition_min_rows(),
             system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
             ),
         }
+    }
+}
+
+impl EntityHandlerConfig {
+    pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
+        if self.datalake_batch_size.is_some() {
+            return;
+        }
+        let batch = resources.derive_datalake_batch_size();
+        self.datalake_batch_size = Some(batch);
+        info!(
+            memory_limit_bytes = resources.memory_limit_bytes,
+            value = batch,
+            "derived engine.handlers.entity_handler.datalake_batch_size"
+        );
+    }
+
+    pub fn datalake_batch_size(&self) -> u64 {
+        self.datalake_batch_size
+            .unwrap_or_else(default_datalake_batch_size)
     }
 }
 
