@@ -105,8 +105,9 @@ impl CodeBackfill {
         // across namespaces; otherwise FIFO consumption processes one
         // namespace's entire batch before any other namespace gets a turn.
         all_pending.shuffle(&mut rand::rng());
-        let mut outcome = self.publish_pending(&all_pending, dispatch_id).await?;
-        outcome.drained_paths = drained_paths;
+        let outcome = self
+            .publish_pending(&all_pending, drained_paths, dispatch_id)
+            .await?;
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
             self.metrics
@@ -209,9 +210,13 @@ impl CodeBackfill {
     pub async fn publish_pending(
         &self,
         projects: &[PendingProject],
+        drained_paths: Vec<String>,
         dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
-        let mut outcome = DispatchOutcome::default();
+        let mut outcome = DispatchOutcome {
+            drained_paths,
+            ..Default::default()
+        };
         let campaign_id = self.campaign.current();
 
         for project in projects {
@@ -349,7 +354,7 @@ mod tests {
 
         projects.shuffle(&mut rand::rng());
         let outcome = backfill
-            .publish_pending(&projects, Uuid::new_v4())
+            .publish_pending(&projects, Vec::new(), Uuid::new_v4())
             .await
             .unwrap();
         assert_eq!(outcome.dispatched, 200);
