@@ -30,10 +30,7 @@ pub struct CodeIndexingSlots {
 
 #[derive(Debug, Clone)]
 pub struct ContainerResources {
-    /// Cgroup-aware on Linux: reflects the pod CPU quota, not the node core count.
     pub available_parallelism: usize,
-
-    /// `None` when no limit is readable (unlimited cgroup, or no cgroups — e.g. macOS).
     pub memory_limit_bytes: Option<u64>,
 }
 
@@ -47,7 +44,6 @@ impl ContainerResources {
         }
     }
 
-    /// The memory limit caps the CPU count so a memory-tight pod cannot derive more workers than it can feed.
     pub fn derive_worker_budget(&self) -> usize {
         let cpu = self.available_parallelism.max(1);
         match self.memory_limit_bytes {
@@ -127,8 +123,6 @@ fn memory_limit_if_bounded(total_memory: u64) -> Option<u64> {
     (total_memory < CGROUP_UNLIMITED_THRESHOLD_BYTES).then_some(total_memory)
 }
 
-/// sysinfo resolves the process's cgroup via `/proc/self/cgroup`, so this also
-/// works without a private cgroup namespace; non-Linux yields `None`.
 fn read_cgroup_memory_limit_bytes() -> Option<u64> {
     let pid = get_current_pid().ok()?;
     let mut system = System::new();
