@@ -44,7 +44,7 @@ fi
 for env in orbit-stg orbit-prd; do
   values="$workdir/apps/services/gkg/env/${env}/values.yaml"
   current="$(read_tag "$values")"
-  sed -i "s/^  tag: \"${current}\"/  tag: \"${VERSION}\"/" "$values"
+  sed -i "s/^  tag: \"${current//./\\.}\"/  tag: \"${VERSION}\"/" "$values"
   [[ "$(read_tag "$values")" == "$VERSION" ]] || { log "Failed to bump ${env} to ${VERSION}"; exit 1; }
 done
 
@@ -91,10 +91,11 @@ git -C "$workdir/apps" checkout --quiet -b "$DEPLOY_BRANCH"
 git -C "$workdir/apps" commit --quiet -am "$mr_title"
 git -C "$workdir/apps" push --quiet origin "$DEPLOY_BRANCH"
 
-mr_url="$(cd "$workdir/apps" && glab mr create \
+mr_output="$(cd "$workdir/apps" && glab mr create \
   --source-branch "$DEPLOY_BRANCH" --target-branch main \
-  --title "$mr_title" --description "$mr_description" --yes \
-  | grep -o "https://[^ ]*/merge_requests/[0-9]*" | head -1)"
+  --title "$mr_title" --description "$mr_description" --yes)"
+mr_url="$(grep -o "https://[^ ]*/merge_requests/[0-9]*" <<<"$mr_output" | head -1 || true)"
+[[ -n "$mr_url" ]] || { log "Could not parse the MR URL from glab output: ${mr_output}"; exit 1; }
 log "Opened deploy MR: ${mr_url}"
 
 if [[ -n "${SLACK_WEBHOOK:-}" ]]; then
