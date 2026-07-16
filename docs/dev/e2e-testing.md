@@ -95,7 +95,7 @@ other suite runs in a parallel worker pool.
 | Phase | Step | What it does |
 |---|---|---|
 | 1 | orphan cleanup + secrets | Clean cluster-scoped leftovers, generate per-run secrets, extract the cert-manager root CA |
-| 2 | `sync-cdc-tables.sh` | Regenerate Siphon CDC config from the pinned `gitlab-org/gitlab` ref |
+| 2 | `sync-cdc-tables.sh` | Regenerate Siphon CDC config from the `siphon-ssot-tables` package registry artifact for the pinned `gitlab.ref` (`publish-siphon-tables.sh` publishes it when the ref is bumped; e2e never fetches from `gitlab-org/gitlab`) |
 | 3 | background pollers | `bootstrap-instance.sh` (license + root PAT, gated on the migrations Job) and `patch-ch-dicts.sh` (DIRECT-layout dictionaries) launch early and overlap the deploy |
 | 4 | `helmfile sync` | Deploy every release; GitLab gates `pg-cdc-setup` and `siphon`, while `gkg` needs only NATS and ClickHouse and overlaps the GitLab boot |
 | 5 | `patch-ch-siphon-watermark.sh` | Add the watermark column (after sync — it enumerates tables the siphon consumer creates), then join the background pollers |
