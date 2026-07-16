@@ -182,7 +182,7 @@ impl Engine {
             worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
         });
-        let global_max_inflight = configuration.max_concurrent_workers;
+        let global_max_inflight = configuration.max_concurrent_workers();
         let tasks: Vec<_> = subscriptions
             .into_iter()
             .map(|subscription| {
@@ -934,7 +934,7 @@ mod tests {
         let completed = Arc::new(AtomicUsize::new(0));
 
         let runtime = test_runtime(&EngineConfiguration {
-            max_concurrent_workers: max_inflight,
+            max_concurrent_workers: Some(max_inflight),
             ..Default::default()
         });
 
@@ -1000,7 +1000,7 @@ mod tests {
     #[tokio::test]
     async fn handler_bypassing_worker_pool_runs_when_pool_exhausted() {
         let runtime = test_runtime(&EngineConfiguration {
-            max_concurrent_workers: 1,
+            max_concurrent_workers: Some(1),
             ..Default::default()
         });
 

@@ -14,9 +14,10 @@ use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{NAMESPACE_DELETION_TOPIC, NamespaceDeletionRequest};
 use crate::types::Event;
-use gkg_server_config::SubscriptionConfig;
+use gkg_server_config::{IndexerModule, SubscriptionConfig};
 
-const NAMESPACE_DELETION_CONCURRENCY_GROUP: &str = "code";
+const NAMESPACE_DELETION_CONCURRENCY_GROUP: &str =
+    IndexerModule::NamespaceDeletion.concurrency_group();
 
 pub fn namespace_deletion_topic_policy() -> SubscriptionConfig {
     SubscriptionConfig {
@@ -63,6 +64,6 @@ mod tests {
         assert_eq!(policy.max_attempts, Some(1));
         assert_eq!(policy.retry_interval_secs, None);
         assert_eq!(policy.dead_letter_on_exhaustion, None);
-        assert_eq!(policy.concurrency_group.as_deref(), Some("code"));
+        assert_eq!(policy.concurrency_group.as_deref(), Some("sdlc"));
     }
 }

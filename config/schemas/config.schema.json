@@ -66,7 +66,7 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
-              "big_indexing_slots": 2,
+              "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
               "job_timeout_secs": 250,
@@ -78,7 +78,7 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": 6,
+              "small_indexing_slots": null,
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
@@ -94,11 +94,10 @@
             "datalake_batch_size": 500000,
             "partition_min_rows": 50000000,
             "partition_overrides": {},
-            "stream_block_size": 65536,
             "system_notes_resolve_lookup_batch_size": 1000
           }
         },
-        "max_concurrent_workers": 16,
+        "max_concurrent_workers": null,
         "modules": [
           "sdlc",
           "code",
@@ -409,10 +408,13 @@
       "type": "object",
       "properties": {
         "big_indexing_slots": {
-          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.",
-          "type": "integer",
+          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 2,
+          "default": null,
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
@@ -487,10 +489,13 @@
           "minimum": 0
         },
         "small_indexing_slots": {
-          "description": "Concurrent indexing slots for small repositories. Defaults to 6.",
-          "type": "integer",
+          "description": "Concurrent indexing slots for small repositories. Unset = derived from the container CPU count.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 6,
+          "default": null,
           "minimum": 0
         },
         "small_repo_max_files": {
@@ -557,7 +562,7 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
-            "big_indexing_slots": 2,
+            "big_indexing_slots": null,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 10,
             "job_timeout_secs": 250,
@@ -569,7 +574,7 @@
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
             "per_file_walk_timeout_ms": 100,
-            "small_indexing_slots": 6,
+            "small_indexing_slots": null,
             "small_repo_max_files": 650,
             "worker_threads": 0,
             "write_buffer_age_secs": 60,
@@ -635,11 +640,11 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `topics`: empty (each module applies its own declared default policy; an\n  entry here is a field-wise override on top of that default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
+      "description": "ETL engine configuration. Scale fields left unset derive from the\ncontainer's resources at startup; an explicit value always wins.",
       "type": "object",
       "properties": {
         "concurrency_groups": {
-          "description": "Named concurrency groups with their limits.\nSubscriptions reference these by name via `SubscriptionConfig::concurrency_group`.",
+          "description": "Named concurrency groups with their limits. Empty = derived from the\nenabled `modules` and the worker cap.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
@@ -662,7 +667,7 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
-                "big_indexing_slots": 2,
+                "big_indexing_slots": null,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 10,
                 "job_timeout_secs": 250,
@@ -674,7 +679,7 @@
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
                 "per_file_walk_timeout_ms": 100,
-                "small_indexing_slots": 6,
+                "small_indexing_slots": null,
                 "small_repo_max_files": 650,
                 "worker_threads": 0,
                 "write_buffer_age_secs": 60,
@@ -690,20 +695,22 @@
               "datalake_batch_size": 500000,
               "partition_min_rows": 50000000,
               "partition_overrides": {},
-              "stream_block_size": 65536,
               "system_notes_resolve_lookup_batch_size": 1000
             }
           }
         },
         "max_concurrent_workers": {
-          "description": "Maximum concurrent message handlers across all modules. Defaults to 16.",
-          "type": "integer",
+          "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container CPU count.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 16,
+          "default": null,
           "minimum": 0
         },
         "modules": {
-          "description": "Modules whose handlers this indexer process should register. Defaults to all\nmodules for backward compatibility (universal indexer). Set to a subset to\nrun a specialised pool, e.g. `[code]` for a code-only Deployment.",
+          "description": "Modules whose handlers this process registers. Unset = all modules.",
           "type": "array",
           "default": [
             "sdlc",
@@ -758,13 +765,6 @@
             "minimum": 0
           },
           "default": {}
-        },
-        "stream_block_size": {
-          "description": "Rows per block streamed from the datalake (`max_block_size`). Larger blocks\namortize per-batch write round-trips (more throughput) at the cost of peak\nmemory per in-flight block.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 65536,
-          "minimum": 1
         },
         "system_notes_resolve_lookup_batch_size": {
           "description": "Maximum number of items bound into each SystemNote resolver lookup.",
@@ -917,7 +917,7 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
-              "big_indexing_slots": 2,
+              "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
               "job_timeout_secs": 250,
@@ -929,7 +929,7 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": 6,
+              "small_indexing_slots": null,
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
@@ -948,7 +948,6 @@
             "datalake_batch_size": 500000,
             "partition_min_rows": 50000000,
             "partition_overrides": {},
-            "stream_block_size": 65536,
             "system_notes_resolve_lookup_batch_size": 1000
           }
         }

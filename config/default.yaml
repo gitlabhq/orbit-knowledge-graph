@@ -65,11 +65,6 @@ graph:
 #   key_path: "/path/to/key.pem"
 
 engine:
-  # Universal-pool defaults; production splits into per-module pools that override these (gkg-helm-charts `indexer.pools`).
-  max_concurrent_workers: 16
-  concurrency_groups:
-    sdlc: 12
-    code: 4
   handlers:
     entity-handler:
       system_notes_resolve_lookup_batch_size: 1000
@@ -98,8 +93,6 @@ engine:
         write_max_flush_age_secs: 120
         write_max_concurrent: 4
         small_repo_max_files: 650
-        small_indexing_slots: 6
-        big_indexing_slots: 2
 
 health_check:
   bind_address: "0.0.0.0:4201"

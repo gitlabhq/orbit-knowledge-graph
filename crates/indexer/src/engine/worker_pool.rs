@@ -51,7 +51,7 @@ pub struct WorkerPool {
 
 impl WorkerPool {
     pub fn new(configuration: &EngineConfiguration, metrics: Arc<EngineMetrics>) -> Self {
-        let global_semaphore = Arc::new(Semaphore::new(configuration.max_concurrent_workers));
+        let global_semaphore = Arc::new(Semaphore::new(configuration.max_concurrent_workers()));
 
         let group_semaphores: HashMap<String, Arc<Semaphore>> = configuration
             .concurrency_groups
@@ -60,7 +60,7 @@ impl WorkerPool {
             .collect();
 
         info!(
-            global_limit = configuration.max_concurrent_workers,
+            global_limit = configuration.max_concurrent_workers(),
             group_limits = ?group_semaphores.keys().collect::<Vec<_>>(),
             "worker pool created"
         );
@@ -169,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn test_global_semaphore_limits_concurrent_workers() {
         let config = EngineConfiguration {
-            max_concurrent_workers: 2,
+            max_concurrent_workers: Some(2),
             ..Default::default()
         };
 
@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn test_group_semaphore_limits_concurrency() {
         let config = EngineConfiguration {
-            max_concurrent_workers: 10,
+            max_concurrent_workers: Some(10),
             concurrency_groups: HashMap::from([("limited".into(), 2)]),
             ..Default::default()
         };
@@ -210,7 +210,7 @@ mod tests {
     async fn test_permit_drop_releases_capacity() {
         let pool = Arc::new(WorkerPool::new(
             &EngineConfiguration {
-                max_concurrent_workers: 1,
+                max_concurrent_workers: Some(1),
                 ..Default::default()
             },
             test_metrics(),
@@ -230,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn test_both_limits_enforced() {
         let config = EngineConfiguration {
-            max_concurrent_workers: 3,
+            max_concurrent_workers: Some(3),
             concurrency_groups: HashMap::from([("group-a".into(), 2)]),
             ..Default::default()
         };
@@ -297,7 +297,7 @@ mod tests {
     #[tokio::test]
     async fn test_group_waiters_do_not_reserve_global_capacity() {
         let config = EngineConfiguration {
-            max_concurrent_workers: 2,
+            max_concurrent_workers: Some(2),
             concurrency_groups: HashMap::from([("group-a".into(), 1)]),
             ..Default::default()
         };
@@ -333,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn test_unknown_group_uses_global_only() {
         let config = EngineConfiguration {
-            max_concurrent_workers: 2,
+            max_concurrent_workers: Some(2),
             concurrency_groups: HashMap::from([("known".into(), 1)]),
             ..Default::default()
         };
@@ -356,7 +356,7 @@ mod tests {
     async fn test_permit_released_when_worker_panics() {
         let pool = Arc::new(WorkerPool::new(
             &EngineConfiguration {
-                max_concurrent_workers: 1,
+                max_concurrent_workers: Some(1),
                 ..Default::default()
             },
             test_metrics(),
