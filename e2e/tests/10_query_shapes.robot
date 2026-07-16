@@ -15,7 +15,7 @@ Neighbors Query Includes The Adjacent Issue
     [Documentation]    The project's neighbors must include the issue that is IN_PROJECT it.
     [Tags]    query-shapes
     ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}, "neighbors": {"node": "p", "direction": "both"}}
+    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"node": "p", "direction": "both"}}
     Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}
 
 Path Finding Connects The Issue To The Project
@@ -33,7 +33,7 @@ GOON Format Encodes The Neighbors Result
     ...                than failing on an upstream version gap.
     [Tags]    query-shapes
     ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}, "neighbors": {"node": "p", "direction": "both"}}
+    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"node": "p", "direction": "both"}}
     ${resp}=    Orbit Query LLM    ${query}
     IF    not $resp.text
         Log    GOON/llm body empty on the pinned GitLab+Workhorse stack; skipping content check.

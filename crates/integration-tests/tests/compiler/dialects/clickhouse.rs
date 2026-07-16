@@ -6,7 +6,7 @@ use compiler::{Node, QueryError, compile};
 fn compile_to_ast_works() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
         "limit": 10
     }"#;
 
@@ -51,12 +51,12 @@ fn traversal_query() {
 fn bool_filter_value_is_preserved() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "n",
             "entity": "Note",
             "columns": ["confidential"],
             "filters": { "confidential": true }
-        },
+        }],
         "limit": 5
     }"#;
 
@@ -341,7 +341,7 @@ fn path_finding_depth_control() {
 fn neighbors_query() {
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]},
+        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]}],
         "neighbors": {"node": "u", "direction": "both"}
     }"#;
 
@@ -370,7 +370,7 @@ fn neighbors_query() {
 fn filter_operators() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "columns": ["username", "state", "created_at"],
@@ -379,7 +379,7 @@ fn filter_operators() {
                 "state": {"op": "in", "value": ["active", "blocked"]},
                 "username": {"op": "contains", "value": "admin"}
             }
-        },
+        }],
         "limit": 30
     }"#;
 
@@ -662,11 +662,11 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {
+        "nodes": [{
             "id": "f",
             "entity": "File",
             "filters": {"path": {"op": "contains", "value": "labkit"}}
-        },
+        }],
         "neighbors": {"node": "f", "direction": "both"}
     }"#;
     let result = compile(json, &ontology, &test_ctx()).unwrap();
@@ -687,7 +687,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
 fn multi_table_neighbors_scans_all_tables() {
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1]},
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
         "neighbors": {"node": "p", "direction": "both"}
     }"#;
     let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();

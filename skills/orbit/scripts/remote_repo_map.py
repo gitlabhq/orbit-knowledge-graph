@@ -431,13 +431,13 @@ def cmd_class(args: argparse.Namespace) -> None:
     # Step 1: look up the class itself (traversal only returns member nodes, not the parent)
     lookup = _query({"query": {
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "d", "entity": "Definition",
             "filters": {**_base_filters(pid, branch),
                         filter_key: {"op": "eq", "value": filter_val},
                         "definition_type": {"op": "in", "value": TYPE_KINDS}},
             "columns": ["id", "fqn", "file_path", "start_line", "definition_type"],
-        },
+        }],
         "limit": 5,
     }})
     parents = _nodes(lookup, "Definition")
@@ -498,7 +498,7 @@ def cmd_api(args: argparse.Namespace) -> None:
 
     body = {"query": {
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "d", "entity": "Definition",
             "filters": {
                 **_base_filters(pid, branch),
@@ -506,7 +506,7 @@ def cmd_api(args: argparse.Namespace) -> None:
                 "definition_type": {"op": "in", "value": TYPE_KINDS + CALLABLE_KINDS},
             },
             "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
-        },
+        }],
         "limit": 100,
     }}
     result = _query(body)

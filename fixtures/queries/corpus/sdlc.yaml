@@ -11,13 +11,13 @@ q1:
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "u",
         "entity": "User",
         "filters": {
           "state": "active"
         }
-      },
+      }],
       "limit": 30,
       "order_by": "-u.created_at"
     }
@@ -258,7 +258,7 @@ q8:
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "pipe",
         "entity": "Pipeline",
         "filters": {
@@ -268,7 +268,7 @@ q8:
             "value": 60
           }
         }
-      },
+      }],
       "limit": 20,
       "order_by": "-pipe.duration"
     }
@@ -410,13 +410,13 @@ q13:
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "wi",
         "entity": "WorkItem",
         "filters": {
           "state": "opened"
         }
-      },
+      }],
       "limit": 30,
       "order_by": "wi.due_date"
     }
@@ -606,14 +606,14 @@ q19:
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "p",
         "entity": "Project",
         "filters": {
           "visibility_level": "public",
           "archived": false
         }
-      },
+      }],
       "limit": 20,
       "order_by": "-p.star_count"
     }
@@ -862,13 +862,13 @@ q26:
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "u",
         "entity": "User",
         "filters": {
           "state": "active"
         }
-      },
+      }],
       "limit": 20
     }
 
@@ -879,7 +879,7 @@ q27:
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "u",
         "entity": "User",
         "filters": {
@@ -892,7 +892,7 @@ q27:
             ]
           }
         }
-      },
+      }],
       "limit": 30,
       "order_by": "-u.created_at"
     }

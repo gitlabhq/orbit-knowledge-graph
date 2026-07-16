@@ -10,7 +10,7 @@ fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
 #[test]
 fn search_with_wildcard_excludes_virtual_columns_from_sql() {
     let compiled = compile_query(
-        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}], "limit": 5}"#,
     );
     let sql = &compiled.base.sql;
     assert!(
@@ -26,7 +26,7 @@ fn search_with_wildcard_excludes_virtual_columns_from_sql() {
 #[test]
 fn search_with_explicit_content_excludes_from_sql() {
     let compiled = compile_query(
-        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}], "limit": 5}"#,
     );
     let sql = &compiled.base.sql;
     assert!(
@@ -39,7 +39,7 @@ fn search_with_explicit_content_excludes_from_sql() {
 #[test]
 fn search_with_content_produces_hydration_plan() {
     let compiled = compile_query(
-        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}], "limit": 5}"#,
     );
     match &compiled.hydration {
         HydrationPlan::Static(templates) => {
@@ -73,7 +73,7 @@ fn search_with_content_produces_hydration_plan() {
 #[test]
 fn search_without_content_has_no_hydration_plan() {
     let compiled = compile_query(
-        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "path"]}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "path"]}], "limit": 5}"#,
     );
     assert!(
         matches!(&compiled.hydration, HydrationPlan::None),
@@ -245,7 +245,7 @@ fn merge_request_diff_virtual_column_hydration() {
     let compiled = compile_query(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["id", "title", "diff"]},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["id", "title", "diff"]}],
             "limit": 5
         }"#,
     );

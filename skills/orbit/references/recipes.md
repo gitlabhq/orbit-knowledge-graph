@@ -29,12 +29,12 @@ Query the `Project` entity by `full_path` and read back its `id`:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "columns": ["id", "full_path"],
       "filters": {"full_path": {"op": "eq", "value": "gitlab-org/orbit/knowledge-graph"}}
-    },
+    }],
     "limit": 1
   }
 }
@@ -71,14 +71,14 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "columns": ["full_path", "name", "visibility_level"],
       "filters": {
         "full_path": {"op": "contains", "value": "gitlab-org/cli"}
       }
-    },
+    }],
     "limit": 5
   }
 }
@@ -107,14 +107,14 @@ project-scoped `iid`); look it up first with the
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p", "entity": "Pipeline",
       "filters": {
         "merge_request_id": {"op": "eq", "value": 482908721},
         "source": {"op": "eq", "value": "merge_request_event"}
       },
       "columns": ["id", "status", "source", "sha", "ref", "created_at"]
-    },
+    }],
     "order_by": "-p.created_at",
     "limit": 100
   }
@@ -128,7 +128,7 @@ pipelines for this MR":
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p", "entity": "Pipeline",
       "filters": {
         "merge_request_id": {"op": "eq", "value": 482908721},
@@ -136,7 +136,7 @@ pipelines for this MR":
         "status": {"op": "eq", "value": "failed"}
       },
       "columns": ["id", "status", "sha", "ref", "failure_reason", "duration", "created_at"]
-    },
+    }],
     "order_by": "-p.created_at",
     "limit": 100
   }
@@ -344,11 +344,11 @@ Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
 {
   "query": {
     "query_type": "neighbors",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "filters": {"full_path": {"op": "eq", "value": "gitlab-org/cli"}}
-    },
+    }],
     "neighbors": {"node": "p", "direction": "outgoing"},
     "limit": 20
   }
@@ -454,7 +454,7 @@ only properties listed in the text-indexed properties table in
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "mr",
       "entity": "MergeRequest",
       "filters": {
@@ -462,7 +462,7 @@ only properties listed in the text-indexed properties table in
         "title": {"op": "all_tokens", "value": "database migration"}
       },
       "columns": ["iid", "title", "state"]
-    },
+    }],
     "order_by": "-mr.created_at",
     "limit": 10
   }
@@ -477,11 +477,11 @@ Add a `cursor` with a `page_size` (max 1000). The first page needs no token.
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
-    },
+    }],
     "cursor": {"page_size": 50}
   }
 }

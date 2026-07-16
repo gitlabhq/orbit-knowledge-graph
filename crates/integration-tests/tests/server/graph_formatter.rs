@@ -258,7 +258,7 @@ async fn search_exact_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state", "name"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state", "name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -306,7 +306,7 @@ async fn search_unicode_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -327,7 +327,7 @@ async fn search_redaction_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &svc,
@@ -355,7 +355,7 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &MockRedactionService::new(),
@@ -784,7 +784,7 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "outgoing"}
         }"#,
         &allow_all(),
@@ -846,7 +846,7 @@ async fn neighbors_incoming_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [101]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
             "neighbors": {"node": "g", "direction": "incoming"}
         }"#,
         &allow_all(),
@@ -890,7 +890,7 @@ async fn neighbors_both_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
             "neighbors": {"node": "g", "direction": "both"}
         }"#,
         &allow_all(),
@@ -956,7 +956,7 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "both"}
         }"#,
         &allow_all(),
@@ -979,7 +979,7 @@ async fn neighbors_both_direction_mixed_entity(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}],
             "neighbors": {"node": "mr", "direction": "both"}
         }"#,
         &allow_all(),
@@ -1026,7 +1026,7 @@ async fn neighbors_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "outgoing"}
         }"#,
         &svc,
@@ -1583,7 +1583,7 @@ async fn search_boolean_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"]},
+            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1622,7 +1622,7 @@ async fn search_datetime_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [9000]},
+            "nodes": [{"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [9000]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1654,7 +1654,7 @@ async fn search_nullable_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [3000]},
+            "nodes": [{"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [3000]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1682,7 +1682,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1737,7 +1737,7 @@ async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["AUTHORED"]}
         }"#,
         &allow_all(),
@@ -1782,7 +1782,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
@@ -1825,7 +1825,7 @@ async fn filter_in_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "in", "value": ["alice", "charlie"]}}},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "in", "value": ["alice", "charlie"]}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1850,7 +1850,7 @@ async fn filter_contains_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "contains", "value": "lic"}}},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "contains", "value": "lic"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1874,7 +1874,7 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "ali"}}},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "ali"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1894,7 +1894,7 @@ async fn filter_is_null_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"op": "is_null"}}},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"op": "is_null"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1922,7 +1922,7 @@ async fn search_node_ids_filtering(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [2, 4]},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [2, 4]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1950,7 +1950,7 @@ async fn search_with_order_by(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": "-u.username",
             "limit": 10
         }"#,
@@ -1974,7 +1974,7 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2203,7 +2203,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,
@@ -2231,7 +2231,7 @@ async fn pagination_present_without_cursor(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2252,7 +2252,7 @@ async fn pagination_truncates_without_cursor(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "limit": 3
         }"#,
         &allow_all(),
@@ -2271,7 +2271,7 @@ async fn pagination_truncates_without_cursor(ctx: &TestContext) {
 async fn pagination_last_page_has_more_false(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
         "order_by": "u.id",
         "cursor": {"page_size": 4}
     }"#;
@@ -2308,7 +2308,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,

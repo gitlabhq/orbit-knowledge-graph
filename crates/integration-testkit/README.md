@@ -207,8 +207,8 @@ resp.skip_requirement(Requirement::OrderBy);
 async fn search_filter_eq(ctx: &TestContext) {
     let resp = run_query(ctx, r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User",
-                 "filters": {"state": "blocked"}},
+        "nodes": [{"id": "u", "entity": "User",
+                 "filters": {"state": "blocked"}}],
         "order_by": "u.id",
         "limit": 10
     }"#, &allow_all()).await;
