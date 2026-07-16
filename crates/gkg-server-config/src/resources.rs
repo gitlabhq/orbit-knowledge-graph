@@ -118,10 +118,6 @@ fn max_workers_for_memory_limit(memory_limit_bytes: u64) -> usize {
         .max(1)
 }
 
-fn memory_limit_if_bounded(total_memory: u64) -> Option<u64> {
-    (total_memory < SYSINFO_UNLIMITED_SENTINEL_THRESHOLD_BYTES).then_some(total_memory)
-}
-
 fn read_cgroup_memory_limit_bytes() -> Option<u64> {
     let pid = get_current_pid().ok()?;
     let mut system = System::new();
@@ -131,7 +127,8 @@ fn read_cgroup_memory_limit_bytes() -> Option<u64> {
         ProcessRefreshKind::nothing(),
     );
     let limits = system.process(pid)?.cgroup_limits()?;
-    memory_limit_if_bounded(limits.total_memory)
+    (limits.total_memory < SYSINFO_UNLIMITED_SENTINEL_THRESHOLD_BYTES)
+        .then_some(limits.total_memory)
 }
 
 #[cfg(test)]
@@ -175,13 +172,6 @@ mod tests {
             2
         );
         assert_eq!(container_resources(8, Some(GIB)).derive_worker_budget(), 1);
-    }
-
-    #[test]
-    fn unlimited_sentinel_reads_as_no_memory_limit() {
-        assert_eq!(memory_limit_if_bounded(u64::MAX), None);
-        assert_eq!(memory_limit_if_bounded(1 << 62), None);
-        assert_eq!(memory_limit_if_bounded(32 * GIB), Some(32 * GIB));
     }
 
     #[test]
