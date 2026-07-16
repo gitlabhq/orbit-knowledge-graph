@@ -249,6 +249,23 @@ pub async fn run(
     result
 }
 
+async fn run_startup_schema_setup(
+    graph: &clickhouse_client::ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+) -> Result<(), DispatcherError> {
+    if schema::version::read_active_version(graph).await? == Some(*schema::version::SCHEMA_VERSION)
+    {
+        schema::migration::create_unversioned_tables(graph, ontology).await?;
+        schema::migration::replace_refreshable_views_for_version(
+            graph,
+            ontology,
+            *schema::version::SCHEMA_VERSION,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 pub async fn run_dispatcher(
     config: &DispatcherConfig,
     ontology: &ontology::Ontology,
@@ -308,16 +325,7 @@ pub async fn run_dispatcher(
         &campaign,
     )
     .await?;
-    if schema::version::read_active_version(&graph).await? == Some(*schema::version::SCHEMA_VERSION)
-    {
-        schema::migration::create_unversioned_tables(&graph, ontology).await?;
-        schema::migration::replace_refreshable_views_for_version(
-            &graph,
-            ontology,
-            *schema::version::SCHEMA_VERSION,
-        )
-        .await?;
-    }
+    run_startup_schema_setup(&graph, ontology).await?;
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let deletion_graph = Arc::new(config.graph.build_client());
@@ -443,5 +451,44 @@ pub async fn run_dispatcher(
                 ));
             Err(DispatcherError::Health(error))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn unreachable_graph() -> clickhouse_client::ArrowClickHouseClient {
+        clickhouse_client::ArrowClickHouseClient::new(
+            "http://127.0.0.1:1",
+            "gkg",
+            "gkg_writer",
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn startup_schema_setup_propagates_clickhouse_failure() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let graph = unreachable_graph();
+
+        assert!(run_startup_schema_setup(&graph, &ontology).await.is_err());
+        assert!(
+            schema::migration::create_unversioned_tables(&graph, &ontology)
+                .await
+                .is_err()
+        );
+        assert!(
+            schema::migration::replace_refreshable_views_for_version(
+                &graph,
+                &ontology,
+                *schema::version::SCHEMA_VERSION,
+            )
+            .await
+            .is_err()
+        );
     }
 }
