@@ -3,19 +3,9 @@
 # pipeline schedule with SCHEDULE_ONLY=e2e-pin-bump; rehearse once with
 # DRY_RUN=true on the schedule.
 e2e-pin-bump:
+  extends: .automation-bot
   stage: review
-  image: registry.gitlab.com/gitlab-org/cli:v1.102.0
-  tags:
-    - saas-linux-small-amd64
   needs: []
-  id_tokens:
-    VAULT_ID_TOKEN:
-      aud: https://vault.gitlab.net
-  secrets:
-    AUTOMATION_BOT_TOKEN:
-      file: false
-      vault: access_tokens/${VAULT_SECRETS_PATH}/automation-bot/token@ci
-      token: $VAULT_ID_TOKEN
   variables:
     DRY_RUN: "false"
   rules:
