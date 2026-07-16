@@ -1,14 +1,14 @@
 # Opens the argocd-apps MR bumping orbit-stg + orbit-prd to this tag, then
 # pings Slack (#f_orbit). Ordered after release-manifest so the image exists
 # before the bump can merge. Bot token (infra-mgmt!3039/!3040) can open MRs on
-# argocd/apps, never merge. Flip DRY_RUN to "false" after a good rehearsal.
+# argocd/apps, never merge. Rerun the tag pipeline with DRY_RUN=true to rehearse.
 release-deploy-mr:
   extends: .automation-bot
   stage: release
   needs:
     - release-manifest
   variables:
-    DRY_RUN: "true"
+    DRY_RUN: "false"
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
