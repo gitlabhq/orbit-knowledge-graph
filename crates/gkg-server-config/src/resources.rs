@@ -20,8 +20,7 @@ const CODE_INDEXING_LANE_SHARE_PERCENT: usize = 50;
 /// Reserve big-repo lanes so a flood of small repos can't starve monorepos (big 2 / small 6).
 const CODE_BIG_LANE_SHARE_PERCENT: usize = 25;
 
-/// sysinfo reports an unlimited or unreadable memory ceiling as a near-`u64::MAX` sentinel.
-const CGROUP_UNLIMITED_THRESHOLD_BYTES: u64 = 1 << 62;
+const SYSINFO_UNLIMITED_SENTINEL_THRESHOLD_BYTES: u64 = 1 << 62;
 
 pub struct CodeIndexingSlots {
     pub small_indexing_slots: usize,
@@ -120,7 +119,7 @@ fn max_workers_for_memory_limit(memory_limit_bytes: u64) -> usize {
 }
 
 fn memory_limit_if_bounded(total_memory: u64) -> Option<u64> {
-    (total_memory < CGROUP_UNLIMITED_THRESHOLD_BYTES).then_some(total_memory)
+    (total_memory < SYSINFO_UNLIMITED_SENTINEL_THRESHOLD_BYTES).then_some(total_memory)
 }
 
 fn read_cgroup_memory_limit_bytes() -> Option<u64> {
@@ -141,32 +140,41 @@ mod tests {
 
     const GIB: u64 = 1024 * 1024 * 1024;
 
-    fn resources(
+    fn container_resources(
         available_parallelism: usize,
-        memory_limit_gib: Option<u64>,
+        memory_limit_bytes: Option<u64>,
     ) -> ContainerResources {
         ContainerResources {
             available_parallelism,
-            memory_limit_bytes: memory_limit_gib.map(|gib| gib * GIB),
+            memory_limit_bytes,
         }
     }
 
     #[test]
     fn worker_budget_is_parallelism_without_a_memory_limit() {
-        assert_eq!(resources(20, None).derive_worker_budget(), 20);
-        assert_eq!(resources(0, None).derive_worker_budget(), 1);
+        assert_eq!(container_resources(20, None).derive_worker_budget(), 20);
+        assert_eq!(container_resources(0, None).derive_worker_budget(), 1);
     }
 
     #[test]
     fn worker_budget_reproduces_prod_pool_shapes() {
-        assert_eq!(resources(16, Some(24)).derive_worker_budget(), 16);
-        assert_eq!(resources(8, Some(32)).derive_worker_budget(), 8);
+        assert_eq!(
+            container_resources(16, Some(24 * GIB)).derive_worker_budget(),
+            16
+        );
+        assert_eq!(
+            container_resources(8, Some(32 * GIB)).derive_worker_budget(),
+            8
+        );
     }
 
     #[test]
     fn memory_limit_caps_the_worker_budget() {
-        assert_eq!(resources(8, Some(4)).derive_worker_budget(), 2);
-        assert_eq!(resources(8, Some(1)).derive_worker_budget(), 1);
+        assert_eq!(
+            container_resources(8, Some(4 * GIB)).derive_worker_budget(),
+            2
+        );
+        assert_eq!(container_resources(8, Some(GIB)).derive_worker_budget(), 1);
     }
 
     #[test]
@@ -206,7 +214,7 @@ mod tests {
     fn resolve_fills_workers_and_groups() {
         let mut cfg = EngineConfiguration::default();
 
-        cfg.resolve_runtime_defaults(&resources(20, None));
+        cfg.resolve_runtime_defaults(&container_resources(20, None));
 
         assert_eq!(cfg.max_concurrent_workers(), 20);
         assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&15));
@@ -217,7 +225,7 @@ mod tests {
     fn resolve_caps_workers_by_memory() {
         let mut cfg = EngineConfiguration::default();
 
-        cfg.resolve_runtime_defaults(&resources(16, Some(6)));
+        cfg.resolve_runtime_defaults(&container_resources(16, Some(6 * GIB)));
 
         assert_eq!(cfg.max_concurrent_workers(), 4);
         assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&3));
@@ -255,7 +263,7 @@ mod tests {
             ..EngineConfiguration::default()
         };
 
-        cfg.resolve_runtime_defaults(&resources(64, None));
+        cfg.resolve_runtime_defaults(&container_resources(64, None));
 
         assert_eq!(cfg.max_concurrent_workers(), 4);
         assert_eq!(
