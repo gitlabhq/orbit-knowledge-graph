@@ -77,7 +77,11 @@ if [[ "$DRY_RUN" == "true" ]]; then
   git -C "$workdir/apps" --no-pager diff >&2
   log "DRY_RUN: would open MR '${mr_title}' with description:"
   log "$mr_description"
-  log "DRY_RUN: would post the review request to Slack."
+  if [[ -n "${SLACK_WEBHOOK:-}" ]]; then
+    log "DRY_RUN: would post the review request to Slack (SLACK_WEBHOOK is set)."
+  else
+    log "DRY_RUN: SLACK_WEBHOOK is NOT visible to this pipeline; the live run would skip the notification."
+  fi
   exit 0
 fi
 
