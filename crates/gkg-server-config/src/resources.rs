@@ -116,9 +116,7 @@ fn max_workers_for_memory_limit(memory_limit_bytes: u64) -> usize {
         .max(1)
 }
 
-/// Effective memory ceiling for this process: the cgroup limit where one
-/// applies (containers; an unlimited cgroup resolves to the machine's RAM),
-/// otherwise total RAM (VMs, bare metal, macOS/Windows).
+/// The cgroup limit where one applies (containers), otherwise total RAM (VMs, bare metal, macOS/Windows).
 fn read_memory_ceiling_bytes() -> Option<u64> {
     let mut system = System::new();
     if let Ok(pid) = get_current_pid() {
