@@ -22,9 +22,9 @@ fn main() {
     let schema: Value = serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", schema_path.display()));
 
-    check_enum(
+    check_object_keys(
         &schema,
-        "/$defs/PropertyFilter/properties/op/enum",
+        "/$defs/OperatorFilter/properties",
         "FilterOp",
         EXPECTED_FILTER_OPS,
     );
@@ -85,7 +85,11 @@ fn main() {
     );
 
     check_array_branch_max_items(&schema, "/$defs/FilterValue/oneOf", MAX_IN_VALUES);
-    check_in_branch_max_items(&schema, MAX_IN_VALUES);
+    check_max_items(
+        &schema,
+        "/$defs/OperatorFilter/properties/in",
+        MAX_IN_VALUES,
+    );
 
     check_array_branch_max_items(
         &schema,
@@ -124,42 +128,32 @@ fn check_array_branch_max_items(schema: &Value, ptr: &str, expected: usize) {
     );
 }
 
-// Locates the `op == "in"` branch by its `if` condition, not index.
-fn check_in_branch_max_items(schema: &Value, expected: usize) {
-    let all_of = schema
-        .pointer("/$defs/PropertyFilter/allOf")
-        .and_then(Value::as_array)
-        .expect("graph_query.schema.json is missing `/$defs/PropertyFilter/allOf`");
-
-    let branch = all_of
-        .iter()
-        .find(|b| b.pointer("/if/properties/op/const").and_then(Value::as_str) == Some("in"))
-        .expect("PropertyFilter allOf has no `op == \"in\"` branch to guard");
-
-    let actual = branch
-        .pointer("/then/properties/value/maxItems")
-        .and_then(Value::as_u64)
-        .expect("PropertyFilter `in` branch is missing integer value maxItems");
-    assert_eq!(
-        actual, expected as u64,
-        "DRIFT: PropertyFilter `in`-branch value maxItems = {actual} but compiler cap = {expected}. \
-         Update either the schema or src/schema_limits.rs so they match."
-    );
-}
-
 fn check_enum(schema: &Value, ptr: &str, def: &str, expected: &[&str]) {
     let actual = schema
         .pointer(ptr)
         .and_then(Value::as_array)
         .unwrap_or_else(|| panic!("graph_query.schema.json is missing `{ptr}`"));
 
-    let mut actual: Vec<&str> = actual
+    let actual: Vec<&str> = actual
         .iter()
         .map(|v| {
             v.as_str()
                 .unwrap_or_else(|| panic!("`{ptr}` contains a non-string enum value: {v}"))
         })
         .collect();
+    assert_sorted_eq(ptr, def, actual, expected);
+}
+
+fn check_object_keys(schema: &Value, ptr: &str, def: &str, expected: &[&str]) {
+    let actual = schema
+        .pointer(ptr)
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("graph_query.schema.json is missing object `{ptr}`"));
+    let actual: Vec<&str> = actual.keys().map(String::as_str).collect();
+    assert_sorted_eq(ptr, def, actual, expected);
+}
+
+fn assert_sorted_eq(ptr: &str, def: &str, mut actual: Vec<&str>, expected: &[&str]) {
     let mut expected: Vec<&str> = expected.to_vec();
     actual.sort_unstable();
     expected.sort_unstable();

@@ -4,6 +4,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUM
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use strum::VariantNames;
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
@@ -481,40 +482,78 @@ where
     D: Deserializer<'de>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
-    Ok(raw
-        .into_iter()
-        .map(|(k, v)| (k, parse_filter_entry(v)))
-        .collect())
+    raw.into_iter()
+        .map(|(k, v)| match parse_filter_entry(v) {
+            Ok(filters) => Ok((k, filters)),
+            Err(e) => Err(serde::de::Error::custom(format!("filter on \"{k}\": {e}"))),
+        })
+        .collect()
 }
 
-/// Parse a filter entry that may be a single filter or an array of
-/// PropertyFilter objects (AND-combined, for expressing ranges).
-fn parse_filter_entry(value: Value) -> Vec<InputFilter> {
-    if let Value::Array(ref arr) = value
-        && !arr.is_empty()
-        && arr.iter().all(|v| v.is_object() && v.get("op").is_some())
-    {
-        return arr.iter().cloned().map(parse_single_filter).collect();
-    }
-    vec![parse_single_filter(value)]
-}
-
-fn parse_single_filter(value: Value) -> InputFilter {
-    if let Value::Object(ref obj) = value
-        && let Some(op_val) = obj.get("op")
-        && let Ok(op) = serde_json::from_value::<FilterOp>(op_val.clone())
-    {
-        return InputFilter {
-            op: Some(op),
-            value: obj.get("value").cloned(),
+/// Parse a filter entry: a bare value is an equality match, an operator
+/// object AND-combines its operator keys, and an array of operator objects
+/// AND-combines its entries (the form needed to repeat an operator).
+fn parse_filter_entry(value: Value) -> Result<Vec<InputFilter>, String> {
+    match value {
+        Value::Object(obj) => parse_operator_object(obj),
+        Value::Array(arr) if arr.iter().any(Value::is_object) => {
+            let mut filters = Vec::new();
+            for elem in arr {
+                let Value::Object(obj) = elem else {
+                    return Err(
+                        "an array of operator objects must not mix in bare values".to_string()
+                    );
+                };
+                filters.extend(parse_operator_object(obj)?);
+            }
+            Ok(filters)
+        }
+        other => Ok(vec![InputFilter {
+            op: None,
+            value: Some(other),
             ..Default::default()
-        };
+        }]),
     }
-    InputFilter {
-        op: None,
-        value: Some(value),
-        ..Default::default()
+}
+
+fn parse_operator_object(obj: serde_json::Map<String, Value>) -> Result<Vec<InputFilter>, String> {
+    if obj.is_empty() {
+        return Err(format!(
+            "operator object needs at least one operator (one of: {})",
+            FilterOp::VARIANTS.join(", ")
+        ));
     }
+    obj.into_iter()
+        .map(|(key, value)| {
+            let op: FilterOp =
+                serde_json::from_value(Value::String(key.clone())).map_err(|_| {
+                    format!(
+                        "unknown operator \"{key}\" (one of: {})",
+                        FilterOp::VARIANTS.join(", ")
+                    )
+                })?;
+            let (op, value) = match (op, value) {
+                (FilterOp::IsNull | FilterOp::IsNotNull, Value::Bool(apply)) => {
+                    let wants_null = (op == FilterOp::IsNull) == apply;
+                    let op = if wants_null {
+                        FilterOp::IsNull
+                    } else {
+                        FilterOp::IsNotNull
+                    };
+                    (op, None)
+                }
+                (FilterOp::IsNull | FilterOp::IsNotNull, _) => {
+                    return Err(format!("\"{key}\" takes a boolean value"));
+                }
+                (op, value) => (op, Some(value)),
+            };
+            Ok(InputFilter {
+                op: Some(op),
+                value,
+                ..Default::default()
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Deserialize)]
