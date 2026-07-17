@@ -742,6 +742,7 @@ mod tests {
                 group_by: vec![InputGroupByKey::Property {
                     node: "_u".into(),
                     property: property.into(),
+                    alias: None,
                     transform: None,
                 }],
                 metrics: vec![InputAggregationMetric {

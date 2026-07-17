@@ -160,13 +160,21 @@ fn gen_aggregation(driver: &mut impl Driver, node_id: &str) -> Option<Value> {
     agg.insert("function".into(), json!(func));
     agg.insert("target".into(), json!(node_id));
 
-    let has_group_by: bool = driver.produce()?;
-    if has_group_by {
-        agg.insert("group_by".into(), json!(node_id));
+    let has_property: bool = driver.produce()?;
+    if has_property {
         agg.insert("property".into(), json!("name"));
     }
 
     Some(Value::Object(agg))
+}
+
+fn gen_group_by_key(driver: &mut impl Driver, node_id: &str) -> Option<Value> {
+    let form: u8 = driver.produce()?;
+    Some(match form % 3 {
+        0 => json!(node_id),
+        1 => json!(format!("{node_id}.name")),
+        _ => json!({"key": format!("{node_id}.name"), "as": "bucket"}),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +224,14 @@ impl TypeGenerator for FuzzQuery {
                         })
                         .collect();
                     query.insert("aggregations".into(), json!(aggs));
+
+                    let has_group_by: bool = driver.produce()?;
+                    if has_group_by
+                        && let Some(group_node) = pick(driver, &node_ids)
+                        && let Some(key) = gen_group_by_key(driver, group_node)
+                    {
+                        query.insert("group_by".into(), json!([key]));
+                    }
                 }
             }
             "path_finding" => {

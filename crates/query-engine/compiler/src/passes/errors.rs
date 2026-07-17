@@ -55,7 +55,7 @@ fn format_group_by_hint(instance: &str, path: &str) -> String {
         "{instance} is not a valid group_by entry at {path}. \
          Expected shapes: by property [\"<node-id>.<property>\"], \
          by node [\"<node-id>\"], \
-         or truncated [{{\"<unit>\": \"<node-id>.<property>\"}}] (e.g. {{\"month\": \"mr.created_at\"}})",
+         or with options [{{\"key\": \"<node-id>.<property>\", \"truncate\": \"month\", \"as\": \"<name>\"}}]",
     )
 }
 

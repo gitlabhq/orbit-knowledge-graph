@@ -97,7 +97,7 @@ fn group_by_property_truncate_month_wraps_column() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"month": "u.created_at"}
+            {"key": "u.created_at", "truncate": "month"}
         ],
         "limit": 50
     }"#;
@@ -124,7 +124,7 @@ fn group_by_property_truncate_all_units_compile() {
                 ],
                 "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
                 "group_by": [
-                    {{"{unit}": "u.created_at"}}
+                    {{"key": "u.created_at", "truncate": "{unit}"}}
                 ],
                 "limit": 10
             }}"#
@@ -160,7 +160,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"minute": "u.created_at"}
+            {"key": "u.created_at", "truncate": "minute"}
         ],
         "limit": 10
     }"#;
@@ -181,7 +181,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"minute": "u.created_at"}
+            {"key": "u.created_at", "truncate": "minute"}
         ],
         "limit": 10
     }"#;
@@ -203,7 +203,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"hour": "u.created_at"}
+            {"key": "u.created_at", "truncate": "hour"}
         ],
         "limit": 50
     }"#;
@@ -225,7 +225,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"month": "u.confidential"}
+            {"key": "u.confidential", "truncate": "month"}
         ],
         "limit": 10
     }"#;
@@ -234,6 +234,48 @@ fn group_by_truncate_on_non_date_property_rejected() {
     assert!(
         msg.contains("requires a Date or DateTime property"),
         "expected data-type rejection; got: {msg}"
+    );
+}
+
+#[test]
+fn group_by_truncate_custom_alias_preserved() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "node_ids": [1]}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"key": "u.created_at", "truncate": "month", "as": "bucket"}
+        ],
+        "limit": 10
+    }"#;
+    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
+        "expected alias `bucket`; got:\n{rendered}"
+    );
+}
+
+#[test]
+fn group_by_aliased_node_key_preserved() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "node_ids": [1]}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"key": "u", "as": "note"}
+        ],
+        "limit": 10
+    }"#;
+    let result = compile(json, &test_ontology(), &test_ctx());
+    assert!(
+        result.is_ok(),
+        "aliased node group key should compile; got: {:?}",
+        result.err()
     );
 }
 

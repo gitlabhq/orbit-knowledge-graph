@@ -178,8 +178,7 @@ Match nodes and relationships, return matching entities.
 Group and aggregate results.
 
 Use top-level `group_by` to group aggregation rows. It applies to every
-aggregation in the query. A node group uses
-`{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}`.
+aggregation in the query. A node group is the node ID as a string: `"<node-id>"`.
 
 ```json orbit-query
 {
@@ -191,7 +190,7 @@ aggregation in the query. A node group uses
   "relationships": [
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
-  "group_by": [{"kind": "node", "node": "u"}],
+  "group_by": ["u"],
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "mr_count"}
   ],
@@ -200,16 +199,20 @@ aggregation in the query. A node group uses
 }
 ```
 
-Use top-level `group_by` entries with `kind: "property"` to group by scalar
-properties, such as dashboard buckets. Property groups use
-`{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}`.
-They must reference ClickHouse-backed, filterable properties allowed for the
-caller. Virtual fields and unfilterable fields are rejected during validation.
+Group by scalar properties, such as dashboard buckets, with
+`"<node-id>.<property>"` strings. They must reference ClickHouse-backed,
+filterable properties allowed for the caller. Virtual fields and unfilterable
+fields are rejected during validation.
 
-`group_by` supports up to four keys and can mix node and property groups. If
-`alias` is omitted, node groups use the node ID. Property groups use the property
-name when unique, or `<node>_<property>` when needed to avoid ambiguity.
-Duplicate group or aggregate output names are rejected.
+The object form `{"key": "<node-id>.<property>", "as": "<name>", "truncate": "<unit>"}`
+adds an output alias and/or date truncation (`minute` through `year`;
+`minute`/`hour` require `node_ids` or a filter on the truncated property).
+
+`group_by` supports up to four keys and can mix node and property groups. Node
+groups use the node ID as the output name. Property groups use the property
+name when unique, or `<node>_<property>` when needed to avoid ambiguity;
+truncated groups append `_<unit>`. Duplicate group or aggregate output names
+are rejected.
 
 ```json orbit-query
 {
@@ -218,7 +221,7 @@ Duplicate group or aggregate output names are rejected.
     {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
   ],
   "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+    "v.severity"
   ],
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vulnerability_count"}

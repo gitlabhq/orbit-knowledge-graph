@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v9",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v10",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -589,7 +589,7 @@
       }
     },
     "GroupByKey": {
-      "description": "Group key for aggregation rows. \"node\" groups by the node (entity object per bucket); \"node.property\" groups by the property (scalar per bucket). Object form truncates a Date/DateTime property before grouping.",
+      "description": "Group key for aggregation rows. \"node\" groups by the node (entity object per bucket); \"node.property\" groups by the property (scalar per bucket). Object form adds an alias and/or date truncation.",
       "oneOf": [
         {
           "type": "string",
@@ -598,17 +598,24 @@
         },
         {
           "type": "object",
-          "description": "Date truncation: {\"<unit>\": \"node.property\"} groups by the property truncated to the unit, e.g. {\"month\": \"mr.created_at\"}. minute/hour require node_ids or a filter on the property.",
-          "minProperties": 1,
-          "maxProperties": 1,
-          "propertyNames": {
-            "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
+          "description": "Group key with options, e.g. {\"key\": \"mr.created_at\", \"truncate\": \"month\", \"as\": \"merged_month\"}.",
+          "required": ["key"],
+          "properties": {
+            "key": {
+              "type": "string",
+              "pattern": "^(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})(\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63}))?$",
+              "description": "\"node\" or \"node.property\" reference."
+            },
+            "as": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Output column alias."
+            },
+            "truncate": {
+              "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"],
+              "description": "Truncate a Date/DateTime property before grouping; requires a \"node.property\" key. minute/hour require node_ids or a filter on the property."
+            }
           },
-          "additionalProperties": {
-            "type": "string",
-            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,63}\\.[a-zA-Z_][a-zA-Z0-9_]{0,63}$",
-            "description": "Property reference as \"node.property\"."
-          }
+          "additionalProperties": false
         }
       ]
     },

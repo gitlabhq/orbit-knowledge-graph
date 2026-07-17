@@ -55,6 +55,18 @@ pub(crate) fn aggregation_sort_regex() -> &'static regex::Regex {
     })
 }
 
+pub(crate) fn identifier_regex() -> &'static regex::Regex {
+    static IDENTIFIER_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    IDENTIFIER_REGEX.get_or_init(|| {
+        let schema: serde_json::Value =
+            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
+        let pattern = schema["$defs"]["Identifier"]["pattern"]
+            .as_str()
+            .expect("schema.json must define an Identifier pattern");
+        regex::Regex::new(pattern).expect("Identifier pattern must be a valid regex")
+    })
+}
+
 pub(crate) fn group_by_key_regex() -> &'static regex::Regex {
     static GROUP_BY_KEY_REGEX: OnceLock<regex::Regex> = OnceLock::new();
     GROUP_BY_KEY_REGEX.get_or_init(|| {

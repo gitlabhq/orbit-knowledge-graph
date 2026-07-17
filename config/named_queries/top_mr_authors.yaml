@@ -13,7 +13,7 @@ query:
   relationships:
     - { type: AUTHORED, from: u, to: mr }
   group_by:
-    - { kind: node, node: u }
+    - u
   aggregations:
     - { function: count, target: mr, alias: mr_count }
   aggregation_sort: "-mr_count"

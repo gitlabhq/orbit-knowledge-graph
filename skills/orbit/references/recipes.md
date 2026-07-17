@@ -158,7 +158,7 @@ underlying join shape and inflate the count):
          "source": {"eq": "merge_request_event"}
        }}
     ],
-    "group_by": [{"kind": "property", "node": "p", "property": "status", "alias": "status"}],
+    "group_by": ["p.status"],
     "aggregations": [{"function": "count", "target": "p", "alias": "pipeline_count"}],
     "aggregation_sort": "-pipeline_count",
     "limit": 20
@@ -370,7 +370,7 @@ Count open merge requests per project, highest first:
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
-    "group_by": [{"kind": "node", "node": "p"}],
+    "group_by": ["p"],
     "aggregations": [
       {"function": "count", "target": "mr", "alias": "open_mrs"}
     ],
@@ -390,7 +390,7 @@ Count detected vulnerabilities by severity:
       {"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}}
     ],
     "group_by": [
-      {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+      "v.severity"
     ],
     "aggregations": [
       {"function": "count", "target": "v", "alias": "vuln_count"}

@@ -230,7 +230,7 @@ Pass the query below as `invoke_command` with
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
-  "group_by": [{"kind": "node", "node": "p"}],
+  "group_by": ["p"],
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "open_mrs"}
   ],

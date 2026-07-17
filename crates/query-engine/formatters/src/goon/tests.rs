@@ -487,7 +487,7 @@ fn aggregation_descriptor_carries_target_dot_property_for_max_over_property() {
 
 #[test]
 fn property_group_with_alias_surfaces_underlying_property() {
-    // `{kind:property, node:v, property:severity, alias:severity_bucket}`
+    // `{key: "v.severity", as: "severity_bucket"}`
     // — without surfacing `severity` the reader sees `severity_bucket`
     // and can't tell which ontology property drives the dimension.
     let mut r = response("aggregation", vec![], vec![]);

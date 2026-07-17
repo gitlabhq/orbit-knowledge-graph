@@ -114,7 +114,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
             ],
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
             "group_by": [
-                {"kind": "property", "node": "n", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
+                {"key": "n.created_at", "truncate": "month", "as": "bucket"}
             ],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
             "aggregation_sort": "bucket",

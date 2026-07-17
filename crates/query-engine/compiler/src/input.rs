@@ -656,10 +656,12 @@ pub struct InputAggregationMetric {
 pub enum InputGroupByKey {
     Node {
         node: String,
+        alias: Option<String>,
     },
     Property {
         node: String,
         property: String,
+        alias: Option<String>,
         transform: Option<PropertyTransform>,
     },
 }
@@ -672,47 +674,64 @@ impl<'de> Deserialize<'de> for InputGroupByKey {
         match Value::deserialize(deserializer)? {
             Value::String(spec) => {
                 let (node, property) = parse_group_key_reference::<D>(&spec)?;
-                Ok(match property {
-                    None => Self::Node { node },
-                    Some(property) => Self::Property {
-                        node,
-                        property,
-                        transform: None,
-                    },
-                })
+                Ok(Self::from_parts(node, property, None, None))
             }
             Value::Object(map) => {
-                let mut entries = map.into_iter();
-                let (Some((unit_name, value)), None) = (entries.next(), entries.next()) else {
+                let mut key = None;
+                let mut alias = None;
+                let mut truncate = None;
+                for (field, value) in map {
+                    let slot = match field.as_str() {
+                        "key" => &mut key,
+                        "as" => &mut alias,
+                        "truncate" => &mut truncate,
+                        _ => {
+                            return Err(serde::de::Error::custom(format!(
+                                "unknown group_by field {field:?}; allowed fields: \"key\", \"as\", \"truncate\""
+                            )));
+                        }
+                    };
+                    let Value::String(s) = value else {
+                        return Err(serde::de::Error::custom(format!(
+                            "group_by field {field:?} takes a string"
+                        )));
+                    };
+                    *slot = Some(s);
+                }
+                let Some(key) = key else {
                     return Err(serde::de::Error::custom(
-                        "group_by truncation object must have exactly one {\"<unit>\": \"node.property\"} entry",
+                        "group_by object requires \"key\": \"node\" or \"node.property\"",
                     ));
                 };
-                let unit = TruncateUnit::from_name(&unit_name).ok_or_else(|| {
-                    serde::de::Error::custom(format!(
-                        "unknown group_by truncation unit {unit_name:?}; valid units: {}",
-                        TruncateUnit::ALL.map(TruncateUnit::name).join(", ")
-                    ))
-                })?;
-                let Value::String(spec) = value else {
+                let (node, property) = parse_group_key_reference::<D>(&key)?;
+                if let Some(alias) = &alias
+                    && !crate::passes::validate::identifier_regex().is_match(alias)
+                {
                     return Err(serde::de::Error::custom(format!(
-                        "group_by truncation {unit_name:?} takes a \"node.property\" string"
+                        "group_by \"as\" {alias:?} must be a valid identifier"
                     )));
-                };
-                let (node, property) = parse_group_key_reference::<D>(&spec)?;
-                let Some(property) = property else {
+                }
+                let transform = truncate
+                    .map(|unit_name| {
+                        TruncateUnit::from_name(&unit_name)
+                            .map(|unit| PropertyTransform::Truncate { unit })
+                            .ok_or_else(|| {
+                                serde::de::Error::custom(format!(
+                                    "unknown truncate unit {unit_name:?}; valid units: {}",
+                                    TruncateUnit::ALL.map(TruncateUnit::name).join(", ")
+                                ))
+                            })
+                    })
+                    .transpose()?;
+                if transform.is_some() && property.is_none() {
                     return Err(serde::de::Error::custom(format!(
-                        "group_by truncation {unit_name:?} requires a \"node.property\" reference, got {spec:?}"
+                        "group_by truncate requires \"key\" to be \"node.property\", got {key:?}"
                     )));
-                };
-                Ok(Self::Property {
-                    node,
-                    property,
-                    transform: Some(PropertyTransform::Truncate { unit }),
-                })
+                }
+                Ok(Self::from_parts(node, property, alias, transform))
             }
             _ => Err(serde::de::Error::custom(
-                "group_by entry must be \"node\", \"node.property\", or {\"<unit>\": \"node.property\"}",
+                "group_by entry must be \"node\", \"node.property\", or an object with \"key\" and optional \"as\"/\"truncate\"",
             )),
         }
     }
@@ -807,6 +826,23 @@ impl TruncateUnit {
 }
 
 impl InputGroupByKey {
+    fn from_parts(
+        node: String,
+        property: Option<String>,
+        alias: Option<String>,
+        transform: Option<PropertyTransform>,
+    ) -> Self {
+        match property {
+            None => Self::Node { node, alias },
+            Some(property) => Self::Property {
+                node,
+                property,
+                alias,
+                transform,
+            },
+        }
+    }
+
     pub fn node(&self) -> &str {
         match self {
             Self::Node { node, .. } | Self::Property { node, .. } => node,
@@ -834,12 +870,13 @@ impl InputGroupByKey {
 
     pub fn output_name(&self, is_unique_property: bool) -> String {
         match self {
-            Self::Node { node } => node.clone(),
+            Self::Node { node, alias } => alias.clone().unwrap_or_else(|| node.clone()),
             Self::Property {
                 node,
                 property,
+                alias,
                 transform,
-            } => {
+            } => alias.clone().unwrap_or_else(|| {
                 let base = if is_unique_property {
                     property.clone()
                 } else {
@@ -849,7 +886,7 @@ impl InputGroupByKey {
                     Some(t) => format!("{}_{}", base, t.output_suffix()),
                     None => base,
                 }
-            }
+            }),
         }
     }
 }
@@ -1421,6 +1458,72 @@ mod tests {
         assert_eq!(input.query_type, QueryType::Aggregation);
         assert_eq!(input.aggregation.metrics[0].function, AggFunction::Count);
         assert!(input.aggregation.sort.is_some());
+    }
+
+    fn group_by_key(json: &str) -> Result<InputGroupByKey, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    #[test]
+    fn group_by_string_forms_parse() {
+        assert_eq!(
+            group_by_key(r#""u""#).unwrap(),
+            InputGroupByKey::Node {
+                node: "u".into(),
+                alias: None
+            }
+        );
+        assert_eq!(
+            group_by_key(r#""mr.state""#).unwrap(),
+            InputGroupByKey::Property {
+                node: "mr".into(),
+                property: "state".into(),
+                alias: None,
+                transform: None
+            }
+        );
+    }
+
+    #[test]
+    fn group_by_object_form_parses_key_as_truncate() {
+        assert_eq!(
+            group_by_key(r#"{"key": "p", "as": "project"}"#).unwrap(),
+            InputGroupByKey::Node {
+                node: "p".into(),
+                alias: Some("project".into())
+            }
+        );
+        assert_eq!(
+            group_by_key(r#"{"key": "mr.created_at", "truncate": "month", "as": "bucket"}"#)
+                .unwrap(),
+            InputGroupByKey::Property {
+                node: "mr".into(),
+                property: "created_at".into(),
+                alias: Some("bucket".into()),
+                transform: Some(PropertyTransform::Truncate {
+                    unit: TruncateUnit::Month
+                })
+            }
+        );
+    }
+
+    #[test]
+    fn group_by_rejections_name_the_problem() {
+        for (json, needle) in [
+            (r#""a.b.c""#, "must be \"node\" or \"node.property\""),
+            (r#"{"as": "x"}"#, "requires \"key\""),
+            (r#"{"key": "u", "truncate": "month"}"#, "node.property"),
+            (
+                r#"{"key": "u.created_at", "truncate": "fortnight"}"#,
+                "valid units",
+            ),
+            (r#"{"key": "u", "kind": "node"}"#, "allowed fields"),
+            (r#"{"key": "u", "as": "bad name"}"#, "valid identifier"),
+            (r#"42"#, "group_by entry must be"),
+        ] {
+            let err = group_by_key(json).unwrap_err().to_string();
+            assert!(err.contains(needle), "for {json}: got {err:?}");
+        }
     }
 
     #[test]
