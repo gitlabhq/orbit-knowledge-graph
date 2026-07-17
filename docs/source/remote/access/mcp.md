@@ -215,7 +215,7 @@ The agent composes the JSON query DSL and invokes the `query_graph` command on y
 behalf. You can also pass raw JSON queries directly if you want precise control over
 results.
 
-## Example: manual query_graph call
+## Example: manual invoke_command call for query_graph
 
 Pass the query below as `invoke_command` with
 `{"command_name": "query_graph", "parameters": {"query": ...}}`:
