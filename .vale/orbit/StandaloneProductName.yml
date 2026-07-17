@@ -1,7 +1,9 @@
 ---
+name: orbit.StandaloneProductName
+description: Requires the full GitLab Orbit product name in public documentation.
 extends: existence
 message: "Use 'GitLab Orbit' instead of standalone 'Orbit'."
 level: error
 scope: text
 raw:
-  - '(?<!GitLab )\bOrbit\b(?! > Configuration)'
+  - '(?<!GitLab )\bOrbit\b(?!\s*>)'
