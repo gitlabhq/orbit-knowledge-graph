@@ -38,6 +38,7 @@ pub struct ClickHouseExtract {
     pub deleted: String,
     pub query: ExtractQuery,
     pub lookups: Vec<ClickHouseExtractLookup>,
+    pub partition_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

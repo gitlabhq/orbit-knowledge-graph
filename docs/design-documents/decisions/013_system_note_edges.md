@@ -182,9 +182,9 @@ The handler reads its mode from config; production deployment uses Mode A.
 
 ### Compatibility with entity-level SDLC indexing (ADR 014)
 
-ADR 014 replaced the former `GlobalHandler` + `NamespaceHandler` split with one `EntityHandler` per ontology entity type. Each handler subscribes to the shared global or namespace NATS topic and processes a single entity kind per message. Partitioning for initial loads is configured per entity via `partition_overrides`.
+ADR 014 replaced the former `GlobalHandler` + `NamespaceHandler` split with one `EntityHandler` per ontology entity type. Each handler subscribes to the shared global or namespace NATS topic and processes a single entity kind per message. Partitioning for initial loads is declared per pipeline via `extract.partition_count` in the ontology node YAML.
 
-ADR 013's system-notes pipeline is fully compatible with this model: it registers as a namespaced `EntityHandler` via `Plan`, reuses the standard checkpoint key format (`ns.{id}.SystemNote`), and can opt into partitioning later via `partition_overrides.SystemNote: N`.
+ADR 013's system-notes pipeline is fully compatible with this model: it registers as a namespaced `EntityHandler` via `Plan`, reuses the standard checkpoint key format (`ns.{id}.SystemNote`), and can opt into partitioning later via `extract.partition_count: N` on its pipeline.
 
 ### Action-coverage drift mitigation
 
@@ -226,7 +226,7 @@ Three-layer defence:
       entity-handler:
         batch_size_overrides:
           SystemNote: 100000     # ~13s of resolver budget per pass on local GDK
-        # No partition_overrides for v1; see "Out of scope".
+        # No extract.partition_count for v1; see "Out of scope".
     ```
 
     `HandlersConfiguration` uses `deny_unknown_fields` (`crates/gkg-server-config/src/engine.rs`), so the SystemNote-specific knobs must fit inside `entity-handler.batch_size_overrides` (the map key is the entity kind) rather than introducing a new top-level config block. Toggling between staging-on and staging-off is a config push, no code change.
@@ -352,7 +352,7 @@ Neither is needed for v1: the measured 3-query plan resolves in 8 ms at batch=1,
 
 ## Out of scope
 
-- **Intra-batch parallelism (rayon / per-row parallel parse).** Not pursued in v1: pure-CPU parse is ~4 s for the full 6.7M `gitlab-org` corpus at 1.74M notes/sec/core — it is not the bottleneck. Horizontal partitioning via ADR 014's `partition_overrides.SystemNote: N` is the lever once we outgrow a single worker.
+- **Intra-batch parallelism (rayon / per-row parallel parse).** Not pursued in v1: pure-CPU parse is ~4 s for the full 6.7M `gitlab-org` corpus at 1.74M notes/sec/core — it is not the bottleneck. Horizontal partitioning via ADR 014's `extract.partition_count: N` on the pipeline is the lever once we outgrow a single worker.
 - **`@`-mention edges** (`*_user_mentions` tables). Separate effort, separate Siphon prerequisite.
 - **Resource state / label / milestone events.** Tracked under #482 with dedicated `resource_*_events` Siphon replication.
 - **Banzai HTML rendering.** The parser only extracts GFM references from plain text; `lib/banzai/reference_parser/*_parser.rb` (HTML-AST-based) is explicitly *not* what we port.
@@ -361,7 +361,7 @@ Neither is needed for v1: the measured 3-query plan resolves in 8 ms at batch=1,
 - **`@-link_type` property on `MENTIONS` to distinguish `relate` vs. `moved` vs. `duplicate`.** Open design question for review feedback; default proposal is yes, using the existing `link_type` enum pattern from `related_to.yaml`. To be settled in the implementation MR, not the ADR.
 - **Partitioning of the system-notes ETL across workers.**
   v1 ships with `partition = None` on the `EntityIndexingRequest` because the POC measured ~125k notes/sec end-to-end on a single core, giving ~54 s per `gitlab-org`-scale pass — well inside the per-message budget.
-  Partitioning is available later through ADR 014's dispatcher-owned `PartitionAssignment` machinery: setting `handlers.entity-handler.partition_overrides.SystemNote: N` makes the dispatcher compute quantile boundaries and publish N messages, each carrying a `PartitionAssignment` whose `Range { lower_bound, upper_bound }` the pipeline applies as a SQL `WHERE` conjunct.
+  Partitioning is available later through ADR 014's dispatcher-owned `PartitionAssignment` machinery: declaring `extract.partition_count: N` on the SystemNote pipeline makes the dispatcher compute quantile boundaries and publish N messages, each carrying a `PartitionAssignment` whose `Range { lower_bound, upper_bound }` the pipeline applies as a SQL `WHERE` conjunct.
   The default partition column derivation in ADR 014 picks the *first non-scope column* of the source `order_by`; for `siphon_notes` that is `noteable_type` (low-cardinality, ~10 enum values), so when partitioning is enabled the implementation will need either a per-entity `partition_column` override or a custom `PartitionStrategy` registered for `SystemNote`.
   The natural partition column is `siphon_system_note_metadata.note_id` (high cardinality, primary key).
   Listed here so a future contributor does not re-derive that we already considered it.

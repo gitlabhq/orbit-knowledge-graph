@@ -70,8 +70,6 @@ engine:
       system_notes_resolve_lookup_batch_size: 1000
       batch_size_overrides:
         WorkItem: 50000
-      partition_overrides:
-        Job: 5
     code-indexing-task:
       pipeline:
         max_file_size_bytes: 5000000

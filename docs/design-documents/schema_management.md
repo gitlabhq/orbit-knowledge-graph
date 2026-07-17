@@ -49,6 +49,9 @@ ClickHouse, not just table structure:
 
 Changes that do **not** require a bump: ontology description updates, comments, formatting,
 documentation-only fields, or query-side-only changes (new filter operators, new query types).
+Runtime-only pipeline knobs are also version-neutral: `extract.partition_count` (initial-load
+parallelism) is stripped from the source fingerprint (`remove_runtime_extract_fields`), since it
+changes neither the stored data nor the DDL.
 
 ### `gkg_schema_version` control table
 

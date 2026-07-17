@@ -242,6 +242,17 @@ impl Ontology {
     }
 
     #[must_use]
+    pub fn with_partition_count(mut self, node: &str, count: u32) -> Self {
+        if let Some(node) = self.nodes.get_mut(node) {
+            for pipeline in &mut node.pipelines {
+                let Extract::ClickHouse(extract) = &mut pipeline.extract;
+                extract.partition_count = Some(count);
+            }
+        }
+        self
+    }
+
+    #[must_use]
     pub fn with_path_scopable_nodes(
         mut self,
         names: impl IntoIterator<Item = impl Into<String>>,

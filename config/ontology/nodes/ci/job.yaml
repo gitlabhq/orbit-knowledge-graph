@@ -288,6 +288,7 @@ pipelines:
       tables: [siphon_p_ci_builds]
       order_by: [traversal_path, id, partition_id]
       query: generated
+      partition_count: 5
     transform:
       type: datafusion
       edges:

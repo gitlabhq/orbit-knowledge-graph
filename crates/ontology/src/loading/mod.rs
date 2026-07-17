@@ -1310,6 +1310,7 @@ mod tests {
                     deleted: "d".to_string(),
                     query: crate::etl::ExtractQuery::Generated { filter: None },
                     lookups: vec![],
+                    partition_count: None,
                 }),
                 transform: Transform::Rust("system_notes".to_string()),
             }],
@@ -1396,6 +1397,7 @@ mod tests {
                 deleted: "d".to_string(),
                 query: crate::etl::ExtractQuery::Generated { filter: None },
                 lookups: vec![],
+                partition_count: None,
             }),
             transform: Transform::DataFusion { edges },
         }

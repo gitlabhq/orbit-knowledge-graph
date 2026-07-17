@@ -199,7 +199,8 @@ engine:
 |-------------|---------|-------------|
 | `engine.handlers.entity-handler.datalake_batch_size` | derived | Rows per datalake extraction query (see [Resource-derived defaults](#resource-derived-defaults)) |
 | `engine.handlers.entity-handler.batch_size_overrides.<Entity>` | None | Per-entity override for datalake batch size |
-| `engine.handlers.entity-handler.partition_overrides.<Entity>` | None | Number of partitions for initial load parallelism |
+
+Initial-load partition parallelism is no longer configured here; a pipeline declares `extract.partition_count` in its ontology node YAML (e.g. `config/ontology/nodes/ci/job.yaml`).
 
 #### Code indexing task handler
 
