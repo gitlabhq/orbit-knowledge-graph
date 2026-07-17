@@ -37,7 +37,7 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,
@@ -54,7 +54,7 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
 pub(super) async fn cursor_follows_next_cursor_to_exhaustion(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
         "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
@@ -96,7 +96,7 @@ pub(super) async fn cursor_follows_next_cursor_to_exhaustion(ctx: &TestContext) 
 pub(super) async fn cursor_with_filter(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "state"],
                  "filters": {"state": "active"}}],
         "order_by": "u.id",
         "cursor": {"page_size": 2}
@@ -121,7 +121,7 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
         "order_by": "u.id",
         "cursor": {"page_size": 2}
     }"#;
@@ -163,7 +163,7 @@ pub(super) async fn cursor_pages_across_null_sort_keys(ctx: &TestContext) {
         let json = format!(
             r#"{{
             "query_type": "traversal",
-            "nodes": [{{"id": "mr", "entity": "MergeRequest", "id_range": {{"start": 1, "end": 10000}}, "columns": ["title"]}}],
+            "nodes": [{{"id": "mr", "entity": "MergeRequest", "filters": {{"id": {{"gte": 1, "lte": 10000}}}}, "columns": ["title"]}}],
             "order_by": "{direction}",
             "cursor": {{"page_size": 2}}
         }}"#
@@ -270,7 +270,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -293,7 +293,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
             {"id": "g", "entity": "Group"}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -330,7 +330,7 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
     // No order_by: the cursor synthesizes PK tie-breakers, so pages are stable.
     let query = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
         "cursor": {"page_size": 3}
     }"#;
 
@@ -351,7 +351,7 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
 pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
         "cursor": {"page_size": 2}
     }"#;
 
@@ -383,7 +383,7 @@ pub(super) async fn cursor_traversal_without_order_by_is_deterministic(ctx: &Tes
     let query = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
             {"id": "g", "entity": "Group"}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -414,7 +414,7 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
     let query = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["id", "username"]},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["id", "username"]},
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -449,7 +449,7 @@ pub(super) async fn cursor_aggregation_pages_cover_all_groups(ctx: &TestContext)
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["id", "username"]},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["id", "username"]},
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -588,9 +588,9 @@ pub(super) async fn cursor_traversal_three_hop_pages_cover_all_edges(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "g", "entity": "Group"},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -620,9 +620,9 @@ pub(super) async fn cursor_traversal_three_hop_pages_cover_all_edges(ctx: &TestC
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
             {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
         ],
         "relationships": [
             {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -666,10 +666,10 @@ pub(super) async fn cursor_traversal_four_hop_pages_cover_all_edges(ctx: &TestCo
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "wi", "entity": "WorkItem"},
                 {"id": "g", "entity": "Group"},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "wi"},
@@ -699,10 +699,10 @@ pub(super) async fn cursor_traversal_four_hop_pages_cover_all_edges(ctx: &TestCo
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
             {"id": "wi", "entity": "WorkItem"},
             {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
         ],
         "relationships": [
             {"type": "AUTHORED", "from": "u", "to": "wi"},
@@ -749,7 +749,7 @@ pub(super) async fn cursor_traversal_with_filters_desc_pages_return_exact_matche
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
             {"id": "wi", "entity": "WorkItem", "columns": ["work_item_type", "weight"],
              "filters": {"work_item_type": {"in": ["issue", "task", "epic"]},
                          "weight": {"gte": 3}}}
@@ -808,7 +808,7 @@ pub(super) async fn cursor_traversal_cross_namespace_pages_cover_scoped_edges(ct
         "query_type": "traversal",
         "nodes": [
             {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
         ],
         "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
         "limit": 100
@@ -817,7 +817,7 @@ pub(super) async fn cursor_traversal_cross_namespace_pages_cover_scoped_edges(ct
         "query_type": "traversal",
         "nodes": [
             {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
         ],
         "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
         "cursor": {"page_size": 1}
@@ -875,9 +875,9 @@ pub(super) async fn cursor_aggregation_multi_hop_desc_seek_covers_all_groups(ctx
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["id", "username"]},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["id", "username"]},
             {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
         ],
         "relationships": [
             {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -940,9 +940,9 @@ pub(super) async fn cursor_traversal_multi_hop_with_redaction_covers_authorized_
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "g", "entity": "Group"},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -975,9 +975,9 @@ pub(super) async fn cursor_traversal_multi_hop_with_redaction_covers_authorized_
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
             {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
         ],
         "relationships": [
             {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -1016,7 +1016,7 @@ pub(super) async fn cursor_traversal_multi_hop_with_redaction_covers_authorized_
 pub(super) async fn cursor_after_token_with_sql_metacharacters_is_parameterized(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
         "order_by": "-u.username",
         "cursor": {"page_size": 2}
     }"#;
@@ -1042,7 +1042,7 @@ pub(super) async fn cursor_after_token_with_sql_metacharacters_is_parameterized(
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}]
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}]
         }"#,
         &allow_all(),
     )

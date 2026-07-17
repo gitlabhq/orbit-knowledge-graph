@@ -6,7 +6,7 @@ pub(super) async fn aggregation_count_returns_correct_values(ctx: &TestContext) 
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -32,7 +32,7 @@ pub(super) async fn aggregation_wildcard_user_to_mr_counts_inferred_edges(ctx: &
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "*", "from": "u", "to": "mr"}],
@@ -58,7 +58,7 @@ pub(super) async fn aggregation_count_group_contains_projects(ctx: &TestContext)
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
@@ -84,7 +84,7 @@ pub(super) async fn aggregation_sort_orders_by_aggregate_value(ctx: &TestContext
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -176,7 +176,7 @@ pub(super) async fn aggregation_sum_produces_correct_totals(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -203,7 +203,7 @@ pub(super) async fn aggregation_redaction_excludes_unauthorized_from_counts(ctx:
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -228,7 +228,7 @@ pub(super) async fn aggregation_avg_produces_correct_values(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -254,7 +254,7 @@ pub(super) async fn aggregation_min_max_produce_correct_values(ctx: &TestContext
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -286,7 +286,7 @@ pub(super) async fn aggregation_min_on_string_column(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -312,7 +312,7 @@ pub(super) async fn aggregation_multiple_functions_in_one_query(ctx: &TestContex
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -349,7 +349,7 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -376,7 +376,7 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
@@ -403,7 +403,7 @@ pub(super) async fn aggregation_path_multiple_groups(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -432,7 +432,7 @@ pub(super) async fn aggregation_sum_with_restricted_path(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -461,7 +461,7 @@ pub(super) async fn aggregation_nested_path_includes_child_projects(ctx: &TestCo
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
@@ -486,7 +486,7 @@ pub(super) async fn aggregation_no_group_by_with_filtered_other_node(ctx: &TestC
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "u", "entity": "User", "node_ids": [1]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -512,7 +512,7 @@ pub(super) async fn aggregation_no_group_by_preserves_relationship_kind(ctx: &Te
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -535,7 +535,7 @@ pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -566,7 +566,7 @@ pub(super) async fn aggregation_group_by_non_default_redaction_id_column(ctx: &T
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
             ],
             "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
@@ -600,7 +600,7 @@ pub(super) async fn aggregation_three_node_with_cascade_intermediate(ctx: &TestC
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest"},
-                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}}
+                {"id": "n", "entity": "Note", "filters": {"id": {"gte": 1, "lte": 10000}}}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
@@ -642,7 +642,7 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -674,7 +674,7 @@ pub(super) async fn aggregation_no_alias_defaults_to_function_name(ctx: &TestCon
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -698,7 +698,7 @@ pub(super) async fn aggregation_no_alias_sum_defaults_to_function_name(ctx: &Tes
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],

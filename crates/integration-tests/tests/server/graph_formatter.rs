@@ -258,7 +258,7 @@ async fn search_exact_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state", "name"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "state", "name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -306,7 +306,7 @@ async fn search_unicode_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -327,7 +327,7 @@ async fn search_redaction_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &svc,
@@ -355,7 +355,7 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &MockRedactionService::new(),
@@ -371,7 +371,7 @@ async fn traversal_single_hop_exact(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -460,7 +460,7 @@ async fn traversal_redaction_removes_unauthorized_paths(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -498,7 +498,7 @@ async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -564,7 +564,7 @@ async fn aggregation_count_exact(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -626,7 +626,7 @@ async fn aggregation_redaction(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1114,7 +1114,7 @@ async fn aggregation_sum(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1162,7 +1162,7 @@ async fn aggregation_avg(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1203,7 +1203,7 @@ async fn aggregation_min_max(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1236,7 +1236,7 @@ async fn aggregation_min_string(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1267,7 +1267,7 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1324,7 +1324,7 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+            "nodes": [{"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}}],
             "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
             "limit": 10
         }"#,
@@ -1357,7 +1357,7 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+            "nodes": [{"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}}],
             "aggregations": [
                 {"function": "count", "target": "g", "alias": "total"},
                 {"function": "min", "target": "g", "property": "id", "alias": "min_id"},
@@ -1393,7 +1393,7 @@ async fn grouped_aggregation_uses_node_group_rows(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1434,7 +1434,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+            "nodes": [{"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}}],
             "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
             "limit": 10
         }"#,
@@ -1458,7 +1458,7 @@ async fn traversal_incoming_direction(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
@@ -1498,7 +1498,7 @@ async fn traversal_both_direction(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g1", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g1", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "g2", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "g1", "to": "g2", "direction": "both"}],
@@ -1540,9 +1540,9 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "n", "entity": "Note", "columns": ["note"]},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "n"},
@@ -1583,7 +1583,7 @@ async fn search_boolean_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"]}],
+            "nodes": [{"id": "n", "entity": "Note", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["note", "confidential", "internal"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1950,7 +1950,7 @@ async fn search_with_order_by(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "order_by": "-u.username",
             "limit": 10
         }"#,
@@ -1994,7 +1994,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
@@ -2037,7 +2037,7 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
@@ -2077,7 +2077,7 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
@@ -2115,9 +2115,9 @@ async fn traversal_chain_user_group_project(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -2161,9 +2161,9 @@ async fn traversal_chain_user_mr_note(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]},
-                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note"]}
+                {"id": "n", "entity": "Note", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["note"]}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
@@ -2203,7 +2203,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,
@@ -2231,7 +2231,7 @@ async fn pagination_present_without_cursor(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2252,7 +2252,7 @@ async fn pagination_truncates_without_cursor(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "limit": 3
         }"#,
         &allow_all(),
@@ -2271,7 +2271,7 @@ async fn pagination_truncates_without_cursor(ctx: &TestContext) {
 async fn pagination_last_page_has_more_false(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
         "order_by": "u.id",
         "cursor": {"page_size": 4}
     }"#;
@@ -2308,7 +2308,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "order_by": "u.id",
             "cursor": {"page_size": 2}
         }"#,
@@ -2344,7 +2344,7 @@ async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -2378,7 +2378,7 @@ async fn no_alias_ungrouped_count_uses_function_name(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+            "nodes": [{"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}}],
             "aggregations": [{"function": "count", "target": "g"}],
             "limit": 10
         }"#,
@@ -2403,7 +2403,7 @@ async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -2438,7 +2438,7 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],

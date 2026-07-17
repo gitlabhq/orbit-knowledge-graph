@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v9",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v10",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -308,7 +308,7 @@
         },
         "node_ids": {
           "type": "array",
-          "description": "Specific node IDs to filter by. Accepts integers or digit strings.",
+          "description": "Specific node IDs to pin this node to. Accepts integers or digit strings. Equivalent to an eq/in filter on id.",
           "items": {
             "oneOf": [
               { "type": "integer" },
@@ -317,15 +317,6 @@
           },
           "minItems": 1,
           "maxItems": 500
-        },
-        "id_range": {
-          "$ref": "#/$defs/IdRange",
-          "description": "ID range filter (inclusive)"
-        },
-        "id_property": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Which property to use as ID (default: 'id')",
-          "default": "id"
         }
       },
       "additionalProperties": false
@@ -347,28 +338,6 @@
           "maxItems": 50
         }
       ]
-    },
-    "IdRange": {
-      "type": "object",
-      "description": "Inclusive ID range filter. Endpoints accept integers or digit strings.",
-      "required": ["start", "end"],
-      "properties": {
-        "start": {
-          "description": "Start of ID range (inclusive)",
-          "oneOf": [
-            { "type": "integer" },
-            { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
-          ]
-        },
-        "end": {
-          "description": "End of ID range (inclusive)",
-          "oneOf": [
-            { "type": "integer" },
-            { "type": "string", "pattern": "^-?[0-9]+$", "maxLength": 20 }
-          ]
-        }
-      },
-      "additionalProperties": false
     },
     "FilterEntry": {
       "description": "Filter(s) on a single property. A bare value is an equality match; an operator object AND-combines its operator keys; an array of operator objects AND-combines entries (only needed to repeat an operator).",
@@ -683,7 +652,7 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Relationship types to traverse. Required when an endpoint uses filters or id_range (not node_ids) to constrain the frontier. Optional when both endpoints use node_ids.",
+          "description": "Relationship types to traverse. Required when an endpoint is narrowed by non-id filters. Optional when both endpoints pin IDs (node_ids or an eq/in filter on id).",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },

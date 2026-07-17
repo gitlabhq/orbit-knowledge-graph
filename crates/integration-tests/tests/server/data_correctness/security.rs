@@ -6,7 +6,7 @@ pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestConte
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -26,7 +26,7 @@ pub(super) async fn search_scoped_to_single_project_namespace(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -43,7 +43,7 @@ pub(super) async fn search_multi_path_returns_union_of_scopes(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -62,7 +62,7 @@ pub(super) async fn search_scoped_mr_excludes_other_namespaces(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}],
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["title"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -81,7 +81,7 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name", "visibility_level"],
                      "filters": {"visibility_level": "public"}}],
             "limit": 10
         }"#,
@@ -106,7 +106,7 @@ pub(super) async fn search_traversal_path_filter_returns_matching_descendants(ct
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["name", "traversal_path"],
                      "filters": {"traversal_path": {"starts_with": "1/100/200/"}}}],
             "limit": 10
@@ -319,7 +319,7 @@ pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestCon
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"],
                      "filters": {"is_admin": true}}],
             "limit": 10
         }"#,
@@ -341,7 +341,7 @@ pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestC
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "order_by": "-u.is_admin",
             "limit": 10
         }"#,
@@ -364,7 +364,7 @@ pub(super) async fn admin_only_non_admin_max_aggregation_rejects_at_compile(ctx:
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -398,7 +398,7 @@ pub(super) async fn admin_only_non_admin_count_aggregation_on_auditor_rejects_at
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -458,7 +458,7 @@ pub(super) async fn admin_only_non_admin_explicit_columns_silently_stripped(ctx:
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["username", "is_admin", "is_auditor"],
                      "node_ids": [1]}],
             "limit": 10
@@ -487,7 +487,7 @@ pub(super) async fn admin_only_admin_filter_compiles(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "is_admin"],
                      "filters": {"is_admin": false}, "node_ids": [1]}],
             "limit": 10
         }"#,
@@ -516,7 +516,7 @@ pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
     compile(
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "is_admin"]}],
             "order_by": "-u.is_admin",
             "limit": 10
         }"#,
@@ -533,7 +533,7 @@ pub(super) async fn admin_only_admin_aggregation_compiles(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -747,7 +747,7 @@ pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}],
             "limit": 50
         }"#,
         &allow_all(),
@@ -791,7 +791,7 @@ pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) 
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -819,7 +819,7 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}],
             "limit": 50
         }"#,
         &svc,
@@ -847,7 +847,7 @@ pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestCon
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -892,7 +892,7 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -949,7 +949,7 @@ pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -979,7 +979,7 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1068,7 +1068,7 @@ pub(super) async fn aggregation_vulnerability_security_manager_meets_the_require
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1096,7 +1096,7 @@ pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_coun
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1129,7 +1129,7 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]}],
+            "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"id": {"gte": 1, "lte": 100000}}, "columns": ["title", "severity"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1179,7 +1179,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_se
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1231,7 +1231,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_security_manager
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1263,7 +1263,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1342,7 +1342,7 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_security_man
             "query_type": "aggregation",
             "nodes": [
                 {"id": "p", "entity": "Project",
-                 "id_range": {"start": 1, "end": 10000},
+                 "filters": {"id": {"gte": 1, "lte": 10000}},
                  "columns": ["name", "traversal_path"]},
                 {"id": "v", "entity": "Vulnerability",
                  "filters": {"traversal_path": "1/100/1000/"}}
@@ -1377,7 +1377,7 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1421,7 +1421,7 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1452,7 +1452,7 @@ pub(super) async fn aggregation_user_only_rejects_at_compile(ctx: &TestContext) 
     let result = compile(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "aggregations": [{"function": "count", "target": "u", "alias": "cnt"}],
             "limit": 10
         }"#,
@@ -1496,7 +1496,7 @@ pub(super) async fn aggregation_user_joined_to_scoped_group_compiles(ctx: &TestC
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1516,7 +1516,7 @@ pub(super) async fn aggregation_user_only_admin_still_compiles(ctx: &TestContext
     compile(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "aggregations": [{"function": "count", "target": "u", "alias": "cnt"}],
             "limit": 10
         }"#,
@@ -1611,7 +1611,7 @@ pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestConte
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "p", "entity": "Project"}
             ],
             "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
@@ -1631,7 +1631,7 @@ pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx:
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],

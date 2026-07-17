@@ -543,7 +543,7 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 100}}},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -593,7 +593,7 @@ mod tests {
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "id_range": {"start": 100, "end": 200}}
+                {"id": "end", "entity": "Project", "filters": {"id": {"gte": 100, "lte": 200}}}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]},

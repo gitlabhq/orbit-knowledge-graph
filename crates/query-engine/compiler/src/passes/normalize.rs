@@ -1,5 +1,8 @@
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
+use crate::input::{
+    ColumnSelection, Direction, EntityAuthConfig, FilterOp, Input, InputFilter, InputIdRange,
+    QueryType, TextIndexMeta,
+};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology, TraversalPathKind};
@@ -162,6 +165,8 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             }
         }
     }
+
+    canonicalize_id_filters(&mut input)?;
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -392,6 +397,79 @@ fn specialize_wildcard(types: &mut Vec<String>, inferred: Vec<String>) {
     }
 }
 
+enum CanonicalIdPin {
+    Ids(Vec<i64>),
+    Range(i64, i64),
+}
+
+/// Fold primary-key filters into the internal `node_ids`/`id_range`
+/// representation so both spellings get identical anchor, cursor-scope, and
+/// selectivity semantics. Only the unambiguous shapes fold (a lone `eq`, a
+/// lone `in`, or a `gte`+`lte` pair, all with integer-coercible values);
+/// anything else stays a plain filter with unchanged behavior.
+pub(crate) fn canonicalize_id_filters(input: &mut Input) -> Result<()> {
+    for node in &mut input.nodes {
+        let Some(filters) = node.filters.get(DEFAULT_PRIMARY_KEY) else {
+            continue;
+        };
+        let Some(pin) = canonical_id_pin(filters) else {
+            continue;
+        };
+        if !node.node_ids.is_empty() {
+            return Err(QueryError::Validation(format!(
+                "node \"{}\" pins IDs with both node_ids and an id filter; use one or the other",
+                node.id
+            )));
+        }
+        node.filters.remove(DEFAULT_PRIMARY_KEY);
+        match pin {
+            CanonicalIdPin::Ids(ids) => node.node_ids = ids,
+            CanonicalIdPin::Range(start, end) => {
+                node.id_range = Some(InputIdRange { start, end });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn canonical_id_pin(filters: &[InputFilter]) -> Option<CanonicalIdPin> {
+    match filters {
+        [f] if matches!(f.op, None | Some(FilterOp::Eq)) => {
+            Some(CanonicalIdPin::Ids(vec![id_value(f.value.as_ref()?)?]))
+        }
+        [f] if f.op == Some(FilterOp::In) => {
+            let Some(Value::Array(values)) = &f.value else {
+                return None;
+            };
+            if values.is_empty() {
+                return None;
+            }
+            let ids = values.iter().map(id_value).collect::<Option<Vec<_>>>()?;
+            Some(CanonicalIdPin::Ids(ids))
+        }
+        [a, b] => {
+            let (lo, hi) = match (a.op, b.op) {
+                (Some(FilterOp::Gte), Some(FilterOp::Lte)) => (a, b),
+                (Some(FilterOp::Lte), Some(FilterOp::Gte)) => (b, a),
+                _ => return None,
+            };
+            Some(CanonicalIdPin::Range(
+                id_value(lo.value.as_ref()?)?,
+                id_value(hi.value.as_ref()?)?,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn id_value(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
 fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
     match value {
         Value::Number(n) => {
@@ -495,10 +573,8 @@ mod tests {
             result.nodes[0].filters.get("username").unwrap()[0].value,
             Some(json!("admin"))
         );
-        assert_eq!(
-            result.nodes[0].filters.get("id").unwrap()[0].value,
-            Some(json!(42))
-        );
+        assert_eq!(result.nodes[0].node_ids, vec![42]);
+        assert!(!result.nodes[0].filters.contains_key("id"));
 
         assert_eq!(result.nodes[1].table, Some("gl_merge_request".into()));
         assert_eq!(
@@ -550,10 +626,8 @@ mod tests {
         let r = normalize_query(
             r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"id": 1}}]}"#,
         );
-        assert_eq!(
-            r.nodes[0].filters.get("id").unwrap()[0].value,
-            Some(json!(1))
-        );
+        assert_eq!(r.nodes[0].node_ids, vec![1]);
+        assert!(!r.nodes[0].filters.contains_key("id"));
 
         let r = normalize_query(
             r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}]}"#,
@@ -616,6 +690,76 @@ mod tests {
         );
 
         assert_eq!(result.relationships[0].fk_column, None);
+    }
+
+    #[test]
+    fn id_eq_filter_canonicalizes_to_node_ids() {
+        let r = normalize_query(
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"eq": "9007199254740993"}}}]}"#,
+        );
+        assert_eq!(r.nodes[0].node_ids, vec![9_007_199_254_740_993]);
+        assert!(!r.nodes[0].filters.contains_key("id"));
+    }
+
+    #[test]
+    fn id_in_filter_canonicalizes_to_node_ids() {
+        let r = normalize_query(
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"in": [1, "2", 3]}}}]}"#,
+        );
+        assert_eq!(r.nodes[0].node_ids, vec![1, 2, 3]);
+        assert!(!r.nodes[0].filters.contains_key("id"));
+    }
+
+    #[test]
+    fn id_range_filter_canonicalizes_to_id_range() {
+        let r = normalize_query(
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"lte": 100, "gte": 1}}}]}"#,
+        );
+        let range = r.nodes[0].id_range.as_ref().unwrap();
+        assert_eq!((range.start, range.end), (1, 100));
+        assert!(!r.nodes[0].filters.contains_key("id"));
+        assert!(r.nodes[0].node_ids.is_empty());
+    }
+
+    #[test]
+    fn non_canonical_id_filters_stay_filters() {
+        for filters in [
+            r#"{"id": {"gt": 5}}"#,
+            r#"{"id": {"gte": 1}}"#,
+            r#"{"id": {"eq": 1, "lte": 9}}"#,
+            r#"{"id": "not-a-number"}"#,
+            r#"{"id": {"in": [1, true]}}"#,
+        ] {
+            let r = normalize_query(&format!(
+                r#"{{"query_type": "traversal", "nodes": [{{"id": "u", "entity": "User", "filters": {filters}}}]}}"#,
+            ));
+            assert!(r.nodes[0].filters.contains_key("id"), "for {filters}");
+            assert!(r.nodes[0].node_ids.is_empty(), "for {filters}");
+            assert!(r.nodes[0].id_range.is_none(), "for {filters}");
+        }
+    }
+
+    #[test]
+    fn node_ids_plus_canonical_id_filter_rejects() {
+        let input = parse_input(
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "filters": {"id": 2}}]}"#,
+        )
+        .unwrap();
+        let ontology = Ontology::load_embedded().unwrap();
+        let err = normalize(input, &ontology).unwrap_err();
+        assert!(
+            err.to_string().contains("both node_ids and an id filter"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_ids_plus_non_canonical_id_filter_is_left_alone() {
+        let r = normalize_query(
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2], "filters": {"id": {"gt": 0}}}]}"#,
+        );
+        assert_eq!(r.nodes[0].node_ids, vec![1, 2]);
+        assert!(r.nodes[0].filters.contains_key("id"));
     }
 
     #[test]

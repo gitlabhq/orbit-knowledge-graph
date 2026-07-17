@@ -125,11 +125,12 @@ A node selector names one entity type in the ontology.
 | `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, GitLab Orbit returns the entity's default columns. |
 | `filters` | `object` | Property filters. |
 | `node_ids` | `array` | Exact IDs to match. Accepts integers or digit strings. Maximum 500. |
-| `id_range` | `object` | Inclusive ID range with `start` and `end`. |
-| `id_property` | `string` | Property used by `node_ids` and `id_range`. Default `id`. |
 
 Use `node_ids` when you already know the graph ID. Use `filters` when you know a
-natural property such as `username`, `full_path`, `state`, or `path`.
+natural property such as `username`, `full_path`, `state`, or `path`. An `eq` or
+`in` filter on `id` is equivalent to `node_ids`, and a `gte` plus `lte` pair on
+`id` selects an inclusive ID range; do not combine `node_ids` with an `id`
+filter on the same node.
 
 ## Relationships
 
@@ -537,11 +538,11 @@ Path finding queries use `path`.
 | `from` | `string` | Alias of the start node selector. |
 | `to` | `string` | Alias of the end node selector. |
 | `max_depth` | `integer` | Maximum path length. Maximum 3. |
-| `rel_types` | `array` | Relationship types to traverse. Required unless both endpoints use `node_ids`. |
+| `rel_types` | `array` | Relationship types to traverse. Required unless both endpoints pin exact IDs. |
 
-Both endpoints must be bounded by `node_ids`, filters, or an `id_range` with a
-span of 500 or less. If either endpoint uses filters or `id_range`, provide
-`rel_types`.
+Both endpoints must be bounded by `node_ids`, filters, or an ID range
+(`gte` plus `lte` on `id`) with a span of 500 or less. If either endpoint uses
+non-ID filters or an ID range, provide `rel_types`.
 
 ```json orbit-query
 {
@@ -564,7 +565,7 @@ span of 500 or less. If either endpoint uses filters or `id_range`, provide
 ## Neighbors
 
 Neighbor queries use a 1-element `nodes` array and a `neighbors` object. The center
-node must be bounded by `node_ids`, filters, or a narrow `id_range`.
+node must be bounded by `node_ids` or filters.
 
 ```json orbit-query
 {
@@ -608,10 +609,11 @@ GitLab Orbit rejects broad or ambiguous queries before compiling SQL.
 | Filters per relationship | 5 |
 
 Traversal and aggregation queries must include at least one selective node:
-`node_ids`, filters, or an `id_range` with a span of 100,000 or less.
+`node_ids`, filters, or an ID range (`gte` plus `lte` on `id`) with a span of
+100,000 or less.
 
 Single-node traversal also requires selectivity. To inspect a broad entity, add
-a filter, provide IDs, or use a narrow `id_range`.
+a filter, provide IDs, or use a narrow ID range.
 
 ## Options
 

@@ -88,9 +88,7 @@ Each node selector specifies which graph nodes to match. All query types declare
 | `entity` | `string` | Entity type (e.g., `User`, `Project`, `MergeRequest`). Validated against ontology. |
 | `columns` | `string` or `array` | Columns to return. Use `"*"` for all columns, or an array of column names (e.g., `["username", "email"]`). If omitted, only `id` is returned. Columns are validated against the ontology. |
 | `filters` | `object` | Property filters. Keys are property names. |
-| `node_ids` | `array` | Specific node IDs to match. |
-| `id_range` | `object` | ID range filter with `start` and `end` (inclusive). |
-| `id_property` | `string` | Which property contains the ID (default: `id`). |
+| `node_ids` | `array` | Specific node IDs to match. An `eq`/`in` filter on `id` canonicalizes to the same internal form; a `gte` plus `lte` pair on `id` becomes an internal ID range. |
 
 ## Filter Operators
 

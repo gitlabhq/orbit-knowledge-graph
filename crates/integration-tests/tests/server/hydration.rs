@@ -441,7 +441,7 @@ async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+        "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}}],
         "limit": 10
     }"#;
 
@@ -460,7 +460,7 @@ async fn traversal_produces_static_hydration_plan(_ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "name"]},
             {"id": "g", "entity": "Group", "columns": ["name", "visibility_level"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -809,7 +809,7 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "f", "entity": "File", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "path", "branch"]},
+            {"id": "f", "entity": "File", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name", "path", "branch"]},
             {"id": "d", "entity": "Definition", "columns": ["name"]}
         ],
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
@@ -988,7 +988,7 @@ async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
             {"id": "g", "entity": "Group", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],

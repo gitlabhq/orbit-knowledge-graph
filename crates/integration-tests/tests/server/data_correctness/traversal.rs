@@ -6,7 +6,7 @@ pub(super) async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &T
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -47,9 +47,9 @@ pub(super) async fn traversal_three_hop_returns_all_user_group_project_paths(ctx
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -95,7 +95,7 @@ pub(super) async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -127,7 +127,7 @@ pub(super) async fn traversal_user_approved_mr_returns_correct_edges(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "APPROVED", "from": "u", "to": "mr"}],
@@ -192,7 +192,7 @@ pub(super) async fn traversal_redaction_removes_unauthorized_data(ctx: &TestCont
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -217,7 +217,7 @@ pub(super) async fn traversal_with_order_by(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -297,7 +297,7 @@ pub(super) async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "state"],
                  "filters": {"state": "blocked"}},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
@@ -499,7 +499,7 @@ pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -522,7 +522,7 @@ pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -572,7 +572,7 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name", "fqn"]},
+                {"id": "caller", "entity": "Definition", "filters": {"id": {"gte": 12000, "lte": 12999}}, "columns": ["name", "fqn"]},
                 {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
@@ -662,7 +662,7 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name"]},
+                {"id": "caller", "entity": "Definition", "filters": {"id": {"gte": 12000, "lte": 12999}}, "columns": ["name"]},
                 {"id": "callee", "entity": "Definition", "filters": {"project_id": 1001}, "columns": ["name"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
@@ -694,7 +694,7 @@ pub(super) async fn traversal_code_graph_edge_level_project_filter(ctx: &TestCon
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name"]},
+                {"id": "caller", "entity": "Definition", "filters": {"id": {"gte": 12000, "lte": 12999}}, "columns": ["name"]},
                 {"id": "callee", "entity": "Definition", "columns": ["name"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee", "filters": {"project_id": 1000}}],

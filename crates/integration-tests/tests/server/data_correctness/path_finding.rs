@@ -353,7 +353,7 @@ pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestCo
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2003}}
+                {"id": "end", "entity": "MergeRequest", "filters": {"id": {"gte": 2000, "lte": 2003}}}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
                      "rel_types": ["AUTHORED"]}

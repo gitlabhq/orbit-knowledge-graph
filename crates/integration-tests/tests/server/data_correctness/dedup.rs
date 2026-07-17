@@ -35,7 +35,7 @@ pub(super) async fn search_returns_latest_version(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "name", "state"],
                      "node_ids": [9001]}],
             "limit": 10
         }"#,
@@ -65,7 +65,7 @@ pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"],
                      "node_ids": [9002]}],
             "limit": 10
         }"#,
@@ -192,7 +192,7 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "state"],
                      "filters": {"state": "active"}}],
             "limit": 100
         }"#,
@@ -224,7 +224,7 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "state"],
                      "filters": {"state": "active"}}],
             "limit": 100
         }"#,
@@ -403,7 +403,7 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "p", "entity": "Project", "node_ids": [1004]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -563,7 +563,7 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "p", "entity": "Project", "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],

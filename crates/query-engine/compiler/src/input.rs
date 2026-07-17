@@ -323,7 +323,13 @@ pub struct InputNode {
     pub filters: HashMap<String, Vec<InputFilter>>,
     #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
+    /// Internal-only since DSL v10: populated by normalize from `gte`+`lte`
+    /// filters on the primary key, no longer accepted from JSON.
+    #[serde(skip)]
     pub id_range: Option<InputIdRange>,
+    /// Internal-only since DSL v10: hydration overrides it for entities whose
+    /// lookup key is not `id`; user queries always use the default.
+    #[serde(skip, default = "default_id_property")]
     pub id_property: String,
     /// Which DB column to select as the auth ID for this node. Populated unconditionally
     /// during normalization ("id" for most entities, e.g. "project_id" for Definition).
@@ -400,30 +406,19 @@ where
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct InputIdRange {
-    #[serde(deserialize_with = "deserialize_id")]
     pub start: i64,
-    #[serde(deserialize_with = "deserialize_id")]
     pub end: i64,
 }
 
-/// Accepts either a JSON integer or a JSON string of digits. Supports the
-/// server response convention (IDs serialized as strings to avoid JavaScript
-/// precision loss) so consumers can round-trip IDs without casting.
-fn deserialize_id<'de, D>(deserializer: D) -> Result<i64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    match Value::deserialize(deserializer)? {
-        Value::Number(n) => n
-            .as_i64()
-            .ok_or_else(|| serde::de::Error::custom("id out of i64 range")),
-        Value::String(s) => s.parse::<i64>().map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom("id must be an integer or string")),
-    }
+fn default_id_property() -> String {
+    DEFAULT_PRIMARY_KEY.to_string()
 }
 
+/// Accepts JSON integers or digit strings. Supports the server response
+/// convention (IDs serialized as strings to avoid JavaScript precision loss)
+/// so consumers can round-trip IDs without casting.
 fn deserialize_id_vec<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
 where
     D: Deserializer<'de>,
@@ -1579,21 +1574,21 @@ mod tests {
     }
 
     #[test]
-    fn id_range_accepts_integers_and_strings() {
+    fn id_range_and_id_property_are_not_deserialized() {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
             "nodes": [{
                 "id": "u",
                 "entity": "User",
-                "id_range": {"start": 1, "end": "9007199254740993"}
+                "id_range": {"start": 1, "end": 100},
+                "id_property": "namespace_id"
             }]
         }"#,
         )
         .unwrap();
 
-        let range = input.nodes[0].id_range.as_ref().unwrap();
-        assert_eq!(range.start, 1);
-        assert_eq!(range.end, 9_007_199_254_740_993);
+        assert!(input.nodes[0].id_range.is_none());
+        assert_eq!(input.nodes[0].id_property, "id");
     }
 }

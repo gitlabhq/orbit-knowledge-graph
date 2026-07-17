@@ -5,7 +5,7 @@ pub(super) async fn search_returns_correct_user_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state", "user_type"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "name", "state", "user_type"]}],
             "order_by": "u.id",
             "limit": 10
         }"#,
@@ -37,7 +37,7 @@ pub(super) async fn search_returns_correct_project_properties(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"]}],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name", "visibility_level"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -61,7 +61,7 @@ pub(super) async fn search_returns_correct_group_full_path(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "full_path"]}],
+            "nodes": [{"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name", "full_path"]}],
             "order_by": "g.id",
             "limit": 10
         }"#,
@@ -87,7 +87,7 @@ pub(super) async fn search_returns_correct_project_full_path(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "full_path"]}],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name", "full_path"]}],
             "order_by": "p.id",
             "limit": 10
         }"#,
@@ -110,7 +110,7 @@ pub(super) async fn search_default_columns_include_full_path(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+            "nodes": [{"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -130,7 +130,7 @@ pub(super) async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "state"],
                      "filters": {"state": "blocked"}}],
             "limit": 10
         }"#,
@@ -149,7 +149,7 @@ pub(super) async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
+            "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name", "visibility_level"],
                      "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
             "limit": 10
         }"#,
@@ -171,7 +171,7 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"],
                      "filters": {"username": {"starts_with": "ali"}}}],
              "limit": 10
         }"#,
@@ -216,7 +216,7 @@ pub(super) async fn search_filter_contains_returns_substring_matches(ctx: &TestC
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"],
                      "filters": {"username": {"contains": "lic"}}}],
              "limit": 10
         }"#,
@@ -238,7 +238,7 @@ pub(super) async fn search_filter_is_null_matches_unset_columns(ctx: &TestContex
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "avatar_url"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "avatar_url"],
                      "filters": {"avatar_url": {"is_null": true}}}],
             "limit": 10
         }"#,
@@ -257,7 +257,7 @@ pub(super) async fn search_with_order_by_desc(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "order_by": "-u.id",
             "limit": 10
         }"#,
@@ -275,7 +275,7 @@ pub(super) async fn search_no_auth_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &svc,
@@ -293,7 +293,7 @@ pub(super) async fn search_redaction_returns_only_allowed_ids(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "limit": 10
         }"#,
         &svc,
@@ -311,7 +311,7 @@ pub(super) async fn search_unicode_properties_survive_pipeline(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "name"],
                      "node_ids": [6]}],
             "limit": 10
         }"#,
@@ -367,7 +367,7 @@ pub(super) async fn search_boolean_columns_have_correct_values(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"],
+            "nodes": [{"id": "n", "entity": "Note", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["note", "confidential", "internal"],
                      "node_ids": [3000, 3001]}],
             "limit": 10
         }"#,
@@ -391,7 +391,7 @@ pub(super) async fn search_datetime_columns_serialize_as_strings(ctx: &TestConte
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "created_at"],
+            "nodes": [{"id": "n", "entity": "Note", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["note", "created_at"],
                      "node_ids": [3000, 3001]}],
             "limit": 10
         }"#,
@@ -417,7 +417,7 @@ pub(super) async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestC
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "created_at"],
+            "nodes": [{"id": "n", "entity": "Note", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["note", "created_at"],
                      "node_ids": [3002]}],
             "limit": 10
         }"#,
@@ -437,7 +437,7 @@ pub(super) async fn search_limit_truncates_results(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]}],
             "order_by": "u.id",
             "limit": 3
         }"#,
@@ -454,7 +454,7 @@ pub(super) async fn search_filter_no_match_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"],
                      "filters": {"username": "nonexistent_user"}}],
             "limit": 10
         }"#,
@@ -473,7 +473,7 @@ pub(super) async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+            "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "state"],
                      "node_ids": [1, 2, 3, 5],
                      "filters": {"state": "active"}}],
             "order_by": "-u.id",
@@ -497,7 +497,7 @@ pub(super) async fn search_filter_gte_on_datetime_returns_matching_rows(ctx: &Te
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
                          "state": {"eq": "merged"},
@@ -527,7 +527,7 @@ pub(super) async fn search_filter_lte_on_datetime_returns_matching_rows(ctx: &Te
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
                          "state": {"eq": "merged"},
@@ -561,7 +561,7 @@ pub(super) async fn search_filter_lt_on_datetime_excludes_same_day_after_midnigh
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
                          "state": {"eq": "merged"},
@@ -591,7 +591,7 @@ pub(super) async fn search_filter_is_not_null_on_datetime_returns_merged_rows(ct
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
                          "merged_at": {"is_not_null": true}
@@ -618,7 +618,7 @@ pub(super) async fn search_multi_filter_date_window(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
                          "state": {"eq": "merged"},
@@ -652,7 +652,7 @@ pub(super) async fn search_multi_filter_date_window_multiple_results(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
                          "state": {"eq": "merged"},
@@ -687,7 +687,7 @@ pub(super) async fn search_multi_filter_empty_window_returns_empty(ctx: &TestCon
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "merged_at"],
                      "filters": {
                          "merged_at": [
@@ -715,7 +715,7 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
                          "state": "merged",
@@ -748,7 +748,7 @@ pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": {"eq": "merged"},
@@ -775,7 +775,7 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "diff"],
                      "filters": {
                          "diff": {"eq": "nonexistent content"}
@@ -800,7 +800,7 @@ pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "diff"],
                      "filters": {
                          "diff": {"is_not_null": true}
@@ -821,7 +821,7 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "mr", "entity": "MergeRequest",
-                     "id_range": {"start": 1, "end": 10000},
+                     "filters": {"id": {"gte": 1, "lte": 10000}},
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": "merged",

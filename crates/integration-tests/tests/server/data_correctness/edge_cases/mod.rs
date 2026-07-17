@@ -12,9 +12,9 @@ pub(super) async fn traversal_referential_integrity_on_complex_query(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "g", "entity": "Group"},
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -103,7 +103,7 @@ pub(super) async fn sip_prefilter_with_filter_returns_correct_results(ctx: &Test
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "user_type"],
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username", "user_type"],
                  "filters": {"user_type": "project_bot"}},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
@@ -153,7 +153,7 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -185,7 +185,7 @@ pub(super) async fn cross_namespace_user_authors_mr_in_different_group(ctx: &Tes
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -218,7 +218,7 @@ pub(super) async fn cross_namespace_group_containment_across_depth(ctx: &TestCon
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "g", "entity": "Group", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["name"]},
                 {"id": "child", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "child"}],
@@ -244,7 +244,7 @@ pub(super) async fn cross_namespace_isolation_no_leakage(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -274,7 +274,7 @@ pub(super) async fn cross_namespace_narrow_scope_returns_all_authors(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -303,7 +303,7 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "p", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 10000}}},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],

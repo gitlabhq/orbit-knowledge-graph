@@ -327,7 +327,8 @@ impl<'a> Validator<'a> {
         for node in &input.nodes {
             if node.node_ids.len() > MAX_NODE_IDS {
                 return Err(QueryError::LimitExceeded(format!(
-                    "node_ids count ({}) for node \"{}\" must not exceed {MAX_NODE_IDS}",
+                    "pinned ID count ({}) for node \"{}\" (node_ids or an id filter) \
+                     must not exceed {MAX_NODE_IDS}",
                     node.node_ids.len(),
                     node.id
                 )));
@@ -631,15 +632,16 @@ impl<'a> Validator<'a> {
             // Path-finding endpoints seed BFS frontiers, so each endpoint
             // must have bounded selectivity: node_ids (already capped at 500
             // by check_depth), filters (lowerer caps CTE at MAX_PATH_ANCHOR_LIMIT),
-            // or id_range with span ≤ MAX_PATH_ANCHOR_RANGE.
+            // or an id range filter folded to a span ≤ MAX_PATH_ANCHOR_RANGE.
             QueryType::PathFinding => {
                 if let Some(ref path) = input.path {
                     for endpoint in [&path.from, &path.to] {
                         let node = input.nodes.iter().find(|n| n.id == *endpoint);
                         if node.is_none_or(|n| !path_endpoint_has_selectivity(n)) {
                             return Err(QueryError::Validation(format!(
-                                "path_finding requires node_ids, filters, or id_range \
-                                 (max span {MAX_PATH_ANCHOR_RANGE}) on endpoint \"{endpoint}\""
+                                "path_finding requires node_ids or filters on endpoint \
+                                 \"{endpoint}\" (an id range filter must span at most \
+                                 {MAX_PATH_ANCHOR_RANGE})"
                             )));
                         }
                     }
@@ -1087,14 +1089,23 @@ mod tests {
             ])
     }
 
+    // The real pipeline canonicalizes id filters during normalize before
+    // validation runs, so these helpers must do the same for selectivity
+    // and depth checks to see the canonical form.
+    fn parse_canonical(json: &str) -> Input {
+        let mut input = parse_input(json).unwrap();
+        crate::passes::normalize::canonicalize_id_filters(&mut input).unwrap();
+        input
+    }
+
     fn assert_ok(json: &str) {
-        let input = parse_input(json).unwrap();
+        let input = parse_canonical(json);
         let ontology = test_ontology();
         Validator::new(&ontology).check_references(&input).unwrap();
     }
 
     fn assert_rejects(json: &str, expected: &str) {
-        let input = parse_input(json).unwrap();
+        let input = parse_canonical(json);
         let ontology = test_ontology();
         let err = Validator::new(&ontology)
             .check_references(&input)
@@ -2138,7 +2149,7 @@ mod tests {
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
-                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                    {"id": "a", "entity": "User", "filters": {"id": {"gte": 1, "lte": 100}}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
@@ -2149,7 +2160,7 @@ mod tests {
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
-                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                    {"id": "a", "entity": "User", "filters": {"id": {"gte": 1, "lte": 10000}}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
@@ -2329,13 +2340,13 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}]
+                "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 100}}}]
             }"#,
         );
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
+                "nodes": [{"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 999999999}}}]
             }"#,
             "full edge table scans",
         );
@@ -2343,7 +2354,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                    {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 100}}},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
@@ -2353,7 +2364,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [
-                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                    {"id": "u", "entity": "User", "filters": {"id": {"gte": 1, "lte": 100}}},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
@@ -2365,7 +2376,7 @@ mod tests {
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
-                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 100}},
+                    {"id": "a", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 100}}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
@@ -2376,7 +2387,7 @@ mod tests {
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
-                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 1000}},
+                    {"id": "a", "entity": "Project", "filters": {"id": {"gte": 1, "lte": 1000}}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
