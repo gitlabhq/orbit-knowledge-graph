@@ -16,8 +16,6 @@ use super::datalake::DatalakeQuery;
 const TARGET_BUCKET_COUNT: i64 = 10_000;
 
 /// Skip partitioning a scope smaller than this; the probe isn't worth it.
-/// Overridable only by tests (via `build_strategies`), which cannot stage a
-/// 50M-row fixture.
 pub const PARTITION_MIN_ROWS: u64 = 50_000_000;
 
 /// Half-open `[lower, upper)` slice of the leading sort-key prefix; `None` is an

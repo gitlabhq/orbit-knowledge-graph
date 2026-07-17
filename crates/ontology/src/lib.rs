@@ -241,9 +241,6 @@ impl Ontology {
         self
     }
 
-    /// Test-support: force a node's pipeline(s) to partition their initial SDLC
-    /// load, so integration tests can exercise partitioning without staging a
-    /// 50M-row fixture.
     #[must_use]
     pub fn with_partition_count(mut self, node: &str, count: u32) -> Self {
         if let Some(node) = self.nodes.get_mut(node) {
