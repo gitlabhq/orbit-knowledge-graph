@@ -211,13 +211,6 @@ pub struct EntityHandlerConfig {
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
 
-    #[serde(default)]
-    pub partition_overrides: HashMap<String, u32>,
-
-    /// Skip partitioning a scope smaller than this; the probe isn't worth it.
-    #[serde(default = "default_partition_min_rows")]
-    pub partition_min_rows: u64,
-
     /// Maximum number of items bound into each SystemNote resolver lookup.
     #[serde(default = "default_system_notes_resolve_lookup_batch_size")]
     #[schemars(range(min = 1))]
@@ -229,8 +222,6 @@ impl Default for EntityHandlerConfig {
         Self {
             datalake_batch_size: None,
             batch_size_overrides: HashMap::new(),
-            partition_overrides: HashMap::new(),
-            partition_min_rows: default_partition_min_rows(),
             system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
             ),
         }
@@ -259,10 +250,6 @@ impl EntityHandlerConfig {
 
 fn default_fetch_concurrency() -> usize {
     10
-}
-
-fn default_partition_min_rows() -> u64 {
-    50_000_000
 }
 
 fn default_code_indexing_max_file_size_bytes() -> u64 {

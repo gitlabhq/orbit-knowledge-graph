@@ -15,6 +15,11 @@ use super::datalake::DatalakeQuery;
 /// a fixed width would collapse a narrow id range into a single bucket.
 const TARGET_BUCKET_COUNT: i64 = 10_000;
 
+/// Skip partitioning a scope smaller than this; the probe isn't worth it.
+/// Overridable only by tests (via `build_strategies`), which cannot stage a
+/// 50M-row fixture.
+pub const PARTITION_MIN_ROWS: u64 = 50_000_000;
+
 /// Half-open `[lower, upper)` slice of the leading sort-key prefix; `None` is an
 /// open end (first/last partition).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,18 +49,17 @@ pub(in crate::modules::sdlc) struct PartitionStrategy {
 
 pub(in crate::modules::sdlc) fn build_strategies(
     ontology: &Ontology,
-    overrides: &HashMap<String, u32>,
     min_rows: u64,
 ) -> HashMap<String, PartitionStrategy> {
     ontology
         .nodes()
         .flat_map(|node| node.pipelines.iter())
         .filter_map(|pipeline| {
-            let count = *overrides.get(&pipeline.name)?;
+            let Extract::ClickHouse(extract) = &pipeline.extract;
+            let count = extract.partition_count?;
             if count <= 1 {
                 return None;
             }
-            let Extract::ClickHouse(extract) = &pipeline.extract;
             let key_columns = partition_key_columns(&extract.order_by)?;
             let base_table = extract.tables.first()?.clone();
             Some((
@@ -498,19 +502,19 @@ mod tests {
     }
 
     #[test]
-    fn build_strategies_resolves_composite_key_for_overridden_entities() {
+    fn build_strategies_resolves_composite_key_from_ontology_partition_count() {
         let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
 
-        let overrides = HashMap::from([("User".to_string(), 4)]);
-        let strategies = build_strategies(&ontology, &overrides, 50_000_000);
-        let user = strategies.get("User").expect("User should be partitioned");
-        assert_eq!(user.count, 4);
-        assert_eq!(user.key_columns, keys(&["id"]));
-        assert_eq!(user.datalake_table, "siphon_users");
-        assert_eq!(user.min_rows, 50_000_000);
+        let strategies = build_strategies(&ontology, PARTITION_MIN_ROWS);
+        let job = strategies.get("Job").expect("Job declares partition_count");
+        assert_eq!(job.count, 5);
+        assert_eq!(job.key_columns, keys(&["traversal_path", "id"]));
+        assert_eq!(job.datalake_table, "siphon_p_ci_builds");
+        assert_eq!(job.min_rows, PARTITION_MIN_ROWS);
 
-        let no_overrides = HashMap::new();
-        let strategies = build_strategies(&ontology, &no_overrides, 50_000_000);
-        assert!(strategies.is_empty());
+        assert!(
+            !strategies.contains_key("User"),
+            "entities without partition_count must not partition"
+        );
     }
 }

@@ -37,9 +37,9 @@ one message; every entity handler for that scope receives it (NATS pub/sub),
 which gives cross-entity parallelism without per-entity subjects or a new
 message type.
 
-Intra-entity parallelism comes from `partition_overrides`: when configured for
-an entity, the handler computes id-range partitions on the fly during the
-first run and fans them out across a `JoinSet`. Once all partitions complete,
+Intra-entity parallelism comes from a pipeline's `extract.partition_count`: when
+the ontology declares it, the handler computes id-range partitions on the fly
+during the first run and fans them out across a `JoinSet`. Once all partitions complete,
 the partition checkpoints are consolidated into a single completed checkpoint
 and subsequent runs skip partitioning.
 
@@ -228,16 +228,20 @@ all handlers run the new code and can be purged by TTL.
 
 ### Configuration
 
-`partition_overrides` lives on the entity handler config. Entities without an
-override run un-partitioned.
+Partition count is declared per pipeline in the ontology node YAML, under
+`extract.partition_count`. Pipelines that omit it run un-partitioned. The probe
+skips scopes below `PARTITION_MIN_ROWS` (`crates/indexer/src/modules/sdlc/partitioning.rs`).
 
 ```yaml
-handlers:
-  entity-handler:
-    batch_size_overrides:
-      WorkItem: 50000
-    partition_overrides:
-      Job: 5
+# config/ontology/nodes/ci/job.yaml
+pipelines:
+  - name: Job
+    extract:
+      type: clickhouse
+      tables: [siphon_p_ci_builds]
+      order_by: [traversal_path, id, partition_id]
+      query: generated
+      partition_count: 5
 ```
 
 The existing `global-handler` and `namespace-handler` topic configs continue
@@ -289,8 +293,8 @@ for the same scope. Hash cannot benefit from ClickHouse's primary key index.
 - Each entity kind has its own NATS consumer (per-handler registration on the
   shared subscription), so a slow MergeRequest does not delay Issue or Job
   processing.
-- Large entities can be partitioned with no message-bus changes:
-  `partition_overrides: { Job: 5 }` and the handler does the rest.
+- Large entities can be partitioned with no message-bus changes: declare
+  `extract.partition_count: 5` on the pipeline and the handler does the rest.
 - Backward-compatible checkpoint keys, no re-processing on deploy.
 
 ### What gets harder

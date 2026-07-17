@@ -4,6 +4,8 @@ mod metrics;
 pub(crate) mod observer;
 mod partitioning;
 mod pipeline;
+
+pub use partitioning::PARTITION_MIN_ROWS;
 mod plan;
 mod transform;
 
@@ -46,6 +48,7 @@ pub async fn register_handlers(
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
+    partition_min_rows: u64,
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
@@ -57,11 +60,7 @@ pub async fn register_handlers(
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
 
-    let partition_strategies = partitioning::build_strategies(
-        ontology,
-        &entity_handler_config.partition_overrides,
-        entity_handler_config.partition_min_rows,
-    );
+    let partition_strategies = partitioning::build_strategies(ontology, partition_min_rows);
     let plans = plan::build_plans(
         ontology,
         plan::Sizing {

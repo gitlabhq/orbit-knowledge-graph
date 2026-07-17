@@ -92,8 +92,6 @@
           "entity-handler": {
             "batch_size_overrides": {},
             "datalake_batch_size": null,
-            "partition_min_rows": 50000000,
-            "partition_overrides": {},
             "system_notes_resolve_lookup_batch_size": 1000
           }
         },
@@ -693,8 +691,6 @@
             "entity-handler": {
               "batch_size_overrides": {},
               "datalake_batch_size": null,
-              "partition_min_rows": 50000000,
-              "partition_overrides": {},
               "system_notes_resolve_lookup_batch_size": 1000
             }
           }
@@ -753,22 +749,6 @@
           "format": "uint64",
           "default": null,
           "minimum": 0
-        },
-        "partition_min_rows": {
-          "description": "Skip partitioning a scope smaller than this; the probe isn't worth it.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 50000000,
-          "minimum": 0
-        },
-        "partition_overrides": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "default": {}
         },
         "system_notes_resolve_lookup_batch_size": {
           "description": "Maximum number of items bound into each SystemNote resolver lookup.",
@@ -950,8 +930,6 @@
           "default": {
             "batch_size_overrides": {},
             "datalake_batch_size": null,
-            "partition_min_rows": 50000000,
-            "partition_overrides": {},
             "system_notes_resolve_lookup_batch_size": 1000
           }
         }

@@ -86,6 +86,8 @@ struct ExtractYaml {
     filter: Option<String>,
     #[serde(default)]
     lookups: Vec<ExtractLookupYaml>,
+    #[serde(default)]
+    partition_count: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -769,6 +771,7 @@ fn build_pipeline<R: ReadOntologyFile>(b: BuildPipeline<'_, R>) -> Result<Pipeli
                 .into_iter()
                 .map(ExtractLookupYaml::into_lookup)
                 .collect(),
+            partition_count: b.extract.partition_count,
         }),
     };
     Ok(Pipeline {

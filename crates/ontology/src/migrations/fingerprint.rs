@@ -86,6 +86,7 @@ pub fn embedded_sources() -> BTreeMap<String, String> {
 fn stable_yaml_hash(content: &str) -> String {
     match serde_yaml::from_str::<serde_yaml::Value>(content) {
         Ok(mut value) => {
+            remove_runtime_extract_fields(&mut value);
             sort_yaml_keys(&mut value);
             match serde_yaml::to_string(&value) {
                 Ok(rendered) => sha256_hex(&rendered),
@@ -165,6 +166,29 @@ fn get_diff_keys_between(
     changed
 }
 
+/// Strip runtime-only pipeline knobs (`extract.partition_count`) so changing them is version-neutral: they affect neither the graph schema nor the extracted data.
+fn remove_runtime_extract_fields(value: &mut serde_yaml::Value) {
+    let serde_yaml::Value::Mapping(root) = value else {
+        return;
+    };
+    let Some(serde_yaml::Value::Sequence(pipelines)) =
+        root.get_mut(serde_yaml::Value::String("pipelines".to_string()))
+    else {
+        return;
+    };
+    for pipeline in pipelines {
+        let serde_yaml::Value::Mapping(pipeline) = pipeline else {
+            continue;
+        };
+        let Some(serde_yaml::Value::Mapping(extract)) =
+            pipeline.get_mut(serde_yaml::Value::String("extract".to_string()))
+        else {
+            continue;
+        };
+        extract.remove(serde_yaml::Value::String("partition_count".to_string()));
+    }
+}
+
 fn remove_auxiliary_schema_settings(value: &mut serde_yaml::Value) {
     let serde_yaml::Value::Mapping(schema) = value else {
         return;
@@ -210,6 +234,14 @@ mod tests {
         let a = "b: 2\na: 1\n";
         let b = "# a leading comment\na: 1\nb: 2 # trailing\n";
         assert_eq!(stable_yaml_hash(a), stable_yaml_hash(b));
+    }
+
+    #[test]
+    fn stable_hash_ignores_extract_partition_count() {
+        let without =
+            "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n";
+        let with = "pipelines:\n  - name: Job\n    extract:\n      tables: [t]\n      order_by: [id]\n      partition_count: 5\n";
+        assert_eq!(stable_yaml_hash(without), stable_yaml_hash(with));
     }
 
     #[test]

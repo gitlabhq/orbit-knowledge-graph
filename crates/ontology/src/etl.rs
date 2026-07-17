@@ -38,6 +38,10 @@ pub struct ClickHouseExtract {
     pub deleted: String,
     pub query: ExtractQuery,
     pub lookups: Vec<ClickHouseExtractLookup>,
+    /// Splits this pipeline's initial load into N parallel partitions during
+    /// SDLC indexing. `None` runs single-threaded; values reach the dispatcher
+    /// via `sdlc::partitioning`.
+    pub partition_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

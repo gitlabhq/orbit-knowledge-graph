@@ -181,6 +181,7 @@ pub async fn run(
             &ontology,
             writer.clone(),
             analytics.clone(),
+            modules::sdlc::PARTITION_MIN_ROWS,
         )
         .await?;
     } else {

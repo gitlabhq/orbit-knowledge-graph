@@ -1748,6 +1748,11 @@
             "$ref": "#/definitions/pipelineExtractLookup"
           },
           "description": "Node lookups and stable output fields owned by generated ClickHouse extraction."
+        },
+        "partition_count": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "Splits this pipeline's initial SDLC load into N parallel partitions. Omit for single-threaded load."
         }
       },
       "required": [
