@@ -39,7 +39,7 @@ sources:
   edges/has_note.yaml: 1bb56e0e34d022eab719ef4c4d0246f9e461ea34c9cc01acb800ded35f580472
   edges/has_package_file.yaml: b0c8ff7c98dbae245450037f201056aa40eac94ed4f11963070c3cdf424115fa
   edges/has_stage.yaml: b2393ca067c6798e04ffdcb6becec846f98da4a1cde66168bd255d3e936fd466
-  edges/has_vulnerability.sql.j2: edb61831432b5b658f2eb37f7b843b07071db52e2c33598bd4d5827a78f664d4
+  edges/has_vulnerability.sql.j2: fee2023ba4543f9817de4e9b21cff3b4ec0337a23f350bb06c2a445c5c0a036a
   edges/has_vulnerability.yaml: bbe644a796d11ec6e345daaa72c237176c8b835d701909dc951a3fced9c7fb78
   edges/imports.yaml: a034828149ed658035f73c11f9ce76423a57090d37bfe133f8cea41d652880f2
   edges/in_environment.yaml: ee5d30b8f5b18da6dbf24086e017f8f54a60d60b8be2e22275a0f6c5496476b6
