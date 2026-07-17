@@ -88,7 +88,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `datalake.database` | `GKG_DATALAKE__DATABASE` | `default` | Database name |
 | `datalake.username` | `GKG_DATALAKE__USERNAME` | `default` | Auth user |
 | `datalake.password` | `GKG_DATALAKE__PASSWORD` | None | Auth password |
-| `datalake.query_settings` | | `{}` | ClickHouse session settings (e.g., `max_rows_to_read`) |
+| `datalake.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
 
 ### Graph
 
@@ -98,7 +98,8 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.database` | `GKG_GRAPH__DATABASE` | `default` | Database name |
 | `graph.username` | `GKG_GRAPH__USERNAME` | `default` | Auth user |
 | `graph.password` | `GKG_GRAPH__PASSWORD` | None | Auth password |
-| `graph.query_settings` | | `{}` | ClickHouse session settings |
+| `graph.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
+| `graph.insert_settings` | | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
 
 ### Profiling (debug)
 
