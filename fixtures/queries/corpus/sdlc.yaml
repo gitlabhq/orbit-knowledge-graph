@@ -129,14 +129,7 @@ q5:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {
@@ -211,13 +204,7 @@ q7:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {
@@ -260,10 +247,7 @@ q8:
         "entity": "Pipeline",
         "filters": {
           "status": "success",
-          "duration": {
-            "op": "gt",
-            "value": 60
-          }
+          "duration": {"gt": 60}
         }
       }],
       "limit": 20,
@@ -314,20 +298,8 @@ q10:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "high",
-                "critical"
-              ]
-            },
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed"
-              ]
-            }
+            "severity": {"in": ["high", "critical"]},
+            "state": {"in": ["detected", "confirmed"]}
           }
         }
       ],
@@ -431,10 +403,7 @@ q14:
           "entity": "WorkItem",
           "filters": {
             "state": "opened",
-            "weight": {
-              "op": "gte",
-              "value": 1
-            }
+            "weight": {"gte": 1}
           }
         },
         {
@@ -624,14 +593,7 @@ q20:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {
@@ -675,14 +637,7 @@ q21:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {
@@ -874,14 +829,7 @@ q27:
         "id": "u",
         "entity": "User",
         "filters": {
-          "user_type": {
-            "op": "in",
-            "value": [
-              "project_bot",
-              "service_account",
-              "automation_bot"
-            ]
-          }
+          "user_type": {"in": ["project_bot", "service_account", "automation_bot"]}
         }
       }],
       "limit": 30,
@@ -965,14 +913,7 @@ q30:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
@@ -1006,13 +947,7 @@ q31:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         }
       ],
@@ -1052,15 +987,7 @@ q32:
           "id": "job",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -1101,15 +1028,7 @@ q33:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "report_type": {
-              "op": "in",
-              "value": [
-                "sast",
-                "dependency_scanning",
-                "container_scanning",
-                "secret_detection"
-              ]
-            }
+            "report_type": {"in": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}
           }
         }
       ],
@@ -1150,14 +1069,7 @@ q34:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {

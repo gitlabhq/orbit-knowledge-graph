@@ -93,7 +93,7 @@ fn group_by_property_truncate_month_wraps_column() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "Note", "filters": {"confidential": {"op": "eq", "value": false}}}
+            {"id": "u", "entity": "Note", "filters": {"confidential": {"eq": false}}}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
@@ -199,7 +199,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "Note", "filters": {"created_at": {"op": "gte", "value": "2026-04-01T00:00:00Z"}}}
+            {"id": "u", "entity": "Note", "filters": {"created_at": {"gte": "2026-04-01T00:00:00Z"}}}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
@@ -375,9 +375,9 @@ fn filter_operators() {
             "entity": "User",
             "columns": ["username", "state", "created_at"],
             "filters": {
-                "created_at": {"op": "gte", "value": "2024-01-01"},
-                "state": {"op": "in", "value": ["active", "blocked"]},
-                "username": {"op": "contains", "value": "admin"}
+                "created_at": {"gte": "2024-01-01"},
+                "state": {"in": ["active", "blocked"]},
+                "username": {"contains": "admin"}
             }
         }],
         "limit": 30
@@ -665,7 +665,7 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         "nodes": [{
             "id": "f",
             "entity": "File",
-            "filters": {"path": {"op": "contains", "value": "labkit"}}
+            "filters": {"path": {"contains": "labkit"}}
         }],
         "neighbors": {"direction": "both"}
     }"#;
@@ -721,7 +721,7 @@ fn scoped_traversal_injects_tight_prefix() {
         "query_type": "traversal",
         "nodes": [
             {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
-            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
         "limit": 100
@@ -735,7 +735,7 @@ fn scoped_aggregation_injects_tight_prefix() {
         "query_type": "aggregation",
         "nodes": [
             {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
-            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
         "group_by": [{"kind": "node", "node": "p"}],
@@ -750,7 +750,7 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}},
+            {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}},
             {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
             {"id": "rel", "entity": "WorkItem", "columns": ["id", "title"]}
         ],

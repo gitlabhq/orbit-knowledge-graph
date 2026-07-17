@@ -16,15 +16,7 @@ security_vulnerability_001_by_severity:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed",
-                "resolved",
-                "dismissed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed", "resolved", "dismissed"]}
           }
         }
       ],
@@ -58,17 +50,7 @@ security_vulnerability_002_by_state:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high",
-                "medium",
-                "low",
-                "unknown",
-                "info"
-              ]
-            }
+            "severity": {"in": ["critical", "high", "medium", "low", "unknown", "info"]}
           }
         }
       ],
@@ -136,14 +118,7 @@ security_vulnerability_004_by_resolution_flags:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high",
-                "medium"
-              ]
-            }
+            "severity": {"in": ["critical", "high", "medium"]}
           }
         }
       ],
@@ -182,15 +157,7 @@ security_vulnerability_005_by_severity_state:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "report_type": {
-              "op": "in",
-              "value": [
-                "sast",
-                "dependency_scanning",
-                "container_scanning",
-                "secret_detection"
-              ]
-            }
+            "report_type": {"in": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}
           }
         }
       ],
@@ -488,14 +455,7 @@ security_scan_013_by_pipeline_id:
           "id": "s",
           "entity": "SecurityScan",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "succeeded",
-                "job_failed",
-                "report_error"
-              ]
-            }
+            "status": {"in": ["succeeded", "job_failed", "report_error"]}
           }
         }
       ],
@@ -563,15 +523,7 @@ security_finding_015_by_deduplicated:
           "id": "f",
           "entity": "Finding",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high",
-                "medium",
-                "low"
-              ]
-            }
+            "severity": {"in": ["critical", "high", "medium", "low"]}
           }
         }
       ],
@@ -673,13 +625,7 @@ security_finding_018_by_scanner_id:
           "id": "f",
           "entity": "Finding",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high"
-              ]
-            }
+            "severity": {"in": ["critical", "high"]}
           }
         }
       ],
@@ -713,15 +659,7 @@ security_occurrence_019_by_severity:
           "id": "o",
           "entity": "VulnerabilityOccurrence",
           "filters": {
-            "report_type": {
-              "op": "in",
-              "value": [
-                "sast",
-                "dependency_scanning",
-                "container_scanning",
-                "secret_detection"
-              ]
-            }
+            "report_type": {"in": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}
           }
         }
       ],
@@ -755,14 +693,7 @@ security_occurrence_020_by_report_type:
           "id": "o",
           "entity": "VulnerabilityOccurrence",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high",
-                "medium"
-              ]
-            }
+            "severity": {"in": ["critical", "high", "medium"]}
           }
         }
       ],
@@ -796,15 +727,7 @@ security_occurrence_021_by_severity_report_type:
           "id": "o",
           "entity": "VulnerabilityOccurrence",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high",
-                "medium",
-                "low"
-              ]
-            }
+            "severity": {"in": ["critical", "high", "medium", "low"]}
           }
         }
       ],
@@ -911,10 +834,7 @@ security_identifier_024_by_external_type:
           "id": "i",
           "entity": "VulnerabilityIdentifier",
           "filters": {
-            "external_type": {
-              "op": "contains",
-              "value": "cve"
-            }
+            "external_type": {"contains": "cve"}
           }
         }
       ],
@@ -948,10 +868,7 @@ security_identifier_025_by_project_id:
           "id": "i",
           "entity": "VulnerabilityIdentifier",
           "filters": {
-            "name": {
-              "op": "contains",
-              "value": "CVE"
-            }
+            "name": {"contains": "CVE"}
           }
         }
       ],
@@ -985,10 +902,7 @@ security_scanner_026_by_vendor:
           "id": "scanner",
           "entity": "VulnerabilityScanner",
           "filters": {
-            "vendor": {
-              "op": "contains",
-              "value": "Git"
-            }
+            "vendor": {"contains": "Git"}
           }
         }
       ],
@@ -1022,10 +936,7 @@ security_scanner_027_by_project_id:
           "id": "scanner",
           "entity": "VulnerabilityScanner",
           "filters": {
-            "vendor": {
-              "op": "contains",
-              "value": "Git"
-            }
+            "vendor": {"contains": "Git"}
           }
         }
       ],
@@ -1059,16 +970,7 @@ ci_pipeline_028_by_status:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "source": {
-              "op": "in",
-              "value": [
-                "push",
-                "web",
-                "schedule",
-                "merge_request_event",
-                "parent_pipeline"
-              ]
-            }
+            "source": {"in": ["push", "web", "schedule", "merge_request_event", "parent_pipeline"]}
           }
         }
       ],
@@ -1102,16 +1004,7 @@ ci_pipeline_029_by_source:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending",
-                "canceled"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending", "canceled"]}
           }
         }
       ],
@@ -1145,16 +1038,7 @@ ci_pipeline_030_by_status_source:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending",
-                "canceled"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending", "canceled"]}
           }
         }
       ],
@@ -1193,13 +1077,7 @@ ci_pipeline_031_by_protected:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         }
       ],
@@ -1267,13 +1145,7 @@ ci_pipeline_033_avg_duration_by_status:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         }
       ],
@@ -1347,14 +1219,7 @@ ci_job_035_by_status:
           "id": "job",
           "entity": "Job",
           "filters": {
-            "when": {
-              "op": "in",
-              "value": [
-                "on_success",
-                "manual",
-                "delayed"
-              ]
-            }
+            "when": {"in": ["on_success", "manual", "delayed"]}
           }
         }
       ],
@@ -1388,15 +1253,7 @@ ci_job_036_by_when:
           "id": "job",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -1430,15 +1287,7 @@ ci_job_037_by_status_when:
           "id": "job",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -1477,13 +1326,7 @@ ci_job_038_by_allow_failure:
           "id": "job",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         }
       ],
@@ -1517,13 +1360,7 @@ ci_job_039_by_retried:
           "id": "job",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         }
       ],
@@ -1693,15 +1530,7 @@ ci_stage_044_by_status:
           "id": "stage",
           "entity": "Stage",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -1769,13 +1598,7 @@ ci_stage_046_by_position:
           "id": "stage",
           "entity": "Stage",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         }
       ],
@@ -1843,14 +1666,7 @@ ci_deployment_048_by_ref:
           "id": "dep",
           "entity": "Deployment",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running"]}
           }
         }
       ],
@@ -1884,14 +1700,7 @@ ci_deployment_049_by_archived:
           "id": "dep",
           "entity": "Deployment",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running"]}
           }
         }
       ],
@@ -1925,16 +1734,7 @@ ci_environment_050_by_state:
           "id": "env",
           "entity": "Environment",
           "filters": {
-            "tier": {
-              "op": "in",
-              "value": [
-                "production",
-                "staging",
-                "testing",
-                "development",
-                "other"
-              ]
-            }
+            "tier": {"in": ["production", "staging", "testing", "development", "other"]}
           }
         }
       ],
@@ -1968,14 +1768,7 @@ ci_environment_051_by_tier:
           "id": "env",
           "entity": "Environment",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "available",
-                "stopping",
-                "stopped"
-              ]
-            }
+            "state": {"in": ["available", "stopping", "stopped"]}
           }
         }
       ],
@@ -2009,14 +1802,7 @@ ci_environment_052_by_state_tier:
           "id": "env",
           "entity": "Environment",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "available",
-                "stopping",
-                "stopped"
-              ]
-            }
+            "state": {"in": ["available", "stopping", "stopped"]}
           }
         }
       ],
@@ -2055,15 +1841,7 @@ code_review_mr_056_by_state:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged",
-                "locked"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged", "locked"]}
           }
         }
       ],
@@ -2097,13 +1875,7 @@ code_review_mr_057_by_merge_status:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "merged"]}
           }
         }
       ],
@@ -2137,13 +1909,7 @@ code_review_mr_058_by_draft:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "merged"]}
           }
         }
       ],
@@ -2177,13 +1943,7 @@ code_review_mr_059_by_squash:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "merged"]}
           }
         }
       ],
@@ -2217,14 +1977,7 @@ code_review_mr_060_by_state_draft:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
@@ -2365,13 +2118,7 @@ code_review_mr_064_avg_diff_by_state:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "merged"]}
           }
         }
       ],
@@ -2411,15 +2158,7 @@ planning_work_item_065_by_state:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "work_item_type": {
-              "op": "in",
-              "value": [
-                "issue",
-                "incident",
-                "task",
-                "epic"
-              ]
-            }
+            "work_item_type": {"in": ["issue", "incident", "task", "epic"]}
           }
         }
       ],
@@ -2453,13 +2192,7 @@ planning_work_item_066_by_type:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed"
-              ]
-            }
+            "state": {"in": ["opened", "closed"]}
           }
         }
       ],
@@ -2493,13 +2226,7 @@ planning_work_item_067_by_confidential:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed"
-              ]
-            }
+            "state": {"in": ["opened", "closed"]}
           }
         }
       ],
@@ -2533,13 +2260,7 @@ planning_work_item_068_by_state_type:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed"
-              ]
-            }
+            "state": {"in": ["opened", "closed"]}
           }
         }
       ],
@@ -2646,14 +2367,7 @@ project_071_by_visibility:
           "id": "p",
           "entity": "Project",
           "filters": {
-            "visibility_level": {
-              "op": "in",
-              "value": [
-                "private",
-                "internal",
-                "public"
-              ]
-            }
+            "visibility_level": {"in": ["private", "internal", "public"]}
           }
         }
       ],
@@ -2687,14 +2401,7 @@ project_072_by_archived:
           "id": "p",
           "entity": "Project",
           "filters": {
-            "visibility_level": {
-              "op": "in",
-              "value": [
-                "private",
-                "internal",
-                "public"
-              ]
-            }
+            "visibility_level": {"in": ["private", "internal", "public"]}
           }
         }
       ],
@@ -2728,14 +2435,7 @@ project_073_by_visibility_archived:
           "id": "p",
           "entity": "Project",
           "filters": {
-            "visibility_level": {
-              "op": "in",
-              "value": [
-                "private",
-                "internal",
-                "public"
-              ]
-            }
+            "visibility_level": {"in": ["private", "internal", "public"]}
           }
         }
       ],
@@ -3101,13 +2801,7 @@ join_occurrence_project_082_by_project_visibility:
           "id": "o",
           "entity": "VulnerabilityOccurrence",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high"
-              ]
-            }
+            "severity": {"in": ["critical", "high"]}
           }
         },
         {
@@ -3152,13 +2846,7 @@ join_occurrence_vulnerability_083_by_vulnerability_state:
           "id": "o",
           "entity": "VulnerabilityOccurrence",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high"
-              ]
-            }
+            "severity": {"in": ["critical", "high"]}
           }
         },
         {
@@ -3203,13 +2891,7 @@ join_occurrence_identifier_084_by_identifier_type:
           "id": "o",
           "entity": "VulnerabilityOccurrence",
           "filters": {
-            "severity": {
-              "op": "in",
-              "value": [
-                "critical",
-                "high"
-              ]
-            }
+            "severity": {"in": ["critical", "high"]}
           }
         },
         {
@@ -3254,13 +2936,7 @@ join_pipeline_project_085_by_project_visibility:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {
@@ -3305,13 +2981,7 @@ join_job_pipeline_086_by_pipeline_status:
           "id": "job",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {
@@ -3401,13 +3071,7 @@ join_pipeline_job_088_by_job_status:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {
@@ -3452,13 +3116,7 @@ join_pipeline_stage_089_by_stage_status:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {
@@ -3503,13 +3161,7 @@ join_stage_job_090_by_job_status:
           "id": "stage",
           "entity": "Stage",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {
@@ -3734,14 +3386,7 @@ join_deployment_environment_095_by_environment_tier:
           "id": "dep",
           "entity": "Deployment",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running"]}
           }
         },
         {
@@ -3786,14 +3431,7 @@ join_deployment_project_096_by_project_visibility:
           "id": "dep",
           "entity": "Deployment",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running"]}
           }
         },
         {
@@ -3973,15 +3611,7 @@ join_pipeline_project_100_by_status_and_visibility:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         },
         {

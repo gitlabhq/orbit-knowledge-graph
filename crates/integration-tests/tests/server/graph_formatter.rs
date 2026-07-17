@@ -1825,7 +1825,7 @@ async fn filter_in_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "in", "value": ["alice", "charlie"]}}}],
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"in": ["alice", "charlie"]}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1850,7 +1850,7 @@ async fn filter_contains_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "contains", "value": "lic"}}}],
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"contains": "lic"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1874,7 +1874,7 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "ali"}}}],
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"starts_with": "ali"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1894,7 +1894,7 @@ async fn filter_is_null_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"op": "is_null"}}}],
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"is_null": true}}}],
             "limit": 10
         }"#,
         &allow_all(),

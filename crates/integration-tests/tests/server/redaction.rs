@@ -1449,8 +1449,8 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
             "id": "u",
             "entity": "User",
             "filters": {
-                "state": {"op": "eq", "value": "active"},
-                "username": {"op": "in", "value": ["alice", "bob", "charlie", "diana"]}
+                "state": {"eq": "active"},
+                "username": {"in": ["alice", "bob", "charlie", "diana"]}
             }
         }],
         "order_by": "u.username",
@@ -1503,7 +1503,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
             "id": "p",
             "entity": "Project",
             "filters": {
-                "visibility_level": {"op": "in", "value": ["public", "internal"]}
+                "visibility_level": {"in": ["public", "internal"]}
             }
         }],
         "order_by": "p.id",
@@ -1660,7 +1660,7 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
             "id": "u",
             "entity": "User",
             "filters": {
-                "username": {"op": "eq", "value": "definitely_does_not_exist_12345"}
+                "username": {"eq": "definitely_does_not_exist_12345"}
             }
         }],
         "limit": 10
@@ -2168,7 +2168,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
             "entity": "User",
             "id_range": {"start": 1, "end": 10000},
             "columns": ["username", "name", "state"],
-            "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
+            "filters": {"username": {"in": ["alice", "bob"]}}
         }],
         "order_by": "u.username",
         "limit": 10
@@ -3523,7 +3523,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2]}}}]
+        "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2]}}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3579,7 +3579,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "filters": {"state": {"op": "in", "value": ["active", "blocked"]}}}]
+        "nodes": [{"id": "u", "entity": "User", "filters": {"state": {"in": ["active", "blocked"]}}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();

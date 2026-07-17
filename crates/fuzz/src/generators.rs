@@ -73,8 +73,16 @@ fn gen_filter(driver: &mut impl Driver) -> Option<Value> {
     let use_op: bool = driver.produce()?;
     if use_op {
         let op = *pick(driver, FILTER_OPS)?;
-        let val: i64 = driver.produce()?;
-        Some(json!({"op": op, "value": val}))
+        let val = if matches!(op, "is_null" | "is_not_null") {
+            let apply: bool = driver.produce()?;
+            json!(apply)
+        } else {
+            let n: i64 = driver.produce()?;
+            json!(n)
+        };
+        let mut filter = Map::new();
+        filter.insert(op.into(), val);
+        Some(Value::Object(filter))
     } else {
         let val: i64 = driver.produce()?;
         Some(json!(val))

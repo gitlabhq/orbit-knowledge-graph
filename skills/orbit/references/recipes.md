@@ -33,7 +33,7 @@ Query the `Project` entity by `full_path` and read back its `id`:
       "id": "p",
       "entity": "Project",
       "columns": ["id", "full_path"],
-      "filters": {"full_path": {"op": "eq", "value": "gitlab-org/orbit/knowledge-graph"}}
+      "filters": {"full_path": {"eq": "gitlab-org/orbit/knowledge-graph"}}
     }],
     "limit": 1
   }
@@ -51,8 +51,8 @@ Requires both `iid` and `project_id` filters (IID is only unique within a projec
     "query_type": "traversal",
     "nodes": [
       {"id": "mr", "entity": "MergeRequest", "columns": "*",
-       "filters": {"iid": {"op": "eq", "value": 1216},
-                   "project_id": {"op": "eq", "value": 77960826}}},
+       "filters": {"iid": {"eq": 1216},
+                   "project_id": {"eq": 77960826}}},
       {"id": "author", "entity": "User", "columns": ["username"]}
     ],
     "relationships": [
@@ -76,7 +76,7 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
       "entity": "Project",
       "columns": ["full_path", "name", "visibility_level"],
       "filters": {
-        "full_path": {"op": "contains", "value": "gitlab-org/cli"}
+        "full_path": {"contains": "gitlab-org/cli"}
       }
     }],
     "limit": 5
@@ -110,8 +110,8 @@ project-scoped `iid`); look it up first with the
     "nodes": [{
       "id": "p", "entity": "Pipeline",
       "filters": {
-        "merge_request_id": {"op": "eq", "value": 482908721},
-        "source": {"op": "eq", "value": "merge_request_event"}
+        "merge_request_id": {"eq": 482908721},
+        "source": {"eq": "merge_request_event"}
       },
       "columns": ["id", "status", "source", "sha", "ref", "created_at"]
     }],
@@ -131,9 +131,9 @@ pipelines for this MR":
     "nodes": [{
       "id": "p", "entity": "Pipeline",
       "filters": {
-        "merge_request_id": {"op": "eq", "value": 482908721},
-        "source": {"op": "eq", "value": "merge_request_event"},
-        "status": {"op": "eq", "value": "failed"}
+        "merge_request_id": {"eq": 482908721},
+        "source": {"eq": "merge_request_event"},
+        "status": {"eq": "failed"}
       },
       "columns": ["id", "status", "sha", "ref", "failure_reason", "duration", "created_at"]
     }],
@@ -154,8 +154,8 @@ underlying join shape and inflate the count):
     "nodes": [
       {"id": "p", "entity": "Pipeline",
        "filters": {
-         "merge_request_id": {"op": "eq", "value": 482908721},
-         "source": {"op": "eq", "value": "merge_request_event"}
+         "merge_request_id": {"eq": 482908721},
+         "source": {"eq": "merge_request_event"}
        }}
     ],
     "group_by": [{"kind": "property", "node": "p", "property": "status", "alias": "status"}],
@@ -176,10 +176,10 @@ Pipeline node:
     "query_type": "traversal",
     "nodes": [
       {"id": "mr", "entity": "MergeRequest",
-       "filters": {"iid": {"op": "eq", "value": 235291},
-                   "project_id": {"op": "eq", "value": 278964}}},
+       "filters": {"iid": {"eq": 235291},
+                   "project_id": {"eq": 278964}}},
       {"id": "p",  "entity": "Pipeline",
-       "filters": {"source": {"op": "eq", "value": "merge_request_event"}},
+       "filters": {"source": {"eq": "merge_request_event"}},
        "columns": ["id", "status", "sha", "created_at"]}
     ],
     "relationships": [{"type": "TRIGGERED", "from": "mr", "to": "p"}],
@@ -217,7 +217,7 @@ history — see the canonical field descriptions on
        "columns": ["iid", "title", "state", "project_id"]},
       {"id": "diff", "entity": "MergeRequestDiff"},
       {"id": "f",    "entity": "MergeRequestDiffFile",
-       "filters": {"old_path": {"op": "eq", "value": "app/services/base_service.rb"}}}
+       "filters": {"old_path": {"eq": "app/services/base_service.rb"}}}
     ],
     "relationships": [
       {"type": "HAS_DIFF", "from": "mr",   "to": "diff"},
@@ -251,7 +251,7 @@ class is namespaced:
     "query_type": "traversal",
     "nodes": [
       {"id": "parent", "entity": "Definition",
-       "filters": {"fqn": {"op": "eq", "value": "ApplicationRecord"}}},
+       "filters": {"fqn": {"eq": "ApplicationRecord"}}},
       {"id": "child",  "entity": "Definition",
        "columns": ["name", "fqn", "file_path"]}
     ],
@@ -295,7 +295,7 @@ or `"-node.property"` (leading `-`) for descending, where `node` is the node `id
   "query": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u",  "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+      {"id": "u",  "entity": "User", "filters": {"username": {"eq": "alice"}}},
       {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state", "created_at"]}
     ],
     "relationships": [
@@ -319,7 +319,7 @@ is no `Issue` node. List the work items in a project via the `IN_PROJECT`
   "query": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "p",  "entity": "Project", "filters": {"id": {"op": "eq", "value": 278964}}},
+      {"id": "p",  "entity": "Project", "filters": {"id": {"eq": 278964}}},
       {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"},
        "columns": ["iid", "title", "state", "work_item_type", "created_at"]}
     ],
@@ -347,7 +347,7 @@ Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
     "nodes": [{
       "id": "p",
       "entity": "Project",
-      "filters": {"full_path": {"op": "eq", "value": "gitlab-org/cli"}}
+      "filters": {"full_path": {"eq": "gitlab-org/cli"}}
     }],
     "neighbors": {"direction": "outgoing"},
     "limit": 20
@@ -418,8 +418,8 @@ causes a server-side validation error.
   "query": {
     "query_type": "path_finding",
     "nodes": [
-      {"id": "from", "entity": "Group",   "filters": {"id": {"op": "eq", "value": 9970}}},
-      {"id": "to",   "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+      {"id": "from", "entity": "Group",   "filters": {"id": {"eq": 9970}}},
+      {"id": "to",   "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
     ],
     "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 2, "rel_types": ["CONTAINS"]}
   }
@@ -428,11 +428,11 @@ causes a server-side validation error.
 
 ## Filter operators
 
-The `filters` object supports simple equality (`{"state": "opened"}`) or a
-structured `PropertyFilter`:
+The `filters` object supports simple equality (`{"state": "opened"}`) or an
+operator object whose keys AND-combine:
 
 ```json
-{"filters": {"<property>": {"op": "<operator>", "value": <value>}}}
+{"filters": {"<property>": {"<operator>": <value>, "<operator>": <value>}}}
 ```
 
 | Operator                                   | Value type                   | Notes                             |
@@ -440,8 +440,11 @@ structured `PropertyFilter`:
 | `eq`, `gt`, `lt`, `gte`, `lte`             | string / number / boolean    | comparison                        |
 | `in`                                       | array (1–100 items)          | membership                        |
 | `contains`, `starts_with`, `ends_with`     | string (≤ 1024 chars)        | string ops                        |
-| `is_null`, `is_not_null`                   | *(omit `value`)*             | null checks                       |
+| `is_null`, `is_not_null`                   | boolean                      | `false` means the negation        |
 | `token_match`, `all_tokens`, `any_tokens`  | string                       | text-indexed properties only — see [`query_language.md`](query_language.md) |
+
+To repeat an operator on one property, use an array of operator objects:
+`{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
 ### Text-token search
 
@@ -458,8 +461,8 @@ only properties listed in the text-indexed properties table in
       "id": "mr",
       "entity": "MergeRequest",
       "filters": {
-        "project_id": {"op": "eq", "value": 278964},
-        "title": {"op": "all_tokens", "value": "database migration"}
+        "project_id": {"eq": 278964},
+        "title": {"all_tokens": "database migration"}
       },
       "columns": ["iid", "title", "state"]
     }],
@@ -480,7 +483,7 @@ Add a `cursor` with a `page_size` (max 1000). The first page needs no token.
     "nodes": [{
       "id": "p",
       "entity": "Project",
-      "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
+      "filters": {"full_path": {"starts_with": "gitlab-org/"}}
     }],
     "cursor": {"page_size": 50}
   }

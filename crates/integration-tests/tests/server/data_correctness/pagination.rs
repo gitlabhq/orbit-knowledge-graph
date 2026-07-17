@@ -751,8 +751,8 @@ pub(super) async fn cursor_traversal_with_filters_desc_pages_return_exact_matche
         "nodes": [
             {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
             {"id": "wi", "entity": "WorkItem", "columns": ["work_item_type", "weight"],
-             "filters": {"work_item_type": {"op": "in", "value": ["issue", "task", "epic"]},
-                         "weight": {"op": "gte", "value": 3}}}
+             "filters": {"work_item_type": {"in": ["issue", "task", "epic"]},
+                         "weight": {"gte": 3}}}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "wi"}],
         "order_by": "-wi.id",

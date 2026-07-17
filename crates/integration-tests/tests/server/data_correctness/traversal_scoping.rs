@@ -24,7 +24,7 @@ const MR_DIFF_FILE_CHAIN: &str = r#"{
     "query_type": "traversal",
     "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-         "filters": {"project_id": {"op": "eq", "value": 1000}}},
+         "filters": {"project_id": {"eq": 1000}}},
         {"id": "diff", "entity": "MergeRequestDiff"},
         {"id": "df", "entity": "MergeRequestDiffFile"}
     ],
@@ -106,7 +106,7 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
             "query_type": "traversal",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-                 "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                 "filters": {"project_id": {"eq": 1000}}},
                 {"id": "wi", "entity": "WorkItem"}
             ],
             "relationships": [{"type": "CLOSES", "from": "mr", "to": "wi"}],
@@ -144,7 +144,7 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
             "query_type": "traversal",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-                 "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                 "filters": {"project_id": {"eq": 1000}}},
                 {"id": "wi", "entity": "WorkItem"}
             ],
             "relationships": [{"type": "CLOSES", "from": "mr", "to": "wi"}],

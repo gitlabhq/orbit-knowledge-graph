@@ -291,7 +291,7 @@ fn basic_search_query() {
             "id": "u",
             "entity": "User",
             "columns": ["username"],
-            "filters": { "username": {"op": "eq", "value": "admin"} }
+            "filters": { "username": {"eq": "admin"} }
         }],
         "limit": 10
     }"#;
@@ -324,9 +324,9 @@ fn complex_search_query() {
             "entity": "User",
             "columns": ["username", "state", "created_at"],
             "filters": {
-                "username": {"op": "starts_with", "value": "admin"},
-                "state": {"op": "in", "value": ["active", "blocked"]},
-                "created_at": {"op": "gte", "value": "2024-01-01"}
+                "username": {"starts_with": "admin"},
+                "state": {"in": ["active", "blocked"]},
+                "created_at": {"gte": "2024-01-01"}
             }
         }],
         "limit": 50,
@@ -760,7 +760,7 @@ fn render_in_filter_inlines_array() {
         r#"{
         "query_type": "traversal",
         "nodes": [{"id": "u", "entity": "User", "filters": {
-            "user_type": {"op": "in", "value": ["project_bot", "service_account"]}
+            "user_type": {"in": ["project_bot", "service_account"]}
         }}],
         "limit": 10
     }"#,
@@ -1062,7 +1062,7 @@ fn like_rejects_short_contains_pattern() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "contains", "value": "ab"}}}],
+                     "filters": {"username": {"contains": "ab"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1082,7 +1082,7 @@ fn like_rejects_single_char_starts_with() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "starts_with", "value": "a"}}}],
+                     "filters": {"username": {"starts_with": "a"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1102,7 +1102,7 @@ fn like_rejects_empty_ends_with() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "ends_with", "value": ""}}}],
+                     "filters": {"username": {"ends_with": ""}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1122,7 +1122,7 @@ fn like_rejects_contains_on_email() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": {"op": "contains", "value": "example"}}}],
+                     "filters": {"email": {"contains": "example"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1141,7 +1141,7 @@ fn like_rejects_starts_with_on_email() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": {"op": "starts_with", "value": "alice"}}}],
+                     "filters": {"email": {"starts_with": "alice"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1200,7 +1200,7 @@ fn filterable_allows_traversal_path_starts_with_inside_scope() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/100/"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1215,7 +1215,7 @@ fn filterable_allows_traversal_path_root_starts_with_inside_scope() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1283,7 +1283,7 @@ fn filterable_rejects_traversal_path_without_trailing_slash() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/100"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1302,7 +1302,7 @@ fn filterable_rejects_traversal_path_contains_operator() {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "contains", "value": "100"}}}],
+                     "filters": {"traversal_path": {"contains": "100"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1362,7 +1362,7 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
-                   "filters": {"project_id": {"op": "eq", "value": 278964}}}],
+                   "filters": {"project_id": {"eq": 278964}}}],
         "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
     }"#;
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
@@ -1444,7 +1444,7 @@ fn aggregation_count_in_clause_pushes_project_id() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
-                   "filters": {"project_id": {"op": "in", "value": [69095239, 278964, 74646916]}}}],
+                   "filters": {"project_id": {"in": [69095239, 278964, 74646916]}}}],
         "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
     }"#;
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();

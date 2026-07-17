@@ -241,7 +241,7 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 1
         }"#;
         let ctx =
@@ -270,7 +270,7 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": 1}}}],
+                     "filters": {"traversal_path": {"starts_with": 1}}}],
             "limit": 1
         }"#;
         let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
@@ -395,7 +395,7 @@ mod tests {
             "nodes": [
                 {"id": "p", "entity": "Project"},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "opened"}
+                    "state": {"eq": "opened"}
                 }}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -427,7 +427,7 @@ mod tests {
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
                 {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
             ],
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
@@ -495,7 +495,7 @@ mod tests {
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
                 {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
             ],
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
@@ -567,7 +567,7 @@ mod tests {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "root"}}},
+                {"id": "start", "entity": "User", "filters": {"username": {"eq": "root"}}},
                 {"id": "end", "entity": "Project", "node_ids": [100]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
@@ -617,8 +617,8 @@ mod tests {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "compile"}}},
-                {"id": "end", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "run_query"}}}
+                {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
+                {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["CALLS"]},
@@ -913,7 +913,7 @@ mod tests {
             "nodes": [
                 {"id": "p", "entity": "Project"},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
+                    "state": {"eq": "merged"}
                 }},
                 {"id": "u", "entity": "User"}
             ],
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn denorm_eq_filter_pushes_to_edge_tags() {
-        let sql = denorm_traversal_sql(r#""state": {"op": "eq", "value": "merged"}"#);
+        let sql = denorm_traversal_sql(r#""state": {"eq": "merged"}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn denorm_in_list_filter_uses_has_any() {
-        let sql = denorm_traversal_sql(r#""state": {"op": "in", "value": ["merged", "opened"]}"#);
+        let sql = denorm_traversal_sql(r#""state": {"in": ["merged", "opened"]}"#);
         assert!(
             sql.contains("hasAny(e0.target_tags"),
             "IN-list denorm filter must use hasAny, got:\n{sql}"
@@ -1170,7 +1170,7 @@ mod tests {
 
     #[test]
     fn denorm_in_list_single_value_uses_has() {
-        let sql = denorm_traversal_sql(r#""state": {"op": "in", "value": ["merged"]}"#);
+        let sql = denorm_traversal_sql(r#""state": {"in": ["merged"]}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "single-value IN-list must use has, got:\n{sql}"
@@ -1179,9 +1179,8 @@ mod tests {
 
     #[test]
     fn denorm_partial_filters_joins_for_non_denorm() {
-        let sql = denorm_traversal_sql(
-            r#""state": {"op": "eq", "value": "merged"}, "source_branch": {"op": "eq", "value": "main"}"#,
-        );
+        let sql =
+            denorm_traversal_sql(r#""state": {"eq": "merged"}, "source_branch": {"eq": "main"}"#);
         assert!(
             sql.contains("INNER JOIN"),
             "partial denorm must JOIN node table for non-denormalized filters, got:\n{sql}"
@@ -1198,7 +1197,7 @@ mod tests {
 
     #[test]
     fn denorm_boolean_filter_renders_value_token() {
-        let sql = denorm_traversal_sql(r#""draft": {"op": "eq", "value": true}"#);
+        let sql = denorm_traversal_sql(r#""draft": {"eq": true}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'draft:true')"),
             "boolean denorm filter must render its value token, got:\n{sql}"
@@ -1214,8 +1213,8 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"op": "eq", "value": "Community contribution"}}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
+                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [
@@ -1240,8 +1239,8 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"op": "eq", "value": "Community contribution"}}}
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
+                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}}
             ],
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "cl"}
@@ -1266,7 +1265,7 @@ mod tests {
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3],
-                 "filters": {"state": {"op": "eq", "value": "merged"}}}
+                 "filters": {"state": {"eq": "merged"}}}
             ],
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10
@@ -1291,7 +1290,7 @@ mod tests {
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
+                    "state": {"eq": "merged"}
                 }}
             ],
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
@@ -1357,7 +1356,7 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "v", "entity": "Vulnerability", "filters": {
-                    "state": {"op": "eq", "value": "detected"}
+                    "state": {"eq": "detected"}
                 }},
                 {"id": "proj", "entity": "Project", "node_ids": [1]}
             ],
@@ -1483,7 +1482,7 @@ mod tests {
                 "neighbors",
                 r#"{
                     "query_type": "neighbors",
-                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"title": {"op": "contains", "value": "fix"}}}],
+                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"title": {"contains": "fix"}}}],
                     "neighbors": {"direction": "both"},
                     "limit": 10
                 }"#,
@@ -1719,7 +1718,7 @@ mod tests {
 
     #[test]
     fn scoped_query_pushes_down_partition_predicate() {
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"op":"eq","value":"opened"}}}],"limit":20}"#;
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"eq":"opened"}}}],"limit":20}"#;
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_scope_prefixes([("m".to_string(), "1/9970/".to_string())].into());
@@ -1835,8 +1834,8 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "f", "entity": "File", "filters": {"path": {"op": "ends_with", "value": ".rb"}}},
-                {"id": "d", "entity": "Definition", "filters": {"name": {"op": "starts_with", "value": "process"}}}
+                {"id": "f", "entity": "File", "filters": {"path": {"ends_with": ".rb"}}},
+                {"id": "d", "entity": "Definition", "filters": {"name": {"starts_with": "process"}}}
             ],
             "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
             "limit": 20
@@ -1954,7 +1953,7 @@ mod tests {
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [116]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
+                    "state": {"eq": "merged"}
                 }},
                 {"id": "p", "entity": "Project"}
             ],
@@ -1993,8 +1992,8 @@ mod tests {
                      "node_ids": [1],
                      "filters": {
                          "created_at": [
-                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
-                             {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                             {"gte": "2026-04-01T00:00:00Z"},
+                             {"lt": "2026-05-01T00:00:00Z"}
                          ]
                      },
                      "columns": ["id", "created_at"]}],
@@ -2017,7 +2016,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "f", "entity": "File",
                          "node_ids": [1],
-                         "filters": {"content": {"op": "eq", "value": "x"}},
+                         "filters": {"content": {"eq": "x"}},
                          "columns": ["path", "content"]}],
                 "limit": 5
             }"#,
@@ -2050,7 +2049,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "f", "entity": "File",
                          "node_ids": [1],
-                         "filters": {"content": {"op": "gt", "value": "x"}}}],
+                         "filters": {"content": {"gt": "x"}}}],
                 "limit": 5
             }"#,
             &ontology,
