@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.18.2
+version: 0.19.0
 license: MIT
 metadata:
   audience: developers
@@ -58,7 +58,7 @@ Put the request body in `/tmp/q.json`:
     "query_type": "traversal",
     "nodes": [
       {"id": "p",  "entity": "Project",
-       "filters": {"id": {"op": "eq", "value": 278964}}},
+       "filters": {"id": {"eq": 278964}}},
       {"id": "mr", "entity": "MergeRequest",
        "columns": ["iid", "title", "state"]}
     ],
@@ -77,7 +77,7 @@ glab orbit remote query /tmp/q.json
 
 `filters` is an **object keyed by property name** — not an array. Use either
 shorthand equality (`{"state": "opened"}`) or the operator form
-(`{"iid": {"op": "eq", "value": 1216}}`). Operators: `eq`, `gt`, `lt`, `gte`,
+(`{"iid": {"eq": 1216}}`). Operators: `eq`, `gt`, `lt`, `gte`,
 `lte`, `in`, `contains`, `starts_with`, `ends_with`, `is_null`, `is_not_null`,
 plus text-token operators (`token_match`, `all_tokens`, `any_tokens`) for
 text-indexed properties — see [`query_language.md`](references/query_language.md).

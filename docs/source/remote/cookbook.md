@@ -101,7 +101,7 @@ Rank the most frequent job failures across your organization:
       "entity": "Job",
       "filters": {
         "status": "failed",
-        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+        "created_at": {"gte": "2025-01-01T00:00:00Z"}
       }
     }
   ],
@@ -125,7 +125,7 @@ that appears under three or more projects is a shared-template hot spot.
       "entity": "Job",
       "filters": {
         "status": "failed",
-        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+        "created_at": {"gte": "2025-01-01T00:00:00Z"}
       }
     },
     {"id": "p", "entity": "Project"}
@@ -155,7 +155,7 @@ pipelines those pipelines triggered.
       "filters": {
         "status": "failed",
         "source": "merge_request_event",
-        "created_at": {"op": "gte", "value": "2025-01-01T00:00:00Z"}
+        "created_at": {"gte": "2025-01-01T00:00:00Z"}
       }
     }
   ],
@@ -175,7 +175,7 @@ incomplete coverage rather than authoritative.
 {
   "query_type": "aggregation",
   "nodes": [
-    {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"op": "eq", "value": 123456789}}},
+    {"id": "mr", "entity": "MergeRequest", "filters": {"id": {"eq": 123456789}}},
     {"id": "d", "entity": "MergeRequestDiff"},
     {"id": "f", "entity": "MergeRequestDiffFile"}
   ],
@@ -201,7 +201,7 @@ helpers, might not be indexed.
     {
       "id": "f",
       "entity": "File",
-      "filters": {"path": {"op": "eq", "value": "app/models/project.rb"}}
+      "filters": {"path": {"eq": "app/models/project.rb"}}
     },
     {
       "id": "def",
@@ -294,7 +294,7 @@ the module or library you want to trace:
     "entity": "ImportedSymbol",
     "columns": ["file_path", "import_path", "identifier_name"],
     "filters": {
-      "import_path": {"op": "contains", "value": "payments-service"}
+      "import_path": {"contains": "payments-service"}
     }
   }],
   "limit": 100
@@ -310,7 +310,7 @@ Find projects that depend on a shared library:
     {
       "id": "f",
       "entity": "File",
-      "filters": {"path": {"op": "contains", "value": "shared-auth-lib"}}
+      "filters": {"path": {"contains": "shared-auth-lib"}}
     },
     {"id": "b", "entity": "Branch", "columns": ["name", "is_default"]},
     {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
@@ -334,7 +334,7 @@ Rank the definitions that the most code imports:
       "entity": "ImportedSymbol",
       "columns": ["import_path"],
       "filters": {
-        "import_path": {"op": "contains", "value": "payments"}
+        "import_path": {"contains": "payments"}
       }
     },
     {"id": "def", "entity": "Definition", "columns": ["name", "fqn", "file_path"]}
@@ -435,7 +435,7 @@ Find all critical and high vulnerabilities:
       "entity": "Vulnerability",
       "columns": ["title", "severity", "state", "report_type"],
       "filters": {
-        "severity": {"op": "in", "value": ["critical", "high"]},
+        "severity": {"in": ["critical", "high"]},
         "state": "detected"
       }
     },
@@ -524,7 +524,7 @@ Fetch the source text of a file. Use `limit: 1` to avoid large responses:
     "entity": "File",
     "columns": ["path", "language", "content"],
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     }
   }],
   "limit": 1
@@ -542,7 +542,7 @@ field returns the raw source text of just that definition, not the full file:
     "entity": "Definition",
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"],
     "filters": {
-      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+      "fqn": {"eq": "Gitlab::Auth::authenticate"}
     }
   }],
   "limit": 5

@@ -169,16 +169,20 @@ Filters can use simple equality:
 }
 ```
 
-Or they can use an operator:
+Or they can use an operator object. Multiple operator keys on the same
+property are AND-combined, which is how you express ranges:
 
 ```json
 {
   "filters": {
-    "created_at": {"op": "gte", "value": "2026-01-01"},
-    "state": {"op": "in", "value": ["opened", "merged"]}
+    "created_at": {"gte": "2026-01-01", "lt": "2026-02-01"},
+    "state": {"in": ["opened", "merged"]}
   }
 }
 ```
+
+To repeat an operator on the same property, use an array of operator
+objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
 | Operator | Use |
 |----------|-----|
@@ -188,8 +192,8 @@ Or they can use an operator:
 | `contains` | String contains a substring. |
 | `starts_with` | String starts with a prefix. |
 | `ends_with` | String ends with a suffix. |
-| `is_null` | Value is null. Do not provide `value`. |
-| `is_not_null` | Value is not null. Do not provide `value`. |
+| `is_null` | Null check. Takes a boolean: `false` matches non-null. |
+| `is_not_null` | Not-null check. Takes a boolean: `false` matches null. |
 | `token_match` | Text index contains one token. |
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
@@ -328,7 +332,7 @@ Fetch source file content:
     "id": "file",
     "entity": "File",
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
   }],
@@ -348,7 +352,7 @@ for a broader search:
     "id": "d",
     "entity": "Definition",
     "filters": {
-      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+      "fqn": {"eq": "Gitlab::Auth::authenticate"}
     },
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"]
   }],
@@ -393,8 +397,8 @@ Find every pipeline that ran for one merge request. Always filter
     "id": "p",
     "entity": "Pipeline",
     "filters": {
-      "merge_request_id": {"op": "eq", "value": 482908721},
-      "source": {"op": "eq", "value": "merge_request_event"}
+      "merge_request_id": {"eq": 482908721},
+      "source": {"eq": "merge_request_event"}
     },
     "columns": ["id", "status", "source", "sha", "ref", "created_at"]
   }],

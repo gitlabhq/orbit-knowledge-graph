@@ -330,14 +330,7 @@
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
@@ -393,14 +386,7 @@
           "state"
         ],
         "filters": {
-          "state": {
-            "op": "in",
-            "value": [
-              "opened",
-              "closed",
-              "merged"
-            ]
-          }
+          "state": {"in": ["opened", "closed", "merged"]}
         }
       }],
       "cursor": {
@@ -461,15 +447,7 @@
           "id": "j",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         },
         {
@@ -501,14 +479,7 @@
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {
@@ -614,15 +585,7 @@
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed",
-                "resolved",
-                "dismissed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed", "resolved", "dismissed"]}
           }
         }
       ],
@@ -658,15 +621,7 @@
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -709,13 +664,7 @@
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {

@@ -118,15 +118,7 @@ vulnerabilities_by_severity_and_state:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "report_type": {
-              "op": "in",
-              "value": [
-                "sast",
-                "dependency_scanning",
-                "container_scanning",
-                "secret_detection"
-              ]
-            }
+            "report_type": {"in": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}
           }
         }
       ],
@@ -167,13 +159,7 @@ vulnerabilities_by_project_and_severity:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed"]}
           }
         },
         {
@@ -357,14 +343,7 @@ projects_by_visibility:
           "id": "p",
           "entity": "Project",
           "filters": {
-            "visibility_level": {
-              "op": "in",
-              "value": [
-                "private",
-                "internal",
-                "public"
-              ]
-            }
+            "visibility_level": {"in": ["private", "internal", "public"]}
           }
         }
       ],
@@ -398,14 +377,7 @@ merge_requests_by_state:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
@@ -439,14 +411,7 @@ merge_requests_by_state_and_draft:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "merged",
-                "closed"
-              ]
-            }
+            "state": {"in": ["opened", "merged", "closed"]}
           }
         }
       ],
@@ -493,15 +458,7 @@ pipelines_by_status:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -535,13 +492,7 @@ pipeline_duration_by_status:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         }
       ],
@@ -581,15 +532,7 @@ jobs_by_status:
           "id": "j",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -623,15 +566,7 @@ jobs_by_status_and_when:
           "id": "j",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -762,15 +697,7 @@ project_pipeline_status_matrix:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         },
         {

@@ -167,7 +167,7 @@ mod tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 278964}}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": {"eq": 278964}}},
                 {"id": "diff", "entity": "MergeRequestDiff"},
                 {"id": "df", "entity": "MergeRequestDiffFile"}
             ],
@@ -237,9 +237,9 @@ mod tests {
         let json = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr_a", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                {"id": "mr_a", "entity": "MergeRequest", "filters": {"project_id": {"eq": 1000}}},
                 {"id": "diff_a", "entity": "MergeRequestDiff"},
-                {"id": "mr_b", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 1001}}},
+                {"id": "mr_b", "entity": "MergeRequest", "filters": {"project_id": {"eq": 1001}}},
                 {"id": "diff_b", "entity": "MergeRequestDiff"}
             ],
             "relationships": [
@@ -281,7 +281,7 @@ mod tests {
     fn project_eq_id_filter_yields_project_scope() {
         let n = node(
             "Project",
-            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 7}}}], "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"id": {"eq": 7}}}], "limit": 1}"#,
         );
         let keys = ontology_keys(&n, &ontology());
         assert_eq!(keys[0], PathResolutionKey::id("Project", 7));
@@ -303,7 +303,7 @@ mod tests {
         let o = ontology();
         let n = node(
             "Project",
-            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "group/project"}}}], "limit": 1}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "group/project"}}}], "limit": 1}"#,
         );
         let keys = ontology_keys(&n, &o);
         assert_eq!(

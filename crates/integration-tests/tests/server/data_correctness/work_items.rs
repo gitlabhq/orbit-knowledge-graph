@@ -46,7 +46,7 @@ pub(super) async fn search_filter_work_item_type_returns_matching_rows(ctx: &Tes
             "query_type": "traversal",
             "nodes": [{"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "work_item_type"],
-                     "filters": {"work_item_type": {"op": "in", "value": ["issue", "task"]}}}],
+                     "filters": {"work_item_type": {"in": ["issue", "task"]}}}],
             "limit": 10
         }"#,
         &allow_all(),

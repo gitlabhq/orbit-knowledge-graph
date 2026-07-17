@@ -4,6 +4,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUM
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use strum::VariantNames;
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
@@ -481,40 +482,78 @@ where
     D: Deserializer<'de>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
-    Ok(raw
-        .into_iter()
-        .map(|(k, v)| (k, parse_filter_entry(v)))
-        .collect())
+    raw.into_iter()
+        .map(|(k, v)| match parse_filter_entry(v) {
+            Ok(filters) => Ok((k, filters)),
+            Err(e) => Err(serde::de::Error::custom(format!("filter on \"{k}\": {e}"))),
+        })
+        .collect()
 }
 
-/// Parse a filter entry that may be a single filter or an array of
-/// PropertyFilter objects (AND-combined, for expressing ranges).
-fn parse_filter_entry(value: Value) -> Vec<InputFilter> {
-    if let Value::Array(ref arr) = value
-        && !arr.is_empty()
-        && arr.iter().all(|v| v.is_object() && v.get("op").is_some())
-    {
-        return arr.iter().cloned().map(parse_single_filter).collect();
-    }
-    vec![parse_single_filter(value)]
-}
-
-fn parse_single_filter(value: Value) -> InputFilter {
-    if let Value::Object(ref obj) = value
-        && let Some(op_val) = obj.get("op")
-        && let Ok(op) = serde_json::from_value::<FilterOp>(op_val.clone())
-    {
-        return InputFilter {
-            op: Some(op),
-            value: obj.get("value").cloned(),
+/// Parse a filter entry: a bare value is an equality match, an operator
+/// object AND-combines its operator keys, and an array of operator objects
+/// AND-combines its entries (the form needed to repeat an operator).
+fn parse_filter_entry(value: Value) -> Result<Vec<InputFilter>, String> {
+    match value {
+        Value::Object(obj) => parse_operator_object(obj),
+        Value::Array(arr) if arr.iter().any(Value::is_object) => {
+            let mut filters = Vec::new();
+            for elem in arr {
+                let Value::Object(obj) = elem else {
+                    return Err(
+                        "an array of operator objects must not mix in bare values".to_string()
+                    );
+                };
+                filters.extend(parse_operator_object(obj)?);
+            }
+            Ok(filters)
+        }
+        other => Ok(vec![InputFilter {
+            op: None,
+            value: Some(other),
             ..Default::default()
-        };
+        }]),
     }
-    InputFilter {
-        op: None,
-        value: Some(value),
-        ..Default::default()
+}
+
+fn parse_operator_object(obj: serde_json::Map<String, Value>) -> Result<Vec<InputFilter>, String> {
+    if obj.is_empty() {
+        return Err(format!(
+            "operator object needs at least one operator (one of: {})",
+            FilterOp::VARIANTS.join(", ")
+        ));
     }
+    obj.into_iter()
+        .map(|(key, value)| {
+            let op: FilterOp =
+                serde_json::from_value(Value::String(key.clone())).map_err(|_| {
+                    format!(
+                        "unknown operator \"{key}\" (one of: {})",
+                        FilterOp::VARIANTS.join(", ")
+                    )
+                })?;
+            let (op, value) = match (op, value) {
+                (FilterOp::IsNull | FilterOp::IsNotNull, Value::Bool(apply)) => {
+                    let wants_null = (op == FilterOp::IsNull) == apply;
+                    let op = if wants_null {
+                        FilterOp::IsNull
+                    } else {
+                        FilterOp::IsNotNull
+                    };
+                    (op, None)
+                }
+                (FilterOp::IsNull | FilterOp::IsNotNull, _) => {
+                    return Err(format!("\"{key}\" takes a boolean value"));
+                }
+                (op, value) => (op, Some(value)),
+            };
+            Ok(InputFilter {
+                op: Some(op),
+                value,
+                ..Default::default()
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1068,8 +1107,8 @@ mod tests {
             "nodes": [{
                 "id": "u", "entity": "User",
                 "filters": {
-                    "created_at": {"op": "gte", "value": "2024-01-01"},
-                    "state": {"op": "in", "value": ["active", "blocked"]}
+                    "created_at": {"gte": "2024-01-01"},
+                    "state": {"in": ["active", "blocked"]}
                 }
             }]
         }"#,
@@ -1093,8 +1132,8 @@ mod tests {
                 "id": "mr", "entity": "MergeRequest",
                 "filters": {
                     "created_at": [
-                        {"op": "gte", "value": "2026-04-01T00:00:00Z"},
-                        {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                        {"gte": "2026-04-01T00:00:00Z"},
+                        {"lt": "2026-05-01T00:00:00Z"}
                     ],
                     "state": "merged"
                 }
@@ -1140,6 +1179,145 @@ mod tests {
         assert_eq!(state.len(), 1);
         assert_eq!(state[0].op, None);
         assert_eq!(state[0].value, Some(serde_json::json!([1, 2, 3])));
+    }
+
+    #[test]
+    fn operator_object_keys_and_combine() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {"created_at": {"gte": "2026-04-01", "lt": "2026-05-01"}}
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let created_at = input.nodes[0].filters.get("created_at").unwrap();
+        assert_eq!(created_at.len(), 2);
+        assert_eq!(created_at[0].op, Some(FilterOp::Gte));
+        assert_eq!(created_at[0].value, Some(serde_json::json!("2026-04-01")));
+        assert_eq!(created_at[1].op, Some(FilterOp::Lt));
+        assert_eq!(created_at[1].value, Some(serde_json::json!("2026-05-01")));
+    }
+
+    #[test]
+    fn unknown_operator_lists_candidates() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "u", "entity": "User",
+                "filters": {"state": {"op": "eq", "value": "active"}}
+            }]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("unknown operator \"op\""), "{err}");
+        assert!(err.contains("token_match"), "{err}");
+    }
+
+    #[test]
+    fn nullability_operators_take_booleans() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {
+                    "merged_at": {"is_null": true},
+                    "closed_at": {"is_null": false},
+                    "created_at": {"is_not_null": false}
+                }
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let filters = &input.nodes[0].filters;
+        let merged_at = &filters.get("merged_at").unwrap()[0];
+        assert_eq!(merged_at.op, Some(FilterOp::IsNull));
+        assert_eq!(merged_at.value, None);
+        assert_eq!(
+            filters.get("closed_at").unwrap()[0].op,
+            Some(FilterOp::IsNotNull)
+        );
+        assert_eq!(
+            filters.get("created_at").unwrap()[0].op,
+            Some(FilterOp::IsNull)
+        );
+    }
+
+    #[test]
+    fn nullability_operator_rejects_non_boolean() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {"merged_at": {"is_null": 1}}
+            }]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("takes a boolean"), "{err}");
+    }
+
+    #[test]
+    fn empty_operator_object_is_rejected() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User", "filters": {"state": {}}}]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("at least one operator"), "{err}");
+    }
+
+    #[test]
+    fn filter_array_rejects_mixed_values_and_objects() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "u", "entity": "User",
+                "filters": {"state": [{"gte": 1}, 5]}
+            }]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("must not mix"), "{err}");
+    }
+
+    #[test]
+    fn filter_array_of_operator_objects_repeats_an_operator() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {"title": [{"contains": "foo"}, {"contains": "bar"}]}
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let title = input.nodes[0].filters.get("title").unwrap();
+        assert_eq!(title.len(), 2);
+        assert_eq!(title[0].op, Some(FilterOp::Contains));
+        assert_eq!(title[0].value, Some(serde_json::json!("foo")));
+        assert_eq!(title[1].op, Some(FilterOp::Contains));
+        assert_eq!(title[1].value, Some(serde_json::json!("bar")));
     }
 
     #[test]

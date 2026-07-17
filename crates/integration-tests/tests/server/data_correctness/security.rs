@@ -108,7 +108,7 @@ pub(super) async fn search_traversal_path_filter_returns_matching_descendants(ct
             "nodes": [{"id": "p", "entity": "Project",
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["name", "traversal_path"],
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/200/"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/100/200/"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -133,7 +133,7 @@ pub(super) async fn search_traversal_path_filter_outside_scope_rejects_at_compil
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 10
         }"#,
         &ontology,

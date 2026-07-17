@@ -886,7 +886,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2],
-                         "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}}],
+                         "filters": {"username": {"in": ["alice", "bob"]}}}],
                 "order_by": "u.id",
                 "cursor": {"page_size": 5},
                 "limit": 10}"#,

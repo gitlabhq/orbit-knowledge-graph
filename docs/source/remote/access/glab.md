@@ -98,7 +98,7 @@ Put the request body in `query.json`:
       "id": "p",
       "entity": "Project",
       "filters": {
-        "full_path": { "op": "starts_with", "value": "your-group/" }
+        "full_path": {"starts_with": "your-group/"}
       }
     }],
     "limit": 5

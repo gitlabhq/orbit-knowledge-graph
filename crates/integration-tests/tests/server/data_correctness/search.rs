@@ -150,7 +150,7 @@ pub(super) async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
-                     "filters": {"visibility_level": {"op": "in", "value": ["public", "internal"]}}}],
+                     "filters": {"visibility_level": {"in": ["public", "internal"]}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -172,7 +172,7 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "starts_with", "value": "ali"}}}],
+                     "filters": {"username": {"starts_with": "ali"}}}],
              "limit": 10
         }"#,
         &allow_all(),
@@ -217,7 +217,7 @@ pub(super) async fn search_filter_contains_returns_substring_matches(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "lic"}}}],
+                     "filters": {"username": {"contains": "lic"}}}],
              "limit": 10
         }"#,
         &allow_all(),
@@ -239,7 +239,7 @@ pub(super) async fn search_filter_is_null_matches_unset_columns(ctx: &TestContex
         r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "avatar_url"],
-                     "filters": {"avatar_url": {"op": "is_null", "value": true}}}],
+                     "filters": {"avatar_url": {"is_null": true}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -500,8 +500,8 @@ pub(super) async fn search_filter_gte_on_datetime_returns_matching_rows(ctx: &Te
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
-                         "state": {"op": "eq", "value": "merged"},
-                         "merged_at": {"op": "gte", "value": "2024-06-01T00:00:00Z"}
+                         "state": {"eq": "merged"},
+                         "merged_at": {"gte": "2024-06-01T00:00:00Z"}
                      }}],
             "order_by": "-mr.merged_at",
             "limit": 10
@@ -530,8 +530,8 @@ pub(super) async fn search_filter_lte_on_datetime_returns_matching_rows(ctx: &Te
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
-                         "state": {"op": "eq", "value": "merged"},
-                         "merged_at": {"op": "lte", "value": "2024-07-01T00:00:00Z"}
+                         "state": {"eq": "merged"},
+                         "merged_at": {"lte": "2024-07-01T00:00:00Z"}
                      }}],
             "order_by": "-mr.merged_at",
             "limit": 10
@@ -564,8 +564,8 @@ pub(super) async fn search_filter_lt_on_datetime_excludes_same_day_after_midnigh
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
-                         "state": {"op": "eq", "value": "merged"},
-                         "merged_at": {"op": "lt", "value": "2024-06-10T00:00:00Z"}
+                         "state": {"eq": "merged"},
+                         "merged_at": {"lt": "2024-06-10T00:00:00Z"}
                      }}],
             "limit": 10
         }"#,
@@ -594,7 +594,7 @@ pub(super) async fn search_filter_is_not_null_on_datetime_returns_merged_rows(ct
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
-                         "merged_at": {"op": "is_not_null"}
+                         "merged_at": {"is_not_null": true}
                      }}],
             "order_by": "-mr.merged_at",
             "limit": 10
@@ -621,10 +621,10 @@ pub(super) async fn search_multi_filter_date_window(ctx: &TestContext) {
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
-                         "state": {"op": "eq", "value": "merged"},
+                         "state": {"eq": "merged"},
                          "merged_at": [
-                             {"op": "gte", "value": "2024-04-01T00:00:00Z"},
-                             {"op": "lt", "value": "2024-07-01T00:00:00Z"}
+                             {"gte": "2024-04-01T00:00:00Z"},
+                             {"lt": "2024-07-01T00:00:00Z"}
                          ]
                      }}],
             "limit": 10
@@ -655,10 +655,10 @@ pub(super) async fn search_multi_filter_date_window_multiple_results(ctx: &TestC
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "merged_at"],
                      "filters": {
-                         "state": {"op": "eq", "value": "merged"},
+                         "state": {"eq": "merged"},
                          "merged_at": [
-                             {"op": "gte", "value": "2024-01-01T00:00:00Z"},
-                             {"op": "lt", "value": "2024-07-01T00:00:00Z"}
+                             {"gte": "2024-01-01T00:00:00Z"},
+                             {"lt": "2024-07-01T00:00:00Z"}
                          ]
                      }}],
             "order_by": "mr.merged_at",
@@ -691,8 +691,8 @@ pub(super) async fn search_multi_filter_empty_window_returns_empty(ctx: &TestCon
                      "columns": ["title", "merged_at"],
                      "filters": {
                          "merged_at": [
-                             {"op": "gte", "value": "2024-07-01T00:00:00Z"},
-                             {"op": "lt", "value": "2024-07-01T00:00:00Z"}
+                             {"gte": "2024-07-01T00:00:00Z"},
+                             {"lt": "2024-07-01T00:00:00Z"}
                          ]
                      }}],
             "limit": 10
@@ -720,7 +720,7 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
                      "filters": {
                          "state": "merged",
                          "merged_at": [
-                             {"op": "gte", "value": "2024-06-01T00:00:00Z"}
+                             {"gte": "2024-06-01T00:00:00Z"}
                          ]
                      }}],
             "order_by": "mr.merged_at",
@@ -751,8 +751,8 @@ pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "diff"],
                      "filters": {
-                         "state": {"op": "eq", "value": "merged"},
-                         "diff": {"op": "contains", "value": "mock"}
+                         "state": {"eq": "merged"},
+                         "diff": {"contains": "mock"}
                      }}],
             "limit": 10
         }"#,
@@ -778,7 +778,7 @@ pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "diff"],
                      "filters": {
-                         "diff": {"op": "eq", "value": "nonexistent content"}
+                         "diff": {"eq": "nonexistent content"}
                      }}],
             "limit": 10
         }"#,
@@ -803,7 +803,7 @@ pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "diff"],
                      "filters": {
-                         "diff": {"op": "is_not_null"}
+                         "diff": {"is_not_null": true}
                      }}],
             "limit": 10
         }"#,
@@ -825,7 +825,7 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
                      "columns": ["title", "state", "diff"],
                      "filters": {
                          "state": "merged",
-                         "diff": {"op": "starts_with", "value": "mock:"}
+                         "diff": {"starts_with": "mock:"}
                      }}],
             "order_by": "mr.id",
             "limit": 10

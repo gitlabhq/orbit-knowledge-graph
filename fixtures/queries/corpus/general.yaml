@@ -16,20 +16,14 @@ q1_defines_traversal_file_ends_with_rb:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": ".rb"
-            }
+            "path": {"ends_with": ".rb"}
           }
         },
         {
           "id": "d",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "starts_with",
-              "value": "process"
-            }
+            "name": {"starts_with": "process"}
           }
         }
       ],
@@ -55,10 +49,7 @@ q2_datetime_range_filter_on_mr:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            },
+            "merged_at": {"gte": "2026-03-01T00:00:00Z"},
             "state": "merged"
           }
         },
@@ -282,10 +273,7 @@ q8_token_match_on_mr_title:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "title": {
-              "op": "token_match",
-              "value": "security"
-            }
+            "title": {"token_match": "security"}
           }
         },
         {
@@ -317,10 +305,7 @@ q9_contains_on_mr_description:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "description": {
-              "op": "contains",
-              "value": "performance regression"
-            }
+            "description": {"contains": "performance regression"}
           }
         },
         {
@@ -494,10 +479,7 @@ q13_all_tokens_on_workitem_title:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "title": {
-              "op": "all_tokens",
-              "value": "memory leak"
-            }
+            "title": {"all_tokens": "memory leak"}
           }
         },
         {
@@ -703,10 +685,7 @@ q18_wide_datetime_pipeline_agg:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "created_at": {
-              "op": "gte",
-              "value": "2025-01-01T00:00:00Z"
-            },
+            "created_at": {"gte": "2025-01-01T00:00:00Z"},
             "status": "failed"
           }
         },
@@ -751,10 +730,7 @@ q19_code_defines_by_node_id:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": ".rb"
-            }
+            "path": {"ends_with": ".rb"}
           }
         },
         {
@@ -825,10 +801,7 @@ q21_calls_aggregation:
           "id": "d1",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "starts_with",
-              "value": "create"
-            }
+            "name": {"starts_with": "create"}
           }
         },
         {
@@ -872,10 +845,7 @@ q22_imports_traversal:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": "controller.rb"
-            }
+            "path": {"ends_with": "controller.rb"}
           }
         },
         {
@@ -946,10 +916,7 @@ q24_job_pipeline_project_agg:
           "filters": {
             "status": "failed",
             "failure_reason": "script_failure",
-            "created_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         },
         {
@@ -1004,10 +971,7 @@ q25_mr_diff_project_traversal:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-04-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-04-01T00:00:00Z"}
           }
         },
         {
@@ -1048,10 +1012,7 @@ q26_calls_with_token_match:
           "id": "d1",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "token_match",
-              "value": "initialize"
-            }
+            "name": {"token_match": "initialize"}
           }
         },
         {
@@ -1134,10 +1095,7 @@ q29_workitem_with_label_filter:
           "id": "l",
           "entity": "Label",
           "filters": {
-            "title": {
-              "op": "contains",
-              "value": "bug"
-            }
+            "title": {"contains": "bug"}
           }
         },
         {
@@ -1218,10 +1176,7 @@ q31_on_branch_code_edge:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": ".rb"
-            }
+            "path": {"ends_with": ".rb"}
           }
         },
         {
@@ -1254,10 +1209,7 @@ q32_extends_traversal:
           "id": "d1",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "token_match",
-              "value": "BaseService"
-            }
+            "name": {"token_match": "BaseService"}
           }
         },
         {
@@ -1287,13 +1239,7 @@ q33_vulnerability_occurrence_chain:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed"]}
           }
         },
         {
@@ -1333,10 +1279,7 @@ q34_any_tokens_on_mr_description:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "description": {
-              "op": "any_tokens",
-              "value": "timeout regression slowdown"
-            }
+            "description": {"any_tokens": "timeout regression slowdown"}
           }
         },
         {
@@ -1628,10 +1571,7 @@ c1_triple_filter_mr:
           "filters": {
             "state": "opened",
             "draft": true,
-            "created_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         },
         {
@@ -1695,10 +1635,7 @@ c3_mr_source_branch_contains:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "source_branch": {
-              "op": "contains",
-              "value": "fix"
-            }
+            "source_branch": {"contains": "fix"}
           }
         },
         {
@@ -1730,10 +1667,7 @@ c4_workitem_multi_text_filter:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "title": {
-              "op": "any_tokens",
-              "value": "security vulnerability CVE exploit"
-            },
+            "title": {"any_tokens": "security vulnerability CVE exploit"},
             "state": "opened",
             "work_item_type": "issue"
           }
@@ -1835,10 +1769,7 @@ d2_group_project_mr_user_authors:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-04-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-04-01T00:00:00Z"}
           }
         },
         {
@@ -1974,10 +1905,7 @@ e1_avg_count_pipeline_duration:
           "entity": "Pipeline",
           "filters": {
             "status": "success",
-            "created_at": {
-              "op": "gte",
-              "value": "2026-04-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-04-01T00:00:00Z"}
           }
         },
         {
@@ -2032,10 +1960,7 @@ e2_sum_lines_per_user:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         },
         {
@@ -2176,10 +2101,7 @@ g1_3_hop_code_chain_file_def_def:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "eq",
-              "value": "app/models/user.rb"
-            }
+            "path": {"eq": "app/models/user.rb"}
           }
         },
         {
@@ -2218,10 +2140,7 @@ g2_directory_file_count:
           "id": "dir",
           "entity": "Directory",
           "filters": {
-            "path": {
-              "op": "starts_with",
-              "value": "app/"
-            }
+            "path": {"starts_with": "app/"}
           }
         },
         {
@@ -2569,10 +2488,7 @@ i2_mr_count_by_target_branch:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2025-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2025-01-01T00:00:00Z"}
           }
         },
         {
@@ -2817,15 +2733,7 @@ i7_vulnerability_count_by_severity:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed",
-                "resolved",
-                "dismissed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed", "resolved", "dismissed"]}
           }
         }
       ],
@@ -2893,15 +2801,7 @@ i9_pipeline_count_by_status_and_source:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
@@ -2942,14 +2842,7 @@ i10_merge_request_state_draft_matrix:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
@@ -2996,14 +2889,7 @@ i11_project_visibility_and_mr_state:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {
@@ -3058,13 +2944,7 @@ i12_project_and_vulnerability_severity:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed"]}
           }
         },
         {
