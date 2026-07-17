@@ -102,28 +102,31 @@ Filters support both simple equality and advanced operators.
 {"filters": {"username": "admin", "state": "active"}}
 ```
 
-**Advanced operators:**
+**Operator objects** (multiple keys AND-combine, e.g. for ranges):
 
 ```json
 {
   "filters": {
-    "created_at": {"op": "gte", "value": "2024-01-01"},
-    "state": {"op": "in", "value": ["active", "blocked"]},
-    "username": {"op": "contains", "value": "admin"}
+    "created_at": {"gte": "2024-01-01", "lt": "2025-01-01"},
+    "state": {"in": ["active", "blocked"]},
+    "username": {"contains": "admin"}
   }
 }
 ```
 
 | Operator | Description | Example |
 |----------|-------------|---------|
-| `eq` | Equality | `{"op": "eq", "value": "admin"}` |
-| `gt`, `lt`, `gte`, `lte` | Comparison | `{"op": "gte", "value": 100}` |
-| `in` | Membership | `{"op": "in", "value": ["a", "b"]}` |
-| `contains` | Substring match | `{"op": "contains", "value": "test"}` |
-| `starts_with` | Prefix match | `{"op": "starts_with", "value": "gl_"}` |
-| `ends_with` | Suffix match | `{"op": "ends_with", "value": "_bot"}` |
-| `is_null` | Null check | `{"op": "is_null"}` |
-| `is_not_null` | Not null check | `{"op": "is_not_null"}` |
+| `eq` | Equality | `{"eq": "admin"}` |
+| `gt`, `lt`, `gte`, `lte` | Comparison | `{"gte": 100}` |
+| `in` | Membership | `{"in": ["a", "b"]}` |
+| `contains` | Substring match | `{"contains": "test"}` |
+| `starts_with` | Prefix match | `{"starts_with": "gl_"}` |
+| `ends_with` | Suffix match | `{"ends_with": "_bot"}` |
+| `is_null` | Null check (boolean; `false` negates) | `{"is_null": true}` |
+| `is_not_null` | Not null check (boolean; `false` negates) | `{"is_not_null": true}` |
+
+Repeating an operator on one property takes an array of operator objects:
+`{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
 ## Relationship Selectors
 
@@ -280,7 +283,7 @@ Match a single entity type with optional filters — a `traversal` query with on
     "entity": "User",
     "columns": ["username", "email"],
     "filters": {
-      "username": {"op": "starts_with", "value": "admin"}
+      "username": {"starts_with": "admin"}
     }
   }],
   "limit": 10

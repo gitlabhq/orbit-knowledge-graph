@@ -110,7 +110,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
-                {"id": "n", "entity": "Note", "filters": {"created_at": {"op": "gte", "value": "2024-01-01T00:00:00Z"}}}
+                {"id": "n", "entity": "Note", "filters": {"created_at": {"gte": "2024-01-01T00:00:00Z"}}}
             ],
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
             "group_by": [

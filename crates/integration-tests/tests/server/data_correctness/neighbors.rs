@@ -245,7 +245,7 @@ pub(super) async fn neighbors_non_default_pk_with_non_denorm_filter(ctx: &TestCo
             "nodes": [{
                 "id": "d",
                 "entity": "MergeRequestDiff",
-                "filters": {"head_commit_sha": {"op": "starts_with", "value": "aaaa"}}
+                "filters": {"head_commit_sha": {"starts_with": "aaaa"}}
             }],
             "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
         }"#,
@@ -271,7 +271,7 @@ pub(super) async fn neighbors_non_default_pk_filter_excludes_non_matching(ctx: &
             "nodes": [{
                 "id": "d",
                 "entity": "MergeRequestDiff",
-                "filters": {"head_commit_sha": {"op": "eq", "value": "no-such-sha"}}
+                "filters": {"head_commit_sha": {"eq": "no-such-sha"}}
             }],
             "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
         }"#,
@@ -302,7 +302,7 @@ pub(super) async fn neighbors_non_default_pk_redaction_uses_merge_request_id(ctx
             "nodes": [{
                 "id": "d",
                 "entity": "MergeRequestDiff",
-                "filters": {"head_commit_sha": {"op": "starts_with", "value": "bbbb"}}
+                "filters": {"head_commit_sha": {"starts_with": "bbbb"}}
             }],
             "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
         }"#,

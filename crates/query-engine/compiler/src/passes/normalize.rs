@@ -433,7 +433,7 @@ mod tests {
         );
 
         let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2, 3, 4]}}}]}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2, 3, 4]}}}]}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
@@ -442,7 +442,7 @@ mod tests {
 
         // Mixed valid/invalid ints in array - unknown values pass through
         let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 999, 3]}}}]}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 999, 3]}}}]}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
@@ -466,7 +466,7 @@ mod tests {
         );
 
         let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "is_null"}}}]}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"is_null": true}}}]}"#,
         );
         assert_eq!(r.nodes[0].filters.get("state").unwrap()[0].value, None);
     }
@@ -478,7 +478,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [
                     {"id": "u", "entity": "User", "filters": {"username": "admin", "id": 42}},
-                    {"id": "mr", "entity": "MergeRequest", "filters": {"state": 3, "draft": false, "title": {"op": "contains", "value": "fix"}}},
+                    {"id": "mr", "entity": "MergeRequest", "filters": {"state": 3, "draft": false, "title": {"contains": "fix"}}},
                     {"id": "p", "entity": "Pipeline", "filters": {"source": 10, "failure_reason": 1}},
                     {"id": "wi", "entity": "WorkItem", "filters": {"state": 2, "work_item_type": 8}},
                     {"id": "n"}
@@ -564,7 +564,7 @@ mod tests {
         );
 
         let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"op": "in", "value": ["main", "develop"]}}}]}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"in": ["main", "develop"]}}}]}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("source_branch").unwrap()[0].value,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v8",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v9",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -296,7 +296,7 @@
         },
         "filters": {
           "type": "object",
-          "description": "Property filters. Keys are property names, values are Filter objects or arrays of PropertyFilter objects (AND-combined, for ranges). Limited to prevent query complexity explosion.",
+          "description": "Property filters. Keys are property names; values are an equality value, an operator object, or an array of operator objects. Limited to prevent query complexity explosion.",
           "propertyNames": {
             "$ref": "#/$defs/Identifier"
           },
@@ -370,36 +370,69 @@
       },
       "additionalProperties": false
     },
-    "Filter": {
-      "description": "Property filter - supports both simple equality and advanced operators",
+    "FilterEntry": {
+      "description": "Filter(s) on a single property. A bare value is an equality match; an operator object AND-combines its operator keys; an array of operator objects AND-combines entries (only needed to repeat an operator).",
       "oneOf": [
         {
           "$ref": "#/$defs/FilterValue",
-          "description": "Simple equality filter (backward compatible)"
+          "description": "Equality match"
         },
         {
-          "$ref": "#/$defs/PropertyFilter",
-          "description": "Advanced operator-based filter"
-        }
-      ]
-    },
-    "FilterEntry": {
-      "description": "One or more filters on a single property. Use an array to express ranges (e.g., date windows). Array entries are AND-combined.",
-      "oneOf": [
-        {
-          "$ref": "#/$defs/Filter",
-          "description": "Single filter (backward compatible)"
+          "$ref": "#/$defs/OperatorFilter"
         },
         {
           "type": "array",
-          "description": "Multiple filters AND-combined on the same property. Each element must use an explicit operator.",
+          "description": "AND-combined operator objects, for repeating an operator on the same property.",
           "items": {
-            "$ref": "#/$defs/PropertyFilter"
+            "$ref": "#/$defs/OperatorFilter"
           },
           "minItems": 1,
           "maxItems": 10
         }
       ]
+    },
+    "OperatorFilter": {
+      "type": "object",
+      "description": "Operator-keyed filter; multiple keys AND-combine, e.g. {\"gte\": a, \"lt\": b}.",
+      "minProperties": 1,
+      "properties": {
+        "eq": { "$ref": "#/$defs/FilterValue" },
+        "gt": { "$ref": "#/$defs/FilterValue" },
+        "lt": { "$ref": "#/$defs/FilterValue" },
+        "gte": { "$ref": "#/$defs/FilterValue" },
+        "lte": { "$ref": "#/$defs/FilterValue" },
+        "in": {
+          "type": "array",
+          "description": "Set membership.",
+          "items": { "$ref": "#/$defs/FilterValue" },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "contains": { "$ref": "#/$defs/SearchPattern" },
+        "starts_with": { "$ref": "#/$defs/SearchPattern" },
+        "ends_with": { "$ref": "#/$defs/SearchPattern" },
+        "is_null": {
+          "type": "boolean",
+          "description": "true matches NULL; false matches non-NULL."
+        },
+        "is_not_null": {
+          "type": "boolean",
+          "description": "true matches non-NULL; false matches NULL."
+        },
+        "token_match": {
+          "$ref": "#/$defs/SearchPattern",
+          "description": "Exact word match. Only on fields that support word matching."
+        },
+        "all_tokens": {
+          "$ref": "#/$defs/SearchPattern",
+          "description": "All words present. Only on fields that support word matching."
+        },
+        "any_tokens": {
+          "$ref": "#/$defs/SearchPattern",
+          "description": "Any word present. Only on fields that support word matching."
+        }
+      },
+      "additionalProperties": false
     },
     "FilterValue": {
       "description": "A filter value - can be a number (integer or float), string, boolean, or list",
@@ -427,49 +460,10 @@
         }
       ]
     },
-    "PropertyFilter": {
-      "type": "object",
-      "description": "Advanced filter with operator",
-      "required": ["op"],
-      "properties": {
-        "op": {
-          "type": "string",
-          "description": "Filter operator. Comparison: eq, gt, lt, gte, lte. Set membership: in (array value). Substring matching: contains, starts_with, ends_with. Nullability: is_null, is_not_null (no value). Word matching: token_match (exact word match), all_tokens (all words present), any_tokens (any word present) — only on fields that support word matching.",
-          "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null", "token_match", "all_tokens", "any_tokens"]
-        },
-        "value": {
-          "description": "Filter value. Required for all operators except is_null/is_not_null. Type: array for 'in', string for contains/starts_with/ends_with/token_match/all_tokens/any_tokens, scalar for comparison operators."
-        }
-      },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": { "properties": { "op": { "enum": ["eq", "gt", "lt", "gte", "lte"] } } },
-          "then": { "required": ["value"], "properties": { "value": { "$ref": "#/$defs/FilterValue" } } }
-        },
-        {
-          "if": { "properties": { "op": { "const": "in" } } },
-          "then": {
-            "required": ["value"],
-            "properties": {
-              "value": {
-                "type": "array",
-                "items": { "$ref": "#/$defs/FilterValue" },
-                "minItems": 1,
-                "maxItems": 100
-              }
-            }
-          }
-        },
-        {
-          "if": { "properties": { "op": { "enum": ["contains", "starts_with", "ends_with"] } } },
-          "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
-        },
-        {
-          "if": { "properties": { "op": { "enum": ["token_match", "all_tokens", "any_tokens"] } } },
-          "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
-        }
-      ]
+    "SearchPattern": {
+      "type": "string",
+      "description": "Substring or word-match pattern. Patterns shorter than 3 characters are rejected at compile time (traversal_path exempt).",
+      "maxLength": 1024
     },
     "RelationshipSelector": {
       "type": "object",

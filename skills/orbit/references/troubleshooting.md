@@ -84,7 +84,7 @@ Put the request body in `/tmp/q-min.json`:
       "id": "p",
       "entity": "Project",
       "filters": {
-        "full_path": {"op": "starts_with", "value": "gitlab-org/"}
+        "full_path": {"starts_with": "gitlab-org/"}
       }
     }],
     "limit": 1

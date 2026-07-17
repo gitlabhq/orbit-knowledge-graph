@@ -243,19 +243,19 @@ Query Vulnerability Counts For Project As Victim
 Reporter Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${REPORTER_VULNERABILITY_CREATED_AT}
     ${filters}=    Evaluate
-    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($REPORTER_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($REPORTER_VULNERABILITY_ID)}}, {"title": $REPORTER_VULNERABILITY_TITLE}, {"created_at": {"op": "lte", "value": $created_at}}]
+    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($REPORTER_VULNERABILITY_ID)}, {"id": {"lte": int($REPORTER_VULNERABILITY_ID)}}, {"title": $REPORTER_VULNERABILITY_TITLE}, {"created_at": {"lte": $created_at}}]
     RETURN    ${filters}
 
 Nested Reporter Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${NESTED_REPORTER_VULNERABILITY_CREATED_AT}
     ${filters}=    Evaluate
-    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($NESTED_REPORTER_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($NESTED_REPORTER_VULNERABILITY_ID)}}, {"title": $NESTED_REPORTER_VULNERABILITY_TITLE}, {"created_at": {"op": "lte", "value": $created_at}}]
+    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($NESTED_REPORTER_VULNERABILITY_ID)}, {"id": {"lte": int($NESTED_REPORTER_VULNERABILITY_ID)}}, {"title": $NESTED_REPORTER_VULNERABILITY_TITLE}, {"created_at": {"lte": $created_at}}]
     RETURN    ${filters}
 
 Security Manager Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${SECURITY_VULNERABILITY_CREATED_AT}
     ${filters}=    Evaluate
-    ...    [None, {"severity": "high"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($SECURITY_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($SECURITY_VULNERABILITY_ID)}}, {"title": $SECURITY_VULNERABILITY_TITLE}, {"created_at": {"op": "gte", "value": $created_at}}]
+    ...    [None, {"severity": "high"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($SECURITY_VULNERABILITY_ID)}, {"id": {"lte": int($SECURITY_VULNERABILITY_ID)}}, {"title": $SECURITY_VULNERABILITY_TITLE}, {"created_at": {"gte": $created_at}}]
     RETURN    ${filters}
 
 Normalize ClickHouse Timestamp

@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use the Orbit query language to search and traverse the knowledge graph.
-title: Orbit query language
+description: Use the GitLab Orbit query language to search and traverse the knowledge graph.
+title: GitLab Orbit query language
 ---
 
 {{< details >}}
@@ -26,7 +26,7 @@ title: Orbit query language
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Use the Orbit query language when you need GitLab data as a graph instead of a
+Use the GitLab Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.
 
@@ -122,7 +122,7 @@ A node selector names one entity type in the ontology.
 |-------|------|-------------|
 | `id` | `string` | Local alias for the node. Relationships, aggregations, path, and neighbors refer to this alias. |
 | `entity` | `string` | Ontology node type, such as `Project`, `User`, `MergeRequest`, `File`, or `Definition`. |
-| `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, Orbit returns the entity's default columns. |
+| `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, GitLab Orbit returns the entity's default columns. |
 | `filters` | `object` | Property filters. |
 | `node_ids` | `array` | Exact IDs to match. Accepts integers or digit strings. Maximum 500. |
 | `id_range` | `object` | Inclusive ID range with `start` and `end`. |
@@ -169,16 +169,20 @@ Filters can use simple equality:
 }
 ```
 
-Or they can use an operator:
+Or they can use an operator object. Multiple operator keys on the same
+property are AND-combined, which is how you express ranges:
 
 ```json
 {
   "filters": {
-    "created_at": {"op": "gte", "value": "2026-01-01"},
-    "state": {"op": "in", "value": ["opened", "merged"]}
+    "created_at": {"gte": "2026-01-01", "lt": "2026-02-01"},
+    "state": {"in": ["opened", "merged"]}
   }
 }
 ```
+
+To repeat an operator on the same property, use an array of operator
+objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
 | Operator | Use |
 |----------|-----|
@@ -188,8 +192,8 @@ Or they can use an operator:
 | `contains` | String contains a substring. |
 | `starts_with` | String starts with a prefix. |
 | `ends_with` | String ends with a suffix. |
-| `is_null` | Value is null. Do not provide `value`. |
-| `is_not_null` | Value is not null. Do not provide `value`. |
+| `is_null` | Null check. Takes a boolean: `false` matches non-null. |
+| `is_not_null` | Not-null check. Takes a boolean: `false` matches null. |
 | `token_match` | Text index contains one token. |
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
@@ -238,7 +242,7 @@ Using these operators on other properties falls back to a full string scan, whic
 ## Columns and virtual columns
 
 Most columns come from indexed graph tables in ClickHouse. Some columns are
-virtual: Orbit fetches them from another service after the graph query returns.
+virtual: GitLab Orbit fetches them from another service after the graph query returns.
 
 Request virtual columns explicitly in `columns`. The `dynamic_columns` option
 used by `path_finding` and `neighbors` excludes virtual columns because they
@@ -328,7 +332,7 @@ Fetch source file content:
     "id": "file",
     "entity": "File",
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
   }],
@@ -348,7 +352,7 @@ for a broader search:
     "id": "d",
     "entity": "Definition",
     "filters": {
-      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+      "fqn": {"eq": "Gitlab::Auth::authenticate"}
     },
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"]
   }],
@@ -393,8 +397,8 @@ Find every pipeline that ran for one merge request. Always filter
     "id": "p",
     "entity": "Pipeline",
     "filters": {
-      "merge_request_id": {"op": "eq", "value": 482908721},
-      "source": {"op": "eq", "value": "merge_request_event"}
+      "merge_request_id": {"eq": 482908721},
+      "source": {"eq": "merge_request_event"}
     },
     "columns": ["id", "status", "source", "sha", "ref", "created_at"]
   }],
@@ -587,7 +591,7 @@ Virtual columns still require an explicit request in a traversal query.
 
 ## Validation limits
 
-Orbit rejects broad or ambiguous queries before compiling SQL.
+GitLab Orbit rejects broad or ambiguous queries before compiling SQL.
 
 | Limit | Value |
 |-------|-------|

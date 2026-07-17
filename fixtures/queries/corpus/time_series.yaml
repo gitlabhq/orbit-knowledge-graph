@@ -22,10 +22,7 @@
           "entity": "Job",
           "filters": {
             "status": "failed",
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-03-01T00:00:00Z"}
           }
         }
       ],
@@ -65,10 +62,7 @@
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         }
       ],
@@ -107,10 +101,7 @@
           "id": "p",
           "entity": "Pipeline",
           "filters": {
-            "started_at": {
-              "op": "gte",
-              "value": "2024-01-01T00:00:00Z"
-            }
+            "started_at": {"gte": "2024-01-01T00:00:00Z"}
           }
         }
       ],
@@ -149,10 +140,7 @@
           "id": "j",
           "entity": "Job",
           "filters": {
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-04-15T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-04-15T00:00:00Z"}
           }
         }
       ],
@@ -192,10 +180,7 @@
           "entity": "Job",
           "filters": {
             "status": "failed",
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-04-25T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-04-25T00:00:00Z"}
           }
         }
       ],
@@ -234,10 +219,7 @@
           "id": "p",
           "entity": "Pipeline",
           "filters": {
-            "started_at": {
-              "op": "gte",
-              "value": "2026-05-10T00:00:00Z"
-            }
+            "started_at": {"gte": "2026-05-10T00:00:00Z"}
           }
         }
       ],
@@ -321,10 +303,7 @@
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         }
       ],
@@ -374,10 +353,7 @@
           "id": "j",
           "entity": "Job",
           "filters": {
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-03-01T00:00:00Z"}
           }
         }
       ],
@@ -422,10 +398,7 @@
           "entity": "WorkItem",
           "filters": {
             "state": "opened",
-            "created_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         }
       ],
@@ -464,10 +437,7 @@
           "id": "p",
           "entity": "Pipeline",
           "filters": {
-            "started_at": {
-              "op": "gte",
-              "value": "2026-05-01T00:00:00Z"
-            }
+            "started_at": {"gte": "2026-05-01T00:00:00Z"}
           }
         }
       ],
@@ -513,10 +483,7 @@
           "entity": "Job",
           "filters": {
             "status": "failed",
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-03-01T00:00:00Z"}
           }
         }
       ],

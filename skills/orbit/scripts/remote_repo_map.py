@@ -84,8 +84,8 @@ def _edges(result: dict) -> list[dict]:
 
 def _base_filters(project_id: int, branch: str) -> dict:
     return {
-        "project_id": {"op": "eq", "value": project_id},
-        "branch":     {"op": "eq", "value": branch},
+        "project_id": {"eq": project_id},
+        "branch":     {"eq": branch},
     }
 
 
@@ -189,7 +189,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
         "nodes": [
             {
                 "id": "base", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), filter_key: {"op": "eq", "value": filter_val}},
+                "filters": {**_base_filters(pid, branch), filter_key: {"eq": filter_val}},
                 "columns": ["fqn", "name"],
             },
             {
@@ -251,7 +251,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
         "nodes": [
             {
                 "id": "child", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), "fqn": {"op": "eq", "value": args.name}},
+                "filters": {**_base_filters(pid, branch), "fqn": {"eq": args.name}},
                 "columns": ["fqn", "name"],
             },
             {
@@ -327,7 +327,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
         "nodes": [
             {
                 "id": "base", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), base_key: {"op": "eq", "value": base_val}},
+                "filters": {**_base_filters(pid, branch), base_key: {"eq": base_val}},
                 "columns": ["id", "fqn", "name"],
             },
             {
@@ -369,7 +369,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
             {
                 "id": "concern", "entity": "Definition",
                 "filters": {**_base_filters(pid, branch),
-                            "file_path": {"op": "starts_with", "value": norm_prefix}},
+                            "file_path": {"starts_with": norm_prefix}},
                 "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
@@ -434,8 +434,8 @@ def cmd_class(args: argparse.Namespace) -> None:
         "nodes": [{
             "id": "d", "entity": "Definition",
             "filters": {**_base_filters(pid, branch),
-                        filter_key: {"op": "eq", "value": filter_val},
-                        "definition_type": {"op": "in", "value": TYPE_KINDS}},
+                        filter_key: {"eq": filter_val},
+                        "definition_type": {"in": TYPE_KINDS}},
             "columns": ["id", "fqn", "file_path", "start_line", "definition_type"],
         }],
         "limit": 5,
@@ -457,7 +457,7 @@ def cmd_class(args: argparse.Namespace) -> None:
             {
                 "id": "parent", "entity": "Definition",
                 "filters": {**_base_filters(pid, branch),
-                             filter_key: {"op": "eq", "value": filter_val}},
+                             filter_key: {"eq": filter_val}},
                 "columns": ["id", "fqn"],
             },
             {
@@ -465,7 +465,7 @@ def cmd_class(args: argparse.Namespace) -> None:
                 # content column omitted — triggers content_resolution_error on large classes
                 "filters": {
                     **_base_filters(pid, branch),
-                    "definition_type": {"op": "in", "value": MEMBER_KINDS},
+                    "definition_type": {"in": MEMBER_KINDS},
                 },
                 "columns": ["id", "name", "fqn", "definition_type", "file_path", "start_line"],
             },
@@ -502,8 +502,8 @@ def cmd_api(args: argparse.Namespace) -> None:
             "id": "d", "entity": "Definition",
             "filters": {
                 **_base_filters(pid, branch),
-                "file_path":       {"op": "starts_with", "value": prefix + "/"},
-                "definition_type": {"op": "in", "value": TYPE_KINDS + CALLABLE_KINDS},
+                "file_path":       {"starts_with": prefix + "/"},
+                "definition_type": {"in": TYPE_KINDS + CALLABLE_KINDS},
             },
             "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
         }],
@@ -551,11 +551,11 @@ def cmd_callers(args: argparse.Namespace) -> None:
         # Exact FQN match: most precise — returns only the intended target
         target_filters: dict = {
             **_base_filters(pid, branch),
-            "name": {"op": "eq", "value": method_name},
-            "fqn":  {"op": "eq",  "value": orbit_fqn},
+            "name": {"eq": method_name},
+            "fqn":  {"eq": orbit_fqn},
         }
     else:
-        target_filters = {**_base_filters(pid, branch), "name": {"op": "eq", "value": method_name}}
+        target_filters = {**_base_filters(pid, branch), "name": {"eq": method_name}}
 
     body = {"query": {
         "query_type": "traversal",

@@ -1117,14 +1117,14 @@ mod tests {
                     "id": "u", "entity": "User",
                     "filters": {
                         "created_at": [
-                            {"op": "gte", "value": "2020-01-01"}, {"op": "lt", "value": "2020-02-01"},
-                            {"op": "gte", "value": "2020-03-01"}, {"op": "lt", "value": "2020-04-01"},
-                            {"op": "gte", "value": "2020-05-01"}, {"op": "lt", "value": "2020-06-01"}
+                            {"gte": "2020-01-01"}, {"lt": "2020-02-01"},
+                            {"gte": "2020-03-01"}, {"lt": "2020-04-01"},
+                            {"gte": "2020-05-01"}, {"lt": "2020-06-01"}
                         ],
                         "username": [
-                            {"op": "contains", "value": "a"}, {"op": "contains", "value": "b"},
-                            {"op": "contains", "value": "c"}, {"op": "contains", "value": "d"},
-                            {"op": "contains", "value": "e"}, {"op": "contains", "value": "f"}
+                            {"contains": "a"}, {"contains": "b"},
+                            {"contains": "c"}, {"contains": "d"},
+                            {"contains": "e"}, {"contains": "f"}
                         ]
                     }
                 }]
@@ -1157,7 +1157,7 @@ mod tests {
         let validator = Validator::new(&ontology);
 
         let eleven_conditions: String = (0..11)
-            .map(|_| r#"{"op": "gte", "value": "2020-01-01"}"#)
+            .map(|_| r#"{"gte": "2020-01-01"}"#)
             .collect::<Vec<_>>()
             .join(", ");
         let over_cap = parse_input(&format!(
@@ -1697,7 +1697,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{
                     "id": "u", "entity": "User",
-                    "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
+                    "filters": {"username": {"in": ["alice", "bob"]}}
                 }]
             }"#,
         );
@@ -1710,7 +1710,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{
                     "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"op": "in", "value": [1, 2, 3]}}
+                    "filters": {"noteable_id": {"in": [1, 2, 3]}}
                 }]
             }"#,
         );
@@ -1723,7 +1723,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{
                     "id": "u", "entity": "User",
-                    "filters": {"username": {"op": "is_null"}}
+                    "filters": {"username": {"is_null": true}}
                 }]
             }"#,
         );
@@ -1769,7 +1769,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{
                     "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"op": "in", "value": [1, "two", 3]}}
+                    "filters": {"noteable_id": {"in": [1, "two", 3]}}
                 }]
             }"#,
             "element [1]",
@@ -1858,7 +1858,7 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{
                     "id": "n", "entity": "Note",
-                    "filters": {"noteable_id": {"op": "in", "value": [1, "bad", 3]}}
+                    "filters": {"noteable_id": {"in": [1, "bad", 3]}}
                 }]
             }"#,
         )
@@ -1914,7 +1914,7 @@ mod tests {
                 ],
                 "relationships": [{
                     "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_kind": {"op": "is_null"}}
+                    "filters": {"target_kind": {"is_null": true}}
                 }]
             }"#,
         );
@@ -1931,7 +1931,7 @@ mod tests {
                 ],
                 "relationships": [{
                     "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"target_id": {"op": "in", "value": [1, 2, 3]}}
+                    "filters": {"target_id": {"in": [1, 2, 3]}}
                 }]
             }"#,
         );
@@ -2002,7 +2002,7 @@ mod tests {
                 ],
                 "relationships": [{
                     "type": "AUTHORED", "from": "u", "to": "n",
-                    "filters": {"source_id": {"op": "in", "value": [1, "bad", 3]}}
+                    "filters": {"source_id": {"in": [1, "bad", 3]}}
                 }]
             }"#,
             "element [1]",
@@ -2424,7 +2424,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "contains", "value": "ab"}}}],
+                     "filters": {"username": {"contains": "ab"}}}],
             "limit": 10
         }"#,
         )
@@ -2446,7 +2446,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User",
-                     "filters": {"email": {"op": "contains", "value": "example"}}}],
+                     "filters": {"email": {"contains": "example"}}}],
             "limit": 10
         }"#,
         )
@@ -2530,7 +2530,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 10
         }"#,
         )
@@ -2550,7 +2550,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [{"id": "u", "entity": "User", "node_ids": [1],
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 10
         }"#,
         )
@@ -2571,7 +2571,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "contains", "value": "100"}}}],
+                     "filters": {"traversal_path": {"contains": "100"}}}],
             "limit": 10
         }"#,
         )
@@ -2592,7 +2592,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}}],
+                     "filters": {"traversal_path": {"starts_with": "1/100"}}}],
             "limit": 10
         }"#,
         )
@@ -2620,7 +2620,7 @@ mod tests {
                 "type": "CONTAINS",
                 "from": "a",
                 "to": "b",
-                "filters": {"traversal_path": {"op": "ends_with", "value": "100/"}}
+                "filters": {"traversal_path": {"ends_with": "100/"}}
             }],
             "limit": 10
         }"#,
@@ -2662,8 +2662,8 @@ mod tests {
                 "nodes": [{"id": "u", "entity": "User",
                          "node_ids": [1],
                          "filters": {"created_at": [
-                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
-                             {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                             {"gte": "2026-04-01T00:00:00Z"},
+                             {"lt": "2026-05-01T00:00:00Z"}
                          ]}}]
             }"#,
         );
@@ -2677,8 +2677,8 @@ mod tests {
                 "nodes": [{"id": "u", "entity": "User",
                          "node_ids": [1],
                          "filters": {"created_at": [
-                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
-                             {"op": "lt", "value": 12345}
+                             {"gte": "2026-04-01T00:00:00Z"},
+                             {"lt": 12345}
                          ]}}]
             }"#,
             "not a string",

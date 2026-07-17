@@ -16,15 +16,7 @@ q1:
           "id": "caller",
           "entity": "Definition",
           "filters": {
-            "definition_type": {
-              "op": "in",
-              "value": [
-                "Class",
-                "Module",
-                "Method",
-                "Function"
-              ]
-            }
+            "definition_type": {"in": ["Class", "Module", "Method", "Function"]}
           }
         },
         {
@@ -54,15 +46,7 @@ q2:
           "id": "caller",
           "entity": "Definition",
           "filters": {
-            "definition_type": {
-              "op": "in",
-              "value": [
-                "Class",
-                "Module",
-                "Method",
-                "Function"
-              ]
-            }
+            "definition_type": {"in": ["Class", "Module", "Method", "Function"]}
           }
         },
         {
@@ -157,15 +141,7 @@ q5:
           "id": "d",
           "entity": "Definition",
           "filters": {
-            "definition_type": {
-              "op": "in",
-              "value": [
-                "Class",
-                "Module",
-                "Method",
-                "Function"
-              ]
-            }
+            "definition_type": {"in": ["Class", "Module", "Method", "Function"]}
           }
         }
       ],
@@ -199,15 +175,7 @@ q6:
           "id": "f",
           "entity": "File",
           "filters": {
-            "language": {
-              "op": "in",
-              "value": [
-                "ruby",
-                "javascript",
-                "typescript",
-                "python"
-              ]
-            }
+            "language": {"in": ["ruby", "javascript", "typescript", "python"]}
           }
         }
       ],
@@ -245,15 +213,7 @@ q7:
             "language"
           ],
           "filters": {
-            "language": {
-              "op": "in",
-              "value": [
-                "ruby",
-                "javascript",
-                "typescript",
-                "python"
-              ]
-            }
+            "language": {"in": ["ruby", "javascript", "typescript", "python"]}
           }
         },
         {
@@ -304,18 +264,7 @@ q8:
           "id": "sym",
           "entity": "ImportedSymbol",
           "filters": {
-            "import_type": {
-              "op": "in",
-              "value": [
-                "Import",
-                "NamedImport",
-                "DefaultImport",
-                "FromImport",
-                "Require",
-                "Include",
-                "WildcardImport"
-              ]
-            }
+            "import_type": {"in": ["Import", "NamedImport", "DefaultImport", "FromImport", "Require", "Include", "WildcardImport"]}
           }
         }
       ],

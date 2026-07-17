@@ -20,7 +20,7 @@ Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Cros
 Project Scoped Traversal Returns Its Own Issue And A Cross Namespace Related Issue
     [Tags]    cross-namespace
     ${rel}=    Create Dictionary    id=rel    entity=WorkItem    columns=${{["id", "title"]}}
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${proj}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${wi}=    Create Dictionary    id=wi    entity=WorkItem    columns=${{["id"]}}
@@ -43,7 +43,7 @@ Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops
     ...                reachable from issue_a only via a 3-hop chain whose last hop crosses into a
     ...                different top-level namespace; the project-A tight prefix must not prune it.
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${a}=    Create Dictionary    id=a    entity=WorkItem
@@ -56,7 +56,7 @@ Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops
 
 Project Scoped Multi Hop Traversal Reaches Cross Namespace Project
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${wi}=    Create Dictionary    id=wi    entity=WorkItem
@@ -71,7 +71,7 @@ Project Scoped Multi Hop Traversal Reaches Cross Namespace Project
 
 Project Scoped Multi Hop Aggregation Counts Cross Namespace Project
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${wi}=    Create Dictionary    id=wi    entity=WorkItem
@@ -95,7 +95,7 @@ Path Finding Within Scoped Project Returns The Path
 
 Group Scoped Multi Hop Traversal Returns Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_GROUP_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
     ${p}=    Create Dictionary    id=p    entity=Project
@@ -110,7 +110,7 @@ Group Scoped Multi Hop Traversal Returns Cross Namespace Related Issue
 
 Group Scoped Multi Hop Aggregation Counts Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_GROUP_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
     ${p}=    Create Dictionary    id=p    entity=Project
@@ -127,7 +127,7 @@ Group Scoped Multi Hop Aggregation Counts Cross Namespace Related Issue
 Project Scoped Traversal Returns Cross Namespace Closed Issue
     [Tags]    cross-namespace
     [Setup]    Seed Cross Project Closing MR
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${mr}=    Create Dictionary    id=mr    entity=MergeRequest
@@ -141,7 +141,7 @@ Project Scoped Traversal Returns Cross Namespace Closed Issue
 Group Scoped Multi Hop Traversal Returns Cross Namespace Closed Issue
     [Tags]    cross-namespace
     [Setup]    Seed Cross Project Closing MR
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_GROUP_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
     ${p}=    Create Dictionary    id=p    entity=Project
