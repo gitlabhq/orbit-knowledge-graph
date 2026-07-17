@@ -147,6 +147,7 @@ mod tests {
                 "FIXES_siphon_vulnerability_merge_request_links_Vulnerability",
                 "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier",
                 "HAS_LABEL_siphon_label_links_Label",
+                "HAS_VULNERABILITY_siphon_sbom_occurrences_vulnerabilities_Vulnerability",
                 "MEMBER_OF_siphon_members",
                 "RELATED_TO_siphon_issue_links_WorkItem",
                 "REOPENED_siphon_resource_state_events_MergeRequest",

@@ -466,3 +466,4 @@ edges:
   REOPENED: edges/reopened.yaml
   MERGED_AT_COMMIT: edges/merged_at_commit.yaml
   DECLARES_DEPENDENCY: edges/declares_dependency.yaml
+  HAS_VULNERABILITY: edges/has_vulnerability.yaml

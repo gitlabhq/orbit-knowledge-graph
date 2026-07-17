@@ -16,6 +16,11 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 85
+  scope: sdlc
+  entities:
+    - HAS_VULNERABILITY
+  note: New HAS_VULNERABILITY edge (Package->Vulnerability); clone carries every prior table intact and only this edge re-derives.
 - version: 84
   scope: none
   note: isValidUTF8 guard on decoded_sha; a no-op for every value already written (raw-binary SHAs previously failed the decode and produced no row), so no indexed row changes.

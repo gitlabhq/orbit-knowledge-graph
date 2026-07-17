@@ -39,6 +39,8 @@ sources:
   edges/has_note.yaml: 1bb56e0e34d022eab719ef4c4d0246f9e461ea34c9cc01acb800ded35f580472
   edges/has_package_file.yaml: b0c8ff7c98dbae245450037f201056aa40eac94ed4f11963070c3cdf424115fa
   edges/has_stage.yaml: b2393ca067c6798e04ffdcb6becec846f98da4a1cde66168bd255d3e936fd466
+  edges/has_vulnerability.sql.j2: 4a59be9e7307cf9a05c5c4a548f912dcbc7c7fdc97f899d124b7340020f970b6
+  edges/has_vulnerability.yaml: bbe644a796d11ec6e345daaa72c237176c8b835d701909dc951a3fced9c7fb78
   edges/imports.yaml: a034828149ed658035f73c11f9ce76423a57090d37bfe133f8cea41d652880f2
   edges/in_environment.yaml: ee5d30b8f5b18da6dbf24086e017f8f54a60d60b8be2e22275a0f6c5496476b6
   edges/in_group.yaml: fd7f09e0aa93e90d51dfff032c54e11a893bbc8f698fbb74f88d72c2888ac8a6
@@ -105,7 +107,7 @@ sources:
   nodes/source_code/file.yaml: f6e9653b7a34e26e8ca1755d24d7de879a504ac7830d9686c57df9f2cde14f7b
   nodes/source_code/imported_symbol.yaml: c61079f0f6912c8c368c9b6866fa459beea4bcf696a5de83c6b806dd8b231a5f
   reference.yaml: 690370de8b936597b790125bbb8ce28743b4e1316f6ef28f64616ebef9dadb74
-  schema.yaml: d9daed955cbdafbd7c90d1a1906184cfa9b4def882109aa16ef074b0210c59d6
+  schema.yaml: 52be70406bc60b2add92eb07e0a24e3da6aae9d6c38bea88cdbbfcf81c2fc268
 ddl:
   checkpoint: 2ccbd8f9e5b9cab81d102e961784539b04f50748cdbeb6635cbd766e1e3174ee
   code_indexing_checkpoint: ad895eac89a2a477af5d2dde6ad0b0e141edef708b8f298130debf498fa17b45

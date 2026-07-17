@@ -1592,6 +1592,79 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
 
+CREATE TABLE IF NOT EXISTS siphon_sbom_component_versions
+(
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `component_id` Int64,
+    `version` String,
+    `source_package_name` String,
+    `organization_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS siphon_sbom_occurrences
+(
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `component_version_id` Nullable(Int64),
+    `project_id` Int64,
+    `pipeline_id` Nullable(Int64),
+    `source_id` Nullable(Int64),
+    `commit_sha` String,
+    `component_id` Int64,
+    `uuid` UUID,
+    `package_manager` Nullable(String),
+    `component_name` Nullable(String),
+    `input_file_path` Nullable(String),
+    `licenses` Nullable(String) DEFAULT '[]',
+    `highest_severity` Nullable(Int16),
+    `vulnerability_count` Int64 DEFAULT 0,
+    `source_package_id` Nullable(Int64),
+    `archived` Bool DEFAULT FALSE,
+    `traversal_ids` Array(Int64) DEFAULT [],
+    `ancestors` String DEFAULT '[]',
+    `reachability` Nullable(Int16) DEFAULT 0,
+    `partition_id` Nullable(Int64) DEFAULT 1,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS siphon_sbom_occurrences_vulnerabilities
+(
+    `id` Int64,
+    `sbom_occurrence_id` Int64,
+    `vulnerability_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `project_id` Nullable(Int64),
+    `vulnerability_occurrence_id` Nullable(Int64),
+    `sbom_occurrence_ref_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
 -- Traversal-path dictionaries (mirrors config/graph.sql) used by the namespace
 -- dispatch change query. The $DICTIONARY_* placeholders are substituted by the
 -- test harness and, in production, at deploy time.

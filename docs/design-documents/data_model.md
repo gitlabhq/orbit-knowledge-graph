@@ -97,6 +97,7 @@ graph TD
     Package -- IN_PROJECT --> Project
     Package -- BUILT_BY --> Pipeline
     Package -- DECLARES_DEPENDENCY --> Dependency
+    Package -- HAS_VULNERABILITY --> Vulnerability
     Package -- HAS_PACKAGE_FILE --> PackageFile
     PackageFile -- IN_PROJECT --> Project
     PackageFile -- BUILT_BY --> Pipeline
@@ -113,6 +114,7 @@ graph TD
 | `BUILT_BY`                          | `Package`, `PackageFile` | `Pipeline` | A package or package file was built by a CI/CD pipeline (sourced from the `packages_build_infos` and `packages_package_file_build_infos` join tables). |
 | `HAS_PACKAGE_FILE`                  | `Package`      | `PackageFile`  | A package contains a package file (FK on the package file).                                             |
 | `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
+| `HAS_VULNERABILITY`                 | `Package`      | `Vulnerability`| A registry package is affected by a vulnerability, matched to its SBOM component occurrence by name/version (sourced from the `sbom_occurrences_vulnerabilities` join and `sbom_occurrences`/`sbom_component_versions`). |
 | `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
 | `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
