@@ -304,7 +304,7 @@ classDiagram
 Because for graph database, we don't need to keep repositories from same
 namespace on the same node, replication strategy will be simpler compared to
 Zoekt search. Models schema may change depending on needs, but the main point is
-to illustrate separation of Zoekt and konwledge graph models, while still
+to illustrate separation of Zoekt and knowledge graph models, while still
 re-using Zoekt Node model for both services.
 
 #### Creating or updating a repository
@@ -377,7 +377,7 @@ sequenceDiagram
 
 **Note**: The GKG Proxy will periodically check health status of both GKG
 containers. If any of them will not respond, it will not send heartbeat requests
-to rails, so this node will be considered as "unavailable" both for idnexing and
+to rails, so this node will be considered as "unavailable" both for indexing and
 querying.
 
 #### Adding a new graph node
