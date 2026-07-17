@@ -343,8 +343,7 @@ pub fn restrict(
         }
     }
 
-    for group in crate::input::property_groups(&input.aggregation.group_by) {
-        let (node, property, _) = group;
+    for (node, property) in crate::input::property_groups(&input.aggregation.group_by) {
         let Some(entity) = entity_of(input, node) else {
             continue;
         };
@@ -743,7 +742,6 @@ mod tests {
                 group_by: vec![InputGroupByKey::Property {
                     node: "_u".into(),
                     property: property.into(),
-                    alias: None,
                     transform: None,
                 }],
                 metrics: vec![InputAggregationMetric {

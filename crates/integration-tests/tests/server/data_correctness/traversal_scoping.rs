@@ -212,7 +212,7 @@ pub(super) async fn scope_implied_container_elision_star_counts_authored_mrs(ctx
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "AUTHORED", "from": "u", "to": "mr"}
             ],
-            "group_by": [{"kind": "node", "node": "u"}],
+            "group_by": ["u"],
             "aggregations": [{"function": "count", "target": "mr", "alias": "c"}],
             "limit": 10
         }"#,
@@ -285,7 +285,7 @@ pub(super) async fn scope_implied_container_elision_chain_counts_diff_files(ctx:
                 {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
                 {"type": "HAS_FILE", "from": "d", "to": "f"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "f", "alias": "c"}],
             "limit": 10
         }"#,

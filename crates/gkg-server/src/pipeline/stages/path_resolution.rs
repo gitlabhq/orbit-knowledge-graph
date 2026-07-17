@@ -434,7 +434,7 @@ mod tests {
             r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "limit": 1}"#
         )));
         assert!(scopes_query_type(qt(
-            r#"{"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "group_by": [{"kind": "node", "node": "p"}], "aggregations": [{"function": "count", "target": "p"}], "limit": 1}"#
+            r#"{"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "group_by": ["p"], "aggregations": [{"function": "count", "target": "p"}], "limit": 1}"#
         )));
         assert!(!scopes_query_type(qt(
             r#"{"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "neighbors": {"direction": "both"}}"#

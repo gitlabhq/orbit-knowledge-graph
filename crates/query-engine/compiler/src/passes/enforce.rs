@@ -737,7 +737,6 @@ mod tests {
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "u".to_string(),
-                    alias: None,
                 }],
                 ..Default::default()
             },
@@ -822,7 +821,6 @@ mod tests {
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "u".to_string(),
-                    alias: None,
                 }],
                 ..Default::default()
             },
@@ -890,7 +888,6 @@ mod tests {
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "f".to_string(),
-                    alias: None,
                 }],
                 ..Default::default()
             },

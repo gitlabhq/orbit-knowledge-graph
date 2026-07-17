@@ -418,7 +418,7 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": [{"kind": "node", "node": "u"}],
+        "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
         "cursor": {"page_size": 2}
     }"#;
@@ -453,7 +453,7 @@ pub(super) async fn cursor_aggregation_pages_cover_all_groups(ctx: &TestContext)
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": [{"kind": "node", "node": "u"}],
+        "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
         "cursor": {"page_size": 2}
     }"#;
@@ -883,7 +883,7 @@ pub(super) async fn cursor_aggregation_multi_hop_desc_seek_covers_all_groups(ctx
             {"type": "MEMBER_OF", "from": "u", "to": "g"},
             {"type": "CONTAINS", "from": "g", "to": "p"}
         ],
-        "group_by": [{"kind": "node", "node": "u"}],
+        "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
         "aggregation_sort": "-project_count",
         "cursor": {"page_size": 2}

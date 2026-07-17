@@ -53,10 +53,9 @@ fn extract_enum_options<'a>(
 fn format_group_by_hint(instance: &str, path: &str) -> String {
     format!(
         "{instance} is not a valid group_by entry at {path}. \
-         Each group_by entry must be an object with a \"kind\" field. \
-         Expected shapes: by property \
-         [{{\"kind\": \"property\", \"node\": \"<node-id>\", \"property\": \"<property>\"}}], \
-         or by node [{{\"kind\": \"node\", \"node\": \"<node-id>\"}}]",
+         Expected shapes: by property [\"<node-id>.<property>\"], \
+         by node [\"<node-id>\"], \
+         or truncated [{{\"<unit>\": \"<node-id>.<property>\"}}] (e.g. {{\"month\": \"mr.created_at\"}})",
     )
 }
 

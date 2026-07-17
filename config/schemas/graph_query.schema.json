@@ -38,7 +38,7 @@
     },
     "group_by": {
       "type": "array",
-      "description": "Aggregation group keys. kind=node returns a node object; kind=property returns a scalar value.",
+      "description": "Aggregation group keys. \"node\" returns a node object; \"node.property\" returns a scalar value.",
       "default": [],
       "maxItems": 4,
       "items": {
@@ -589,67 +589,26 @@
       }
     },
     "GroupByKey": {
-      "description": "A group key for aggregation output rows. Node keys return an entity object per bucket; property keys return the scalar property value per bucket.",
+      "description": "Group key for aggregation rows. \"node\" groups by the node (entity object per bucket); \"node.property\" groups by the property (scalar per bucket). Object form truncates a Date/DateTime property before grouping.",
       "oneOf": [
         {
-          "type": "object",
-          "description": "Group by a node selector.",
-          "required": ["kind", "node"],
-          "properties": {
-            "kind": {
-              "const": "node"
-            },
-            "node": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Node variable to use as the group key"
-            },
-            "alias": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Output column alias for this group key"
-            }
-      }
-    },
+          "type": "string",
+          "pattern": "^(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})(\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63}))?$",
+          "description": "Node reference (\"mr\") or property reference (\"mr.state\")."
+        },
         {
           "type": "object",
-          "description": "Group by a scalar property on a node selector.",
-          "required": ["kind", "node", "property"],
-          "properties": {
-            "kind": {
-              "const": "property"
-            },
-            "node": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Node variable whose property is used as the group key"
-            },
-            "property": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Property name to group by"
-            },
-            "transform": {
-              "$ref": "#/$defs/PropertyTransform",
-              "description": "Optional transform applied to the property before grouping (e.g. date truncation)."
-            },
-            "alias": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Output column alias for this group key"
-            }
+          "description": "Date truncation: {\"<unit>\": \"node.property\"} groups by the property truncated to the unit, e.g. {\"month\": \"mr.created_at\"}. minute/hour require node_ids or a filter on the property.",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "propertyNames": {
+            "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
           },
-          "additionalProperties": false
-        }
-      ]
-    },
-    "PropertyTransform": {
-      "description": "Tagged enum: add new variants by `kind`.",
-      "oneOf": [
-        {
-          "type": "object",
-          "description": "Truncate a Date/DateTime property. minute/hour require node_ids or a filter on the property.",
-          "required": ["kind", "unit"],
-          "properties": {
-            "kind": {"const": "truncate"},
-            "unit": {"enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]}
-          },
-          "additionalProperties": false
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,63}\\.[a-zA-Z_][a-zA-Z0-9_]{0,63}$",
+            "description": "Property reference as \"node.property\"."
+          }
         }
       ]
     },

@@ -76,7 +76,7 @@ fn aggregation_query() {
             {"id": "u", "entity": "User", "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "group_by": [{"kind": "node", "node": "u"}],
+        "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
         "limit": 10
     }"#;
@@ -97,7 +97,7 @@ fn group_by_property_truncate_month_wraps_column() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}}
+            {"month": "u.created_at"}
         ],
         "limit": 50
     }"#;
@@ -124,7 +124,7 @@ fn group_by_property_truncate_all_units_compile() {
                 ],
                 "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
                 "group_by": [
-                    {{"kind": "property", "node": "u", "property": "created_at", "transform": {{"kind": "truncate", "unit": "{unit}"}}}}
+                    {{"{unit}": "u.created_at"}}
                 ],
                 "limit": 10
             }}"#
@@ -160,7 +160,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
+            {"minute": "u.created_at"}
         ],
         "limit": 10
     }"#;
@@ -181,7 +181,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
+            {"minute": "u.created_at"}
         ],
         "limit": 10
     }"#;
@@ -203,7 +203,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "hour"}}
+            {"hour": "u.created_at"}
         ],
         "limit": 50
     }"#;
@@ -225,7 +225,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "confidential", "transform": {"kind": "truncate", "unit": "month"}}
+            {"month": "u.confidential"}
         ],
         "limit": 10
     }"#;
@@ -238,7 +238,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
 }
 
 #[test]
-fn group_by_truncate_custom_alias_preserved() {
+fn group_by_old_kind_object_rejected_with_hint() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
@@ -250,11 +250,11 @@ fn group_by_truncate_custom_alias_preserved() {
         ],
         "limit": 10
     }"#;
-    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
+    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+    let msg = format!("{err:?}");
     assert!(
-        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
-        "expected alias `bucket`; got:\n{rendered}"
+        msg.contains("not a valid group_by entry") && msg.contains("month"),
+        "expected group_by shape hint for the removed kind-tagged form; got: {msg}"
     );
 }
 
@@ -738,7 +738,7 @@ fn scoped_aggregation_injects_tight_prefix() {
             {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
-        "group_by": [{"kind": "node", "node": "p"}],
+        "group_by": ["p"],
         "aggregations": [{"function": "count", "target": "wi", "alias": "c"}],
         "limit": 100
     }"#;

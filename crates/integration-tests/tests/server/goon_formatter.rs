@@ -292,7 +292,7 @@ async fn aggregation_node_grouping_lifts_unique_nodes_and_emits_rows(ctx: &TestC
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
             "limit": 10}"#,
         &allow_all(),
@@ -330,7 +330,7 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "property", "node": "u", "property": "state"}],
+            "group_by": ["u.state"],
             "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
             "aggregation_sort": "-user_count",
             "limit": 10}"#,

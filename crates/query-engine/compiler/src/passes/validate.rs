@@ -55,6 +55,18 @@ pub(crate) fn aggregation_sort_regex() -> &'static regex::Regex {
     })
 }
 
+pub(crate) fn group_by_key_regex() -> &'static regex::Regex {
+    static GROUP_BY_KEY_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+    GROUP_BY_KEY_REGEX.get_or_init(|| {
+        let schema: serde_json::Value =
+            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
+        let pattern = schema["$defs"]["GroupByKey"]["oneOf"][0]["pattern"]
+            .as_str()
+            .expect("schema.json must define a GroupByKey string pattern");
+        regex::Regex::new(pattern).expect("GroupByKey pattern must be a valid regex")
+    })
+}
+
 fn collect_schema_errors(
     validator: &jsonschema::Validator,
     value: &serde_json::Value,
@@ -717,7 +729,7 @@ impl<'a> Validator<'a> {
         for name in &group_output_names {
             if !seen_group_output_names.insert(name.clone()) {
                 return Err(QueryError::Validation(format!(
-                    "duplicate group_by output alias \"{name}\""
+                    "duplicate group_by output column \"{name}\""
                 )));
             }
         }
@@ -1195,7 +1207,7 @@ mod tests {
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-                "group_by": [{"kind": "node", "node": "u"}],
+                "group_by": ["u"],
                 "aggregations": [{
                     "function": "count",
                     "target": "n",
@@ -1267,7 +1279,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-                "group_by": [{"kind": "node", "node": "missing"}],
+                "group_by": ["missing"],
                 "aggregations": [{
                     "function": "count",
                     "target": "u",
@@ -1295,7 +1307,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}],
+                "group_by": ["p.visibility_level"],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
         );
@@ -1304,7 +1316,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [{"kind": "property", "node": "missing", "property": "visibility_level"}],
+                "group_by": ["missing.visibility_level"],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
             "undefined node \"missing\"",
@@ -1314,7 +1326,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [{"kind": "property", "node": "p", "property": "not_real"}],
+                "group_by": ["p.not_real"],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
             "invalid property",
@@ -1324,7 +1336,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}]
+                "group_by": ["p.visibility_level"]
             }"#,
             "only supported for aggregation",
         );
@@ -1334,8 +1346,8 @@ mod tests {
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
                 "group_by": [
-                    {"kind": "property", "node": "p", "property": "visibility_level", "alias": "bucket"},
-                    {"kind": "node", "node": "p", "alias": "bucket"}
+                    "p.visibility_level",
+                    "p.visibility_level"
                 ],
                 "aggregations": [{
                     "function": "count",
@@ -1343,15 +1355,15 @@ mod tests {
                     "alias": "project_count"
                 }]
             }"#,
-            "duplicate group_by output alias",
+            "duplicate group_by output column",
         );
 
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [{"kind": "property", "node": "p", "property": "visibility_level", "alias": "count"}],
-                "aggregations": [{"function": "count", "target": "p"}]
+                "group_by": ["p.visibility_level"],
+                "aggregations": [{"function": "count", "target": "p", "alias": "visibility_level"}]
             }"#,
             "conflicts with another output column",
         );
@@ -1435,7 +1447,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by": [{"kind": "property", "node": "p", "property": "name"}],
+                "group_by": ["p.name"],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
         )
@@ -1593,7 +1605,7 @@ mod tests {
                     {"id": "g", "entity": "Group"}
                 ],
                 "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-                "group_by": [{"kind": "node", "node": "u"}],
+                "group_by": ["u"],
                 "aggregations": [
                     {"function": "count", "target": "u", "alias": "total"},
                     {"function": "count", "target": "g", "alias": "group_count"}
@@ -1652,7 +1664,7 @@ mod tests {
                     {"id": "mr", "entity": "MergeRequest"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr", "direction": "both"}],
-                "group_by": [{"kind": "node", "node": "u"}],
+                "group_by": ["u"],
                 "aggregations": [{"function": "count", "target": "mr"}]
             }"#,
             "does not support direction",
@@ -2308,7 +2320,7 @@ mod tests {
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": [{"kind": "node", "node": "p"}],
+                "group_by": ["p"],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
@@ -2320,7 +2332,7 @@ mod tests {
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": [{"kind": "node", "node": "p"}],
+                "group_by": ["p"],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
             "full edge table scans",
@@ -2357,7 +2369,7 @@ mod tests {
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "group_by": [{"kind": "node", "node": "p"}],
+                "group_by": ["p"],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
@@ -2508,7 +2520,7 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "node_ids": [1]}],
-            "group_by": [{"kind": "property", "node": "g", "property": "private_note"}],
+            "group_by": ["g.private_note"],
             "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
             "limit": 10
         }"#,

@@ -652,26 +652,90 @@ pub struct InputAggregationMetric {
     pub alias: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputGroupByKey {
     Node {
         node: String,
-        #[serde(default)]
-        alias: Option<String>,
     },
     Property {
         node: String,
         property: String,
-        #[serde(default)]
-        alias: Option<String>,
-        #[serde(default)]
         transform: Option<PropertyTransform>,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+impl<'de> Deserialize<'de> for InputGroupByKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::String(spec) => {
+                let (node, property) = parse_group_key_reference::<D>(&spec)?;
+                Ok(match property {
+                    None => Self::Node { node },
+                    Some(property) => Self::Property {
+                        node,
+                        property,
+                        transform: None,
+                    },
+                })
+            }
+            Value::Object(map) => {
+                let mut entries = map.into_iter();
+                let (Some((unit_name, value)), None) = (entries.next(), entries.next()) else {
+                    return Err(serde::de::Error::custom(
+                        "group_by truncation object must have exactly one {\"<unit>\": \"node.property\"} entry",
+                    ));
+                };
+                let unit = TruncateUnit::from_name(&unit_name).ok_or_else(|| {
+                    serde::de::Error::custom(format!(
+                        "unknown group_by truncation unit {unit_name:?}; valid units: {}",
+                        TruncateUnit::ALL.map(TruncateUnit::name).join(", ")
+                    ))
+                })?;
+                let Value::String(spec) = value else {
+                    return Err(serde::de::Error::custom(format!(
+                        "group_by truncation {unit_name:?} takes a \"node.property\" string"
+                    )));
+                };
+                let (node, property) = parse_group_key_reference::<D>(&spec)?;
+                let Some(property) = property else {
+                    return Err(serde::de::Error::custom(format!(
+                        "group_by truncation {unit_name:?} requires a \"node.property\" reference, got {spec:?}"
+                    )));
+                };
+                Ok(Self::Property {
+                    node,
+                    property,
+                    transform: Some(PropertyTransform::Truncate { unit }),
+                })
+            }
+            _ => Err(serde::de::Error::custom(
+                "group_by entry must be \"node\", \"node.property\", or {\"<unit>\": \"node.property\"}",
+            )),
+        }
+    }
+}
+
+fn parse_group_key_reference<'de, D>(spec: &str) -> Result<(String, Option<String>), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let caps = crate::passes::validate::group_by_key_regex()
+        .captures(spec)
+        .ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "group_by key {spec:?} must be \"node\" or \"node.property\""
+            ))
+        })?;
+    Ok((
+        caps["node"].to_owned(),
+        caps.name("property").map(|m| m.as_str().to_owned()),
+    ))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropertyTransform {
     /// Truncate a Date or DateTime property to the start of `unit`.
     Truncate { unit: TruncateUnit },
@@ -685,8 +749,7 @@ impl PropertyTransform {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TruncateUnit {
     Minute,
     Hour,
@@ -698,6 +761,20 @@ pub enum TruncateUnit {
 }
 
 impl TruncateUnit {
+    pub const ALL: [Self; 7] = [
+        Self::Minute,
+        Self::Hour,
+        Self::Day,
+        Self::Week,
+        Self::Month,
+        Self::Quarter,
+        Self::Year,
+    ];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|unit| unit.name() == name)
+    }
+
     pub fn ch_function(self) -> &'static str {
         match self {
             Self::Minute => "toStartOfMinute",
@@ -757,13 +834,12 @@ impl InputGroupByKey {
 
     pub fn output_name(&self, is_unique_property: bool) -> String {
         match self {
-            Self::Node { node, alias } => alias.clone().unwrap_or_else(|| node.clone()),
+            Self::Node { node } => node.clone(),
             Self::Property {
                 node,
                 property,
-                alias,
                 transform,
-            } => alias.clone().unwrap_or_else(|| {
+            } => {
                 let base = if is_unique_property {
                     property.clone()
                 } else {
@@ -773,7 +849,7 @@ impl InputGroupByKey {
                     Some(t) => format!("{}_{}", base, t.output_suffix()),
                     None => base,
                 }
-            }),
+            }
         }
     }
 }
@@ -805,16 +881,11 @@ pub fn node_group_ids(groups: &[InputGroupByKey]) -> impl Iterator<Item = &str> 
     })
 }
 
-pub fn property_groups(
-    groups: &[InputGroupByKey],
-) -> impl Iterator<Item = (&str, &str, Option<&str>)> {
+pub fn property_groups(groups: &[InputGroupByKey]) -> impl Iterator<Item = (&str, &str)> {
     groups.iter().filter_map(|group| match group {
-        InputGroupByKey::Property {
-            node,
-            property,
-            alias,
-            ..
-        } => Some((node.as_str(), property.as_str(), alias.as_deref())),
+        InputGroupByKey::Property { node, property, .. } => {
+            Some((node.as_str(), property.as_str()))
+        }
         InputGroupByKey::Node { .. } => None,
     })
 }
@@ -1340,7 +1411,7 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "n"}, {"id": "u"}],
-            "group_by": [{"kind": "node", "node": "u"}],
+            "group_by": ["u"],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
             "aggregation_sort": "-note_count"
         }"#,

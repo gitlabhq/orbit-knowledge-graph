@@ -404,7 +404,7 @@ pub(super) async fn aggregation_variable_length_counts_all_depths(ctx: &TestCont
                 {"type": "IN_PROJECT", "from": "wi", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 2}
             ],
-            "group_by": [{"kind": "node", "node": "u"}],
+            "group_by": ["u"],
             "aggregations": [{"function": "count", "target": "g", "alias": "n"}],
             "limit": 5
         }"#,
