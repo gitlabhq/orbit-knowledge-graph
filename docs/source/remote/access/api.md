@@ -199,7 +199,7 @@ An example response:
 
 ## Tools endpoint
 
-Returns the MCP tool definitions for `query_graph` and `get_graph_schema`
+Returns the MCP tool definitions for `list_commands` and `invoke_command`
 in a format compatible with MCP clients.
 
 ```shell
