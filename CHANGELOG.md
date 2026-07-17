@@ -1,3 +1,29 @@
+## [0.91.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.90.1...v0.91.0) (2026-07-17)
+
+### ⚠ BREAKING CHANGES
+
+* **dsl:** replace op/value filters with operator-keyed objects
+
+### Features
+
+* **ci:** serve e2e SSOT tables from a package registry artifact ([dedaadc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dedaadc49b4aae1c1d8abbc4ae329a05600fade6)) by Aaron Algutifan
+* **dsl:** flatten aggregation_sort to the order_by string form ([60b560b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/60b560b3e5eb0acbef0347b5f9162914e2cd7d79)) by Aaron Algutifan
+* **ontology:** declarative HAS_VULNERABILITY edge (Package→Vulnerability) ([3c0a884](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3c0a88482d695be594e9e1741accb286334e7564)) by Tim Rizzi
+
+### Other
+
+* **config:** fix stale ClickHouse settings field names in server runbook ([171fdc4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/171fdc4b4c9998f2ca06f395936751128ff1b1b9)) by Jean-Gabriel Doyon
+* **dsl:** infer center node in neighbors queries ([c6fc73b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6fc73b4ae64f3296ed8a46d977dfcd40ebe739c)) by Aaron Algutifan
+* **dsl:** replace op/value filters with operator-keyed objects ([cf0cae1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cf0cae1b047e0faf41f019ef7fa644b2be2ec4ae)) by Aaron Algutifan
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([1839328](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1839328dbb7126f88e52fb23e170d642bad4ee02)) by Orbit automation bot
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([dac0d1b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dac0d1b246c82877634d6fbe0515aa5ecc4ce4db)) by Orbit automation bot
+* fixed typo in README.md ([7c3960a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7c3960ae9a7fc5804afe053c6c1fccbbba448255)) by Ayumu Aizawa
+* **i18n:** update ja-jp for commit 20f6200c ([e3fbe37](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e3fbe373b0c973afc40cb4a710de4d7a20f2fbf2)) by GitLab-Argo Bot
+* **i18n:** update ja-jp for commit 2a86eb58 ([58f9c7b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58f9c7b880d4ee81a9dc553fcce5653154155d46)) by GitLab-Argo Bot
+* **lint:** require "GitLab Orbit" product name in public docs ([c75a214](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c75a21430d343c4373076fc6958d4cb326913c2a)) by Dmitry Gruzd
+* **mcp:** document command wrapper tools as the MCP surface ([c810f12](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c810f1263312db6c55951d1388d68e529dd35a86)) by Michael Angelo Rivera
+* **ontology:** declare SDLC partition count in the pipeline ([49b4e35](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/49b4e352e7b9cdad4d5f2536b65503103af5c272)) by Jean-Gabriel Doyon
+
 ## [0.90.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.90.0...v0.90.1) (2026-07-16)
 
 ### Fixes
