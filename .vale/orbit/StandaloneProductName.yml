@@ -6,4 +6,4 @@ message: "Use 'GitLab Orbit' instead of standalone 'Orbit'."
 level: error
 scope: text
 raw:
-  - '(?<!GitLab )(?<!Select )\bOrbit\b(?!\*\* >)'
+  - '(?<!GitLab )\bOrbit\b(?! > Configuration)'
