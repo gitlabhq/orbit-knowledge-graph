@@ -1645,6 +1645,24 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id);
 
+-- Reconciliation companion mirrored from the monolith's ClickHouse schema. The
+-- HAS_VULNERABILITY extract uses it to resolve occurrence traversal_paths by id.
+CREATE TABLE IF NOT EXISTS siphon_sbom_occurrences_pg_pkey_ordered
+(
+    `id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (id, traversal_path)
+ORDER BY (id, traversal_path);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS siphon_sbom_occurrences_pg_pkey_ordered_mv
+TO siphon_sbom_occurrences_pg_pkey_ordered
+AS SELECT id, traversal_path, _siphon_replicated_at, _siphon_deleted
+FROM siphon_sbom_occurrences;
+
 CREATE TABLE IF NOT EXISTS siphon_sbom_occurrences_vulnerabilities
 (
     `id` Int64,
