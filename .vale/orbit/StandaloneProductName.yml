@@ -1,0 +1,7 @@
+---
+extends: existence
+message: "Use 'GitLab Orbit' instead of standalone 'Orbit'."
+level: error
+scope: text
+raw:
+  - '(?<!GitLab )\bOrbit\b(?! > Configuration)'
