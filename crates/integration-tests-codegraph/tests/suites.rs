@@ -478,3 +478,6 @@ yaml_test!(
     rust_workspace_setup_fixes,
     "rust/workspace_setup_fixes.yaml"
 );
+
+// Zig
+yaml_test!(zig_definitions, "zig/definitions.yaml");

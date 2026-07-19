@@ -198,6 +198,14 @@ repos:
     commit_sha: 5a267ec4264cdeb529512901119223889463703f
     groups: [terraform]
 
+  # Zig
+  - name: zls
+    source: github
+    project: zigtools/zls
+    version: "0.16.0"
+    commit_sha: 494486203c3a48927f2383aa3d5ce5fca112186d
+    groups: [zig]
+
 scenarios:
   hyperfine:
     - id: v2

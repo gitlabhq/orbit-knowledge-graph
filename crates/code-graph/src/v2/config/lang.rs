@@ -226,6 +226,12 @@ define_languages! {
         separator: ".",
         names: ["lua"],
     },
+    Zig => {
+        support_lang: Zig,
+        extensions: ["zig"],
+        separator: ".",
+        names: ["zig"],
+    },
 }
 
 #[cfg(test)]

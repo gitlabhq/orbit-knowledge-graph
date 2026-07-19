@@ -25,6 +25,7 @@ pub enum SupportLang {
     Hcl,
     Swift,
     Lua,
+    Zig,
 }
 
 impl fmt::Display for SupportLang {
@@ -137,6 +138,11 @@ impl LanguageExt for SupportLang {
             Self::Lua => tree_sitter_lua::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-lua"))]
             Self::Lua => panic!("tree-sitter-lua feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-zig")]
+            Self::Zig => tree_sitter_zig::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-zig"))]
+            Self::Zig => panic!("tree-sitter-zig feature not enabled"),
         }
     }
 
