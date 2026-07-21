@@ -30,7 +30,14 @@ properties:
     source: project_id
     nullable: false
     mutable: false
-    description: "Owning project ID."
+    description: "Owning project ID. Zero for external repositories."
+
+  external_repository_id:
+    type: int64
+    source: external_repository_id
+    nullable: false
+    mutable: false
+    description: "External repository ID. Zero for native GitLab projects."
 
   name:
     type: string
@@ -59,6 +66,7 @@ storage:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: external_repository_id, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
     - {name: is_default, type: "Bool", default: "true"}
   indexes:

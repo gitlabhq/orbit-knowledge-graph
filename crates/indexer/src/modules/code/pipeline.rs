@@ -26,6 +26,7 @@ pub struct IndexingRequest {
     pub task_id: i64,
     pub commit_sha: Option<String>,
     pub had_prior_checkpoint: bool,
+    pub external_repository_id: i64,
 }
 
 /// Terminal outcome of `CodeIndexingPipeline::index_project`.
@@ -446,13 +447,23 @@ impl CodeIndexingPipeline {
         HandlerError,
     > {
         let tracer = code_graph::v2::trace::Tracer::new(false);
-        let envelope = IndexerEnvelope::new(
-            request.traversal_path.clone(),
-            request.project_id,
-            request.branch.clone(),
-            request.commit_sha.as_deref().unwrap_or("").to_string(),
-            indexed_at,
-        );
+        let envelope = if request.external_repository_id != 0 {
+            IndexerEnvelope::for_external_repository(
+                request.traversal_path.clone(),
+                request.external_repository_id,
+                request.branch.clone(),
+                request.commit_sha.as_deref().unwrap_or("").to_string(),
+                indexed_at,
+            )
+        } else {
+            IndexerEnvelope::new(
+                request.traversal_path.clone(),
+                request.project_id,
+                request.branch.clone(),
+                request.commit_sha.as_deref().unwrap_or("").to_string(),
+                indexed_at,
+            )
+        };
 
         let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(IndexerConverter::new(
             envelope,

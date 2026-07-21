@@ -80,6 +80,8 @@ impl CodeIndexingTaskRoute {
                     traversal_path: traversal_path.to_string(),
                     dispatch_id: ctx.dispatch_id,
                     campaign_id: ctx.campaign_id.clone(),
+                    source_type: None,
+                    external_repository_id: None,
                 };
                 latest
                     .entry(key)

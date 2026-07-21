@@ -84,6 +84,15 @@ pub struct CodeIndexingTaskRequest {
     pub dispatch_id: Uuid,
     #[serde(default)]
     pub campaign_id: Option<String>,
+    /// When set to `"external_repository"`, the task targets an external repo
+    /// and `external_repository_id` carries the owning entity ID. `None`
+    /// (the default) means a regular GitLab project.
+    #[serde(default)]
+    pub source_type: Option<String>,
+    /// ID of the `Analytics::KnowledgeGraph::ExternalRepository` record when
+    /// `source_type` is `"external_repository"`.
+    #[serde(default)]
+    pub external_repository_id: Option<i64>,
 }
 
 impl CodeIndexingTaskRequest {
@@ -135,5 +144,65 @@ impl NamespaceDeletionRequest {
 impl Event for NamespaceDeletionRequest {
     fn subscription() -> Subscription {
         Subscription::new(INDEXER_STREAM, NAMESPACE_DELETION_SUBJECT_PATTERN)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_indexing_task_request_deserializes_without_external_fields() {
+        let json = r#"{
+            "task_id": 42,
+            "project_id": 123,
+            "branch": "main",
+            "commit_sha": "abc123",
+            "traversal_path": "1/42/"
+        }"#;
+
+        let request: CodeIndexingTaskRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.task_id, 42);
+        assert_eq!(request.project_id, 123);
+        assert!(request.source_type.is_none());
+        assert!(request.external_repository_id.is_none());
+    }
+
+    #[test]
+    fn code_indexing_task_request_deserializes_with_external_fields() {
+        let json = r#"{
+            "task_id": 1,
+            "project_id": 0,
+            "branch": "main",
+            "commit_sha": "def456",
+            "traversal_path": "1/42/",
+            "source_type": "external_repository",
+            "external_repository_id": 99
+        }"#;
+
+        let request: CodeIndexingTaskRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.project_id, 0);
+        assert_eq!(request.source_type.as_deref(), Some("external_repository"));
+        assert_eq!(request.external_repository_id, Some(99));
+    }
+
+    #[test]
+    fn code_indexing_task_request_serializes_round_trip() {
+        let request = CodeIndexingTaskRequest {
+            task_id: 1,
+            project_id: 0,
+            branch: Some("main".to_string()),
+            commit_sha: Some("abc".to_string()),
+            traversal_path: "1/42/".to_string(),
+            dispatch_id: Uuid::nil(),
+            campaign_id: None,
+            source_type: Some("external_repository".to_string()),
+            external_repository_id: Some(77),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        let deserialized: CodeIndexingTaskRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.external_repository_id, Some(77));
+        assert_eq!(deserialized.source_type.as_deref(), Some("external_repository"));
     }
 }
