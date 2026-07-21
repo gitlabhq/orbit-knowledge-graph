@@ -95,7 +95,7 @@ storage:
   primary_key: [traversal_path, id]
   settings:
     add_minmax_index_for_temporal_columns: "1"
-    auto_statistics_types: "'minmax, uniq, countmin'"
+    auto_statistics_types: "'basic, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: external_id, type: "String", default: "''", codec: ["ZSTD(1)"]}

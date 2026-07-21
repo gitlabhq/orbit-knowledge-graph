@@ -114,7 +114,7 @@ storage:
   primary_key: [id]
   settings:
     add_minmax_index_for_temporal_columns: "1"
-    auto_statistics_types: "'minmax, uniq, countmin'"
+    auto_statistics_types: "'basic, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: runner_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
