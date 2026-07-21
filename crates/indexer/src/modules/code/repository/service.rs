@@ -153,6 +153,25 @@ impl RepositoryService for CachingRepositoryService {
             }
         }
     }
+
+    async fn external_repository_info(
+        &self,
+        external_repository_id: i64,
+    ) -> Result<ExternalRepositoryInfo, RepositoryServiceError> {
+        self.inner
+            .external_repository_info(external_repository_id)
+            .await
+    }
+
+    async fn download_external_archive(
+        &self,
+        external_repository_id: i64,
+        ref_name: &str,
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        self.inner
+            .download_external_archive(external_repository_id, ref_name)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -234,6 +253,25 @@ pub mod test_utils {
                 return Err(err);
             }
             Ok(Box::pin(futures::stream::empty()))
+        }
+
+        async fn external_repository_info(
+            &self,
+            external_repository_id: i64,
+        ) -> Result<ExternalRepositoryInfo, RepositoryServiceError> {
+            Err(RepositoryServiceError::Archive(format!(
+                "mock: no external repo info for {external_repository_id}"
+            )))
+        }
+
+        async fn download_external_archive(
+            &self,
+            external_repository_id: i64,
+            _ref_name: &str,
+        ) -> Result<ByteStream, RepositoryServiceError> {
+            Err(RepositoryServiceError::Archive(format!(
+                "mock: no external archive for {external_repository_id}"
+            )))
         }
     }
 
@@ -382,5 +420,42 @@ mod tests {
         let result = service.project_info(99).await;
         assert!(result.is_err());
         assert_eq!(counting.project_info_call_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn caching_service_delegates_external_repository_info() {
+        let mock = MockRepositoryService::with_default_branch(1, "main");
+        let service = CachingRepositoryService::create(mock);
+
+        let result = service.external_repository_info(42).await;
+        // MockRepositoryService returns an error for external calls (not implemented),
+        // but the important thing is it does NOT return the trait default stub error
+        // "external repository info not supported" — it reaches the inner service.
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            !err_msg.contains("not supported"),
+            "CachingRepositoryService must delegate external_repository_info to inner, \
+             not fall through to the trait default stub. Got: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn caching_service_delegates_download_external_archive() {
+        let mock = MockRepositoryService::with_default_branch(1, "main");
+        let service = CachingRepositoryService::create(mock);
+
+        let result = service.download_external_archive(42, "main").await;
+        match result {
+            Err(err) => {
+                let err_msg = err.to_string();
+                assert!(
+                    !err_msg.contains("not supported"),
+                    "CachingRepositoryService must delegate download_external_archive to inner, \
+                     not fall through to the trait default stub. Got: {err_msg}"
+                );
+            }
+            Ok(_) => panic!("expected error from mock, got Ok"),
+        }
     }
 }
