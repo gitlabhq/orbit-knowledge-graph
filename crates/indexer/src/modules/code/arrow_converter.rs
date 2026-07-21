@@ -55,6 +55,12 @@ impl IndexerEnvelope {
     }
 }
 
+impl IndexerEnvelope {
+    pub fn is_external(&self) -> bool {
+        self.external_repository_id != 0
+    }
+}
+
 impl RowEnvelope for IndexerEnvelope {
     fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), ArrowError> {
         b.col("id")?.push_int(id)?;
@@ -62,8 +68,10 @@ impl RowEnvelope for IndexerEnvelope {
         b.col("project_id")?.push_int(self.project_id)?;
         b.col("branch")?.push_str(&self.branch)?;
         b.col("commit_sha")?.push_str(&self.commit_sha)?;
-        b.col("external_repository_id")?
-            .push_int(self.external_repository_id)?;
+        if self.is_external() {
+            b.col("external_repository_id")?
+                .push_int(self.external_repository_id)?;
+        }
         b.col("_version")?
             .push_timestamp_micros(self.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
@@ -346,8 +354,10 @@ impl AsRecordBatch for BranchRow<'_> {
         b.col("traversal_path")?
             .push_str(&self.env.traversal_path)?;
         b.col("project_id")?.push_int(self.env.project_id)?;
-        b.col("external_repository_id")?
-            .push_int(self.env.external_repository_id)?;
+        if self.env.is_external() {
+            b.col("external_repository_id")?
+                .push_int(self.env.external_repository_id)?;
+        }
         b.col("name")?.push_str(&self.env.branch)?;
         b.col("is_default")?.push_bool(true)?;
         b.col("_version")?
@@ -390,27 +400,29 @@ fn convert_repository_edges(
         .unwrap_or_default();
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
-    edge_rows.push(IndexerEdgeRow {
-        env,
-        source_id: branch_id,
-        target_id: env.project_id,
-        edge_kind: "IN_PROJECT",
-        source_node_kind: "Branch",
-        target_node_kind: "Project",
-        source_tags: branch_tags.clone(),
-        target_tags: Vec::new(),
-    });
+    if !env.is_external() {
+        edge_rows.push(IndexerEdgeRow {
+            env,
+            source_id: branch_id,
+            target_id: env.project_id,
+            edge_kind: "IN_PROJECT",
+            source_node_kind: "Branch",
+            target_node_kind: "Project",
+            source_tags: branch_tags.clone(),
+            target_tags: Vec::new(),
+        });
 
-    edge_rows.push(IndexerEdgeRow {
-        env,
-        source_id: env.project_id,
-        target_id: branch_id,
-        edge_kind: "CONTAINS",
-        source_node_kind: "Project",
-        target_node_kind: "Branch",
-        source_tags: Vec::new(),
-        target_tags: branch_tags.clone(),
-    });
+        edge_rows.push(IndexerEdgeRow {
+            env,
+            source_id: env.project_id,
+            target_id: branch_id,
+            edge_kind: "CONTAINS",
+            source_node_kind: "Project",
+            target_node_kind: "Branch",
+            source_tags: Vec::new(),
+            target_tags: branch_tags.clone(),
+        });
+    }
 
     edge_rows.extend(branch_contains_directory_rows(
         graph,
@@ -664,6 +676,18 @@ impl ConverterSpecs {
             tag_properties: build_tag_properties(ontology),
         }
     }
+
+    pub fn external_from_ontology(ontology: &Ontology) -> Self {
+        Self {
+            branch: entity_specs(ontology, "ExternalBranch"),
+            directory: entity_specs(ontology, "ExternalDirectory"),
+            file: entity_specs(ontology, "ExternalFile"),
+            definition: entity_specs(ontology, "ExternalDefinition"),
+            imported_symbol: entity_specs(ontology, "ExternalImportedSymbol"),
+            edge: edge_specs(ontology),
+            tag_properties: build_tag_properties(ontology),
+        }
+    }
 }
 
 pub struct IndexerConverter {
@@ -678,10 +702,16 @@ impl IndexerConverter {
         ontology: &Ontology,
         table_names: Arc<super::config::CodeTableNames>,
     ) -> Self {
+        let specs = if envelope.external_repository_id != 0 {
+            ConverterSpecs::external_from_ontology(ontology)
+        } else {
+            ConverterSpecs::from_ontology(ontology)
+        };
+
         Self {
             envelope,
             table_names,
-            specs: ConverterSpecs::from_ontology(ontology),
+            specs,
         }
     }
 }
