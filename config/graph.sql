@@ -34,6 +34,61 @@ CREATE TABLE IF NOT EXISTS code_indexing_checkpoint (
 ORDER BY (traversal_path, project_id, branch)
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
+CREATE TABLE IF NOT EXISTS gl_advisory (
+    id Int64 CODEC(T64, ZSTD(1)),
+    advisory_xid String DEFAULT '' CODEC(ZSTD(1)),
+    source_xid Int64 CODEC(T64, ZSTD(1)),
+    title String DEFAULT '' CODEC(ZSTD(1)),
+    description String DEFAULT '' CODEC(ZSTD(3)),
+    cvss_v2 String DEFAULT '' CODEC(ZSTD(1)),
+    cvss_v3 String DEFAULT '' CODEC(ZSTD(1)),
+    cvss_v4 String DEFAULT '' CODEC(ZSTD(1)),
+    urls Array(String) DEFAULT [] CODEC(ZSTD(1)),
+    published_date Date32 CODEC(Delta(4), ZSTD(1)),
+    created_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_advisory_xid advisory_xid TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_advisory_identifier (
+    id Int64 CODEC(T64, ZSTD(1)),
+    advisory_id Int64 CODEC(T64, ZSTD(1)),
+    position Int64 CODEC(T64, ZSTD(1)),
+    identifier_type LowCardinality(String) DEFAULT '' CODEC(ZSTD(1)),
+    identifier_value String DEFAULT '' CODEC(ZSTD(1)),
+    identifier_name String DEFAULT '' CODEC(ZSTD(1)),
+    identifier_url String DEFAULT '' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_identifier_value identifier_value TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (identifier_type, identifier_value, id) PRIMARY KEY (identifier_type, identifier_value, id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_affected_package (
+    id Int64 CODEC(T64, ZSTD(1)),
+    advisory_id Int64 CODEC(T64, ZSTD(1)),
+    purl_type Int64 CODEC(T64, ZSTD(1)),
+    package_name String DEFAULT '' CODEC(ZSTD(1)),
+    distro_version String DEFAULT '' CODEC(ZSTD(1)),
+    solution String DEFAULT '' CODEC(ZSTD(1)),
+    affected_range String DEFAULT '' CODEC(ZSTD(1)),
+    fixed_versions Array(String) DEFAULT [] CODEC(ZSTD(1)),
+    overridden_advisory_fields String DEFAULT '' CODEC(ZSTD(1)),
+    versions String DEFAULT '' CODEC(ZSTD(3)),
+    created_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_package_name package_name TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
 CREATE TABLE IF NOT EXISTS gl_branch (
     id Int64 CODEC(T64, ZSTD(1)),
     traversal_path String CODEC(ZSTD(1)),
@@ -83,6 +138,20 @@ CREATE TABLE IF NOT EXISTS gl_container_repository (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+
+CREATE TABLE IF NOT EXISTS gl_cve_enrichment (
+    id Int64 CODEC(T64, ZSTD(1)),
+    cve String DEFAULT '' CODEC(ZSTD(1)),
+    epss_score String CODEC(ZSTD(1)),
+    is_known_exploit Bool DEFAULT false,
+    created_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_cve cve TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (cve) PRIMARY KEY (cve)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_definition (
     id Int64 CODEC(T64, ZSTD(1)),
@@ -398,6 +467,38 @@ CREATE TABLE IF NOT EXISTS gl_label (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
+CREATE TABLE IF NOT EXISTS gl_malware_advisory (
+    id Int64 CODEC(T64, ZSTD(1)),
+    advisory_xid String DEFAULT '' CODEC(ZSTD(1)),
+    source_xid Int64 CODEC(T64, ZSTD(1)),
+    title String DEFAULT '' CODEC(ZSTD(1)),
+    description String DEFAULT '' CODEC(ZSTD(3)),
+    urls Array(String) DEFAULT [] CODEC(ZSTD(1)),
+    published_date Date32 CODEC(Delta(4), ZSTD(1)),
+    created_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_advisory_xid advisory_xid TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_malware_affected_package (
+    id Int64 CODEC(T64, ZSTD(1)),
+    advisory_id Int64 CODEC(T64, ZSTD(1)),
+    purl_type Int64 CODEC(T64, ZSTD(1)),
+    package_name String DEFAULT '' CODEC(ZSTD(1)),
+    affected_version String DEFAULT '' CODEC(ZSTD(1)),
+    created_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_package_name package_name TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
 CREATE TABLE IF NOT EXISTS gl_merge_request (
     id Int64 CODEC(T64, ZSTD(1)),
     iid Nullable(Int64) CODEC(Delta(8), LZ4),
@@ -686,6 +787,44 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
+
+CREATE TABLE IF NOT EXISTS gl_pm_license (
+    id Int64 CODEC(T64, ZSTD(1)),
+    spdx_identifier String DEFAULT '' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_spdx_identifier spdx_identifier TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_pm_package (
+    id Int64 CODEC(T64, ZSTD(1)),
+    purl_type Int64 CODEC(T64, ZSTD(1)),
+    name String DEFAULT '' CODEC(ZSTD(1)),
+    licenses String DEFAULT '' CODEC(ZSTD(1)),
+    created_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_name name TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_pm_package_version (
+    id Int64 CODEC(T64, ZSTD(1)),
+    pm_package_id Int64 CODEC(T64, ZSTD(1)),
+    version String DEFAULT '' CODEC(ZSTD(1)),
+    created_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    updated_at DateTime64(0, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_version version TYPE bloom_filter(0.0001) GRANULARITY 1,
+    INDEX idx_pm_package_id pm_package_id TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_project (
     id Int64 CODEC(T64, ZSTD(1)),
