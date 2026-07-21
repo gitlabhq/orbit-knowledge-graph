@@ -5,9 +5,6 @@ variants:
     to_node: { type: PmPackageVersion, id: id }
     description: FK via pm_package_versions.pm_package_id.
 
-indexer:
-  reindex: [siphon_pm_package_versions]
-
 pipelines:
   - name: HAS_VERSION_siphon_pm_package_versions
     extract:

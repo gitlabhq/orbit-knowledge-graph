@@ -5,16 +5,11 @@ variants:
     to_node: { type: PmPackage, id: id }
     description: Join on (purl_type, package_name).
 
-indexer:
-  reindex:
-    - siphon_pm_affected_packages
-    - siphon_pm_packages
-
 pipelines:
   - name: AFFECTS_PACKAGE_siphon_pm_affected_packages_PmPackage
     extract:
       type: clickhouse
-      tables: [siphon_pm_affected_packages, siphon_pm_packages]
+      tables: [siphon_pm_affected_packages]
       order_by: [id]
       query: affects_package.sql.j2
     transform:

@@ -5,9 +5,6 @@ variants:
     to_node: { type: PmLicense, id: id }
     description: Many-to-many via pm_package_version_licenses.
 
-indexer:
-  reindex: [siphon_pm_package_version_licenses]
-
 pipelines:
   - name: HAS_LICENSE_siphon_pm_package_version_licenses
     extract:

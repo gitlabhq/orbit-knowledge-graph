@@ -5,10 +5,6 @@ variants:
     to_node: { type: AdvisoryIdentifier, id: id }
     description: Advisory fan-out to identifier rows.
 
-indexer:
-  reindex:
-    - siphon_pm_advisory_identifiers
-
 pipelines:
   - name: HAS_ADVISORY_IDENTIFIER_siphon_pm_advisory_identifiers
     extract:

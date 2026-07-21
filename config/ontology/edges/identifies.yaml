@@ -7,14 +7,13 @@ variants:
 
 indexer:
   reindex:
-    - siphon_pm_advisory_identifiers
     - siphon_vulnerability_identifiers
 
 pipelines:
   - name: IDENTIFIES_siphon_pm_advisory_identifiers_VulnerabilityIdentifier
     extract:
       type: clickhouse
-      tables: [siphon_pm_advisory_identifiers, siphon_vulnerability_identifiers]
+      tables: [siphon_vulnerability_identifiers]
       order_by: [traversal_path, id]
       query: identifies.sql.j2
     transform:

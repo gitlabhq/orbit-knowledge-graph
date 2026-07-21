@@ -5,9 +5,6 @@ variants:
     to_node: { type: AffectedPackage, id: id }
     description: FK link via pm_affected_packages.advisory_id.
 
-indexer:
-  reindex: [siphon_pm_affected_packages]
-
 pipelines:
   - name: AFFECTS_siphon_pm_affected_packages
     extract:

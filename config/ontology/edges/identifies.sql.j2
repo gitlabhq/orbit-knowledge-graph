@@ -18,7 +18,7 @@ SELECT
   _batch._version AS _version,
   _batch._deleted AS _deleted
 FROM _batch
-INNER JOIN siphon_pm_advisory_identifiers FINAL ai
+INNER JOIN siphon_pm_advisory_identifiers AS ai FINAL
   ON lowerUTF8(ai.identifier_type) = lowerUTF8(_batch.external_type)
  AND ai.identifier_value = _batch.external_id
 WHERE ai.{{deleted_column}} = FALSE

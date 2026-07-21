@@ -5,16 +5,11 @@ variants:
     to_node: { type: AdvisoryIdentifier, id: id }
     description: Join on cve = identifier_value where identifier_type='cve'.
 
-indexer:
-  reindex:
-    - siphon_pm_cve_enrichment
-    - siphon_pm_advisory_identifiers
-
 pipelines:
   - name: ENRICHES_siphon_pm_cve_enrichment_AdvisoryIdentifier
     extract:
       type: clickhouse
-      tables: [siphon_pm_cve_enrichment, siphon_pm_advisory_identifiers]
+      tables: [siphon_pm_cve_enrichment]
       order_by: [id]
       query: enriches.sql.j2
     transform:

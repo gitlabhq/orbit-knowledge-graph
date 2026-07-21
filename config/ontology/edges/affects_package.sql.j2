@@ -5,8 +5,8 @@ SELECT
   p.id AS target_id,
   {{watermark_column}} AS _version,
   {{deleted_column}} AS _deleted
-FROM siphon_pm_affected_packages FINAL ap
-INNER JOIN siphon_pm_packages FINAL p
+FROM siphon_pm_affected_packages AS ap FINAL
+INNER JOIN siphon_pm_packages AS p FINAL
   ON p.purl_type = ap.purl_type AND p.name = ap.package_name
 WHERE ap.{{deleted_column}} = FALSE AND p.{{deleted_column}} = FALSE
   {{filters}}
