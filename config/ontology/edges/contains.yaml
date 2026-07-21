@@ -41,6 +41,21 @@ variants:
     scope: same_namespace
     description: "Directory contains file."
 
+  - from_node: { type: ExternalBranch, id: id }
+    to_node: { type: ExternalDirectory, id: id }
+    scope: same_namespace
+    description: "External branch contains root directory."
+
+  - from_node: { type: ExternalDirectory, id: id }
+    to_node: { type: ExternalDirectory, id: id }
+    scope: same_namespace
+    description: "External directory contains subdirectory."
+
+  - from_node: { type: ExternalDirectory, id: id }
+    to_node: { type: ExternalFile, id: id }
+    scope: same_namespace
+    description: "External directory contains file."
+
 indexer:
   reindex: [siphon_work_item_parent_links]
 pipelines:

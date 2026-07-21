@@ -17,3 +17,17 @@ variants:
   - from_node: { type: Definition, id: id }
     to_node: { type: ImportedSymbol, id: id }
     description: "Definition calls an imported symbol whose target is not yet resolved to a concrete definition."
+
+  - from_node: { type: ExternalDefinition, id: id }
+    to_node: { type: ExternalDefinition, id: id }
+    scope: same_namespace
+    description: "External definition calls another external definition."
+
+  - from_node: { type: ExternalFile, id: id }
+    to_node: { type: ExternalDefinition, id: id }
+    scope: same_namespace
+    description: "External file contains a top-level call to an external definition."
+
+  - from_node: { type: ExternalDefinition, id: id }
+    to_node: { type: ExternalImportedSymbol, id: id }
+    description: "External definition calls an imported symbol."

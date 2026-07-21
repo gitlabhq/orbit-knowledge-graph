@@ -138,6 +138,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn external_node_types_load_from_embedded_ontology() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        for name in CodeTableNames::EXTERNAL_NODE_KINDS {
+            assert!(
+                ontology.get_node(name).is_some(),
+                "external node type {name} must be registered in schema.yaml"
+            );
+        }
+        assert!(
+            ontology.get_node("ExternalBranch").is_some(),
+            "ExternalBranch must be registered"
+        );
+
+        let external_tables =
+            CodeTableNames::external_from_ontology(&ontology).expect("external tables must resolve");
+        assert!(
+            external_tables.file.contains("gl_external_file"),
+            "external file table should be gl_external_file, got {}",
+            external_tables.file
+        );
+    }
+
+    #[test]
+    fn external_nodes_redact_under_external_repository_type() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        for name in CodeTableNames::EXTERNAL_NODE_KINDS {
+            let node = ontology.get_node(name).expect("node must exist");
+            let redaction = node.redaction.as_ref().expect("redaction must be configured");
+            assert_eq!(
+                redaction.resource_type, "external_repository",
+                "{name} must redact under resource_type: external_repository, not project"
+            );
+            assert_eq!(
+                redaction.id_column.as_str(),
+                "external_repository_id",
+                "{name} must use external_repository_id as id_column"
+            );
+        }
+    }
+
+    #[test]
     fn edge_tables_only_contain_code_relevant_tables() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
