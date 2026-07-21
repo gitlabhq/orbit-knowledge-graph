@@ -1,0 +1,41 @@
+# config/ontology/nodes/package_metadata/pm_license.yaml
+
+node_type: PmLicense
+domain: package_metadata
+global: true
+description: A software license reference used by pm_packages.
+label: spdx_identifier
+destination_table: gl_pm_license
+default_columns: [id, spdx_identifier]
+sort_key: [id]
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+  spdx_identifier:
+    type: string
+    source: spdx_identifier
+    nullable: false
+    description: "SPDX license identifier (e.g. MIT, Apache-2.0)."
+
+pipelines:
+  - name: PmLicense
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_licenses]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
+
+storage:
+  primary_key: [id]
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: spdx_identifier, type: "String", default: "''", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_spdx_identifier, column: spdx_identifier, type: "bloom_filter(0.0001)", granularity: 1}

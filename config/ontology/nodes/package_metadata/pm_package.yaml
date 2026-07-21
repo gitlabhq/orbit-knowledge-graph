@@ -1,0 +1,67 @@
+# config/ontology/nodes/package_metadata/pm_package.yaml
+
+node_type: PmPackage
+domain: package_metadata
+global: true
+description: A package registered in package-metadata (distinct from registry Package).
+label: name
+destination_table: gl_pm_package
+default_columns: [id, purl_type, name]
+sort_key: [id]
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+  purl_type:
+    type: int64
+    source: purl_type
+    nullable: false
+    description: "Package URL type enum."
+    selectivity: low
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Package name."
+  licenses:
+    type: string
+    source: licenses
+    nullable: true
+    description: "Licenses JSON blob (deprecated in favor of PmLicense join)."
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    mutable: false
+    description: "Creation timestamp."
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Last update timestamp."
+
+pipelines:
+  - name: PmPackage
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_packages]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
+
+storage:
+  primary_key: [id]
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: purl_type, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: licenses, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_name, column: name, type: "bloom_filter(0.0001)", granularity: 1}

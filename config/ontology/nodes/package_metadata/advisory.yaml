@@ -1,0 +1,104 @@
+# config/ontology/nodes/package_metadata/advisory.yaml
+
+node_type: Advisory
+domain: package_metadata
+global: true
+description: A package-ecosystem security advisory (CVE, GHSA, GLSA, USN, etc.) sourced from PackageMetadata::Advisory.
+label: advisory_xid
+destination_table: gl_advisory
+default_columns: [id, advisory_xid, source_xid, published_date]
+sort_key: [id]
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+  advisory_xid:
+    type: string
+    source: advisory_xid
+    nullable: false
+    mutable: false
+    description: "Source-provided advisory identifier."
+  source_xid:
+    type: int64
+    source: source_xid
+    nullable: false
+    mutable: false
+    description: "Source system (glad, trivy_db, etc.)."
+  title:
+    type: string
+    source: title
+    nullable: true
+    description: "Human-readable advisory title."
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Detailed description."
+  cvss_v2:
+    type: string
+    source: cvss_v2
+    nullable: true
+    description: "CVSS v2 vector."
+  cvss_v3:
+    type: string
+    source: cvss_v3
+    nullable: true
+    description: "CVSS v3 vector."
+  cvss_v4:
+    type: string
+    source: cvss_v4
+    nullable: true
+    description: "CVSS v4 vector."
+  urls:
+    type: string
+    source: urls
+    nullable: false
+    description: "Reference URLs (JSON-encoded array)."
+  published_date:
+    type: date
+    source: published_date
+    nullable: false
+    description: "Publication date."
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    mutable: false
+    description: "Creation timestamp."
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Last update timestamp."
+
+pipelines:
+  - name: Advisory
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_advisories]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
+
+storage:
+  primary_key: [id]
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: advisory_xid, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: source_xid, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: cvss_v2, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: cvss_v3, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: cvss_v4, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: urls, type: "Array(String)", default: "[]", codec: ["ZSTD(1)"]}
+    - {name: published_date, type: "Date32", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_advisory_xid, column: advisory_xid, type: "bloom_filter(0.0001)", granularity: 1}

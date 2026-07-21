@@ -1,0 +1,14 @@
+SELECT
+  cityHash64(concat(identifier_type, '|', identifier_value, '|', toString(advisory_id), '|', toString(position))) AS id,
+  advisory_id,
+  position,
+  identifier_type,
+  identifier_value,
+  identifier_name,
+  identifier_url,
+  {{watermark_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_pm_advisory_identifiers
+WHERE 1=1 {{filters}}
+ORDER BY identifier_type, identifier_value, advisory_id, position
+LIMIT {{batch_size}}

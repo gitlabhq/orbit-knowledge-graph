@@ -1,0 +1,76 @@
+# config/ontology/nodes/package_metadata/advisory_identifier.yaml
+
+node_type: AdvisoryIdentifier
+domain: package_metadata
+global: true
+description: A single identifier extracted from an advisory's identifiers[] array (e.g. CVE-2021-44228).
+label: identifier_value
+destination_table: gl_advisory_identifier
+default_columns: [id, identifier_type, identifier_value, advisory_id]
+sort_key: [identifier_type, identifier_value, id]
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Synthetic ID: cityHash64(identifier_type || identifier_value || advisory_id || position)."
+  advisory_id:
+    type: int64
+    source: advisory_id
+    nullable: false
+    mutable: false
+    description: "Owning advisory ID."
+  position:
+    type: int64
+    source: position
+    nullable: false
+    mutable: false
+    description: "Zero-based index within the identifiers array."
+  identifier_type:
+    type: string
+    source: identifier_type
+    nullable: false
+    mutable: false
+    description: "Identifier kind (cve, ghsa, cwe, usn, gemnasium, ...)."
+    selectivity: low
+  identifier_value:
+    type: string
+    source: identifier_value
+    nullable: false
+    mutable: false
+    description: "Identifier value (e.g. CVE-2021-44228)."
+  identifier_name:
+    type: string
+    source: identifier_name
+    nullable: true
+    description: "Human-readable name (often equals identifier_value)."
+  identifier_url:
+    type: string
+    source: identifier_url
+    nullable: true
+    description: "Reference URL. May be empty."
+
+pipelines:
+  - name: AdvisoryIdentifier
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_advisory_identifiers]
+      order_by: [identifier_type, identifier_value, advisory_id, position]
+      query: advisory_identifier.sql.j2
+    transform:
+      type: datafusion
+
+storage:
+  primary_key: [identifier_type, identifier_value, id]
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: advisory_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: position, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: identifier_type, type: "LowCardinality(String)", default: "''", codec: ["ZSTD(1)"]}
+    - {name: identifier_value, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: identifier_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: identifier_url, type: "String", default: "''", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_identifier_value, column: identifier_value, type: "bloom_filter(0.0001)", granularity: 1}

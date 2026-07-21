@@ -1,0 +1,67 @@
+# config/ontology/nodes/package_metadata/cve_enrichment.yaml
+
+node_type: CveEnrichment
+domain: package_metadata
+global: true
+description: EPSS score and known-exploit metadata for a CVE.
+label: cve
+destination_table: gl_cve_enrichment
+default_columns: [id, cve, epss_score, is_known_exploit]
+sort_key: [cve]
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+  cve:
+    type: string
+    source: cve
+    nullable: false
+    mutable: false
+    description: "CVE identifier (e.g. CVE-2021-44228)."
+  epss_score:
+    type: float64
+    source: epss_score
+    nullable: false
+    description: "EPSS exploitability probability (0.0-1.0)."
+  is_known_exploit:
+    type: boolean
+    source: is_known_exploit
+    nullable: false
+    description: "Whether this CVE has a known active exploit."
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    mutable: false
+    description: "Creation timestamp."
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Last update timestamp."
+
+pipelines:
+  - name: CveEnrichment
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_cve_enrichment]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
+
+storage:
+  primary_key: [cve]
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: cve, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: epss_score, type: "Float64", codec: ["ZSTD(1)"]}
+    - {name: is_known_exploit, type: "Bool", default: "false"}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_cve, column: cve, type: "bloom_filter(0.0001)", granularity: 1}
