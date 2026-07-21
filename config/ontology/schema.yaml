@@ -407,6 +407,18 @@ domains:
     description: "Entities related to container image repositories in the container registry."
     nodes:
       ContainerRepository: nodes/container_registry/container_repository.yaml
+  package_metadata:
+    description: "Global package metadata: advisories, packages, licenses, CVE enrichment. Sourced from GitLab pm_* tables."
+    nodes:
+      Advisory: nodes/package_metadata/advisory.yaml
+      AdvisoryIdentifier: nodes/package_metadata/advisory_identifier.yaml
+      AffectedPackage: nodes/package_metadata/affected_package.yaml
+      CveEnrichment: nodes/package_metadata/cve_enrichment.yaml
+      PmPackage: nodes/package_metadata/pm_package.yaml
+      PmPackageVersion: nodes/package_metadata/pm_package_version.yaml
+      PmLicense: nodes/package_metadata/pm_license.yaml
+      MalwareAdvisory: nodes/package_metadata/malware_advisory.yaml
+      MalwareAffectedPackage: nodes/package_metadata/malware_affected_package.yaml
 edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
@@ -467,3 +479,11 @@ edges:
   MERGED_AT_COMMIT: edges/merged_at_commit.yaml
   DECLARES_DEPENDENCY: edges/declares_dependency.yaml
   HAS_VULNERABILITY: edges/has_vulnerability.yaml
+  HAS_ADVISORY_IDENTIFIER: edges/has_advisory_identifier.yaml
+  IDENTIFIES: edges/identifies.yaml
+  AFFECTS: edges/affects.yaml
+  AFFECTS_PACKAGE: edges/affects_package.yaml
+  HAS_VERSION: edges/has_version.yaml
+  HAS_LICENSE: edges/has_license.yaml
+  ENRICHES: edges/enriches.yaml
+  HAS_MALWARE_ADVISORY_PACKAGE: edges/has_malware_advisory_package.yaml
