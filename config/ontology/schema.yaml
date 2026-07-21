@@ -27,7 +27,7 @@ settings:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
         settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
+          auto_statistics_types: "'basic, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -53,7 +53,7 @@ settings:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, project_id, branch]
         settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
+          auto_statistics_types: "'basic, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
@@ -81,7 +81,7 @@ settings:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
         settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
+          auto_statistics_types: "'basic, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -101,11 +101,13 @@ settings:
         - {name: source_kind, type: string}
         - {name: target_id, type: int64}
         - {name: target_kind, type: string}
+        - {name: image_layer_digest, type: string}
+        - {name: image_layer_diff_id, type: string}
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
         settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
+          auto_statistics_types: "'basic, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -113,6 +115,8 @@ settings:
           - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
           - {name: target_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: image_layer_digest, type: "String", default: "''", codec: ["ZSTD(1)"]}
+          - {name: image_layer_diff_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
         indexes:
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
@@ -129,7 +133,7 @@ settings:
         index_granularity: 1024
         primary_key: [traversal_path, relationship_kind, source_id]
         settings:
-          auto_statistics_types: "'minmax, uniq, countmin'"
+          auto_statistics_types: "'basic, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
