@@ -18,10 +18,10 @@ properties:
     description: "Unique ID."
   advisory_id:
     type: int64
-    source: advisory_id
+    source: pm_advisory_id
     nullable: false
     mutable: false
-    description: "Owning advisory."
+    description: "Owning advisory (pm_advisory_id in the source table)."
   purl_type:
     type: int64
     source: purl_type
