@@ -1,0 +1,25 @@
+description: CveEnrichment metadata enriches AdvisoryIdentifier rows whose value is a CVE.
+
+variants:
+  - from_node: { type: CveEnrichment, id: id }
+    to_node: { type: AdvisoryIdentifier, id: id }
+    description: Join on cve = identifier_value where identifier_type='cve'.
+
+indexer:
+  reindex:
+    - siphon_pm_cve_enrichment
+    - siphon_pm_advisory_identifiers
+
+pipelines:
+  - name: ENRICHES_siphon_pm_cve_enrichment_AdvisoryIdentifier
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_cve_enrichment, siphon_pm_advisory_identifiers]
+      order_by: [id]
+      query: enriches.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: CveEnrichment }
+          to: { field: target_id, kind: AdvisoryIdentifier }
+          label: ENRICHES

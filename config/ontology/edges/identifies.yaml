@@ -1,0 +1,25 @@
+description: AdvisoryIdentifier is the global counterpart to per-project VulnerabilityIdentifier, joined on identifier_type/identifier_value.
+
+variants:
+  - from_node: { type: AdvisoryIdentifier, id: id }
+    to_node: { type: VulnerabilityIdentifier, id: id }
+    description: Bridges global advisory identifiers to per-project vulnerability identifiers.
+
+indexer:
+  reindex:
+    - siphon_pm_advisory_identifiers
+    - siphon_vulnerability_identifiers
+
+pipelines:
+  - name: IDENTIFIES_siphon_pm_advisory_identifiers_VulnerabilityIdentifier
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_advisory_identifiers, siphon_vulnerability_identifiers]
+      order_by: [traversal_path, id]
+      query: identifies.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: AdvisoryIdentifier }
+          to: { field: target_id, kind: VulnerabilityIdentifier }
+          label: IDENTIFIES

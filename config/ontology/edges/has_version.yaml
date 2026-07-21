@@ -1,0 +1,23 @@
+description: PmPackage has one or more PmPackageVersion records.
+
+variants:
+  - from_node: { type: PmPackage, id: id }
+    to_node: { type: PmPackageVersion, id: id }
+    description: FK via pm_package_versions.pm_package_id.
+
+indexer:
+  reindex: [siphon_pm_package_versions]
+
+pipelines:
+  - name: HAS_VERSION_siphon_pm_package_versions
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_package_versions]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: pm_package_id, kind: PmPackage }
+          to: { field: id, kind: PmPackageVersion }
+          label: HAS_VERSION

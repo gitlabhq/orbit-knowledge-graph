@@ -1,0 +1,11 @@
+SELECT
+  '0/' AS traversal_path,
+  cityHash64(concat(identifier_type, '|', identifier_value, '|', toString(advisory_id), '|', toString(position))) AS id,
+  advisory_id AS source_id,
+  cityHash64(concat(identifier_type, '|', identifier_value, '|', toString(advisory_id), '|', toString(position))) AS target_id,
+  {{watermark_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_pm_advisory_identifiers
+WHERE 1=1 {{filters}}
+ORDER BY identifier_type, identifier_value, advisory_id, position
+LIMIT {{batch_size}}

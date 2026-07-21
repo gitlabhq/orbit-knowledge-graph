@@ -1,0 +1,23 @@
+description: Advisory affects a package/version range in a specific ecosystem.
+
+variants:
+  - from_node: { type: Advisory, id: id }
+    to_node: { type: AffectedPackage, id: id }
+    description: FK link via pm_affected_packages.advisory_id.
+
+indexer:
+  reindex: [siphon_pm_affected_packages]
+
+pipelines:
+  - name: AFFECTS_siphon_pm_affected_packages
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_affected_packages]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: advisory_id, kind: Advisory }
+          to: { field: id, kind: AffectedPackage }
+          label: AFFECTS

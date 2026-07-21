@@ -1,0 +1,25 @@
+WITH
+  _batch AS (SELECT
+    vi.id AS target_id,
+    vi.traversal_path AS traversal_path,
+    vi.external_type AS external_type,
+    vi.external_id AS external_id,
+    {{watermark_column}} AS _version,
+    {{deleted_column}} AS _deleted
+  FROM siphon_vulnerability_identifiers vi
+  WHERE startsWith(vi.traversal_path, {traversal_path:String}) {{filters}}
+  ORDER BY vi.traversal_path, vi.id
+  LIMIT {{batch_size}})
+SELECT
+  _batch.traversal_path AS traversal_path,
+  cityHash64(concat(lowerUTF8(ai.identifier_type), '|', ai.identifier_value, '|', toString(ai.advisory_id), '|', toString(ai.position))) AS id,
+  cityHash64(concat(lowerUTF8(ai.identifier_type), '|', ai.identifier_value, '|', toString(ai.advisory_id), '|', toString(ai.position))) AS source_id,
+  _batch.target_id AS target_id,
+  _batch._version AS _version,
+  _batch._deleted AS _deleted
+FROM _batch
+INNER JOIN siphon_pm_advisory_identifiers FINAL ai
+  ON lowerUTF8(ai.identifier_type) = lowerUTF8(_batch.external_type)
+ AND ai.identifier_value = _batch.external_id
+WHERE ai._siphon_deleted = FALSE
+ORDER BY traversal_path, id

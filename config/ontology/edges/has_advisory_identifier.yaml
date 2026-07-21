@@ -1,0 +1,24 @@
+description: An advisory has one or more identifiers exploded from its identifiers[] JSONB array.
+
+variants:
+  - from_node: { type: Advisory, id: id }
+    to_node: { type: AdvisoryIdentifier, id: id }
+    description: Advisory fan-out to identifier rows.
+
+indexer:
+  reindex:
+    - siphon_pm_advisory_identifiers
+
+pipelines:
+  - name: HAS_ADVISORY_IDENTIFIER_siphon_pm_advisory_identifiers
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_advisory_identifiers]
+      order_by: [identifier_type, identifier_value, advisory_id, position]
+      query: has_advisory_identifier.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: Advisory }
+          to: { field: target_id, kind: AdvisoryIdentifier }
+          label: HAS_ADVISORY_IDENTIFIER

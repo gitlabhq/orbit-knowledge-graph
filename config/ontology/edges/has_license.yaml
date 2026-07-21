@@ -1,0 +1,23 @@
+description: PmPackageVersion is licensed under one or more PmLicense records.
+
+variants:
+  - from_node: { type: PmPackageVersion, id: id }
+    to_node: { type: PmLicense, id: id }
+    description: Many-to-many via pm_package_version_licenses.
+
+indexer:
+  reindex: [siphon_pm_package_version_licenses]
+
+pipelines:
+  - name: HAS_LICENSE_siphon_pm_package_version_licenses
+    extract:
+      type: clickhouse
+      tables: [siphon_pm_package_version_licenses]
+      order_by: [pm_package_version_id, pm_license_id]
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: pm_package_version_id, kind: PmPackageVersion }
+          to: { field: pm_license_id, kind: PmLicense }
+          label: HAS_LICENSE

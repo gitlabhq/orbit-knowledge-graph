@@ -1,0 +1,14 @@
+SELECT
+  '0/' AS traversal_path,
+  ce.id AS id,
+  ce.id AS source_id,
+  cityHash64(concat(lowerUTF8(ai.identifier_type), '|', ai.identifier_value, '|', toString(ai.advisory_id), '|', toString(ai.position))) AS target_id,
+  {{watermark_column}} AS _version,
+  {{deleted_column}} AS _deleted
+FROM siphon_pm_cve_enrichment FINAL ce
+INNER JOIN siphon_pm_advisory_identifiers FINAL ai
+  ON lowerUTF8(ai.identifier_type) = 'cve' AND ai.identifier_value = ce.cve
+WHERE ce._siphon_deleted = FALSE AND ai._siphon_deleted = FALSE
+  {{filters}}
+ORDER BY id
+LIMIT {{batch_size}}
