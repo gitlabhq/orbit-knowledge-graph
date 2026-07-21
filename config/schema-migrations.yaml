@@ -16,6 +16,8 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 89
+  scope: code
 - version: 88
   scope: none
   note: Marks 13 edge mappings mutable so the stale-edge sweep reconciles them. The flag is read only by the sweep's group derivation; extract SQL, transform output and DDL are untouched, so every indexed row is byte-identical.
