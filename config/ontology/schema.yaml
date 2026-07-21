@@ -397,6 +397,11 @@ domains:
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
       ImportedSymbol: nodes/source_code/imported_symbol.yaml
+      ExternalBranch: nodes/source_code/external_branch.yaml
+      ExternalDirectory: nodes/source_code/external_directory.yaml
+      ExternalFile: nodes/source_code/external_file.yaml
+      ExternalDefinition: nodes/source_code/external_definition.yaml
+      ExternalImportedSymbol: nodes/source_code/external_imported_symbol.yaml
   packages:
     description: "Entities related to packages published to the package registry."
     nodes:

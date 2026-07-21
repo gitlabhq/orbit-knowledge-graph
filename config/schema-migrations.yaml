@@ -17,7 +17,7 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 86
-  scope: code
+  scope: '*'
 - version: 85
   scope: sdlc
   entities:

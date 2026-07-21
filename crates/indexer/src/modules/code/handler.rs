@@ -438,8 +438,7 @@ mod tests {
             let ontology = Arc::new(ontology);
             let external_table_names = Arc::new(
                 CodeTableNames::external_from_ontology(&ontology)
-                    .unwrap_or_else(|_| CodeTableNames::from_ontology(&ontology)
-                        .expect("code tables must resolve")),
+                    .expect("external code tables must resolve from embedded ontology"),
             );
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,

@@ -11,5 +11,12 @@ variants:
 
   - from_node: { type: File, id: id }
     to_node: { type: Branch, id: id }
-    scope: same_namespace
     description: "File exists on branch."
+
+  - from_node: { type: ExternalDirectory, id: id }
+    to_node: { type: ExternalBranch, id: id }
+    description: "External directory exists on external branch."
+
+  - from_node: { type: ExternalFile, id: id }
+    to_node: { type: ExternalBranch, id: id }
+    description: "External file exists on external branch."

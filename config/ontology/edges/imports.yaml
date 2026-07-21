@@ -11,3 +11,11 @@ variants:
   - from_node: { type: ImportedSymbol, id: id }
     to_node: { type: Definition, id: id }
     description: "Imported symbol resolves to a concrete definition (e.g. JS/TS module-system resolution to the imported export)."
+
+  - from_node: { type: ExternalFile, id: id }
+    to_node: { type: ExternalImportedSymbol, id: id }
+    description: "External file contains an import statement."
+
+  - from_node: { type: ExternalImportedSymbol, id: id }
+    to_node: { type: ExternalDefinition, id: id }
+    description: "External imported symbol resolves to a concrete definition."
