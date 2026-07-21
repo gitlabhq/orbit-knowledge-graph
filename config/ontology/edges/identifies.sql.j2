@@ -21,5 +21,5 @@ FROM _batch
 INNER JOIN siphon_pm_advisory_identifiers FINAL ai
   ON lowerUTF8(ai.identifier_type) = lowerUTF8(_batch.external_type)
  AND ai.identifier_value = _batch.external_id
-WHERE ai._siphon_deleted = FALSE
+WHERE ai.{{deleted_column}} = FALSE
 ORDER BY traversal_path, id
