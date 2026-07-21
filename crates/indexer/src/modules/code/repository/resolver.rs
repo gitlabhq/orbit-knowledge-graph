@@ -97,6 +97,17 @@ impl RepositoryResolver {
         self.full_download(project_id, branch, ref_name).await
     }
 
+    pub async fn resolve_external(
+        &self,
+        external_repository_id: i64,
+        branch: &str,
+        commit_sha: Option<&str>,
+    ) -> Result<CachedRepository, ResolveError> {
+        let ref_name = commit_sha.unwrap_or(branch);
+        self.full_download_external(external_repository_id, branch, ref_name)
+            .await
+    }
+
     async fn full_download(
         &self,
         project_id: i64,
@@ -140,6 +151,55 @@ impl RepositoryResolver {
             }),
             Err(e) => {
                 Err(HandlerError::Processing(format!("failed to extract archive: {e}")).into())
+            }
+        }
+    }
+
+    async fn full_download_external(
+        &self,
+        external_repository_id: i64,
+        branch: &str,
+        ref_name: &str,
+    ) -> Result<CachedRepository, ResolveError> {
+        info!(
+            external_repository_id,
+            branch, ref_name, "downloading external repository archive"
+        );
+
+        let archive_stream = match self
+            .repository_service
+            .download_external_archive(external_repository_id, ref_name)
+            .await
+        {
+            Ok(stream) => stream,
+            Err(err) => {
+                if let Some((reason, detail)) = classify_download_error(&err) {
+                    return Err(ResolveError::EmptyRepository { reason, detail });
+                }
+                return Err(
+                    HandlerError::Processing(format!("failed to download external archive: {err}"))
+                        .into(),
+                );
+            }
+        };
+
+        match self.cache.extract_archive(archive_stream).await {
+            Ok(path) => Ok(path),
+            Err(RepositoryCacheError::EmptyArchive) => Err(ResolveError::EmptyRepository {
+                reason: EmptyRepositoryReason::EmptyArchive,
+                detail: format!(
+                    "archive contained no entries for external repo {external_repository_id} ref {ref_name}"
+                ),
+            }),
+            Err(RepositoryCacheError::RepositoryTooLarge) => Err(ResolveError::EmptyRepository {
+                reason: EmptyRepositoryReason::RepositoryTooLarge,
+                detail: format!(
+                    "external repository {external_repository_id} ref {ref_name} exceeded the total-bytes cap"
+                ),
+            }),
+            Err(e) => {
+                Err(HandlerError::Processing(format!("failed to extract external archive: {e}"))
+                    .into())
             }
         }
     }

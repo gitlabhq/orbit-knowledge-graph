@@ -126,19 +126,27 @@ impl CodeIndexingTaskHandler {
         &self,
         request: &CodeIndexingTaskRequest,
     ) -> Result<Option<String>, HandlerError> {
-        match &request.branch {
-            Some(branch) => Ok(Some(branch.clone())),
-            None => match self
-                .repository_service
-                .project_info(request.project_id)
-                .await
-            {
+        if let Some(branch) = &request.branch {
+            return Ok(Some(branch.clone()));
+        }
+
+        if request.is_external_repository() {
+            let ext_id = request.external_repository_id.unwrap_or(0);
+            match self.repository_service.external_repository_info(ext_id).await {
+                Ok(info) => Ok(Some(info.default_branch)),
+                Err(RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(_))) => Ok(None),
+                Err(e) => Err(HandlerError::Processing(format!(
+                    "failed to fetch external repository info: {e}"
+                ))),
+            }
+        } else {
+            match self.repository_service.project_info(request.project_id).await {
                 Ok(project_info) => Ok(Some(project_info.default_branch)),
                 Err(RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(_))) => Ok(None),
                 Err(e) => Err(HandlerError::Processing(format!(
                     "failed to fetch project info: {e}"
                 ))),
-            },
+            }
         }
     }
 

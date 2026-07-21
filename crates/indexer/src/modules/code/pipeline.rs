@@ -254,15 +254,24 @@ impl CodeIndexingPipeline {
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
 
         let fetch_start = Instant::now();
-        let repository = match self
-            .resolver
-            .resolve(
-                request.project_id,
-                &request.branch,
-                request.commit_sha.as_deref(),
-            )
-            .await
-        {
+        let resolve_result = if request.external_repository_id != 0 {
+            self.resolver
+                .resolve_external(
+                    request.external_repository_id,
+                    &request.branch,
+                    request.commit_sha.as_deref(),
+                )
+                .await
+        } else {
+            self.resolver
+                .resolve(
+                    request.project_id,
+                    &request.branch,
+                    request.commit_sha.as_deref(),
+                )
+                .await
+        };
+        let repository = match resolve_result {
             Ok(path) => {
                 self.metrics.record_resolution_strategy("full_download");
                 path

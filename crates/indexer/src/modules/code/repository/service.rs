@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::Stream;
-use gitlab_client::{GitlabClient, GitlabClientError, ProjectInfo};
+use gitlab_client::{ExternalRepositoryInfo, GitlabClient, GitlabClientError, ProjectInfo};
 use moka::future::Cache;
 
 pub type ByteStream =
@@ -28,6 +28,27 @@ pub trait RepositoryService: Send + Sync {
         project_id: i64,
         ref_name: &str,
     ) -> Result<ByteStream, RepositoryServiceError>;
+
+    async fn external_repository_info(
+        &self,
+        external_repository_id: i64,
+    ) -> Result<ExternalRepositoryInfo, RepositoryServiceError> {
+        let _ = external_repository_id;
+        Err(RepositoryServiceError::Archive(
+            "external repository info not supported".to_string(),
+        ))
+    }
+
+    async fn download_external_archive(
+        &self,
+        external_repository_id: i64,
+        ref_name: &str,
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        let _ = (external_repository_id, ref_name);
+        Err(RepositoryServiceError::Archive(
+            "external archive download not supported".to_string(),
+        ))
+    }
 }
 
 pub struct RailsRepositoryService {
@@ -56,6 +77,33 @@ impl RepositoryService for RailsRepositoryService {
         let stream = self
             .gitlab_client
             .download_archive(project_id, ref_name)
+            .await?;
+
+        Ok(Box::pin(
+            stream.map(|r| r.map_err(RepositoryServiceError::GitlabApi)),
+        ))
+    }
+
+    async fn external_repository_info(
+        &self,
+        external_repository_id: i64,
+    ) -> Result<ExternalRepositoryInfo, RepositoryServiceError> {
+        Ok(self
+            .gitlab_client
+            .external_repository_info(external_repository_id)
+            .await?)
+    }
+
+    async fn download_external_archive(
+        &self,
+        external_repository_id: i64,
+        ref_name: &str,
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        use futures::StreamExt;
+
+        let stream = self
+            .gitlab_client
+            .download_external_archive(external_repository_id, ref_name)
             .await?;
 
         Ok(Box::pin(

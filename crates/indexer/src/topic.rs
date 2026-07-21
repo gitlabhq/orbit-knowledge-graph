@@ -96,6 +96,10 @@ pub struct CodeIndexingTaskRequest {
 }
 
 impl CodeIndexingTaskRequest {
+    pub fn is_external_repository(&self) -> bool {
+        self.source_type.as_deref() == Some("external_repository")
+    }
+
     pub fn publish_subscription(&self) -> Subscription {
         use base64::Engine;
         let branch_component = match &self.branch {
