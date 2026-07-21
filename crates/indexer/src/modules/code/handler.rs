@@ -304,6 +304,7 @@ impl CodeIndexingTaskHandler {
             task_id: request.task_id,
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
+            external_repository_id: request.external_repository_id.unwrap_or(0),
         };
         // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
@@ -485,6 +486,8 @@ mod tests {
                 traversal_path: format!("1/{project_id}/"),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
+                source_type: None,
+                external_repository_id: None,
             })
             .unwrap()
         }
@@ -556,6 +559,8 @@ mod tests {
             traversal_path: "1/123/".to_string(),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            source_type: None,
+            external_repository_id: None,
         })
         .unwrap();
 
@@ -583,6 +588,8 @@ mod tests {
             traversal_path: "1/123/".to_string(),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            source_type: None,
+            external_repository_id: None,
         })
         .unwrap();
 
@@ -628,6 +635,8 @@ mod tests {
             traversal_path: "1/123/".to_string(),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            source_type: None,
+            external_repository_id: None,
         })
         .unwrap();
 

@@ -11,7 +11,7 @@ use serde::Serialize;
 use tracing::debug;
 
 use crate::error::GitlabClientError;
-use crate::types::{MergeRequestDiffBatch, ProjectInfo};
+use crate::types::{ExternalRepositoryInfo, MergeRequestDiffBatch, ProjectInfo};
 use gkg_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
@@ -147,6 +147,44 @@ impl GitlabClient {
 
         let response = self.authenticated_get(url).await?;
         Self::check_response_status(&response, project_id)?;
+
+        Ok(into_byte_stream(response))
+    }
+
+    pub async fn external_repository_info(
+        &self,
+        external_repository_id: i64,
+    ) -> Result<ExternalRepositoryInfo, GitlabClientError> {
+        let url = format!(
+            "{}/api/v4/internal/orbit/external_repository/{}/info",
+            self.base_url, external_repository_id
+        );
+
+        debug!(external_repository_id, url = %url, "fetching external repository info from GitLab");
+
+        let response = self.authenticated_get(&url).await?;
+        Self::check_response_status(&response, external_repository_id)?;
+
+        let info: ExternalRepositoryInfo = response.json().await?;
+        Ok(info)
+    }
+
+    pub async fn download_external_archive(
+        &self,
+        external_repository_id: i64,
+        ref_name: &str,
+    ) -> Result<ByteStream, GitlabClientError> {
+        let base = format!(
+            "{}/api/v4/internal/orbit/external_repository/{}/repository/archive",
+            self.base_url, external_repository_id
+        );
+        let url = reqwest::Url::parse_with_params(&base, &[("ref", ref_name)])
+            .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+
+        debug!(external_repository_id, ref_name, url = %url, "downloading external archive from GitLab");
+
+        let response = self.authenticated_get(url).await?;
+        Self::check_response_status(&response, external_repository_id)?;
 
         Ok(into_byte_stream(response))
     }

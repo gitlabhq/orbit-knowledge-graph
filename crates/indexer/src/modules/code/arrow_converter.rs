@@ -16,6 +16,7 @@ pub struct IndexerEnvelope {
     pub branch: String,
     pub commit_sha: String,
     pub version_micros: i64,
+    pub external_repository_id: i64,
 }
 
 impl IndexerEnvelope {
@@ -32,6 +33,24 @@ impl IndexerEnvelope {
             branch,
             commit_sha,
             version_micros: indexed_at.timestamp_micros(),
+            external_repository_id: 0,
+        }
+    }
+
+    pub fn for_external_repository(
+        traversal_path: String,
+        external_repository_id: i64,
+        branch: String,
+        commit_sha: String,
+        indexed_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            traversal_path,
+            project_id: 0,
+            branch,
+            commit_sha,
+            version_micros: indexed_at.timestamp_micros(),
+            external_repository_id,
         }
     }
 }
@@ -43,6 +62,8 @@ impl RowEnvelope for IndexerEnvelope {
         b.col("project_id")?.push_int(self.project_id)?;
         b.col("branch")?.push_str(&self.branch)?;
         b.col("commit_sha")?.push_str(&self.commit_sha)?;
+        b.col("external_repository_id")?
+            .push_int(self.external_repository_id)?;
         b.col("_version")?
             .push_timestamp_micros(self.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
@@ -325,6 +346,8 @@ impl AsRecordBatch for BranchRow<'_> {
         b.col("traversal_path")?
             .push_str(&self.env.traversal_path)?;
         b.col("project_id")?.push_int(self.env.project_id)?;
+        b.col("external_repository_id")?
+            .push_int(self.env.external_repository_id)?;
         b.col("name")?.push_str(&self.env.branch)?;
         b.col("is_default")?.push_bool(true)?;
         b.col("_version")?

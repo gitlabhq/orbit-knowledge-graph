@@ -5,6 +5,12 @@ pub struct ProjectInfo {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub struct ExternalRepositoryInfo {
+    pub external_repository_id: i64,
+    pub default_branch: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct MergeRequestDiffBatch {
     #[serde(rename = "id")]
     pub merge_request_diff_id: i64,
