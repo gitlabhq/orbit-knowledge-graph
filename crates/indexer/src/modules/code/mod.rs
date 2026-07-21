@@ -73,6 +73,8 @@ pub async fn register_handlers(
 
     let table_names =
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
+    let external_table_names =
+        Arc::new(CodeTableNames::external_from_ontology(ontology).map_err(HandlerInitError::new)?);
 
     let gitlab_client =
         Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
@@ -109,6 +111,7 @@ pub async fn register_handlers(
         stale_data_cleaner,
         metrics.clone(),
         table_names,
+        external_table_names,
         Arc::new(ontology.clone()),
         pipeline_config,
     ));

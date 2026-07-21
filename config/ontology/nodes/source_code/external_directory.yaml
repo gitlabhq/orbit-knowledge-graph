@@ -1,21 +1,21 @@
-# config/ontology/nodes/source_code/file.yaml
+# config/ontology/nodes/source_code/external_directory.yaml
 
-node_type: File
+node_type: ExternalDirectory
 domain: source_code
-description: A source code file within a repository
+description: A directory within an external repository's file structure
 label: path
-destination_table: gl_file
-default_columns: [id, path, name, language, commit_sha]
-sort_key: [traversal_path, project_id, branch, id]
+destination_table: gl_external_directory
+default_columns: [id, path, name, commit_sha]
+sort_key: [traversal_path, external_repository_id, branch, id]
 
 style:
-  size: 24
-  color: "#22D3EE"
+  size: 26
+  color: "#06B6D4"
 
 redaction:
-  resource_type: project
-  id_column: project_id
-  ability: read_code
+  resource_type: external_repository
+  id_column: external_repository_id
+  ability: read_external_repository_code
 
 properties:
   id:
@@ -26,7 +26,7 @@ properties:
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
-      source_table: gl_file
+      source_table: gl_external_directory
       key_column: id
 
   traversal_path:
@@ -41,7 +41,14 @@ properties:
     source: project_id
     nullable: false
     mutable: false
-    description: "Owning project ID."
+    description: "Always zero for external repositories."
+
+  external_repository_id:
+    type: int64
+    source: external_repository_id
+    nullable: false
+    mutable: false
+    description: "Owning external repository ID."
 
   branch:
     type: string
@@ -69,47 +76,7 @@ properties:
     source: name
     nullable: false
     mutable: false
-    description: "File name including extension."
-
-  extension:
-    type: string
-    source: extension
-    nullable: false
-    mutable: false
-    description: "Extension (e.g., rb, py, java)."
-    selectivity: low
-
-  language:
-    type: string
-    source: language
-    nullable: false
-    mutable: false
-    description: "Programming language (e.g., ruby, python, java)."
-    selectivity: low
-
-  size_bytes:
-    type: int64
-    source: size_bytes
-    nullable: false
-    mutable: false
-    description: "Uncompressed file size in bytes, measured at index time."
-
-  content:
-    type: string
-    virtual:
-      service: gitaly
-      lookup: blob_content
-      depends_on: [project_id, commit_sha, branch, path]
-    nullable: true
-    description: "Raw source text, resolved from Gitaly at query time."
-
-  reason:
-    type: string
-    source: reason
-    nullable: false
-    mutable: true
-    description: "Why the file was skipped or failed to index (e.g. oversize, timeout_parse, invalid_utf8). Empty for files indexed successfully."
-    selectivity: low
+    description: "Directory name."
 
 storage:
   settings:
@@ -119,17 +86,14 @@ storage:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: external_repository_id, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: branch, type: "String", codec: ["ZSTD(1)"]}
     - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: path, type: "String", codec: ["ZSTD(3)"]}
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
-    - {name: extension, type: "LowCardinality(String)", codec: ["LZ4"]}
-    - {name: language, type: "LowCardinality(String)", codec: ["LZ4"]}
-    - {name: size_bytes, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
-    - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_external_repository_id, column: external_repository_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}

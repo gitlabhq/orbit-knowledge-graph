@@ -1,21 +1,21 @@
-# config/ontology/nodes/source_code/definition.yaml
+# config/ontology/nodes/source_code/external_definition.yaml
 
-node_type: Definition
+node_type: ExternalDefinition
 domain: source_code
-description: A code definition such as a class, function, method, or module
+description: A code definition such as a class, function, method, or module within an external repository
 label: name
-destination_table: gl_definition
+destination_table: gl_external_definition
 default_columns: [id, name, fqn, definition_type, file_path, commit_sha, start_line, end_line]
-sort_key: [traversal_path, project_id, branch, id]
+sort_key: [traversal_path, external_repository_id, branch, id]
 
 style:
   size: 26
   color: "#2DD4BF"
 
 redaction:
-  resource_type: project
-  id_column: project_id
-  ability: read_code
+  resource_type: external_repository
+  id_column: external_repository_id
+  ability: read_external_repository_code
 
 properties:
   id:
@@ -26,7 +26,7 @@ properties:
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
-      source_table: gl_definition
+      source_table: gl_external_definition
       key_column: id
 
   traversal_path:
@@ -41,7 +41,14 @@ properties:
     source: project_id
     nullable: false
     mutable: false
-    description: "Owning project ID."
+    description: "Always zero for external repositories."
+
+  external_repository_id:
+    type: int64
+    source: external_repository_id
+    nullable: false
+    mutable: false
+    description: "Owning external repository ID."
 
   branch:
     type: string
@@ -145,6 +152,7 @@ storage:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: external_repository_id, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: branch, type: "String", codec: ["ZSTD(1)"]}
     - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: file_path, type: "String", codec: ["ZSTD(9)"]}
@@ -159,7 +167,7 @@ storage:
     - {name: end_char, type: "Int64", codec: ["T64", "ZSTD(1)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_external_repository_id, column: external_repository_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_fqn, column: fqn, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}

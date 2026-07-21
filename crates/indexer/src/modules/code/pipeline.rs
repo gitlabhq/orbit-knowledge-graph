@@ -134,6 +134,7 @@ pub struct CodeIndexingPipeline {
     inflight: Arc<AtomicUsize>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
+    external_table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
     pipeline_config: CodeIndexingPipelineConfig,
     fetch_concurrency: usize,
@@ -155,6 +156,7 @@ impl CodeIndexingPipeline {
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
+        external_table_names: Arc<CodeTableNames>,
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
@@ -180,6 +182,7 @@ impl CodeIndexingPipeline {
             inflight: Arc::new(AtomicUsize::new(0)),
             metrics,
             table_names,
+            external_table_names,
             ontology,
             fetch_concurrency: fc,
             small_repo_max_files: pipeline_config.small_repo_max_files,
@@ -254,7 +257,8 @@ impl CodeIndexingPipeline {
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
 
         let fetch_start = Instant::now();
-        let resolve_result = if request.external_repository_id != 0 {
+        let is_external = request.external_repository_id != 0;
+        let resolve_result = if is_external {
             self.resolver
                 .resolve_external(
                     request.external_repository_id,
@@ -456,7 +460,8 @@ impl CodeIndexingPipeline {
         HandlerError,
     > {
         let tracer = code_graph::v2::trace::Tracer::new(false);
-        let envelope = if request.external_repository_id != 0 {
+        let is_external = request.external_repository_id != 0;
+        let envelope = if is_external {
             IndexerEnvelope::for_external_repository(
                 request.traversal_path.clone(),
                 request.external_repository_id,
@@ -474,10 +479,16 @@ impl CodeIndexingPipeline {
             )
         };
 
+        let effective_table_names = if is_external {
+            self.external_table_names.clone()
+        } else {
+            self.table_names.clone()
+        };
+
         let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(IndexerConverter::new(
             envelope,
             &self.ontology,
-            self.table_names.clone(),
+            effective_table_names,
         ));
 
         // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so

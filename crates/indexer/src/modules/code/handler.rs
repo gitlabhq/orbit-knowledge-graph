@@ -383,6 +383,7 @@ mod tests {
     use crate::modules::code::checkpoint::CodeCheckpointStore;
     use crate::modules::code::checkpoint::CodeIndexingCheckpoint;
     use crate::modules::code::checkpoint::test_utils::MockCodeCheckpointStore;
+    use crate::modules::code::config::CodeTableNames;
     use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::repository::RepositoryResolver;
     use crate::modules::code::repository::cache::LocalRepositoryCache;
@@ -434,6 +435,12 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
+            let ontology = Arc::new(ontology);
+            let external_table_names = Arc::new(
+                CodeTableNames::external_from_ontology(&ontology)
+                    .unwrap_or_else(|_| CodeTableNames::from_ontology(&ontology)
+                        .expect("code tables must resolve")),
+            );
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,
                 crate::testkit::test_writer(),
@@ -441,7 +448,8 @@ mod tests {
                 stale_data_cleaner,
                 metrics.clone(),
                 table_names,
-                Arc::new(ontology),
+                external_table_names,
+                ontology,
                 gkg_server_config::CodeIndexingPipelineConfig::default(),
             ));
 

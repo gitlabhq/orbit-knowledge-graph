@@ -82,6 +82,55 @@ impl CodeTableNames {
 
     /// Ontology node names backing [`Self::node_tables`], in the same order.
     pub const NODE_KINDS: [&'static str; 4] = ["Directory", "File", "Definition", "ImportedSymbol"];
+
+    /// Build table names for external repository code nodes.
+    pub fn external_from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
+        let code_node_types: HashSet<&str> = ontology
+            .nodes()
+            .filter(|node| node.domain == CODE_DOMAIN)
+            .map(|node| node.name.as_str())
+            .collect();
+
+        let mut edge_tables = HashMap::new();
+        for edge in ontology.edges() {
+            let involves_code_node = code_node_types.contains(edge.source_kind.as_str())
+                || code_node_types.contains(edge.target_kind.as_str());
+            if involves_code_node {
+                edge_tables
+                    .entry(edge.relationship_kind.clone())
+                    .or_insert_with(|| {
+                        prefixed_table_name(&edge.destination_table, *SCHEMA_VERSION)
+                    });
+            }
+        }
+        let default_edge_table = prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION);
+
+        Ok(Self {
+            branch: prefixed_table_name(ontology.table_name("ExternalBranch")?, *SCHEMA_VERSION),
+            directory: prefixed_table_name(
+                ontology.table_name("ExternalDirectory")?,
+                *SCHEMA_VERSION,
+            ),
+            file: prefixed_table_name(ontology.table_name("ExternalFile")?, *SCHEMA_VERSION),
+            definition: prefixed_table_name(
+                ontology.table_name("ExternalDefinition")?,
+                *SCHEMA_VERSION,
+            ),
+            imported_symbol: prefixed_table_name(
+                ontology.table_name("ExternalImportedSymbol")?,
+                *SCHEMA_VERSION,
+            ),
+            edge_tables,
+            default_edge_table,
+        })
+    }
+
+    pub const EXTERNAL_NODE_KINDS: [&'static str; 4] = [
+        "ExternalDirectory",
+        "ExternalFile",
+        "ExternalDefinition",
+        "ExternalImportedSymbol",
+    ];
 }
 
 #[cfg(test)]

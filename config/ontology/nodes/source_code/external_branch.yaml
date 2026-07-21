@@ -1,11 +1,11 @@
-# config/ontology/nodes/source_code/branch.yaml
+# config/ontology/nodes/source_code/external_branch.yaml
 
-node_type: Branch
+node_type: ExternalBranch
 domain: source_code
-description: A Git branch in a repository
+description: A Git branch in an external repository
 label: name
-destination_table: gl_branch
-sort_key: [traversal_path, project_id, id]
+destination_table: gl_external_branch
+sort_key: [traversal_path, external_repository_id, id]
 default_columns: [id, name, is_default]
 
 style:
@@ -13,9 +13,9 @@ style:
   color: "#14B8A6"
 
 redaction:
-  resource_type: project
-  id_column: project_id
-  ability: read_code
+  resource_type: external_repository
+  id_column: external_repository_id
+  ability: read_external_repository_code
 
 properties:
   id:
@@ -30,7 +30,14 @@ properties:
     source: project_id
     nullable: false
     mutable: false
-    description: "Owning project ID."
+    description: "Always zero for external repositories."
+
+  external_repository_id:
+    type: int64
+    source: external_repository_id
+    nullable: false
+    mutable: false
+    description: "Owning external repository ID."
 
   name:
     type: string
@@ -59,10 +66,11 @@ storage:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: external_repository_id, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
     - {name: is_default, type: "Bool", default: "true"}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_external_repository_id, column: external_repository_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
