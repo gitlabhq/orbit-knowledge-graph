@@ -216,6 +216,11 @@ Using these operators on other properties falls back to a full string scan, whic
 | `Deployment` | `ref` |
 | `Directory` | `name`, `path` |
 | `Environment` | `environment_type`, `name` |
+| `ExternalBranch` | `name` |
+| `ExternalDefinition` | `file_path`, `fqn`, `name` |
+| `ExternalDirectory` | `name`, `path` |
+| `ExternalFile` | `name`, `path` |
+| `ExternalImportedSymbol` | `file_path`, `import_path` |
 | `File` | `name`, `path` |
 | `Finding` | `description`, `name` |
 | `Group` | `description`, `name` |

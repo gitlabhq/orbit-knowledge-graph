@@ -176,10 +176,10 @@ impl RepositoryResolver {
                 if let Some((reason, detail)) = classify_download_error(&err) {
                     return Err(ResolveError::EmptyRepository { reason, detail });
                 }
-                return Err(
-                    HandlerError::Processing(format!("failed to download external archive: {err}"))
-                        .into(),
-                );
+                return Err(HandlerError::Processing(format!(
+                    "failed to download external archive: {err}"
+                ))
+                .into());
             }
         };
 
@@ -197,10 +197,10 @@ impl RepositoryResolver {
                     "external repository {external_repository_id} ref {ref_name} exceeded the total-bytes cap"
                 ),
             }),
-            Err(e) => {
-                Err(HandlerError::Processing(format!("failed to extract external archive: {e}"))
-                    .into())
-            }
+            Err(e) => Err(HandlerError::Processing(format!(
+                "failed to extract external archive: {e}"
+            ))
+            .into()),
         }
     }
 }
