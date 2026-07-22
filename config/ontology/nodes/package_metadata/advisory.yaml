@@ -9,6 +9,11 @@ destination_table: gl_advisory
 default_columns: [id, advisory_xid, source_xid, published_date]
 sort_key: [id]
 
+redaction:
+  resource_type: pm_advisory
+  id_column: id
+  ability: read_security_resource
+
 properties:
   id:
     type: int64

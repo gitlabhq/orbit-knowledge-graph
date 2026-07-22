@@ -392,6 +392,7 @@ domains:
       WorkItem: nodes/plan/work_item.yaml
       Milestone: nodes/plan/milestone.yaml
       Label: nodes/plan/label.yaml
+      Release: nodes/plan/release.yaml
   source_code:
     description: "Entities related to source code structure, definitions, and imports."
     nodes:

@@ -140,3 +140,9 @@ variants:
     fk_column: project_id
     scope: namespace_anchor
     description: "Dependency belongs to project."
+
+  - from_node: { type: Release, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "Release belongs to project."

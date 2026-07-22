@@ -1,0 +1,110 @@
+# config/ontology/nodes/plan/release.yaml
+
+node_type: Release
+domain: plan
+description: A GitLab Release — a versioned snapshot of a project, typically tied to a git tag.
+label: tag
+destination_table: gl_release
+default_columns: [id, tag, name, sha, released_at]
+
+redaction:
+  resource_type: release
+  id_column: id
+  ability: read_release
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project."
+  tag:
+    type: string
+    source: tag
+    nullable: true
+    description: "Git tag associated with the release."
+  name:
+    type: string
+    source: name
+    nullable: true
+    description: "Human-readable release name."
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Release notes."
+  sha:
+    type: string
+    source: sha
+    nullable: true
+    description: "Commit SHA the release points at."
+  author_id:
+    type: int64
+    source: author_id
+    nullable: true
+    description: "User who created the release."
+  released_at:
+    type: timestamp
+    source: released_at
+    nullable: false
+    description: "When the release was published."
+  release_published_at:
+    type: timestamp
+    source: release_published_at
+    nullable: true
+    description: "Explicit publish timestamp (may differ from released_at)."
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: false
+    mutable: false
+    description: "Creation timestamp."
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: false
+    description: "Last update timestamp."
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+indexer:
+  reindex: [siphon_releases]
+pipelines:
+  - name: Release
+    extract:
+      type: clickhouse
+      tables: [siphon_releases]
+      order_by: [traversal_path, id]
+      query: generated
+    transform:
+      type: datafusion
+
+storage:
+  primary_key: [traversal_path, id]
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: tag, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: released_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: release_published_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", default: "now()", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_tag, column: tag, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
