@@ -151,8 +151,8 @@ mod tests {
             "ExternalBranch must be registered"
         );
 
-        let external_tables =
-            CodeTableNames::external_from_ontology(&ontology).expect("external tables must resolve");
+        let external_tables = CodeTableNames::external_from_ontology(&ontology)
+            .expect("external tables must resolve");
         assert!(
             external_tables.file.contains("gl_external_file"),
             "external file table should be gl_external_file, got {}",
@@ -165,7 +165,10 @@ mod tests {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         for name in CodeTableNames::EXTERNAL_NODE_KINDS {
             let node = ontology.get_node(name).expect("node must exist");
-            let redaction = node.redaction.as_ref().expect("redaction must be configured");
+            let redaction = node
+                .redaction
+                .as_ref()
+                .expect("redaction must be configured");
             assert_eq!(
                 redaction.resource_type, "external_repository",
                 "{name} must redact under resource_type: external_repository, not project"

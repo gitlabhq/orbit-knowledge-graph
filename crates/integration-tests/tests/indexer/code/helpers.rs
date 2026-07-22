@@ -81,6 +81,10 @@ impl CodeIndexingDeps {
             .expect("writer must build"),
         );
 
+        let external_table_names = Arc::new(
+            CodeTableNames::external_from_ontology(&ontology)
+                .expect("external code tables must resolve"),
+        );
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
             writer,
@@ -88,6 +92,7 @@ impl CodeIndexingDeps {
             stale_data_cleaner,
             metrics.clone(),
             table_names,
+            external_table_names,
             Arc::new(ontology),
             pipeline_config,
         ));
@@ -125,6 +130,10 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
         let config = CodeIndexingPipelineConfig::default();
+        let external_table_names = Arc::new(
+            CodeTableNames::external_from_ontology(&ontology)
+                .expect("external code tables must resolve"),
+        );
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,
             writer,
@@ -132,6 +141,7 @@ impl CodeIndexingDeps {
             stale_data_cleaner,
             self.metrics.clone(),
             table_names,
+            external_table_names,
             Arc::new(ontology),
             config,
         ));

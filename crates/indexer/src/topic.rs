@@ -207,6 +207,9 @@ mod tests {
         let json = serde_json::to_string(&request).unwrap();
         let deserialized: CodeIndexingTaskRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.external_repository_id, Some(77));
-        assert_eq!(deserialized.source_type.as_deref(), Some("external_repository"));
+        assert_eq!(
+            deserialized.source_type.as_deref(),
+            Some("external_repository")
+        );
     }
 }
