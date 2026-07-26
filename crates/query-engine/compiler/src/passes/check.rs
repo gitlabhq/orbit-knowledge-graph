@@ -43,7 +43,35 @@ fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
         check_query(arm, ctx)?;
     }
 
+    if let Some(where_clause) = q.where_clause.as_ref() {
+        check_subqueries_in_expr(where_clause, ctx)?;
+    }
+
     check_derived_tables_in_from(&q.from, ctx)
+}
+
+fn check_subqueries_in_expr(expr: &Expr, ctx: &SecurityContext) -> Result<()> {
+    match expr {
+        Expr::InSelect { query, .. } => check_query(query, ctx),
+        Expr::BinaryOp { left, right, .. } => {
+            check_subqueries_in_expr(left, ctx)?;
+            check_subqueries_in_expr(right, ctx)
+        }
+        Expr::UnaryOp { expr, .. }
+        | Expr::Lambda { body: expr, .. }
+        | Expr::InSubquery { expr, .. } => check_subqueries_in_expr(expr, ctx),
+        Expr::FuncCall { args, .. } => {
+            for arg in args {
+                check_subqueries_in_expr(arg, ctx)?;
+            }
+            Ok(())
+        }
+        Expr::Column { .. }
+        | Expr::Identifier(_)
+        | Expr::Literal(_)
+        | Expr::Param { .. }
+        | Expr::Star => Ok(()),
+    }
 }
 
 fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> Result<()> {
