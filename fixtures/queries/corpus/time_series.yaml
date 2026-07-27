@@ -34,7 +34,7 @@
           "alias": "failure_count"
         }
       ],
-      "aggregation_sort": "month",
+      "aggregation_sort": "j_finished_at_month",
       "limit": 12
     }
 
@@ -63,7 +63,7 @@
           "alias": "merge_count"
         }
       ],
-      "aggregation_sort": "quarter",
+      "aggregation_sort": "mr_merged_at_quarter",
       "limit": 12
     }
 
@@ -91,7 +91,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": "year",
+      "aggregation_sort": "p_started_at_year",
       "limit": 10
     }
 
@@ -119,7 +119,7 @@
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": "week",
+      "aggregation_sort": "j_finished_at_week",
       "limit": 10
     }
 
@@ -148,7 +148,7 @@
           "alias": "failure_count"
         }
       ],
-      "aggregation_sort": "day",
+      "aggregation_sort": "j_finished_at_day",
       "limit": 30
     }
 
@@ -176,7 +176,7 @@
           "alias": "pipeline_count"
         }
       ],
-      "aggregation_sort": "hour",
+      "aggregation_sort": "p_started_at_hour",
       "limit": 50
     }
 
@@ -202,7 +202,7 @@
           "alias": "job_count"
         }
       ],
-      "aggregation_sort": "minute",
+      "aggregation_sort": "j_finished_at_minute",
       "limit": 50
     }
 
@@ -308,7 +308,7 @@
           "alias": "opened_count"
         }
       ],
-      "aggregation_sort": "month",
+      "aggregation_sort": "wi_created_at_month",
       "limit": 12
     }
 
@@ -342,7 +342,7 @@
           "alias": "total_duration_secs"
         }
       ],
-      "aggregation_sort": "day",
+      "aggregation_sort": "p_started_at_day",
       "limit": 30
     }
 
@@ -371,7 +371,7 @@
           "alias": "n"
         }
       ],
-      "aggregation_sort": "finished_at_month",
+      "aggregation_sort": "j_finished_at_month",
       "limit": 12
     }
 

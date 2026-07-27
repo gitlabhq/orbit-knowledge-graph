@@ -106,8 +106,8 @@ fn group_by_property_truncate_month_wraps_column() {
         "expected toDate32(toStartOfMonth(...)) wrapper; got:\n{rendered}"
     );
     assert!(
-        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS created_at_month"),
-        "expected default alias `created_at_month`; got:\n{rendered}"
+        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS u_created_at_month"),
+        "expected derived column `u_created_at_month`; got:\n{rendered}"
     );
 }
 
@@ -121,9 +121,7 @@ fn group_by_property_truncate_all_units_compile() {
                     {{"id": "u", "entity": "Note", "node_ids": [1]}}
                 ],
                 "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
-                "group_by": [
-
-                ],
+                "group_by": [{{"{unit}": "u.created_at"}}],
                 "limit": 10
             }}"#
         );

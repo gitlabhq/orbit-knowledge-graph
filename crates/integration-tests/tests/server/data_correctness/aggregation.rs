@@ -115,7 +115,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
             "group_by": [{"month": "n.created_at"}],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
-            "aggregation_sort": "bucket",
+            "aggregation_sort": "n_created_at_month",
             "limit": 20
         }"#,
         &allow_all(),
@@ -134,7 +134,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
         .iter()
         .map(|row| {
             let bucket = row
-                .get("bucket")
+                .get("n_created_at_month")
                 .map(|v| match v {
                     serde_json::Value::String(s) => s.clone(),
                     other => other.to_string(),
