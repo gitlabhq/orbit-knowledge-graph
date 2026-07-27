@@ -1,0 +1,149 @@
+name: Zig definitions
+
+fixtures:
+  - path: shapes.zig
+    content: |
+      const MAX_POINTS: u32 = 100;
+
+      var counter: u32 = 0;
+
+      const Color = enum { red, green, blue };
+
+      const Value = union(enum) {
+          int: i64,
+          float: f64,
+      };
+
+      const Point = struct {
+          x: f64,
+          y: f64,
+
+          pub fn init(x: f64, y: f64) Point {
+              return Point{ .x = x, .y = y };
+          }
+
+          pub fn normSquared(self: Point) f64 {
+              return self.x * self.x + self.y * self.y;
+          }
+      };
+
+      pub fn distanceSquared(a: Point, b: Point) f64 {
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          return dx * dx + dy * dy;
+      }
+
+      test "point init works" {
+          _ = Point.init(1.0, 2.0);
+      }
+
+      test {
+          _ = Point.init(3.0, 4.0);
+      }
+
+tests:
+  - name: Point struct is indexed with Struct type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Point'
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Point", fqn: "Point", type: "Struct" } }
+
+  - name: Color enum is indexed with Enum type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Color'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Enum" } }
+
+  - name: Value union is indexed with Union type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Value'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Union" } }
+
+  - name: Top-level fn is indexed with Function type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'distanceSquared'
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "distanceSquared", type: "Function" } }
+
+  - name: Plain const is indexed with Const type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'MAX_POINTS'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Const" } }
+
+  - name: Plain var is indexed with Var type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'counter'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Var" } }
+
+  - name: Point.init is scoped under Point FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Point.init'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "init", type: "Function" } }
+
+  - name: Point.normSquared is scoped under Point FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Point.normSquared'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "normSquared" } }
+
+  - name: Named test block is indexed with its string name
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Test' AND d.name = 'point init works'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "point init works" } }
+
+  - name: Anonymous test block is indexed with a synthesized name
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Test' AND d.name STARTS WITH 'test@L'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+
+  - name: Both named and anonymous test blocks are indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Test'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+
+  - name: All container types are in the same file
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Struct', 'Enum', 'Union']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { no_nulls: file }
+      - { match: { field: file, pattern: "shapes.zig" } }
