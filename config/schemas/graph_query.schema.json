@@ -483,27 +483,16 @@
           "description": "Target node variable ID (must match a node's id field)"
         },
         "hops": {
-          "description": "Number of relationship hops: an integer for exactly N hops, or a [min, max] pair for a range. Capped to prevent resource exhaustion.",
-          "default": 1,
-          "oneOf": [
-            {
-              "type": "integer",
-              "description": "Exactly N hops",
-              "minimum": 1,
-              "maximum": 3
-            },
-            {
-              "type": "array",
-              "description": "Inclusive [min, max] hop range",
-              "items": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 3
-              },
-              "minItems": 2,
-              "maxItems": 2
-            }
-          ]
+          "type": "array",
+          "description": "Inclusive [min, max] hop range; [2, 2] means exactly 2 hops. Capped to prevent resource exhaustion.",
+          "default": [1, 1],
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "minItems": 2,
+          "maxItems": 2
         },
         "direction": {
           "$ref": "#/$defs/Direction",

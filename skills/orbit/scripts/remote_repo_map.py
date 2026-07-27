@@ -377,7 +377,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
         # descendant mixes in itself, not transitively.
         "relationships": [
             {"type": "EXTENDS", "from": "descendant", "to": "concern",
-             "hops": 1}
+             "hops": [1, 1]}
         ],
         "limit": 1000,
     }}

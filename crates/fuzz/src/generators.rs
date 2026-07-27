@@ -147,12 +147,7 @@ fn gen_relationship(driver: &mut impl Driver, from: &str, to: &str) -> Option<Va
     if has_hops {
         let min: u8 = driver.produce()?;
         let max: u8 = driver.produce()?;
-        let exact: bool = driver.produce()?;
-        if exact {
-            rel.insert("hops".into(), json!((max % 5) + 1));
-        } else {
-            rel.insert("hops".into(), json!([(min % 3) + 1, (max % 5) + 1]));
-        }
+        rel.insert("hops".into(), json!([(min % 3) + 1, (max % 5) + 1]));
     }
 
     Some(Value::Object(rel))

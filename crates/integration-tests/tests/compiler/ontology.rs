@@ -544,7 +544,7 @@ fn single_hop_does_not_generate_recursive_cte() {
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "n", "entity": "Note", "columns": ["confidential"]}
         ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "hops": 1}],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "hops": [1, 1]}],
         "limit": 25
     }"#;
 

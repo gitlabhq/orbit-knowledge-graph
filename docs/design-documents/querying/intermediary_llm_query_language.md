@@ -138,7 +138,7 @@ Relationships connect nodes in the query:
   "from": "u",
   "to": "mr",
   "direction": "outgoing",
-  "hops": 1
+  "hops": [1, 1]
 }
 ```
 
@@ -148,7 +148,7 @@ Relationships connect nodes in the query:
 | `from` | `string` | Source node variable ID. |
 | `to` | `string` | Target node variable ID. |
 | `direction` | `string` | `outgoing` (default), `incoming`, or `both`. |
-| `hops` | `integer` or `array` | Exactly N hops (`2`) or an inclusive `[min, max]` range (`[1, 3]`). 1-3, default: 1. |
+| `hops` | `array` | Inclusive `[min, max]` hop range; `[2, 2]` means exactly 2. Bounds 1-3, default `[1, 1]`. |
 | `filters` | `object` | Filters on relationship properties. |
 
 ## Query Types

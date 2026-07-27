@@ -613,37 +613,30 @@ fn parse_hops(value: Value) -> Result<HopRange, String> {
         let n = v
             .as_u64()
             .and_then(|n| u32::try_from(n).ok())
-            .ok_or_else(|| format!("hops must be a positive integer, got {v}"))?;
+            .ok_or_else(|| format!("hops bound must be a positive integer, got {v}"))?;
         if n == 0 {
-            return Err("hops must be at least 1".to_string());
+            return Err("hops bounds must be at least 1".to_string());
         }
         Ok(n)
     };
-    match &value {
-        Value::Number(_) => {
-            let n = as_hop_count(&value)?;
-            Ok(HopRange { min: n, max: n })
-        }
-        Value::Array(arr) => {
-            let [min, max] = arr.as_slice() else {
-                return Err(format!(
-                    "hops range must be a [min, max] pair, got {} element(s)",
-                    arr.len()
-                ));
-            };
-            let (min, max) = (as_hop_count(min)?, as_hop_count(max)?);
-            if min > max {
-                return Err(format!(
-                    "hops range [{min}, {max}] is inverted: min must not exceed max"
-                ));
-            }
-            Ok(HopRange { min, max })
-        }
-        _ => Err(
-            "hops must be an integer (exactly N hops) or a [min, max] pair (a hop range)"
-                .to_string(),
-        ),
+    let Value::Array(arr) = &value else {
+        return Err(format!(
+            "hops must be a [min, max] pair (e.g. [1, 3]; [2, 2] for exactly 2), got {value}"
+        ));
+    };
+    let [min, max] = arr.as_slice() else {
+        return Err(format!(
+            "hops must be a [min, max] pair, got {} element(s)",
+            arr.len()
+        ));
+    };
+    let (min, max) = (as_hop_count(min)?, as_hop_count(max)?);
+    if min > max {
+        return Err(format!(
+            "hops range [{min}, {max}] is inverted: min must not exceed max"
+        ));
     }
+    Ok(HopRange { min, max })
 }
 
 fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -1089,13 +1082,15 @@ mod tests {
     }
 
     #[test]
-    fn hops_integer_means_exactly_n() {
-        assert_eq!(hops("2").unwrap(), HopRange { min: 2, max: 2 });
+    fn hops_pair_means_inclusive_range() {
+        assert_eq!(hops("[1, 3]").unwrap(), HopRange { min: 1, max: 3 });
+        assert_eq!(hops("[2, 2]").unwrap(), HopRange { min: 2, max: 2 });
     }
 
     #[test]
-    fn hops_pair_means_inclusive_range() {
-        assert_eq!(hops("[1, 3]").unwrap(), HopRange { min: 1, max: 3 });
+    fn hops_bare_integer_rejects_with_pair_example() {
+        let err = hops("2").unwrap_err();
+        assert!(err.contains("[min, max] pair"), "{err}");
     }
 
     #[test]
@@ -1112,8 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn hops_zero_rejects() {
-        assert!(hops("0").unwrap_err().contains("at least 1"));
+    fn hops_zero_bound_rejects() {
         assert!(hops("[0, 2]").unwrap_err().contains("at least 1"));
     }
 
