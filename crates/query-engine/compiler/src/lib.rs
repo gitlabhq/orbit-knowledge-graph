@@ -1397,7 +1397,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("p.visibility_level AS visibility_level"),
+            sql.contains("p.visibility_level AS p_visibility_level"),
             "property group key must be selected as a scalar column, got:\n{sql}"
         );
         assert!(
@@ -1435,7 +1435,7 @@ mod tests {
             "role-gated grouped entity must remain in FROM for SecurityPass, got:\n{sql}"
         );
         assert!(
-            sql.contains("v.severity AS severity") && sql.contains("GROUP BY v.severity"),
+            sql.contains("v.severity AS v_severity") && sql.contains("GROUP BY v.severity"),
             "security property grouping must use the protected node alias, got:\n{sql}"
         );
     }
