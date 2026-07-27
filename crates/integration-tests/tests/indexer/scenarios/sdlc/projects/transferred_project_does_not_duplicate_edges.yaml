@@ -1,0 +1,48 @@
+# Seeds siphon_projects and the route table directly rather than via the
+# `projects:` pseudo-table, which writes version DEFAULT now() and would
+# outrank any dated row the move step seeds.
+description: Transferring a project to another subgroup does not duplicate its edges under the old path
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+        - { id: 200, parent_id: 100, traversal_path: "1/100/200/" }
+      siphon_projects:
+        - { id: 1000, name: app, path: app, visibility_level: 0, namespace_id: 100, creator_id: 1, created_at: "2023-01-01", updated_at: "2024-01-15", archived: false, star_count: 0, last_activity_at: "2024-01-15", _siphon_replicated_at: "2024-01-15 00:00:00" }
+      project_namespace_traversal_paths:
+        - { id: 1000, traversal_path: "1/100/1000/", version: "2024-01-15 00:00:00" }
+    expect:
+      edges:
+        - kind: CONTAINS
+          from: Group
+          to: Project
+          count: 1
+          rows:
+            - { source_id: 100, target_id: 1000, traversal_path: "1/100/1000/" }
+
+  # Rails rewrites the route row and touches the project. The pre-move route row
+  # stays readable until a merge collapses it, so the extract sees both paths and
+  # must not re-emit the project — or its edges — under the old one.
+  - seed:
+      checkpoint:
+        - { key: ns.100.Project, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null" }
+      project_namespace_traversal_paths:
+        - { id: 1000, traversal_path: "1/100/200/1000/", version: "2024-01-20 18:00:00" }
+      siphon_projects:
+        - { id: 1000, name: app, path: app, visibility_level: 0, namespace_id: 200, creator_id: 1, created_at: "2023-01-01", updated_at: "2024-01-20", archived: false, star_count: 0, last_activity_at: "2024-01-20", _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_project:
+          rows:
+            - { id: 1000, traversal_path: "1/100/1000/" }
+            - { id: 1000, traversal_path: "1/100/200/1000/" }
+      edges:
+        - kind: CONTAINS
+          from: Group
+          to: Project
+          count: 2
+          rows:
+            - { source_id: 100, target_id: 1000, traversal_path: "1/100/1000/" }
+            - { source_id: 200, target_id: 1000, traversal_path: "1/100/200/1000/" }

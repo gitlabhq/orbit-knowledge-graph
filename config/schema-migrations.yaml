@@ -25,7 +25,7 @@ migrations:
 - version: 85
   scope: sdlc
   entities:
-  - HAS_VULNERABILITY
+    - HAS_VULNERABILITY
   note: New HAS_VULNERABILITY edge (Package->Vulnerability); clone carries every prior table intact and only this edge re-derives.
 - version: 84
   scope: none
