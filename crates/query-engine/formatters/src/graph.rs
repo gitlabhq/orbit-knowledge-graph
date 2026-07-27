@@ -723,7 +723,7 @@ mod tests {
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "aggregation",
                     "nodes": [{"id": "v", "entity": "Vulnerability"}],
-                    "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+                    "group_by": ["v.severity"],
                     "aggregations": [{
                         "function": "count",
                         "target": "v",

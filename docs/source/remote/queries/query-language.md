@@ -488,7 +488,7 @@ Count merged merge requests per project:
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "project"}
   ],
-  "group_by": [{"kind": "node", "node": "project"}],
+  "group_by": ["project"],
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "merged_mrs"}
   ],
@@ -509,9 +509,7 @@ Count detected vulnerabilities by severity:
       "filters": {"state": "detected"}
     }
   ],
-  "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-  ],
+  "group_by": ["v.severity"],
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vulnerability_count"}
   ],

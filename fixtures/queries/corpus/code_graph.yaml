@@ -145,13 +145,7 @@ q5:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "d",
-          "property": "definition_type"
-        }
-      ],
+      "group_by": ["d.definition_type"],
       "aggregations": [
         {
           "function": "count",
@@ -179,13 +173,7 @@ q6:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "language"
-        }
-      ],
+      "group_by": ["f.language"],
       "aggregations": [
         {
           "function": "count",
@@ -229,17 +217,8 @@ q7:
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "f",
-          "alias": "file"
-        },
-        {
-          "kind": "property",
-          "node": "d",
-          "property": "definition_type",
-          "alias": "definition_type"
-        }
+        "f",
+        "d.definition_type"
       ],
       "aggregations": [
         {
@@ -268,13 +247,7 @@ q8:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "sym",
-          "property": "import_type"
-        }
-      ],
+      "group_by": ["sym.import_type"],
       "aggregations": [
         {
           "function": "count",

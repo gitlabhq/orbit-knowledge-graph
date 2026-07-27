@@ -191,7 +191,7 @@ aggregation in the query. A node group uses
   "relationships": [
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
-  "group_by": [{"kind": "node", "node": "u"}],
+  "group_by": ["u"],
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "mr_count"}
   ],
@@ -217,9 +217,7 @@ Duplicate group or aggregate output names are rejected.
   "nodes": [
     {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
   ],
-  "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-  ],
+  "group_by": ["v.severity"],
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vulnerability_count"}
   ],

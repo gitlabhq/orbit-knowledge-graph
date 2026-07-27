@@ -44,12 +44,11 @@ fn build_aggregation(
             InputGroupByKey::Property {
                 node,
                 property,
-                transform,
-                ..
+                truncate,
             } => {
                 let col = Expr::col(node, property);
-                let expr = match transform {
-                    Some(crate::input::PropertyTransform::Truncate { unit }) => {
+                let expr = match truncate {
+                    Some(unit) => {
                         // Without the cast, `Date`/`DateTime` keys cross Arrow
                         // as bare integers on some server versions.
                         let truncated = Expr::func(unit.ch_function(), vec![col]);

@@ -335,7 +335,7 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
             "limit": 10
         }"#;
@@ -361,7 +361,7 @@ mod tests {
                 {"id": "f", "entity": "File"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
                 "function": "count",
                 "target": "f",
@@ -399,7 +399,7 @@ mod tests {
                 }}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
@@ -921,7 +921,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "AUTHORED", "from": "u", "to": "mr"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
@@ -964,7 +964,7 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
@@ -1064,7 +1064,7 @@ mod tests {
                 "min_hops": 1,
                 "max_hops": 2
             }],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "f"}],
             "limit": 10
         }"#;
@@ -1103,7 +1103,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 3}
             ],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
             "limit": 3
         }"#;
@@ -1294,7 +1294,7 @@ mod tests {
                 }}
             ],
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
+            "group_by": ["u"],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
@@ -1328,7 +1328,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "wi", "to": "p"},
                 {"type": "CLOSED", "from": "u", "to": "wi"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
                 "function": "count",
                 "target": "u",
@@ -1361,7 +1361,7 @@ mod tests {
                 {"id": "proj", "entity": "Project", "node_ids": [1]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
-            "group_by": [{"kind": "node", "node": "proj"}],
+            "group_by": ["proj"],
             "aggregations": [{
                 "function": "count",
                 "target": "v",
@@ -1385,7 +1385,7 @@ mod tests {
             "nodes": [
                 {"id": "p", "entity": "Project", "node_ids": [1]}
             ],
-            "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}],
+            "group_by": ["p.visibility_level"],
             "aggregations": [{
                 "function": "count",
                 "target": "p",
@@ -1419,7 +1419,7 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [1]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+            "group_by": ["v.severity"],
             "aggregations": [{
                 "function": "count",
                 "target": "v",
@@ -1460,7 +1460,7 @@ mod tests {
                         {"id": "p", "entity": "Project"}
                     ],
                     "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-                    "group_by": [{"kind": "node", "node": "p"}],
+                    "group_by": ["p"],
                     "aggregations": [{"function": "count", "target": "mr", "alias": "merged_mrs"}],
                     "limit": 10
                 }"#,
@@ -1553,7 +1553,7 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "j"}],
+            "group_by": ["j"],
             "aggregations": [{"function": "count", "target": "j", "alias": "fail_count"}],
             "limit": 20
         }"#;
@@ -1624,7 +1624,7 @@ mod tests {
                 {"id": "proj", "entity": "Project"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
-            "group_by": [{"kind": "node", "node": "proj"}],
+            "group_by": ["proj"],
             "aggregations": [{"function": "count", "target": "j", "alias": "failed_jobs"}],
             "limit": 200
         }"#;
@@ -1686,7 +1686,7 @@ mod tests {
                 {"type": "HAS_FILE", "from": "d", "to": "f"}
             ],
             "aggregations": [{"function": "count", "target": "f", "alias": "appearances"}],
-            "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+            "group_by": ["f.old_path"],
             "limit": 60
         }"#;
 
@@ -1708,7 +1708,7 @@ mod tests {
 
     fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
         let query = format!(
-            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":[{{"kind":"node","node":"{group}"}}],"aggregations":[{{"function":"count","target":"{agg}","alias":"c"}}],"limit":20}}"#
+            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"function":"count","target":"{agg}","alias":"c"}}],"limit":20}}"#
         );
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
@@ -1784,7 +1784,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "n", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
             "limit": 10
         }"#;
@@ -1816,7 +1816,7 @@ mod tests {
                 {"type": "CONTAINS", "from": "g", "to": "p"},
                 {"type": "AUTHORED", "from": "u", "to": "n"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
             "limit": 10
         }"#;
@@ -1961,7 +1961,7 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
