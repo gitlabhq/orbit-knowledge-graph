@@ -1084,6 +1084,45 @@ mod tests {
         serde_json::from_str(&format!("\"{spec}\"")).expect("order_by parses")
     }
 
+    fn hops(json: &str) -> Result<HopRange, String> {
+        serde_json::from_str::<HopRange>(json).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn hops_integer_means_exactly_n() {
+        assert_eq!(hops("2").unwrap(), HopRange { min: 2, max: 2 });
+    }
+
+    #[test]
+    fn hops_pair_means_inclusive_range() {
+        assert_eq!(hops("[1, 3]").unwrap(), HopRange { min: 1, max: 3 });
+    }
+
+    #[test]
+    fn hops_omitted_defaults_to_single_hop() {
+        let rel: InputRelationship =
+            serde_json::from_str(r#"{"type": "CONTAINS", "from": "a", "to": "b"}"#).unwrap();
+        assert_eq!(rel.hops, HopRange { min: 1, max: 1 });
+    }
+
+    #[test]
+    fn hops_inverted_pair_rejects_with_ordering_error() {
+        let err = hops("[3, 1]").unwrap_err();
+        assert!(err.contains("inverted"), "{err}");
+    }
+
+    #[test]
+    fn hops_zero_rejects() {
+        assert!(hops("0").unwrap_err().contains("at least 1"));
+        assert!(hops("[0, 2]").unwrap_err().contains("at least 1"));
+    }
+
+    #[test]
+    fn hops_wrong_arity_rejects() {
+        let err = hops("[1, 2, 3]").unwrap_err();
+        assert!(err.contains("[min, max] pair"), "{err}");
+    }
+
     #[test]
     fn order_by_descending_uses_leading_dash() {
         assert_eq!(

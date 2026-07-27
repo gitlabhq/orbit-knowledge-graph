@@ -136,7 +136,7 @@ Nodes are deduplicated. Edges are instance-level.
 
 User:1 appears once even though it has 2 edges. Table view stacks a Users table above a Projects table. Graph view gets 4 nodes and 3 edges directly.
 
-#### Traversal (variable-length, max_hops > 1)
+#### Traversal (variable-length, hops above 1)
 
 Edges carry a `depth` field.
 

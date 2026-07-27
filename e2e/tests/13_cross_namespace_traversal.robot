@@ -39,7 +39,7 @@ Project Scoped Neighbors Returns Cross Namespace Related Issue
 
 Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops
     [Documentation]    The neighbors query type is 1-hop by schema, so a 3-hop neighborhood is
-    ...                expressed as a variable-length (max_hops=3) RELATED_TO traversal. issue_c is
+    ...                expressed as a variable-length (hops 1..3) RELATED_TO traversal. issue_c is
     ...                reachable from issue_a only via a 3-hop chain whose last hop crosses into a
     ...                different top-level namespace; the project-A tight prefix must not prune it.
     [Tags]    cross-namespace
@@ -49,7 +49,7 @@ Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops
     ${a}=    Create Dictionary    id=a    entity=WorkItem
     ${b}=    Create Dictionary    id=b    entity=WorkItem    columns=${{["id"]}}
     ${r1}=    Create Dictionary    type=IN_PROJECT    from=a    to=p
-    ${r2}=    Create Dictionary    type=RELATED_TO    from=a    to=b    max_hops=${3}
+    ${r2}=    Create Dictionary    type=RELATED_TO    from=a    to=b    hops=${{[1, 3]}}
     ${query}=    Create Dictionary    query_type=traversal
     ...    nodes=${{[$p, $a, $b]}}    relationships=${{[$r1, $r2]}}    limit=${100}
     Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_C}

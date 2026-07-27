@@ -2299,7 +2299,7 @@ mod tests {
                     {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
         );
         assert_rejects(
@@ -2309,7 +2309,7 @@ mod tests {
                     {"id": "u", "entity": "User"},
                     {"id": "p", "entity": "Project"}
                 ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
             "full edge table scans",
         );

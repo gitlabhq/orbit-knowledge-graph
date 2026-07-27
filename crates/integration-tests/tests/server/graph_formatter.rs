@@ -2001,8 +2001,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
                 "type": "MEMBER_OF",
                 "from": "u",
                 "to": "g",
-                "min_hops": 1,
-                "max_hops": 2
+                "hops": [1, 2]
             }],
             "limit": 50
         }"#,
@@ -2031,7 +2030,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
     }
 }
 
-async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
+async fn traversal_variable_length_floor_skips_shallow(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
@@ -2044,8 +2043,7 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
                 "type": "MEMBER_OF",
                 "from": "u",
                 "to": "g",
-                "min_hops": 2,
-                "max_hops": 3
+                "hops": [2, 3]
             }],
             "limit": 50
         }"#,
@@ -2059,7 +2057,7 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
     let group_ids = node_ids(nodes, "Group");
     assert!(
         !group_ids.contains(&100) && !group_ids.contains(&101) && !group_ids.contains(&102),
-        "depth-1 groups (100, 101, 102) must be excluded by min_hops=2"
+        "depth-1 groups (100, 101, 102) must be excluded by the hop floor of 2"
     );
     assert!(
         group_ids.contains(&200),
@@ -2084,8 +2082,7 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
                 "type": "MEMBER_OF",
                 "from": "u",
                 "to": "g",
-                "min_hops": 1,
-                "max_hops": 3
+                "hops": [1, 3]
             }],
             "limit": 50
         }"#,
@@ -2492,7 +2489,7 @@ async fn graph_formatter_e2e() {
         traversal_deduplicates_shared_nodes,
         traversal_redaction_removes_unauthorized_paths,
         traversal_variable_length_reaches_depth_2,
-        traversal_variable_length_min_hops_skips_shallow,
+        traversal_variable_length_floor_skips_shallow,
         traversal_variable_length_with_redaction_at_depth,
         traversal_incoming_direction,
         traversal_both_direction,
