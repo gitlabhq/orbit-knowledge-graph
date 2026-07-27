@@ -86,10 +86,11 @@ All queries declare node selectors in the `nodes` array — a 1-element array
 for `neighbors` and single-node `traversal`; multi-node `traversal`,
 `aggregation`, and `path_finding` add `relationships`.
 
-- For multi-hop **traversal** edges, set `relationships[].max_hops` (and
-  optionally `min_hops`). Default 1, max 3.
+- For multi-hop **traversal** edges, set `relationships[].hops`: an integer
+  for exactly N hops (`"hops": 2`) or a `[min, max]` pair for a range
+  (`"hops": [1, 3]`). Omitted means 1. Max 3.
 - For **path_finding** queries, set `path.max_depth` inside the required
-  `path` sub-object. Max 3. `max_hops` does not apply to `path_finding`.
+  `path` sub-object. Max 3. `hops` does not apply to `path_finding`.
   When endpoints use filters, include `path.rel_types` to bound fan-out;
   path_finding follows edges only in their schema direction (see
   [recipe pitfall](references/recipes.md#path_finding--shortest-path-between-nodes)).

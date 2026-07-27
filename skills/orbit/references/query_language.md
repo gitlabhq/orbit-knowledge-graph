@@ -150,8 +150,7 @@ Relationships connect node selectors by alias.
 | `from` | `string` | Alias of the start node selector. |
 | `to` | `string` | Alias of the end node selector. |
 | `direction` | `string` | `outgoing`, `incoming`, or `both`. Default `outgoing`. |
-| `min_hops` | `integer` | Minimum hops. Default 1. Maximum 3. |
-| `max_hops` | `integer` | Maximum hops. Default 1. Maximum 3. |
+| `hops` | `integer` or `array` | Exactly N hops (`2`) or an inclusive `[min, max]` range (`[1, 3]`). Default 1. Maximum 3. |
 | `filters` | `object` | Relationship property filters. Maximum 5 filters. |
 
 For example, merge requests point to projects with `IN_PROJECT`, and users point

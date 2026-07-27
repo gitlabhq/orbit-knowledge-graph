@@ -108,7 +108,7 @@ has no matches.
 - `neighbors` or single-node `traversal` with more than 1 entry in `nodes`.
 - Multi-node `traversal` without at least 2 nodes and 1 relationship.
 - `query_type: "aggregation"` without any `aggregations` entries.
-- `max_hops` or `max_depth` > 3 (server-enforced ceiling).
+- `hops` upper bound or `max_depth` > 3 (server-enforced ceiling).
 - `cursor.after` reused after changing the query (the token is bound to the exact query that issued it).
 - `allowlist rejected` / `not valid under 'oneOf'` on a `columns` entry —
   the column name is not in the entity's allowlist. Run

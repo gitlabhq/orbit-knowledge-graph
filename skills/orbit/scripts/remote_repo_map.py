@@ -170,7 +170,7 @@ def _parse_callers_fqn(raw: str) -> tuple[str, str | None]:
 def cmd_extends(args: argparse.Namespace) -> None:
     """Find all descendants of a class/module via EXTENDS — single server-side multi-hop traversal.
 
-    Uses min_hops/max_hops on the RelationshipSelector to collapse the old
+    Uses a hops range on the RelationshipSelector to collapse the old
     N×M frontier loop (one query per frontier node per hop) into a single
     server-side traversal.  For a class with 16 direct subclasses at depth=2
     the old approach required 16+256=272 sequential API calls (~2.5 min);
@@ -199,7 +199,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
             },
         ],
         "relationships": [
-            {"type": "EXTENDS", "from": "child", "to": "base", "min_hops": 1, "max_hops": depth}
+            {"type": "EXTENDS", "from": "child", "to": "base", "hops": [1, depth]}
         ],
         # Max server-side cap. Multi-hop fan-out on wide trees can exceed a few
         # hundred nodes; a low limit truncates the result non-deterministically
@@ -237,7 +237,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
     (e.g. 'Issue' matches app/models/issue.rb AND qa/resource/issue.rb).
     Pass --filter-prefix app/models/concerns to list only included concerns.
 
-    Uses min_hops/max_hops on the RelationshipSelector to issue a single
+    Uses a hops range on the RelationshipSelector to issue a single
     query instead of the old N×M frontier loop.
     """
     pid    = args.project_id
@@ -261,7 +261,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
             },
         ],
         "relationships": [
-            {"type": "EXTENDS", "from": "child", "to": "ancestor", "min_hops": 1, "max_hops": depth}
+            {"type": "EXTENDS", "from": "child", "to": "ancestor", "hops": [1, depth]}
         ],
         # See cmd_extends: request the full cap so multi-hop ancestor chains are
         # not truncated non-deterministically.
@@ -338,7 +338,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
         ],
         "relationships": [
             {"type": "EXTENDS", "from": "descendant", "to": "base",
-             "min_hops": 1, "max_hops": depth}
+             "hops": [1, depth]}
         ],
         "limit": 1000,
     }}
@@ -377,7 +377,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
         # descendant mixes in itself, not transitively.
         "relationships": [
             {"type": "EXTENDS", "from": "descendant", "to": "concern",
-             "min_hops": 1, "max_hops": 1}
+             "hops": 1}
         ],
         "limit": 1000,
     }}
