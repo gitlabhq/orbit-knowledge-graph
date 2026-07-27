@@ -562,10 +562,8 @@ pub struct InputRelationship {
     pub types: Vec<String>,
     pub from: String,
     pub to: String,
-    #[serde(default = "default_hops")]
-    pub min_hops: u32,
-    #[serde(default = "default_hops")]
-    pub max_hops: u32,
+    #[serde(default)]
+    pub hops: HopRange,
     #[serde(default)]
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
@@ -589,8 +587,63 @@ pub struct InputRelationship {
     pub scope_preserving: bool,
 }
 
-fn default_hops() -> u32 {
-    1
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HopRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+impl Default for HopRange {
+    fn default() -> Self {
+        Self { min: 1, max: 1 }
+    }
+}
+
+impl<'de> Deserialize<'de> for HopRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_hops(Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_hops(value: Value) -> Result<HopRange, String> {
+    let as_hop_count = |v: &Value| -> Result<u32, String> {
+        let n = v
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| format!("hops must be a positive integer, got {v}"))?;
+        if n == 0 {
+            return Err("hops must be at least 1".to_string());
+        }
+        Ok(n)
+    };
+    match &value {
+        Value::Number(_) => {
+            let n = as_hop_count(&value)?;
+            Ok(HopRange { min: n, max: n })
+        }
+        Value::Array(arr) => {
+            let [min, max] = arr.as_slice() else {
+                return Err(format!(
+                    "hops range must be a [min, max] pair, got {} element(s)",
+                    arr.len()
+                ));
+            };
+            let (min, max) = (as_hop_count(min)?, as_hop_count(max)?);
+            if min > max {
+                return Err(format!(
+                    "hops range [{min}, {max}] is inverted: min must not exceed max"
+                ));
+            }
+            Ok(HopRange { min, max })
+        }
+        _ => Err(
+            "hops must be an integer (exactly N hops) or a [min, max] pair (a hop range)"
+                .to_string(),
+        ),
+    }
 }
 
 fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>

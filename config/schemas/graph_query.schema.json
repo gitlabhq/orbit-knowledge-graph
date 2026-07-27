@@ -482,19 +482,28 @@
           "$ref": "#/$defs/Identifier",
           "description": "Target node variable ID (must match a node's id field)"
         },
-        "min_hops": {
-          "type": "integer",
-          "description": "Minimum number of relationship hops",
-          "minimum": 0,
-          "maximum": 3,
-          "default": 1
-        },
-        "max_hops": {
-          "type": "integer",
-          "description": "Maximum number of relationship hops. Limited to prevent resource exhaustion.",
-          "minimum": 1,
-          "maximum": 3,
-          "default": 1
+        "hops": {
+          "description": "Number of relationship hops: an integer for exactly N hops, or a [min, max] pair for a range. Capped to prevent resource exhaustion.",
+          "default": 1,
+          "oneOf": [
+            {
+              "type": "integer",
+              "description": "Exactly N hops",
+              "minimum": 1,
+              "maximum": 3
+            },
+            {
+              "type": "array",
+              "description": "Inclusive [min, max] hop range",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          ]
         },
         "direction": {
           "$ref": "#/$defs/Direction",
@@ -514,18 +523,7 @@
           "default": {}
         }
       },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "description": "max_hops must be >= min_hops",
-          "if": { "required": ["min_hops"], "properties": { "min_hops": { "minimum": 2 } } },
-          "then": { "properties": { "max_hops": { "minimum": 2 } } }
-        },
-        {
-          "if": { "required": ["min_hops"], "properties": { "min_hops": { "minimum": 3 } } },
-          "then": { "properties": { "max_hops": { "minimum": 3 } } }
-        }
-      ]
+      "additionalProperties": false
     },
     "RelationshipType": {
       "description": "Relationship type specification - single, multiple, or wildcard",

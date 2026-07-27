@@ -153,12 +153,12 @@ pub fn enforce_return(
         };
 
         for (i, rel) in input.relationships.iter().enumerate() {
-            let prefix = if rel.max_hops > 1 {
+            let prefix = if rel.hops.max > 1 {
                 format!("hop_e{i}_")
             } else {
                 format!("e{i}_")
             };
-            let path_column = (rel.max_hops > 1).then(|| format!("{prefix}path_nodes"));
+            let path_column = (rel.hops.max > 1).then(|| format!("{prefix}path_nodes"));
             ctx.edges.push(EdgeMeta {
                 type_column: format!("{prefix}{EDGE_TYPE_SUFFIX}"),
                 src_column: format!("{prefix}{EDGE_SRC_SUFFIX}"),

@@ -297,10 +297,10 @@ impl<'a> Validator<'a> {
                         .into(),
                 ));
             }
-            if rel.max_hops > MAX_HOPS_CAP {
+            if rel.hops.max > MAX_HOPS_CAP {
                 return Err(QueryError::DepthExceeded(format!(
-                    "max_hops ({}) must not exceed {MAX_HOPS_CAP}",
-                    rel.max_hops
+                    "hops upper bound ({}) must not exceed {MAX_HOPS_CAP}",
+                    rel.hops.max
                 )));
             }
             if rel.types.len() > MAX_REL_TYPES {
