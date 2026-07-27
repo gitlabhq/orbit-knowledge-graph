@@ -31,14 +31,18 @@ CI pipelines, or custom tooling.
 
 ## Authentication
 
-All endpoints require a GitLab personal access token with `read_api` scope,
-passed as a Bearer token:
+All endpoints require a GitLab personal access token, passed as a Bearer token:
 
 ```shell
 --header "Authorization: Bearer <your_token>"
 ```
 
-Results are scoped to entities the token owner can access in GitLab.
+Standard (legacy) tokens need the `read_api` scope. Fine-grained tokens need the
+"Read knowledge graph" permission.
+
+Results are scoped to entities the token owner can access in GitLab. A fine-grained
+token scoped to a group or project is further limited to results from that group
+or project.
 
 ## Billing
 

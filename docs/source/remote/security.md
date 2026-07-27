@@ -79,8 +79,9 @@ environment, and stores no permission data of its own.
 Programmatic access uses your existing GitLab authentication, scoped to what the token owner
 can see in GitLab.
 
-- REST API: a standard (legacy) personal access token with the `read_api` scope, sent as a
-  Bearer token. Fine-grained personal access tokens are not supported. For more information,
-  see [REST API](access/api.md).
+- REST API: a personal access token sent as a Bearer token. Standard (legacy) tokens need the
+  `read_api` scope. Fine-grained tokens need the "Read knowledge graph" permission, and a
+  token scoped to a group or project only returns results from that group or project. For
+  more information, see [REST API](access/api.md).
 - MCP: GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. For more information, see [MCP](access/mcp.md).
 - GitLab Duo Agent Platform: no token to configure. For more information, see [GitLab Duo Agent Platform](access/duo.md).
