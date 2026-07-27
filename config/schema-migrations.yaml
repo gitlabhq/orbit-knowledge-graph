@@ -16,10 +16,13 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 86
+  scope: '*'
+  note: HAS_VULNERABILITY extract switched to LEFT JOINs from _batch so paging keys on driver-row cardinality (#1064); windows skipped by the old INNER JOINs must backfill. Deriver widens a .sql.j2 edge change to '*'.
 - version: 85
   scope: sdlc
   entities:
-    - HAS_VULNERABILITY
+  - HAS_VULNERABILITY
   note: New HAS_VULNERABILITY edge (Package->Vulnerability); clone carries every prior table intact and only this edge re-derives.
 - version: 84
   scope: none
