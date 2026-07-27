@@ -1,0 +1,20 @@
+# The `namespaces` pseudo-table writes its traversal-path row with version
+# DEFAULT now(), so the explicitly-dated stale row is always the older one.
+description: A group with a stale traversal-path row indexes once, at its current path
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+    - { id: 200, parent_id: 100, traversal_path: "1/100/200/" }
+    - { id: 300, parent_id: 200, traversal_path: "1/100/200/300/" }
+  namespace_traversal_paths:
+    - { id: 300, traversal_path: "1/100/300/", version: "2024-01-15 00:00:00" }
+
+expect:
+  nodes:
+    gl_group:
+      rows:
+        - { id: 100, traversal_path: "1/100/" }
+        - { id: 200, traversal_path: "1/100/200/" }
+        - { id: 300, traversal_path: "1/100/200/300/" }

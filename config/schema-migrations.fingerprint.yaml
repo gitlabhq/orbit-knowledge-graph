@@ -79,10 +79,10 @@ sources:
   nodes/code_review/merge_request_diff_file.sql.j2: 08925206e14aabe5235473c27d93780b8178c032c69f3c55204edd2e78622162
   nodes/code_review/merge_request_diff_file.yaml: 1d5e3b07d4aba7e0755d607e479c41b2b120675049dfdbd5c0c19e28fdf2a23d
   nodes/container_registry/container_repository.yaml: a764a75922e42023f695f778261c5317b909456d31b464271b7c32f70bf4eea4
-  nodes/core/group.sql.j2: 01be7fe6d3f90c104d95292c085b7f794bceb71a49adcdfc55f74a6a3c764021
+  nodes/core/group.sql.j2: 20da4d8ccfccdc8611e1f936cccc27cfc02c84136f0174ef14108a78e705ab50
   nodes/core/group.yaml: 83241097356ffbaeaec9f09d8281e070f2b1fc937bd7dd544d447ad8b51fc985
   nodes/core/note.yaml: bc232b2fe0e4f08c5196ef660022733d43a1b466d23ca11b2a1bf32989571e7f
-  nodes/core/project.sql.j2: 29ea9fd95d49fd49d3ea20f99c9d3be215dcfc5a728309a0e90bc6a1836b0295
+  nodes/core/project.sql.j2: 696c33014a5279f7b50b0724f961912e5dd795b7ec48ba57c20aa8aebe58b5be
   nodes/core/project.yaml: ad452f0fdffbdca1ed981dcd998a64620594b7e2316a8b2d84fe6b2d84432c72
   nodes/core/user.yaml: 0f549d9973f177009e684f7997d27e6319344b0b381550fda64078a838a53ca0
   nodes/packages/dependency.yaml: 2ac3e0ecb6dded49f260c0788d74b4c7b8c864a666c115f41b4825abeee69046

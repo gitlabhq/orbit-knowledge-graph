@@ -61,7 +61,9 @@ Namespace deletion is separate from the row-level soft-delete that flows through
 
 ### Reconciling moved entities
 
-When a project or subgroup is transferred or reparented, Rails rewrites its `traversal_path` in the route tables (`project_namespace_traversal_paths`, `namespace_traversal_paths`) while keeping the same `id`. The SDLC ETL then re-indexes the entity at its new path, creating a new ReplacingMergeTree key. The graph tables are sorted by `traversal_path`, so the old-path row is a distinct key that never gets touched and survives FINAL with `_deleted = false`, producing a duplicate live row under the stale path.
+When a project or subgroup is transferred or reparented, Rails rewrites its `traversal_path` in the route tables (`project_namespace_traversal_paths`, `namespace_traversal_paths`) while keeping the same `id`. Those tables are `ReplacingMergeTree(version, deleted)` keyed on `id` alone, so both the old and the new path stay readable until a merge collapses them. The SDLC ETL then re-indexes the entity at its new path, creating a new ReplacingMergeTree key. The graph tables are sorted by `traversal_path`, so the old-path row is a distinct key that never gets touched and survives FINAL with `_deleted = false`, producing a duplicate live row under the stale path.
+
+The `Project` and `Group` extracts collapse that join with `argMax(traversal_path, version)` scoped to the root being indexed, so a move within a root stops emitting the old path; moves across roots and rows written before the collapse still reach the reconciler.
 
 On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each root it reuses the deletion `INSERT INTO ... SELECT` but appends one predicate that narrows the scan from "all rows under the root" to "rows whose `traversal_path` is no longer a current route under the root":
 

@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 87
+  scope: '*'
+  note: Project/Group extract collapses its traversal-path join with argMax, so a transferred entity indexes once at its current path instead of once per historical path; rebuild drops the already-written stale-path duplicates.
 - version: 86
   scope: '*'
   note: HAS_VULNERABILITY extract switched to LEFT JOINs from _batch so paging keys on driver-row cardinality (#1064); windows skipped by the old INNER JOINs must backfill. Deriver widens a .sql.j2 edge change to '*'.

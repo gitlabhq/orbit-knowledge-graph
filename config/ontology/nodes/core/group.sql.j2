@@ -8,16 +8,17 @@ SELECT
   namespace.owner_id AS owner_id,
   namespace.created_at AS created_at,
   namespace.updated_at AS updated_at,
-  traversal_paths.traversal_path AS traversal_path,
+  traversal_paths.current_path AS traversal_path,
   namespace.{{watermark_column}} AS _version,
   (namespace.{{deleted_column}} OR namespace.type != 'Group') AS _deleted
 FROM siphon_namespaces namespace
 INNER JOIN (
   SELECT
     id,
-    traversal_path
+    argMax(traversal_path, version) AS current_path
   FROM namespace_traversal_paths
-  WHERE startsWith(traversal_path, {traversal_path:String}) ) traversal_paths ON namespace.id = traversal_paths.id
+  WHERE startsWith(traversal_path, {traversal_path:String})
+  GROUP BY id ) traversal_paths ON namespace.id = traversal_paths.id
 LEFT JOIN (
   SELECT
     namespace_id,
@@ -34,7 +35,7 @@ LEFT JOIN (
     AND source_type = 'Namespace'
     AND NOT {{deleted_column}}
   GROUP BY source_id ) routes ON namespace.id = routes.source_id
-WHERE startsWith(traversal_paths.traversal_path, {traversal_path:String})
+WHERE startsWith(traversal_paths.current_path, {traversal_path:String})
   AND (namespace.id IN (SELECT
       id
     FROM namespace_traversal_paths
