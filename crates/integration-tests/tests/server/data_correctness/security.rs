@@ -1648,3 +1648,61 @@ pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx:
     resp.assert_group_node_absent("g", "Group", 101);
     resp.assert_group_node_absent("g", "Group", 102);
 }
+
+pub(super) async fn aggregation_two_hop_anchor_scoped_excludes_other_namespaces(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            ],
+            "relationships": [
+                {"type": "APPROVED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "approved_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_row_value_i64("u", "User", 2, "approved_count", 1);
+    resp.assert_group_row_value_i64("u", "User", 3, "approved_count", 1);
+    resp.assert_group_node_absent("u", "User", 1);
+}
+
+pub(super) async fn aggregation_two_hop_anchor_multi_path_counts_union_of_scopes(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            ],
+            "relationships": [
+                {"type": "APPROVED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "approved_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/100/".into(), "1/101/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_row_value_i64("u", "User", 1, "approved_count", 1);
+    resp.assert_group_row_value_i64("u", "User", 2, "approved_count", 1);
+    resp.assert_group_row_value_i64("u", "User", 3, "approved_count", 1);
+}

@@ -216,6 +216,8 @@ async fn data_correctness() {
         security::aggregation_vulnerability_traversal_path_filter_reporter_rejects_at_compile,
         security::aggregation_vulnerability_traversal_path_filter_security_manager_counts,
         security::aggregation_vulnerability_sql_drops_reporter_paths,
+        security::aggregation_two_hop_anchor_scoped_excludes_other_namespaces,
+        security::aggregation_two_hop_anchor_multi_path_counts_union_of_scopes,
         pagination::cursor_first_page,
         pagination::cursor_follows_next_cursor_to_exhaustion,
         pagination::cursor_with_filter,
