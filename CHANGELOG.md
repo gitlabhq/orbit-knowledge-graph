@@ -1,3 +1,15 @@
+## [0.91.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.91.0...v0.91.1) (2026-07-27)
+
+### Fixes
+
+* **query:** prune traversal paths in subqueries ([a2fbe4d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a2fbe4d69a19923a6dff93f2f679df0d231fd3fa)) by Michael Angelo Rivera
+
+### Other
+
+* **ci:** bump ai review bot models to opus 5 ([4e2f566](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4e2f56608809c057df6475b6fe2f2b5375a33f72)) by Dmitry Gruzd
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([a39ac36](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a39ac36eeca844f05576f51fe34e72942052858d)) by Orbit automation bot
+* **i18n:** update ja-jp for commit c9939739 ([768d911](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/768d9114c2d89d21f086725d35ce7c50c590c77d)) by GitLab-Argo Bot
+
 ## [0.91.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.90.1...v0.91.0) (2026-07-17)
 
 ### ⚠ BREAKING CHANGES
