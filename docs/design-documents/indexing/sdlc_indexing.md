@@ -283,6 +283,8 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
 8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
 
+Both the completion signal (point 8) and the next-page cursor (point 3) count and read the extract's *output* rows, so every extract must preserve driver-row cardinality: the `LIMIT` binds a single driver table (the first `extract.tables` entry), and the final `SELECT` must emit one output row per driver row read. A `.sql.j2` template that reduces cardinality — an `INNER JOIN` that drops unmatched driver rows — makes a full page collapse to a short one, so the loop mis-reads completion and abandons the rest of the watermark window (the data-loss cause in #1064). Point-lookup enrichment therefore `LEFT JOIN`s the driver and lets the transform's `IS NOT NULL` endpoint filter drop rows whose join found no match.
+
 ```sql
 --- Example extraction query with keyset pagination
 SELECT
