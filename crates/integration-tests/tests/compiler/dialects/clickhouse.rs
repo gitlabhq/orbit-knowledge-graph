@@ -233,7 +233,7 @@ fn group_by_truncate_custom_alias_preserved() {
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [{"key": "u.created_at", "truncate": "month"}],
+        "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
         "limit": 10
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();

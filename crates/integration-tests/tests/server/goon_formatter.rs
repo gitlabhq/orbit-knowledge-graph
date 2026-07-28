@@ -344,8 +344,8 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
 
     assert!(s.contains("query_type:aggregation"));
     assert!(
-        s.contains("group_by:state(property)"),
-        "property group must declare kind=property: {s}"
+        s.contains("group_by:u_state(property:state)"),
+        "property group must declare kind=property and its source property: {s}"
     );
     assert!(
         s.contains("aggregations:user_count(count:u)"),
@@ -353,7 +353,7 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
     );
     assert!(s.contains("@rows\n"));
     assert!(
-        s.contains("state=active"),
+        s.contains("u_state=active"),
         "active state bucket must appear bare: {s}"
     );
 }

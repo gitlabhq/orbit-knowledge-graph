@@ -52,7 +52,7 @@ Truncated Date Group Key Serializes As An ISO Date String
     ${query}=    Evaluate
     ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"key": "w.created_at", "truncate": "month"}], "aggregations": [{"function": "count", "target": "w", "alias": "n"}], "limit": 5}
     ${resp}=    Orbit Query    ${query}
-    ${month}=    Aggregation Value    ${resp}    month
+    ${month}=    Aggregation Value    ${resp}    w_created_at_month
     ${month}=    Convert To String    ${month}
     Should Match Regexp    ${month}    ^\\d{4}-\\d{2}-\\d{2}$
     ...    truncated month key is not an ISO date string: ${month}

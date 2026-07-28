@@ -163,15 +163,36 @@ fn malformed_group_by_entry_shows_expected_shapes() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(msg.contains("\"kind\""), "got: {msg}");
     assert!(
-        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
+        msg.contains("\"<node-id>.<property>\"") && msg.contains("\"truncate\""),
         "got: {msg}"
     );
 }
 
 #[test]
-fn bare_string_group_by_entry_shows_expected_shapes() {
+fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
+    let err = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "group_by": ["p.name.x"],
+            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("/group_by/0"), "got: {msg}");
+    assert!(
+        msg.contains("\"<node-id>\"") && msg.contains("\"<node-id>.<property>\""),
+        "got: {msg}"
+    );
+}
+
+#[test]
+fn bare_string_group_by_unknown_node_names_the_reference() {
     let err = compile(
         r#"{
             "query_type": "aggregation",
@@ -185,12 +206,7 @@ fn bare_string_group_by_entry_shows_expected_shapes() {
     )
     .unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(msg.contains("\"kind\""), "got: {msg}");
-    assert!(
-        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
-        "got: {msg}"
-    );
+    assert!(msg.contains("undefined node \"name\""), "got: {msg}");
 }
 
 #[test]

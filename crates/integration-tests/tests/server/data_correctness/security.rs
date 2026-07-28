@@ -1192,7 +1192,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_se
     )
     .await;
 
-    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_group_column("v_severity", "v", "severity");
     resp.assert_empty_aggregation();
 }
 
@@ -1219,7 +1219,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_filter_oracle_is
     )
     .await;
 
-    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_group_column("v_severity", "v", "severity");
     resp.assert_empty_aggregation();
 }
 
@@ -1244,9 +1244,9 @@ pub(super) async fn aggregation_vulnerability_property_grouping_security_manager
     )
     .await;
 
-    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_group_column("v_severity", "v", "severity");
     resp.assert_row_count(1);
-    resp.assert_row_value_str(0, "severity", "high");
+    resp.assert_row_value_str(0, "v_severity", "high");
     resp.assert_row_value_i64(0, "vuln_count", 1);
 }
 
@@ -1278,7 +1278,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
 
     let sql = &compiled.base.sql;
     assert!(
-        sql.contains("v.severity AS severity"),
+        sql.contains("v.severity AS v_severity"),
         "property group key must be selected from Vulnerability alias, got:\n{sql}"
     );
     assert!(
