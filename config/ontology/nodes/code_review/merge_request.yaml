@@ -390,7 +390,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: CLOSED
-          mutable: true
         - from:
             field: id
             kind: MergeRequest
@@ -406,7 +405,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: REVIEWER
-          mutable: true
           array_field: user_id
         - from:
             field: approvals
@@ -415,7 +413,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: APPROVED
-          mutable: true
           array_field: user_id
         - from:
             field: id
