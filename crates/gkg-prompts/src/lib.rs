@@ -134,7 +134,18 @@ fn template_placeholders(template: &str) -> Result<Vec<String>, minijinja::Error
         .collect())
 }
 
+const RUST_KEYWORDS: &[&str] = &[
+    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate",
+    "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl",
+    "in", "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
+    "return", "self", "Self", "static", "struct", "super", "trait", "true", "try", "type",
+    "typeof", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
+];
+
 fn is_rust_ident(s: &str) -> bool {
+    if RUST_KEYWORDS.contains(&s) {
+        return false;
+    }
     let mut chars = s.chars();
     chars
         .next()
@@ -267,6 +278,14 @@ mod tests {
     fn validate_rejects_unused_declared_variables() {
         let p = prompt("name: a\nversion: 1.0.0\nvariables: [who]\ndescription: Hello");
         assert!(p.validate("a").is_err());
+    }
+
+    #[test]
+    fn validate_rejects_rust_keyword_variables() {
+        let p = prompt("name: a\nversion: 1.0.0\nvariables: [type]\ndescription: \"{{ type }}\"");
+        assert!(p.validate("a").is_err());
+        assert!(!is_rust_ident("mod"));
+        assert!(is_rust_ident("query_graph"));
     }
 
     #[test]
