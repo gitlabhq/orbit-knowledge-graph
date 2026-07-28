@@ -5155,6 +5155,8 @@ dependencies = [
 name = "gkg-prompts"
 version = "0.1.0"
 dependencies = [
+ "minijinja",
+ "semver",
  "serde",
  "serde_yaml",
 ]
@@ -5187,6 +5189,7 @@ dependencies = [
  "labkit",
  "labkit-events",
  "mimalloc",
+ "minijinja",
  "moka",
  "named-queries",
  "nats-client",

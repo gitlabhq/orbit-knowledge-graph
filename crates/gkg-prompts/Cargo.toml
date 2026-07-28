@@ -4,6 +4,11 @@ version.workspace = true
 edition = "2024"
 license = "MIT"
 
+[lib]
+proc-macro = true
+
 [dependencies]
+minijinja = { workspace = true }
+semver = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }

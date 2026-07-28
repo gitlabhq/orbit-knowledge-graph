@@ -29,7 +29,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   New entity types start in the ontology, not in Rust.
   Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`).
   Schema: `config/schemas/ontology.schema.json`.
-- **Agent-facing prompts are YAML, not Rust literals.** Text that lands in a model's context window (tool and command descriptions) lives as versioned YAML under `config/prompts/`, one file per prompt. Build scripts compile each file into a string constant via `crates/gkg-prompts`, so a malformed prompt fails the build.
+- **Agent-facing prompts are YAML, not Rust literals.** Text that lands in a model's context window (tool and command descriptions) lives as versioned YAML under `config/prompts/`, one file per prompt (`remote/` for the server surface, `local/` for the CLI). The `gkg-prompts` proc macro embeds each file as a string constant at compile time and validates MiniJinja template placeholders, so a malformed prompt fails the build.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
 - **Layered configuration.** `AppConfig` in `crates/gkg-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
@@ -54,6 +54,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
 - GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
 - Skill version bumped when files under `skills/<name>/` change (`skill-version-bump-check`)
+- Prompt version bumped when files under `config/prompts/` change (`prompt-version-bump-check`)
 - Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)

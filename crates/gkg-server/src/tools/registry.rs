@@ -15,10 +15,16 @@ pub struct ToolDefinition {
 }
 
 pub(super) const COMMAND_SUMMARIES: [(&str, &str); 4] = [
-    ("query_graph", prompts::query_graph::SUMMARY),
-    ("get_graph_schema", prompts::get_graph_schema::SUMMARY),
-    ("get_query_dsl", prompts::get_query_dsl::SUMMARY),
-    ("get_response_format", prompts::get_response_format::SUMMARY),
+    ("query_graph", prompts::tools::query_graph::SUMMARY),
+    (
+        "get_graph_schema",
+        prompts::tools::get_graph_schema::SUMMARY,
+    ),
+    ("get_query_dsl", prompts::tools::get_query_dsl::SUMMARY),
+    (
+        "get_response_format",
+        prompts::tools::get_response_format::SUMMARY,
+    ),
 ];
 
 pub(super) fn list_commands_description() -> String {
@@ -28,10 +34,14 @@ pub(super) fn list_commands_description() -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!(
-        "{}\n\nAvailable commands:\n{commands}",
-        prompts::list_commands::DESCRIPTION
-    )
+    let mut environment = minijinja::Environment::new();
+    environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    environment
+        .render_str(
+            prompts::list_commands::DESCRIPTION_TEMPLATE,
+            minijinja::context! { commands },
+        )
+        .expect("template placeholders are validated against the prompt file at compile time")
 }
 
 pub(super) mod params {
@@ -111,7 +121,7 @@ impl ToolRegistry {
     pub(super) fn query_graph() -> ToolDefinition {
         // Inline TOON kept for back-compat (one release cycle); a follow-up
         // strips it once `get_query_dsl` adoption is verified.
-        let base_description = prompts::query_graph::DESCRIPTION;
+        let base_description = prompts::tools::query_graph::DESCRIPTION;
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
@@ -136,7 +146,7 @@ impl ToolRegistry {
     pub(super) fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: prompts::get_graph_schema::DESCRIPTION.into(),
+            description: prompts::tools::get_graph_schema::DESCRIPTION.into(),
             parameters: params::get_graph_schema_parameters(),
         }
     }
@@ -191,7 +201,7 @@ impl CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: prompts::get_query_dsl::DESCRIPTION.into(),
+            description: prompts::tools::get_query_dsl::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -205,7 +215,7 @@ impl CommandRegistry {
     fn get_response_format() -> ToolDefinition {
         ToolDefinition {
             name: "get_response_format".into(),
-            description: prompts::get_response_format::DESCRIPTION.into(),
+            description: prompts::tools::get_response_format::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

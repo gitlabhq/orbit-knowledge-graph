@@ -1,5 +1,3 @@
-# short feeds the CLI --help; description is the MCP tool description and
-# must extend short (validated at build time).
 name: index
 version: 1.0.0
 short: Index a code repository and output graph statistics as JSON

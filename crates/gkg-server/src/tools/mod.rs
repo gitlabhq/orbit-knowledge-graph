@@ -1,5 +1,5 @@
 mod prompts {
-    include!(concat!(env!("OUT_DIR"), "/tool_prompts.rs"));
+    gkg_prompts::embed!("remote");
 }
 mod registry;
 mod schema;

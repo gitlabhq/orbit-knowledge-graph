@@ -68,7 +68,7 @@ impl V2CommandRegistry {
     fn query_graph() -> ToolDefinition {
         ToolDefinition {
             name: "query_graph".into(),
-            description: prompts::query_graph_v2::DESCRIPTION.into(),
+            description: prompts::tools::query_graph_v2::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "required": ["query"],
@@ -84,7 +84,7 @@ impl V2CommandRegistry {
     fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: prompts::get_graph_schema_v2::DESCRIPTION.into(),
+            description: prompts::tools::get_graph_schema_v2::DESCRIPTION.into(),
             parameters: params::get_graph_schema_parameters(),
         }
     }
@@ -92,7 +92,7 @@ impl V2CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: prompts::get_query_dsl::DESCRIPTION.into(),
+            description: prompts::tools::get_query_dsl::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -106,7 +106,7 @@ impl V2CommandRegistry {
     fn get_response_format() -> ToolDefinition {
         ToolDefinition {
             name: "get_response_format".into(),
-            description: prompts::get_response_format::DESCRIPTION.into(),
+            description: prompts::tools::get_response_format::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
