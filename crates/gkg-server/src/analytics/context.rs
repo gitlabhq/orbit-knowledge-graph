@@ -166,7 +166,7 @@ fn apply_metrics(
                 .aggregation
                 .metrics
                 .iter()
-                .map(|m| m.function.to_string())
+                .map(|m| m.expr.function().to_string())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .filter_map(|s| s.parse().ok())

@@ -326,13 +326,7 @@ impl GraphFormatter {
     }
 
     fn agg_col_names(aggs: &[compiler::input::InputAggregationMetric]) -> Vec<String> {
-        aggs.iter()
-            .map(|agg| {
-                agg.alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.to_string())
-            })
-            .collect()
+        aggs.iter().map(|agg| agg.alias.clone()).collect()
     }
 
     fn build_column_descriptors(
@@ -340,13 +334,10 @@ impl GraphFormatter {
     ) -> Vec<ColumnDescriptor> {
         aggs.iter()
             .map(|agg| ColumnDescriptor {
-                name: agg
-                    .alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.to_string()),
-                function: agg.function.to_string(),
-                target: agg.target.clone(),
-                property: agg.property.clone(),
+                name: agg.alias.clone(),
+                function: agg.expr.function().to_string(),
+                target: Some(agg.expr.node().to_string()),
+                property: agg.expr.property().map(str::to_owned),
             })
             .collect()
     }
@@ -725,9 +716,8 @@ mod tests {
                     "nodes": [{"id": "v", "entity": "Vulnerability"}],
                     "group_by": ["v.severity"],
                     "aggregations": [{
-                        "function": "count",
-                        "target": "v",
-                        "alias": "vulnerability_count"
+                        "count": "v",
+                        "as": "vulnerability_count"
                     }],
                     "limit": 10
                 }))

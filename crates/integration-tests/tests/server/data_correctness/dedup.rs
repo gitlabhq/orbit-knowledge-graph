@@ -104,7 +104,7 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "group_by": ["p"],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),
@@ -163,7 +163,7 @@ pub(super) async fn aggregation_multi_hop_self_join_dedups_edge_versions(ctx: &T
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "project"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#,
         &dedup_svc(),
@@ -270,7 +270,7 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "group_by": ["p"],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),
@@ -646,7 +646,7 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "group_by": ["p"],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),

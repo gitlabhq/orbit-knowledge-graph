@@ -302,7 +302,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -384,7 +384,7 @@ mod tests {
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
                 "group_by": ["u"],
-                "aggregations": [{"function": "count", "target": "mr", "alias": "c"}],
+                "aggregations": [{"count": "mr", "as": "c"}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -416,7 +416,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
@@ -505,7 +505,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
@@ -656,7 +656,7 @@ mod tests {
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
                 "group_by": ["u"],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
@@ -783,7 +783,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
@@ -860,7 +860,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "aggregation_sort": "-c",
                 "limit": 10}"#,
         );

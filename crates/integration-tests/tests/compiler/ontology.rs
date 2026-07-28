@@ -58,15 +58,19 @@ fn invalid_column_in_filter() {
 
 #[test]
 fn valid_column_in_aggregation() {
-    assert!(compile(
-        r#"{
+    assert!(
+        compile(
+            r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-            "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
+            "aggregations": [{"count": "p.name", "as": "name_count"}],
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(),
-    ).is_ok());
+            &embedded_ontology(),
+            &test_ctx(),
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -75,11 +79,13 @@ fn invalid_column_in_aggregation() {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-            "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
+            "aggregations": [{"sum": "p.invalid_property", "as": "total"}],
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(),
-    ).unwrap_err();
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("does not exist"));
 }
 
@@ -133,7 +139,7 @@ fn invalid_group_by_property_lists_valid_fields() {
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
             "group_by": ["p.reviewer_count"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -154,7 +160,7 @@ fn malformed_group_by_entry_shows_expected_shapes() {
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
             "group_by": [{"node": "p", "property": "name"}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -176,7 +182,7 @@ fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
             "group_by": ["p.name.x"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -198,7 +204,7 @@ fn bare_string_group_by_unknown_node_names_the_reference() {
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
             "group_by": ["name"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -431,7 +437,7 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "limit": 10
     }"#;
 
@@ -567,7 +573,7 @@ fn multi_hop_aggregation() {
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 2]}],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+        "aggregations": [{"count": "p", "as": "project_count"}],
         "limit": 10
     }"#;
 
@@ -1379,7 +1385,7 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
                    "filters": {"project_id": {"eq": 278964}}}],
-        "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
+        "aggregations": [{"count": "d", "as": "total"}]
     }"#;
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
@@ -1461,7 +1467,7 @@ fn aggregation_count_in_clause_pushes_project_id() {
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
                    "filters": {"project_id": {"in": [69095239, 278964, 74646916]}}}],
-        "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
+        "aggregations": [{"count": "d", "as": "total"}]
     }"#;
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
@@ -1525,7 +1531,7 @@ fn calls_aggregation_compiles() {
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
         "group_by": ["callee"],
-        "aggregations": [{"function": "count", "target": "caller", "alias": "callers"}],
+        "aggregations": [{"count": "caller", "as": "callers"}],
         "limit": 1
     }"#;
 

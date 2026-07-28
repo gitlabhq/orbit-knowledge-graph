@@ -156,14 +156,15 @@ fn gen_relationship(driver: &mut impl Driver, from: &str, to: &str) -> Option<Va
 fn gen_aggregation(driver: &mut impl Driver, node_id: &str) -> Option<Value> {
     let func = *pick(driver, AGG_FUNCTIONS)?;
     let mut agg = Map::new();
-    agg.insert("function".into(), json!(func));
-    agg.insert("target".into(), json!(node_id));
 
-    let has_group_by: bool = driver.produce()?;
-    if has_group_by {
-        agg.insert("group_by".into(), json!(node_id));
-        agg.insert("property".into(), json!("name"));
-    }
+    let with_property: bool = driver.produce()?;
+    let target = if with_property || func != "count" {
+        format!("{node_id}.name")
+    } else {
+        node_id.to_string()
+    };
+    agg.insert(func.into(), json!(target));
+    agg.insert("as".into(), json!("agg_result"));
 
     Some(Value::Object(agg))
 }

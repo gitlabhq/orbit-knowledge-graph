@@ -709,7 +709,7 @@ mod tests {
     #[test]
     fn aggregation_only_adds_columns_for_group_by_nodes() {
         use crate::input::{
-            AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
+            AggExpr, AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
         };
 
         let input = Input {
@@ -730,10 +730,8 @@ mod tests {
             ],
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
-                    function: AggFunction::Count,
-                    target: Some("n".to_string()),
-                    property: None,
-                    alias: Some("note_count".to_string()),
+                    expr: AggExpr::from_parts(AggFunction::Count, "n", None),
+                    alias: "note_count".to_string(),
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "u".to_string(),
@@ -794,7 +792,7 @@ mod tests {
     #[test]
     fn aggregation_adds_redaction_id_to_group_by() {
         use crate::input::{
-            AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
+            AggExpr, AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
         };
 
         let input = Input {
@@ -815,10 +813,8 @@ mod tests {
             ],
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
-                    function: AggFunction::Count,
-                    target: Some("mr".to_string()),
-                    property: None,
-                    alias: Some("mr_count".to_string()),
+                    expr: AggExpr::from_parts(AggFunction::Count, "mr", None),
+                    alias: "mr_count".to_string(),
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "u".to_string(),
@@ -858,7 +854,7 @@ mod tests {
     #[test]
     fn aggregation_adds_separate_pk_to_group_by() {
         use crate::input::{
-            AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
+            AggExpr, AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
         };
 
         // When the group-by node has redaction_id_column != "id", enforce
@@ -883,10 +879,8 @@ mod tests {
             ],
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
-                    function: AggFunction::Count,
-                    target: Some("d".to_string()),
-                    property: None,
-                    alias: Some("defs".to_string()),
+                    expr: AggExpr::from_parts(AggFunction::Count, "d", None),
+                    alias: "defs".to_string(),
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "f".to_string(),

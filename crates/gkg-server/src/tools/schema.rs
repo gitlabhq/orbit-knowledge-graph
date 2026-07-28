@@ -230,7 +230,7 @@ mod tests {
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));
@@ -253,7 +253,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "merged_mr_count"}
+                {"count": "mr", "as": "merged_mr_count"}
             ],
             "limit": 1
         }));
@@ -270,7 +270,7 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));
@@ -294,7 +294,7 @@ mod tests {
             ],
             "group_by": ["p"],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));

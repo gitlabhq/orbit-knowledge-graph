@@ -569,7 +569,7 @@ async fn aggregation_count_exact(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
+            "aggregations": [{"count": "g", "as": "group_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -631,7 +631,7 @@ async fn aggregation_redaction(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
+            "aggregations": [{"count": "g", "as": "group_count"}],
             "limit": 10
         }"#,
         &svc,
@@ -1119,7 +1119,7 @@ async fn aggregation_sum(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id", "alias": "id_sum"}],
+            "aggregations": [{"sum": "u.id", "as": "id_sum"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1167,7 +1167,7 @@ async fn aggregation_avg(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "avg", "target": "u", "property": "id", "alias": "avg_id"}],
+            "aggregations": [{"avg": "u.id", "as": "avg_id"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1209,8 +1209,8 @@ async fn aggregation_min_max(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
+                {"min": "u.id", "as": "min_id"},
+                {"max": "u.id", "as": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -1242,7 +1242,7 @@ async fn aggregation_min_string(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "min", "target": "u", "property": "username", "alias": "min_username"}
+                {"min": "u.username", "as": "min_username"}
             ],
             "limit": 10
         }"#,
@@ -1273,9 +1273,9 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "count", "target": "u", "alias": "member_count"},
-                {"function": "avg", "target": "u", "property": "id", "alias": "avg_id"},
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"}
+                {"count": "u", "as": "member_count"},
+                {"avg": "u.id", "as": "avg_id"},
+                {"min": "u.id", "as": "min_id"}
             ],
             "limit": 10
         }"#,
@@ -1325,7 +1325,7 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
+            "aggregations": [{"count": "g", "as": "total"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1359,9 +1359,9 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
             "aggregations": [
-                {"function": "count", "target": "g", "alias": "total"},
-                {"function": "min", "target": "g", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "g", "property": "id", "alias": "max_id"}
+                {"count": "g", "as": "total"},
+                {"min": "g.id", "as": "min_id"},
+                {"max": "g.id", "as": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -1398,7 +1398,7 @@ async fn grouped_aggregation_uses_node_group_rows(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
+            "aggregations": [{"count": "g", "as": "group_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1435,7 +1435,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
+            "aggregations": [{"count": "g", "as": "total"}],
             "limit": 10
         }"#,
         &svc,
@@ -2346,7 +2346,7 @@ async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g"}],
+            "aggregations": [{"count": "g", "as": "count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2376,7 +2376,7 @@ async fn no_alias_ungrouped_count_uses_function_name(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"function": "count", "target": "g"}],
+            "aggregations": [{"count": "g", "as": "count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2406,9 +2406,9 @@ async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "count", "target": "u"},
-                {"function": "min", "target": "u", "property": "id"},
-                {"function": "max", "target": "u", "property": "id"}
+                {"count": "u", "as": "count"},
+                {"min": "u.id", "as": "min"},
+                {"max": "u.id", "as": "max"}
             ],
             "limit": 10
         }"#,
@@ -2440,7 +2440,7 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u"}],
+            "aggregations": [{"count": "u", "as": "count"}],
             "aggregation_sort": "-count",
             "limit": 10
         }"#,

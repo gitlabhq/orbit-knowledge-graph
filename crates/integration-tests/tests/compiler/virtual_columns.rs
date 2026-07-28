@@ -88,7 +88,7 @@ fn aggregation_with_content_produces_hydration_plan() {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "content"]}],
-            "aggregations": [{"function": "count", "target": "f", "alias": "total"}],
+            "aggregations": [{"count": "f", "as": "total"}],
             "limit": 5
         }"#,
     );
@@ -114,7 +114,7 @@ fn aggregation_with_wildcard_excludes_virtual_columns_from_sql() {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}],
-            "aggregations": [{"function": "count", "target": "f", "alias": "total"}],
+            "aggregations": [{"count": "f", "as": "total"}],
             "limit": 5
         }"#,
     );

@@ -419,7 +419,7 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "cursor": {"page_size": 2}
     }"#;
 
@@ -454,7 +454,7 @@ pub(super) async fn cursor_aggregation_pages_cover_all_groups(ctx: &TestContext)
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "cursor": {"page_size": 2}
     }"#;
 
@@ -884,7 +884,7 @@ pub(super) async fn cursor_aggregation_multi_hop_desc_seek_covers_all_groups(ctx
             {"type": "CONTAINS", "from": "g", "to": "p"}
         ],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+        "aggregations": [{"count": "p", "as": "project_count"}],
         "aggregation_sort": "-project_count",
         "cursor": {"page_size": 2}
     }"#;
