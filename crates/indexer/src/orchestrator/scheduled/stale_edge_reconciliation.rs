@@ -20,8 +20,8 @@ struct ReconciliationGroup {
     emitting_node: String,
     emitting_node_table: String,
     edge_table: String,
-    /// Edge endpoint holding the owner's id; also picks the `*_kind` column that
-    /// pins the owner's node type. `gl_edge` is shared, so without that pin the
+    /// Also picks the `*_kind` column pinning the node type: `gl_edge` is
+    /// shared, so without that pin the
     /// join would match unrelated node types that share the integer id space.
     emitting_node_id_column: &'static str,
     emitting_node_kind_column: &'static str,
@@ -336,18 +336,20 @@ mod tests {
 
     fn find<'a>(
         groups: &'a [ReconciliationGroup],
-        owner: &str,
+        emitting_node: &str,
         edge_table_suffix: &str,
         endpoint: &str,
     ) -> &'a ReconciliationGroup {
         groups
             .iter()
             .find(|g| {
-                g.emitting_node == owner
+                g.emitting_node == emitting_node
                     && g.edge_table.ends_with(edge_table_suffix)
                     && g.emitting_node_id_column == endpoint
             })
-            .unwrap_or_else(|| panic!("expected group {owner}/*{edge_table_suffix}/{endpoint}"))
+            .unwrap_or_else(|| {
+                panic!("expected group {emitting_node}/*{edge_table_suffix}/{endpoint}")
+            })
     }
 
     fn fixture() -> ReconciliationGroup {
@@ -363,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn outgoing_edge_owner_is_source() {
+    fn outgoing_edge_is_emitted_from_source_endpoint() {
         let groups = groups();
         let diff = find(&groups, "MergeRequest", "gl_diff_edge", "source_id");
         assert_eq!(diff.emitting_node_kind_column, "source_kind");
@@ -374,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn incoming_edge_owner_is_target() {
+    fn incoming_edge_is_emitted_from_target_endpoint() {
         let groups = groups();
         let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
         assert_eq!(incoming.emitting_node_kind_column, "target_kind");
@@ -386,12 +388,12 @@ mod tests {
     }
 
     #[test]
-    fn kinds_sharing_owner_and_table_collapse_into_one_group() {
+    fn kinds_sharing_emitting_node_and_table_collapse_into_one_group() {
         let groups = groups();
         let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
         assert!(
             incoming.relationship_kinds.len() > 1,
-            "UPDATED_BY and LAST_EDITED_BY share an owner, table and endpoint so they \
+            "UPDATED_BY and LAST_EDITED_BY share an emitting node, table and endpoint so they \
              must batch into one statement: {incoming:?}",
         );
     }
@@ -419,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn polymorphic_endpoint_has_no_owner_row_to_compare() {
+    fn polymorphic_endpoint_has_no_emitting_node_row_to_compare() {
         let polymorphic = EdgeMapping {
             source: NodeRef {
                 field: "noteable_id".to_string(),
@@ -456,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn sql_pins_owner_kind_and_batches_every_relationship_kind() {
+    fn sql_pins_emitting_node_kind_and_batches_every_relationship_kind() {
         let sql = build_tombstone_statement(&fixture(), &[]);
 
         assert!(sql.contains("INSERT INTO v57_gl_ci_edge"), "{sql}");
@@ -471,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn staleness_compares_versions_and_stamps_from_the_owner() {
+    fn staleness_compares_versions_and_stamps_from_the_emitting_node() {
         let sql = build_tombstone_statement(&fixture(), &[]);
 
         assert!(sql.contains("edge._version < emitter._version"), "{sql}");
