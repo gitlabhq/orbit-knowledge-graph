@@ -566,7 +566,7 @@ fn multi_hop_aggregation() {
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 2]}],
-        "group_by": [{"kind": "node", "node": "u"}],
+        "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
         "limit": 10
     }"#;
