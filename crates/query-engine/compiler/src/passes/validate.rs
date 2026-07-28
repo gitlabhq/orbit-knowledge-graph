@@ -60,8 +60,10 @@ pub(crate) fn group_by_key_regex() -> &'static regex::Regex {
     GROUP_BY_KEY_REGEX.get_or_init(|| {
         let schema: serde_json::Value =
             serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        let pattern = schema["$defs"]["GroupByKey"]["oneOf"][0]["pattern"]
-            .as_str()
+        let pattern = schema["$defs"]["GroupByKey"]["oneOf"]
+            .as_array()
+            .and_then(|branches| branches.iter().find(|b| b["type"] == "string"))
+            .and_then(|branch| branch["pattern"].as_str())
             .expect("schema.json must define a GroupByKey string pattern");
         regex::Regex::new(pattern).expect("GroupByKey pattern must be a valid regex")
     })
