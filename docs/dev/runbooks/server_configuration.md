@@ -463,7 +463,7 @@ GKG_NATS__AUTO_CREATE_STREAMS=true        # Auto-create on startup
 
 ## Helm chart configuration
 
-In production, GKG is deployed via the [`gkg-helm-charts`](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables.
+In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables.
 
 ### Key Helm values mapping
 
@@ -482,7 +482,7 @@ In production, GKG is deployed via the [`gkg-helm-charts`](https://gitlab.com/gi
 ### Overriding configuration via Helm
 
 ```shell
-helm upgrade gkg gkg-helm-charts/gkg \
+helm upgrade gkg orbit-helm-charts/gkg \
   --set nats.consumerName=gkg-indexer \
   --set clickhouse.graph.database=gkg-production
 ```
@@ -490,7 +490,7 @@ helm upgrade gkg gkg-helm-charts/gkg \
 For complex overrides, use a values file:
 
 ```shell
-helm upgrade gkg gkg-helm-charts/gkg -f custom-values.yaml
+helm upgrade gkg orbit-helm-charts/gkg -f custom-values.yaml
 ```
 
 ## Troubleshooting with kubectl

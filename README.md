@@ -9,7 +9,7 @@
 
 [![pipeline status](https://gitlab.com/gitlab-org/orbit/knowledge-graph/badges/main/pipeline.svg)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/pipelines)
 [![latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/badges/release.svg)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)
-[![Helm chart](https://img.shields.io/badge/helm-gkg--helm--charts-blue)](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts)
+[![Helm chart](https://img.shields.io/badge/helm-orbit--helm--charts-blue)](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts)
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 [![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
@@ -203,7 +203,7 @@ The product name is Orbit. The binary and config still use the engineering name 
 | Repository | Role |
 |---|---|
 | [`orbit/knowledge-graph`](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | This repo. Server, indexer, CLI. |
-| [`orbit/gkg-helm-charts`](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Official Helm chart. |
+| [`orbit/orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) | Official Helm chart. |
 | [`orbit/gkg-e2e-harness`](https://gitlab.com/gitlab-org/orbit/gkg-e2e-harness) | GKE bootstrap for end-to-end tests. |
 | [`orbit/documentation/orbit-artifacts`](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and session notes. |
 | [`analytics-section/siphon`](https://gitlab.com/gitlab-org/analytics-section/siphon) | External CDC pipeline that feeds the datalake. |

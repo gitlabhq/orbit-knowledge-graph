@@ -57,7 +57,7 @@ The service handles untrusted input at multiple boundaries (user queries, CDC ev
 
 ### Single binary deployment
 
-`gkg-server` runs in four modes via a `--mode` flag: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`. All modes share configuration and startup logic. The Helm chart (`gkg-helm-charts` v1.0.0) deploys the same container image for every workload type, differing only in the mode argument and resource limits.
+`gkg-server` runs in four modes via a `--mode` flag: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`. All modes share configuration and startup logic. The Helm chart (`orbit-helm-charts` v1.0.0) deploys the same container image for every workload type, differing only in the mode argument and resource limits.
 
 Rust compiles to a statically linked binary with no runtime dependencies. The container image is scratch-based: just the binary, TLS certificates, and ontology fixtures. No interpreter, no VM, no shared library chain. This simplifies self-managed and Dedicated deployments where we do not control the host OS.
 
@@ -163,7 +163,7 @@ The PREP (Production Readiness) review (MR !64) will evaluate Rust-specific oper
 
 - [Knowledge Graph repository](https://gitlab.com/gitlab-org/orbit/knowledge-graph) - 16-crate Cargo workspace
 - [Build images repository](https://gitlab.com/gitlab-org/rust/build-images) - shared Rust CI builder images (GKG uses `orbit-knowledge-graph`) with sccache
-- [GKG Helm charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) - production Helm chart (v1.0.0)
+- [GKG Helm charts](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) - production Helm chart (v1.0.0)
 - [ADR 001: gRPC communication protocol](001_grpc_communication.md)
 - [ADR 003: API Design — Unified REST + GraphQL](003_api_design.md)
 - [Design documents](../README.md) - architecture overview

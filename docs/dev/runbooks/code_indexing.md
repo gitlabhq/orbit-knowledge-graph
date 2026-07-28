@@ -321,7 +321,7 @@ Fix via Helm values or environment variable:
 
 ```shell
 # Helm
-helm upgrade gkg gkg-helm-charts/gkg \
+helm upgrade gkg orbit-helm-charts/gkg \
   --set dispatcher.extraEnv.GKG_SCHEDULE__TASKS__CODE_INDEXING_TASK__EVENTS_STREAM_NAME=stg_siphon_event_stream
 
 # Or in values.yaml under schedule.tasks.code_indexing_task.events_stream_name
