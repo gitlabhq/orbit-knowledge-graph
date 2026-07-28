@@ -163,7 +163,7 @@ The PREP (Production Readiness) review (MR !64) will evaluate Rust-specific oper
 
 - [Knowledge Graph repository](https://gitlab.com/gitlab-org/orbit/knowledge-graph) - 16-crate Cargo workspace
 - [Build images repository](https://gitlab.com/gitlab-org/rust/build-images) - shared Rust CI builder images (GKG uses `orbit-knowledge-graph`) with sccache
-- [GKG Helm charts](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) - production Helm chart (v1.0.0)
+- [Orbit Helm charts](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) - production Helm chart (v1.0.0)
 - [ADR 001: gRPC communication protocol](001_grpc_communication.md)
 - [ADR 003: API Design — Unified REST + GraphQL](003_api_design.md)
 - [Design documents](../README.md) - architecture overview
