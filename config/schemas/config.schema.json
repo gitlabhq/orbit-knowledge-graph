@@ -271,7 +271,12 @@
           },
           "table-cleanup": {
             "cron": "0 0 3 * * *",
-            "delete_timeout_secs": 3600
+            "lookback_secs": 604800,
+            "max_backlog_secs": 2592000,
+            "max_memory_bytes": 8000000000,
+            "statement_timeout_secs": 5400,
+            "verify_poll_interval_secs": 5,
+            "window_secs": 604800
           }
         }
       }
@@ -1555,7 +1560,12 @@
             },
             "table-cleanup": {
               "cron": "0 0 3 * * *",
-              "delete_timeout_secs": 3600
+              "lookback_secs": 604800,
+              "max_backlog_secs": 2592000,
+              "max_memory_bytes": 8000000000,
+              "statement_timeout_secs": 5400,
+              "verify_poll_interval_secs": 5,
+              "window_secs": 604800
             }
           }
         }
@@ -1615,7 +1625,12 @@
           "$ref": "#/$defs/TableCleanupConfig",
           "default": {
             "cron": "0 0 3 * * *",
-            "delete_timeout_secs": 3600
+            "lookback_secs": 604800,
+            "max_backlog_secs": 2592000,
+            "max_memory_bytes": 8000000000,
+            "statement_timeout_secs": 5400,
+            "verify_poll_interval_secs": 5,
+            "window_secs": 604800
           }
         }
       },
@@ -1751,10 +1766,40 @@
           ],
           "default": null
         },
-        "delete_timeout_secs": {
+        "lookback_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 3600,
+          "default": 604800,
+          "minimum": 0
+        },
+        "max_backlog_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 2592000,
+          "minimum": 0
+        },
+        "max_memory_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 8000000000,
+          "minimum": 0
+        },
+        "statement_timeout_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 5400,
+          "minimum": 0
+        },
+        "verify_poll_interval_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 5,
+          "minimum": 0
+        },
+        "window_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 604800,
           "minimum": 0
         }
       }

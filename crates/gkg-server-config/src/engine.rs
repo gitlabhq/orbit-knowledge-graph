@@ -572,12 +572,42 @@ impl Default for CodeBackfillSweepConfig {
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_table_cleanup_delete_timeout_secs")]
-    pub delete_timeout_secs: u64,
+    #[serde(default = "default_sweep_statement_timeout_secs")]
+    pub statement_timeout_secs: u64,
+    #[serde(default = "default_sweep_max_memory_bytes")]
+    pub max_memory_bytes: u64,
+    #[serde(default = "default_sweep_lookback_secs")]
+    pub lookback_secs: u64,
+    #[serde(default = "default_sweep_window_secs")]
+    pub window_secs: u64,
+    #[serde(default = "default_sweep_verify_poll_interval_secs")]
+    pub verify_poll_interval_secs: u64,
+    #[serde(default = "default_sweep_max_backlog_secs")]
+    pub max_backlog_secs: u64,
 }
 
-fn default_table_cleanup_delete_timeout_secs() -> u64 {
-    3600
+fn default_sweep_lookback_secs() -> u64 {
+    604_800
+}
+
+fn default_sweep_window_secs() -> u64 {
+    604_800
+}
+
+fn default_sweep_verify_poll_interval_secs() -> u64 {
+    5
+}
+
+fn default_sweep_max_backlog_secs() -> u64 {
+    2_592_000
+}
+
+fn default_sweep_statement_timeout_secs() -> u64 {
+    5400
+}
+
+fn default_sweep_max_memory_bytes() -> u64 {
+    8_000_000_000
 }
 
 impl Default for TableCleanupConfig {
@@ -586,7 +616,12 @@ impl Default for TableCleanupConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 0 3 * * *".into()),
             },
-            delete_timeout_secs: default_table_cleanup_delete_timeout_secs(),
+            statement_timeout_secs: default_sweep_statement_timeout_secs(),
+            max_memory_bytes: default_sweep_max_memory_bytes(),
+            lookback_secs: default_sweep_lookback_secs(),
+            window_secs: default_sweep_window_secs(),
+            verify_poll_interval_secs: default_sweep_verify_poll_interval_secs(),
+            max_backlog_secs: default_sweep_max_backlog_secs(),
         }
     }
 }

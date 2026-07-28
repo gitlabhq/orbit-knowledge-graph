@@ -1,11 +1,12 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use clickhouse_client::FromArrowColumn;
-use ontology::constants::TRAVERSAL_PATH_COLUMN;
+use chrono::{DateTime, TimeDelta, Utc};
 use tracing::{info, warn};
+
+use gkg_utils::arrow::ArrowUtils;
 
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
@@ -14,27 +15,17 @@ use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskEr
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
-const CHECKPOINT_KEY_PREFIX: &str = "maintenance.table_cleanup";
-const NAMESPACE_ROOT_EXPRESSION: &str = "arrayStringConcat(arraySlice(arrayFilter(part -> part != \'\', splitByChar(\'/\', traversal_path)), 1, 2), \'/\') || \'/\'";
-const NAMESPACE_ROOT_PREDICATE: &str = "startsWith(traversal_path, {root:String})";
+const TASK_NAME: &str = "maintenance.table_cleanup";
+const KEYS_TABLE: &str = "tombstone_sweep_keys";
 
 struct ReplacingMergeTreeTable {
     name: String,
     sort_key: Vec<String>,
 }
 
-impl ReplacingMergeTreeTable {
-    fn can_scope_by_namespace_root(&self) -> bool {
-        self.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
-    }
-
-    fn namespace_root_expression(&self) -> &'static str {
-        if self.can_scope_by_namespace_root() {
-            NAMESPACE_ROOT_EXPRESSION
-        } else {
-            "\'\'"
-        }
-    }
+struct VersionWindow {
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
 }
 
 pub struct TableCleanup {
@@ -66,7 +57,7 @@ impl TableCleanup {
 #[async_trait]
 impl ScheduledTask for TableCleanup {
     fn name(&self) -> &str {
-        CHECKPOINT_KEY_PREFIX
+        TASK_NAME
     }
 
     fn schedule(&self) -> &ScheduleConfiguration {
@@ -75,7 +66,7 @@ impl ScheduledTask for TableCleanup {
 
     async fn run(&self) -> Result<(), TaskError> {
         let started = Instant::now();
-        let result = self.apply_tombstones_to_all_tables().await;
+        let result = self.sweep_tombstones_from_all_tables().await;
         let outcome = if result.is_ok() { "success" } else { "error" };
         self.metrics
             .record_run(self.name(), outcome, started.elapsed().as_secs_f64());
@@ -84,105 +75,93 @@ impl ScheduledTask for TableCleanup {
 }
 
 impl TableCleanup {
-    async fn apply_tombstones_to_all_tables(&self) -> Result<(), TaskError> {
+    async fn sweep_tombstones_from_all_tables(&self) -> Result<(), TaskError> {
         let mut failed = 0u64;
-        let mut scopes_swept = 0u64;
 
         for table in &self.tables {
             let started = Instant::now();
-            match self.apply_tombstones_to_table(table).await {
-                Ok(scopes) => {
-                    scopes_swept += scopes;
+            match self.sweep_tombstones_from_table(table).await {
+                Ok(()) => {
                     let elapsed = started.elapsed().as_secs_f64();
                     self.metrics.record_query_duration(&table.name, elapsed);
                     info!(
                         table = table.name,
-                        scopes,
                         duration_ms = (elapsed * 1000.0) as u64,
-                        "applied pending tombstones"
+                        "swept tombstoned keys"
                     );
                 }
                 Err(error) => {
                     failed += 1;
-                    self.metrics.record_error(self.name(), "apply_tombstones");
-                    warn!(table = table.name, %error, "failed to apply pending tombstones");
+                    self.metrics.record_error(self.name(), "sweep_tombstones");
+                    warn!(table = table.name, %error, "failed to sweep tombstoned keys");
                 }
+            }
+            if let Err(error) = self.drop_keys_table().await {
+                warn!(table = table.name, %error, "failed to drop the keys table");
             }
         }
 
         let tables = self.tables.len();
-        info!(tables, failed, scopes_swept, "table cleanup complete");
+        info!(tables, failed, "tombstone sweep complete");
 
         if failed > 0 {
             return Err(TaskError::new(format!(
-                "{failed}/{tables} tables failed to apply tombstones"
+                "{failed}/{tables} tables failed to sweep"
             )));
         }
         Ok(())
     }
 
-    async fn apply_tombstones_to_table(
+    async fn sweep_tombstones_from_table(
         &self,
         table: &ReplacingMergeTreeTable,
-    ) -> Result<u64, TaskError> {
-        let watermark = Utc::now();
-        let cursor = self.load_cursor(&table.name).await?;
-        let roots = self
-            .list_namespace_roots_with_new_tombstones(table, cursor)
-            .await?;
-
-        for root in &roots {
-            self.delete_tombstoned_keys(table, root.as_deref()).await?;
-        }
-
-        self.save_cursor(&table.name, &watermark).await?;
-        Ok(roots.len() as u64)
-    }
-
-    async fn list_namespace_roots_with_new_tombstones(
-        &self,
-        table: &ReplacingMergeTreeTable,
-        cursor: DateTime<Utc>,
-    ) -> Result<Vec<Option<String>>, TaskError> {
-        let batches = self
-            .graph
-            .query(&build_namespace_roots_with_new_tombstones_sql(table))
-            .param("cursor", cursor.format(TIMESTAMP_FORMAT).to_string())
-            .fetch_arrow()
-            .await
-            .map_err(TaskError::new)?;
-        Ok(String::extract_column(&batches, 0)
-            .map_err(TaskError::new)?
-            .into_iter()
-            .map(|root| Some(root).filter(|root| !root.is_empty()))
-            .collect())
-    }
-
-    async fn delete_tombstoned_keys(
-        &self,
-        table: &ReplacingMergeTreeTable,
-        namespace_root: Option<&str>,
     ) -> Result<(), TaskError> {
+        let window = self.next_window(&table.name).await?;
+
+        self.drop_keys_table().await?;
         self.graph
-            .query(&build_delete_tombstoned_keys_sql(
-                table,
-                namespace_root,
-                self.config.delete_timeout_secs,
-            ))
-            .param("root", namespace_root.unwrap_or_default().to_string())
+            .query(&build_tombstoned_keys_table_sql(table, &self.config))
+            .param(
+                "window_start",
+                window.start.format(TIMESTAMP_FORMAT).to_string(),
+            )
+            .param(
+                "window_end",
+                window.end.format(TIMESTAMP_FORMAT).to_string(),
+            )
             .execute()
             .await
-            .map_err(TaskError::new)
+            .map_err(TaskError::new)?;
+        self.graph
+            .query(&build_delete_tombstoned_keys_sql(table, &self.config))
+            .execute()
+            .await
+            .map_err(TaskError::new)?;
+        self.wait_until_tombstoned_keys_are_gone(table).await?;
+
+        self.save_cursor(&table.name, &window.end).await
     }
 
-    async fn load_cursor(&self, table: &str) -> Result<DateTime<Utc>, TaskError> {
-        Ok(self
+    /// The window always ends at now so a run applies the newest tombstones, and
+    /// always spans at least `window_secs` so a first run with no checkpoint is
+    /// still useful. A missed run widens it back to the last checkpoint, capped
+    /// at `max_backlog_secs` to keep any single run bounded.
+    async fn next_window(&self, table: &str) -> Result<VersionWindow, TaskError> {
+        let completed = self
             .checkpoint_store
             .load(&checkpoint_key_for_table(table))
             .await
             .map_err(TaskError::new)?
-            .map(|checkpoint| checkpoint.watermark)
-            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH))
+            .map(|checkpoint| checkpoint.watermark);
+        let end = Utc::now();
+        let ago = |secs: u64| end - TimeDelta::seconds(secs as i64);
+        let resume = completed
+            .map(|watermark| watermark - TimeDelta::seconds(self.config.lookback_secs as i64))
+            .unwrap_or_else(|| ago(self.config.window_secs));
+        let start = resume
+            .min(ago(self.config.window_secs))
+            .max(ago(self.config.max_backlog_secs));
+        Ok(VersionWindow { start, end })
     }
 
     async fn save_cursor(&self, table: &str, watermark: &DateTime<Utc>) -> Result<(), TaskError> {
@@ -195,42 +174,104 @@ impl TableCleanup {
             .await
             .map_err(TaskError::new)
     }
+
+    /// `lightweight_deletes_sync = 1` returns before the mutation is guaranteed
+    /// applied, and `system.mutations` is not readable by the graph user, so
+    /// completion is confirmed against the data itself.
+    async fn wait_until_tombstoned_keys_are_gone(
+        &self,
+        table: &ReplacingMergeTreeTable,
+    ) -> Result<(), TaskError> {
+        let deadline = Instant::now() + Duration::from_secs(self.config.statement_timeout_secs);
+        loop {
+            if self.count_remaining_tombstoned_rows(table).await? == 0 {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(TaskError::new(format!(
+                    "delete on {} left rows behind after {}s",
+                    table.name, self.config.statement_timeout_secs
+                )));
+            }
+            tokio::time::sleep(Duration::from_secs(self.config.verify_poll_interval_secs)).await;
+        }
+    }
+
+    async fn count_remaining_tombstoned_rows(
+        &self,
+        table: &ReplacingMergeTreeTable,
+    ) -> Result<u64, TaskError> {
+        let batches = self
+            .graph
+            .query(&build_count_remaining_tombstoned_rows_sql(
+                table,
+                &self.config,
+            ))
+            .fetch_arrow()
+            .await
+            .map_err(TaskError::new)?;
+        Ok(batches
+            .first()
+            .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, "remaining", 0))
+            .unwrap_or(0))
+    }
+
+    async fn drop_keys_table(&self) -> Result<(), TaskError> {
+        self.graph
+            .query(&format!("DROP TABLE IF EXISTS {KEYS_TABLE}"))
+            .execute()
+            .await
+            .map_err(TaskError::new)
+    }
 }
 
-fn checkpoint_key_for_table(table: &str) -> String {
-    format!("{CHECKPOINT_KEY_PREFIX}.{table}")
-}
-
-fn build_namespace_roots_with_new_tombstones_sql(table: &ReplacingMergeTreeTable) -> String {
+fn build_tombstoned_keys_table_sql(
+    table: &ReplacingMergeTreeTable,
+    config: &TableCleanupConfig,
+) -> String {
+    let keys = table.sort_key.join(", ");
+    let source = &table.name;
     format!(
-        "SELECT DISTINCT {} AS root FROM {} WHERE _deleted AND _version > {{cursor:String}}",
-        table.namespace_root_expression(),
-        table.name
+        "CREATE TABLE {KEYS_TABLE} ENGINE = MergeTree ORDER BY ({keys}) \
+         AS SELECT {keys} FROM ( \
+           SELECT {keys}, _deleted FROM {source} \
+           WHERE _version > {{window_start:String}} AND _version <= {{window_end:String}} \
+           ORDER BY {keys}, _version DESC \
+           LIMIT 1 BY {keys} \
+         ) WHERE _deleted \
+         SETTINGS max_memory_usage = {}, max_bytes_before_external_sort = {}, \
+                  optimize_read_in_order = 1, max_execution_time = {}",
+        config.max_memory_bytes,
+        config.max_memory_bytes / 4,
+        config.statement_timeout_secs
     )
 }
 
 fn build_delete_tombstoned_keys_sql(
     table: &ReplacingMergeTreeTable,
-    namespace_root: Option<&str>,
-    delete_timeout_secs: u64,
+    config: &TableCleanupConfig,
 ) -> String {
     let keys = table.sort_key.join(", ");
-    let name = &table.name;
-    let scope = if namespace_root.is_some() {
-        NAMESPACE_ROOT_PREDICATE
-    } else {
-        "1 = 1"
-    };
     format!(
-        "DELETE FROM {name} WHERE {scope} AND ({keys}) IN ( \
-           SELECT {keys} FROM ( \
-             SELECT {keys}, _deleted FROM {name} \
-             WHERE {scope} \
-             ORDER BY {keys}, _version DESC \
-             LIMIT 1 BY {keys} \
-           ) WHERE _deleted \
-         ) \
-         SETTINGS lightweight_deletes_sync = 2, max_execution_time = {delete_timeout_secs}"
+        "DELETE FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {KEYS_TABLE}) \
+         SETTINGS lightweight_deletes_sync = 1, max_execution_time = {}",
+        table.name, config.statement_timeout_secs
+    )
+}
+
+fn checkpoint_key_for_table(table: &str) -> String {
+    format!("{TASK_NAME}.{table}")
+}
+
+fn build_count_remaining_tombstoned_rows_sql(
+    table: &ReplacingMergeTreeTable,
+    config: &TableCleanupConfig,
+) -> String {
+    let keys = table.sort_key.join(", ");
+    format!(
+        "SELECT count() AS remaining FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {KEYS_TABLE}) \
+         SETTINGS max_execution_time = {}",
+        table.name, config.statement_timeout_secs
     )
 }
 
@@ -252,7 +293,7 @@ fn list_replacing_merge_tree_tables(ontology: &ontology::Ontology) -> Vec<Replac
 mod tests {
     use super::*;
 
-    fn all_replacing_merge_tree_tables() -> Vec<ReplacingMergeTreeTable> {
+    fn all_tables() -> Vec<ReplacingMergeTreeTable> {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         list_replacing_merge_tree_tables(&ontology)
     }
@@ -269,23 +310,19 @@ mod tests {
 
     #[test]
     fn every_table_has_a_sort_key() {
-        for table in &all_replacing_merge_tree_tables() {
-            assert!(
-                !table.sort_key.is_empty(),
-                "table '{}' has no sort key, so its rows have no dedup identity",
-                table.name
-            );
+        for table in &all_tables() {
+            assert!(!table.sort_key.is_empty(), "table '{}'", table.name);
         }
     }
 
     #[test]
     fn auxiliary_tables_are_not_swept() {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        let tables = all_replacing_merge_tree_tables();
-
         for aux in ontology.auxiliary_tables() {
             assert!(
-                !tables.iter().any(|table| table.name.ends_with(&aux.name)),
+                !all_tables()
+                    .iter()
+                    .any(|table| table.name.ends_with(&aux.name)),
                 "auxiliary table '{}' must not be swept",
                 aux.name
             );
@@ -293,22 +330,65 @@ mod tests {
     }
 
     #[test]
-    fn every_table_carries_the_schema_version_prefix() {
-        let prefix = format!("v{}_", *SCHEMA_VERSION);
-        for table in &all_replacing_merge_tree_tables() {
-            assert!(
-                table.name.starts_with(&prefix),
-                "table '{}' is missing the schema version prefix",
-                table.name
-            );
-        }
+    fn keys_table_name_avoids_the_schema_version_prefix() {
+        assert!(!KEYS_TABLE.starts_with('v'));
+        assert!(
+            !KEYS_TABLE.contains(&format!("v{}_", *SCHEMA_VERSION)),
+            "schema garbage collection globs v<version>_* and would drop the keys table"
+        );
     }
 
     #[test]
-    fn delete_considers_only_the_newest_version_of_each_key() {
-        let tables = all_replacing_merge_tree_tables();
-        let table = find_table_ending_in(&tables, "gl_edge");
-        let sql = build_delete_tombstoned_keys_sql(table, Some("1/9/"), 60);
+    fn a_lookback_window_absorbs_late_arriving_tombstones() {
+        let config = TableCleanupConfig::default();
+        assert!(
+            config.lookback_secs >= 86400,
+            "_version is a source watermark, so the window must outlast replication delay"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_first_run_sweeps_the_recent_past_not_1970() {
+        let config = TableCleanupConfig::default();
+        let end = Utc::now();
+        let earliest = end - TimeDelta::seconds(config.max_backlog_secs as i64);
+        let standard = end - TimeDelta::seconds(config.window_secs as i64);
+
+        assert!(
+            standard > earliest,
+            "the standard window must sit inside the backlog cap so a first run covers recent time"
+        );
+        assert!(
+            earliest > DateTime::<Utc>::UNIX_EPOCH,
+            "a window anchored at the epoch would take thousands of runs to reach the present"
+        );
+    }
+
+    #[test]
+    fn keys_are_bounded_to_one_version_window() {
+        let tables = all_tables();
+        let sql = build_tombstoned_keys_table_sql(
+            find_table_ending_in(&tables, "gl_edge"),
+            &TableCleanupConfig::default(),
+        );
+
+        assert!(
+            sql.contains("_version > {window_start:String}"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("_version <= {window_end:String}"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn keys_are_the_newest_version_of_each_sort_key() {
+        let tables = all_tables();
+        let sql = build_tombstoned_keys_table_sql(
+            find_table_ending_in(&tables, "gl_edge"),
+            &TableCleanupConfig::default(),
+        );
 
         assert!(sql.contains("LIMIT 1 BY"), "sql: {sql}");
         assert!(sql.contains("_version DESC"), "sql: {sql}");
@@ -316,48 +396,40 @@ mod tests {
     }
 
     #[test]
-    fn delete_waits_for_the_mutation_instead_of_polling_system_mutations() {
-        let tables = all_replacing_merge_tree_tables();
-        let sql =
-            build_delete_tombstoned_keys_sql(find_table_ending_in(&tables, "gl_edge"), None, 900);
+    fn delete_reads_keys_from_the_materialised_table_not_the_source() {
+        let tables = all_tables();
+        let table = find_table_ending_in(&tables, "gl_edge");
+        let sql = build_delete_tombstoned_keys_sql(table, &TableCleanupConfig::default());
 
-        assert!(sql.contains("lightweight_deletes_sync = 2"), "sql: {sql}");
-        assert!(sql.contains("max_execution_time = 900"), "sql: {sql}");
-        assert!(!sql.contains("system.mutations"), "sql: {sql}");
-    }
-
-    #[test]
-    fn namespace_scoped_delete_prunes_both_the_outer_and_inner_scan() {
-        let tables = all_replacing_merge_tree_tables();
-        let sql = build_delete_tombstoned_keys_sql(
-            find_table_ending_in(&tables, "gl_edge"),
-            Some("1/9970/"),
-            60,
-        );
-
-        assert_eq!(
-            sql.matches("startsWith(traversal_path, {root:String})")
-                .count(),
-            2,
+        assert!(
+            sql.contains(&format!(
+                "IN (SELECT {} FROM {KEYS_TABLE})",
+                table.sort_key.join(", ")
+            )),
             "sql: {sql}"
         );
     }
 
     #[test]
-    fn global_tables_are_swept_without_a_path_predicate() {
-        let tables = all_replacing_merge_tree_tables();
-        let user = find_table_ending_in(&tables, "gl_user");
-        assert!(!user.can_scope_by_namespace_root());
+    fn completion_is_confirmed_against_the_data_not_system_mutations() {
+        let tables = all_tables();
+        let table = find_table_ending_in(&tables, "gl_edge");
+        let sql = build_count_remaining_tombstoned_rows_sql(table, &TableCleanupConfig::default());
 
-        let sql = build_delete_tombstoned_keys_sql(user, None, 60);
-        assert!(!sql.contains("traversal_path"), "sql: {sql}");
+        assert!(sql.contains("count() AS remaining"), "sql: {sql}");
+        assert!(sql.contains(KEYS_TABLE), "sql: {sql}");
+        assert!(!sql.contains("system.mutations"), "sql: {sql}");
     }
 
     #[test]
-    fn checkpoint_key_is_scoped_per_table() {
-        assert_eq!(
-            checkpoint_key_for_table("v85_gl_edge"),
-            "maintenance.table_cleanup.v85_gl_edge"
+    fn delete_waits_synchronously_instead_of_reading_system_mutations() {
+        let tables = all_tables();
+        let sql = build_delete_tombstoned_keys_sql(
+            find_table_ending_in(&tables, "gl_edge"),
+            &TableCleanupConfig::default(),
         );
+
+        assert!(sql.contains("lightweight_deletes_sync = 1"), "sql: {sql}");
+        assert!(!sql.contains("system.mutations"), "sql: {sql}");
     }
 }
