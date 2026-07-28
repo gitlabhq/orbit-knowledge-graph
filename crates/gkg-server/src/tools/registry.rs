@@ -4,6 +4,7 @@ use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::prompts;
 use super::schema::condensed_query_schema;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,22 +15,10 @@ pub struct ToolDefinition {
 }
 
 pub(super) const COMMAND_SUMMARIES: [(&str, &str); 4] = [
-    (
-        "query_graph",
-        "Execute permission-aware graph queries over GitLab SDLC and code entities.",
-    ),
-    (
-        "get_graph_schema",
-        "Return graph nodes, edges, and expanded node properties.",
-    ),
-    (
-        "get_query_dsl",
-        "Return the query_graph JSON DSL grammar and version.",
-    ),
-    (
-        "get_response_format",
-        "Return the query_graph response JSON Schema and version.",
-    ),
+    ("query_graph", prompts::query_graph::SUMMARY),
+    ("get_graph_schema", prompts::get_graph_schema::SUMMARY),
+    ("get_query_dsl", prompts::get_query_dsl::SUMMARY),
+    ("get_response_format", prompts::get_response_format::SUMMARY),
 ];
 
 pub(super) fn list_commands_description() -> String {
@@ -40,9 +29,8 @@ pub(super) fn list_commands_description() -> String {
         .join("\n");
 
     format!(
-        "List Orbit Knowledge Graph commands with descriptions and input schemas. \
-         Use this before invoke_command to discover available command details.\n\n\
-         Available commands:\n{commands}"
+        "{}\n\nAvailable commands:\n{commands}",
+        prompts::list_commands::DESCRIPTION
     )
 }
 
@@ -123,11 +111,7 @@ impl ToolRegistry {
     pub(super) fn query_graph() -> ToolDefinition {
         // Inline TOON kept for back-compat (one release cycle); a follow-up
         // strips it once `get_query_dsl` adoption is verified.
-        let base_description = "Execute graph queries. \
-                                The DSL below is STRUCTURE ONLY — you MUST call \
-                                get_graph_schema (with expand_nodes) to discover valid \
-                                node/property/edge names. Use get_query_dsl for the \
-                                full grammar reference.";
+        let base_description = prompts::query_graph::DESCRIPTION;
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
@@ -152,11 +136,7 @@ impl ToolRegistry {
     pub(super) fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
-                          and edges with their source/target types. Pass expand_nodes (or its \
-                          alias entity_types) with specific type names to get their filterable \
-                          properties and types before composing a query_graph call."
-                .into(),
+            description: prompts::get_graph_schema::DESCRIPTION.into(),
             parameters: params::get_graph_schema_parameters(),
         }
     }
@@ -179,10 +159,7 @@ impl ToolRegistry {
     fn invoke_command() -> ToolDefinition {
         ToolDefinition {
             name: "invoke_command".into(),
-            description: "Execute an Orbit command. This is a wrapper tool: keep only command_name \
-                          and parameters at the top level, and put downstream command inputs inside \
-                          parameters."
-                .into(),
+            description: prompts::invoke_command::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "required": ["command_name"],
@@ -214,9 +191,7 @@ impl CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: "Return the query_graph JSON DSL grammar and version. Use this before \
-                          composing query_graph parameters."
-                .into(),
+            description: prompts::get_query_dsl::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -230,7 +205,7 @@ impl CommandRegistry {
     fn get_response_format() -> ToolDefinition {
         ToolDefinition {
             name: "get_response_format".into(),
-            description: "Return the JSON Schema and version for query_graph responses.".into(),
+            description: prompts::get_response_format::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

@@ -1,0 +1,5 @@
+name: get_response_format
+version: 1.0.0
+summary: Return the query_graph response JSON Schema and version.
+description: >-
+  Return the JSON Schema and version for query_graph responses.

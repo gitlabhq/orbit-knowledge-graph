@@ -3,6 +3,7 @@ use std::sync::Arc;
 use ontology::Ontology;
 use serde_json::json;
 
+use super::prompts;
 use super::registry::{ToolDefinition, ToolRegistry, list_commands_description, params};
 
 pub struct V2ToolRegistry;
@@ -35,10 +36,7 @@ impl V2ToolRegistry {
     fn invoke_command() -> ToolDefinition {
         ToolDefinition {
             name: "invoke_command".into(),
-            description: "Execute an Orbit command. This is a wrapper tool: keep only command_name \
-                          and parameters at the top level, and put downstream command inputs inside \
-                          parameters."
-                .into(),
+            description: prompts::invoke_command::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "required": ["command_name"],
@@ -70,10 +68,7 @@ impl V2CommandRegistry {
     fn query_graph() -> ToolDefinition {
         ToolDefinition {
             name: "query_graph".into(),
-            description: "Execute a graph query. Before composing a query, call get_query_dsl \
-                          for the DSL and get_graph_schema for the node and edge names relevant \
-                          to the user's question."
-                .into(),
+            description: prompts::query_graph_v2::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "required": ["query"],
@@ -89,10 +84,7 @@ impl V2CommandRegistry {
     fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: "Return the graph schema. Pass expand_nodes (or its alias entity_types) \
-                          with the node types relevant to the user's question to include their \
-                          properties and relationships."
-                .into(),
+            description: prompts::get_graph_schema_v2::DESCRIPTION.into(),
             parameters: params::get_graph_schema_parameters(),
         }
     }
@@ -100,9 +92,7 @@ impl V2CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: "Return the query_graph JSON DSL grammar and version. Use this before \
-                          composing query_graph parameters."
-                .into(),
+            description: prompts::get_query_dsl::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -116,7 +106,7 @@ impl V2CommandRegistry {
     fn get_response_format() -> ToolDefinition {
         ToolDefinition {
             name: "get_response_format".into(),
-            description: "Return the JSON Schema and version for query_graph responses.".into(),
+            description: prompts::get_response_format::DESCRIPTION.into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

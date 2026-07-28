@@ -22,6 +22,7 @@ members = [
   "crates/gkg-analytics",
   "crates/gkg-billing",
   "crates/gkg-observability",
+  "crates/gkg-prompts",
   "crates/gkg-server-config",
   "crates/gkg-server",
   "crates/ontology",

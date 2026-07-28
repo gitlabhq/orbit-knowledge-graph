@@ -1,3 +1,6 @@
+mod prompts {
+    include!(concat!(env!("OUT_DIR"), "/tool_prompts.rs"));
+}
 mod registry;
 mod schema;
 mod service;

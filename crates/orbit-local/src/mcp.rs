@@ -57,9 +57,9 @@ pub struct OrbitLocalServer {
 
 fn mcp_description(name: &str) -> &'static str {
     match name {
-        "run_sql" => descriptions::RUN_SQL_MCP,
-        "get_graph_schema" => descriptions::GET_SCHEMA_MCP,
-        "index" => descriptions::INDEX_MCP,
+        "run_sql" => descriptions::run_sql::DESCRIPTION,
+        "get_graph_schema" => descriptions::get_graph_schema::DESCRIPTION,
+        "index" => descriptions::index::DESCRIPTION,
         other => unreachable!("tool `{other}` has no entry in `descriptions`"),
     }
 }

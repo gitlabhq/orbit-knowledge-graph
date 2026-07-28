@@ -1,0 +1,6 @@
+name: invoke_command
+version: 1.0.0
+description: >-
+  Execute an Orbit command. This is a wrapper tool: keep only command_name and
+  parameters at the top level, and put downstream command inputs inside
+  parameters.

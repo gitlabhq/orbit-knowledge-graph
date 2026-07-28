@@ -23,6 +23,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
 | Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/gkg-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |
 | Named query JSON schema | `config/schemas/named_query.schema.json` (validate with `mise named-queries:validate`; CI gate `named-query-schema-validate`) |
+| Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; compiled into string constants by `crates/gkg-prompts` from the `gkg-server` and `orbit-local` build scripts) |
 | Query DSL version | `config/QUERY_DSL_VERSION` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |

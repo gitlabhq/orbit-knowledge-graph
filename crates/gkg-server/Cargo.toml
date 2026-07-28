@@ -61,6 +61,7 @@ toon-format = { workspace = true }
 
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }
+gkg-prompts = { path = "../gkg-prompts" }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
 tonic-prost-build = { workspace = true }

@@ -4,6 +4,8 @@ fn main() {
         println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,@loader_path/deps");
     }
 
+    generate_local_prompts();
+
     // Release jobs run on `vX.Y.Z` tags (.gitlab/ci/release-local.yml), so
     // CI_COMMIT_TAG is the authoritative release version. `git describe` is a
     // best-effort convenience for local/dev builds; the static Cargo.toml
@@ -37,4 +39,20 @@ fn main() {
     // Rebuild when HEAD or refs move so dev builds don't report a stale tag.
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/refs");
+}
+
+/// Compiles the versioned YAML prompts under `config/prompts/local/` into
+/// string constants (`OUT_DIR/local_prompts.rs`) for the CLI `--help` text
+/// and MCP tool descriptions.
+fn generate_local_prompts() {
+    let dir = std::path::PathBuf::from(env!("PROMPTS_DIR")).join("local");
+    println!("cargo:rerun-if-changed={}", dir.display());
+
+    let prompts = gkg_prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by cargo"));
+    std::fs::write(
+        out_dir.join("local_prompts.rs"),
+        gkg_prompts::render_modules(&prompts),
+    )
+    .expect("write generated local_prompts.rs");
 }

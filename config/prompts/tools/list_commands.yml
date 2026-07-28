@@ -1,0 +1,7 @@
+# Preamble only: the server appends "Available commands:" plus one line per
+# command summary at runtime.
+name: list_commands
+version: 1.0.0
+description: >-
+  List Orbit Knowledge Graph commands with descriptions and input schemas.
+  Use this before invoke_command to discover available command details.

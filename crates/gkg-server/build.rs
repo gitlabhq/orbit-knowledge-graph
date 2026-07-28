@@ -1,10 +1,27 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    generate_tool_prompts();
     validate_named_queries();
     validate_migration_ledger();
     validate_authored_etl_sql();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
+}
+
+/// Compiles the versioned YAML prompts under `config/prompts/tools/` into
+/// string constants (`OUT_DIR/tool_prompts.rs`), so tool descriptions ship
+/// from the prompt registry and a malformed prompt fails the build.
+fn generate_tool_prompts() {
+    let dir = std::path::PathBuf::from(env!("PROMPTS_DIR")).join("tools");
+    println!("cargo:rerun-if-changed={}", dir.display());
+
+    let prompts = gkg_prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by cargo"));
+    std::fs::write(
+        out_dir.join("tool_prompts.rs"),
+        gkg_prompts::render_modules(&prompts),
+    )
+    .expect("write generated tool_prompts.rs");
 }
 
 /// Fails the build on ontology/DDL drift from the fingerprint snapshot or a

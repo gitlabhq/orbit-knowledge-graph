@@ -1,0 +1,9 @@
+[package]
+name = "gkg-prompts"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
