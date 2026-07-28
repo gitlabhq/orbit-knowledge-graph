@@ -29,9 +29,8 @@
       "group_by": [{"key": "j.finished_at", "truncate": "month"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "failure_count"
+          "count": "j",
+          "as": "failure_count"
         }
       ],
       "aggregation_sort": "j_finished_at_month",
@@ -58,9 +57,8 @@
       "group_by": [{"key": "mr.merged_at", "truncate": "quarter"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_count"
+          "count": "mr",
+          "as": "merge_count"
         }
       ],
       "aggregation_sort": "mr_merged_at_quarter",
@@ -86,9 +84,8 @@
       "group_by": [{"key": "p.started_at", "truncate": "year"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "pipeline_count"
+          "count": "p",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "p_started_at_year",
@@ -114,9 +111,8 @@
       "group_by": [{"key": "j.finished_at", "truncate": "week"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "j_finished_at_week",
@@ -143,9 +139,8 @@
       "group_by": [{"key": "j.finished_at", "truncate": "day"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "failure_count"
+          "count": "j",
+          "as": "failure_count"
         }
       ],
       "aggregation_sort": "j_finished_at_day",
@@ -171,9 +166,8 @@
       "group_by": [{"key": "p.started_at", "truncate": "hour"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "pipeline_count"
+          "count": "p",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "p_started_at_hour",
@@ -197,9 +191,8 @@
       "group_by": [{"key": "j.finished_at", "truncate": "minute"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "j_finished_at_minute",
@@ -243,9 +236,8 @@
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_count"
+          "count": "mr",
+          "as": "merge_count"
         }
       ],
       "aggregation_sort": "-merge_count",
@@ -274,9 +266,8 @@
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -303,9 +294,8 @@
       "group_by": [{"key": "wi.created_at", "truncate": "month"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "opened_count"
+          "count": "wi",
+          "as": "opened_count"
         }
       ],
       "aggregation_sort": "wi_created_at_month",
@@ -331,15 +321,12 @@
       "group_by": [{"key": "p.started_at", "truncate": "day"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "pipeline_count"
+          "count": "p",
+          "as": "pipeline_count"
         },
         {
-          "function": "sum",
-          "target": "p",
-          "property": "duration",
-          "alias": "total_duration_secs"
+          "sum": "p.duration",
+          "as": "total_duration_secs"
         }
       ],
       "aggregation_sort": "p_started_at_day",
@@ -366,9 +353,8 @@
       "group_by": [{"key": "j.finished_at", "truncate": "month"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "n"
+          "count": "j",
+          "as": "n"
         }
       ],
       "aggregation_sort": "j_finished_at_month",

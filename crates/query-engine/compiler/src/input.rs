@@ -690,8 +690,23 @@ pub struct InputAggregation {
 pub struct InputAggregationMetric {
     #[serde(flatten)]
     pub expr: AggExpr,
-    #[serde(rename = "as")]
-    pub alias: String,
+    #[serde(rename = "as", default)]
+    pub alias: Option<String>,
+}
+
+impl InputAggregationMetric {
+    pub fn output_name(&self) -> String {
+        match &self.alias {
+            Some(alias) => alias.clone(),
+            None => {
+                let function = self.expr.function();
+                match self.expr.property() {
+                    Some(property) => format!("{}_{}_{}", function, self.expr.node(), property),
+                    None => format!("{}_{}", function, self.expr.node()),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1603,7 +1618,7 @@ mod tests {
                 property: None
             })
         );
-        assert_eq!(input.aggregation.metrics[0].alias, "note_count");
+        assert_eq!(input.aggregation.metrics[0].output_name(), "note_count");
         assert!(input.aggregation.sort.is_some());
     }
 
@@ -1652,17 +1667,27 @@ mod tests {
     }
 
     #[test]
-    fn aggregation_rejects_missing_alias() {
-        let err = parse_input(
+    fn aggregation_derives_output_name_without_alias() {
+        let input = parse_input(
             r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "mr"}],
-            "aggregations": [{"count": "mr"}]
+            "aggregations": [
+                {"count": "mr"},
+                {"avg": "mr.merge_duration"},
+                {"max": "mr.additions", "as": "biggest"}
+            ]
         }"#,
         )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("as"), "got: {err}");
+        .unwrap();
+
+        let names: Vec<String> = input
+            .aggregation
+            .metrics
+            .iter()
+            .map(InputAggregationMetric::output_name)
+            .collect();
+        assert_eq!(names, ["count_mr", "avg_mr_merge_duration", "biggest"]);
     }
 
     fn group_by_key(json: &str) -> Result<InputGroupByKey, String> {

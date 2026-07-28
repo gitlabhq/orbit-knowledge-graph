@@ -66,8 +66,7 @@ pub struct GraphResponse {
 pub struct ColumnDescriptor {
     pub name: String,
     pub function: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
+    pub target: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub property: Option<String>,
 }
@@ -326,7 +325,7 @@ impl GraphFormatter {
     }
 
     fn agg_col_names(aggs: &[compiler::input::InputAggregationMetric]) -> Vec<String> {
-        aggs.iter().map(|agg| agg.alias.clone()).collect()
+        aggs.iter().map(|agg| agg.output_name()).collect()
     }
 
     fn build_column_descriptors(
@@ -334,9 +333,9 @@ impl GraphFormatter {
     ) -> Vec<ColumnDescriptor> {
         aggs.iter()
             .map(|agg| ColumnDescriptor {
-                name: agg.alias.clone(),
+                name: agg.output_name(),
                 function: agg.expr.function().to_string(),
-                target: Some(agg.expr.node().to_string()),
+                target: agg.expr.node().to_string(),
                 property: agg.expr.property().map(str::to_owned),
             })
             .collect()

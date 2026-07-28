@@ -731,7 +731,7 @@ mod tests {
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(AggFunction::Count, "n", None),
-                    alias: "note_count".to_string(),
+                    alias: Some("note_count".to_string()),
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "u".to_string(),
@@ -814,7 +814,7 @@ mod tests {
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(AggFunction::Count, "mr", None),
-                    alias: "mr_count".to_string(),
+                    alias: Some("mr_count".to_string()),
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "u".to_string(),
@@ -880,7 +880,7 @@ mod tests {
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(AggFunction::Count, "d", None),
-                    alias: "defs".to_string(),
+                    alias: Some("defs".to_string()),
                 }],
                 group_by: vec![InputGroupByKey::Node {
                     node: "f".to_string(),

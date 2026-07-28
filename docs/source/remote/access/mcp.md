@@ -232,7 +232,7 @@ Pass the query below as `invoke_command` with
   ],
   "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "open_mrs"}
+    { "count": "mr", "as": "open_mrs" }
   ],
   "aggregation_sort": "-open_mrs",
   "limit": 10

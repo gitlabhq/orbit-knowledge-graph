@@ -147,7 +147,8 @@ fn nullable_flags(input: &Input, key_count: usize) -> Vec<bool> {
             let mut idx = 0;
             if let Some(sort) = &input.aggregation.sort {
                 let sorts_on_count = input.aggregation.metrics.iter().any(|a| {
-                    a.alias == sort.column && matches!(a.expr.function(), AggFunction::Count)
+                    a.output_name() == sort.column
+                        && matches!(a.expr.function(), AggFunction::Count)
                 });
                 if let Some(f) = flags.first_mut() {
                     *f = !sorts_on_count;

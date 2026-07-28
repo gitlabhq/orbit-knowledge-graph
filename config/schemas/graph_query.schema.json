@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v11",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v12",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -555,7 +555,7 @@
     },
     "Aggregation": {
       "type": "object",
-      "description": "One aggregation: a single function key plus \"as\", the output column name, e.g. {\"avg\": \"mr.merge_duration\", \"as\": \"avg_dur\"}.",
+      "description": "One aggregation as a single function key, e.g. {\"avg\": \"mr.merge_duration\", \"as\": \"avg_dur\"}. Output column: \"as\" when given, else function_node or function_node_property.",
       "properties": {
         "count": {
           "$ref": "#/$defs/NodeOrPropertyRef",
@@ -568,11 +568,17 @@
         "collect": { "$ref": "#/$defs/NodePropertyRef" },
         "as": {
           "$ref": "#/$defs/Identifier",
-          "description": "Output column name; referenced by aggregation_sort."
+          "description": "Custom output column name; referenced by aggregation_sort."
         }
       },
-      "required": ["as"],
-      "minProperties": 2,
+      "oneOf": [
+        { "required": ["count"] },
+        { "required": ["sum"] },
+        { "required": ["avg"] },
+        { "required": ["min"] },
+        { "required": ["max"] },
+        { "required": ["collect"] }
+      ],
       "maxProperties": 2,
       "additionalProperties": false
     },

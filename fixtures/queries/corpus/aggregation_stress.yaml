@@ -23,9 +23,8 @@ security_vulnerability_001_by_severity:
       "group_by": ["v.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -51,9 +50,8 @@ security_vulnerability_002_by_state:
       "group_by": ["v.state"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -79,9 +77,8 @@ security_vulnerability_003_by_report_type:
       "group_by": ["v.report_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -110,9 +107,8 @@ security_vulnerability_004_by_resolution_flags:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -141,9 +137,8 @@ security_vulnerability_005_by_severity_state:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -173,9 +168,8 @@ security_vulnerability_006_by_report_type_severity_state:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -201,9 +195,8 @@ security_vulnerability_007_by_project_id:
       "group_by": ["v.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "critical_count"
+          "count": "v",
+          "as": "critical_count"
         }
       ],
       "aggregation_sort": "-critical_count",
@@ -229,15 +222,12 @@ security_vulnerability_008_latest_detected_by_project:
       "group_by": ["v.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "detected_count"
+          "count": "v",
+          "as": "detected_count"
         },
         {
-          "function": "max",
-          "target": "v",
-          "property": "updated_at",
-          "alias": "latest_update"
+          "max": "v.updated_at",
+          "as": "latest_update"
         }
       ],
       "aggregation_sort": "-detected_count",
@@ -263,9 +253,8 @@ security_scan_009_by_scan_type:
       "group_by": ["s.scan_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -291,9 +280,8 @@ security_scan_010_by_status:
       "group_by": ["s.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -322,9 +310,8 @@ security_scan_011_by_type_status:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -350,9 +337,8 @@ security_scan_012_by_project_id:
       "group_by": ["s.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -378,9 +364,8 @@ security_scan_013_by_pipeline_id:
       "group_by": ["s.pipeline_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -406,9 +391,8 @@ security_finding_014_by_severity:
       "group_by": ["f.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -434,9 +418,8 @@ security_finding_015_by_deduplicated:
       "group_by": ["f.deduplicated"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -462,9 +445,8 @@ security_finding_016_by_project_id:
       "group_by": ["f.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -490,9 +472,8 @@ security_finding_017_by_scan_id:
       "group_by": ["f.scan_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -518,9 +499,8 @@ security_finding_018_by_scanner_id:
       "group_by": ["f.scanner_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -546,9 +526,8 @@ security_occurrence_019_by_severity:
       "group_by": ["o.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -574,9 +553,8 @@ security_occurrence_020_by_report_type:
       "group_by": ["o.report_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -605,9 +583,8 @@ security_occurrence_021_by_severity_report_type:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -633,9 +610,8 @@ security_occurrence_022_by_project_id:
       "group_by": ["o.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -661,9 +637,8 @@ security_occurrence_023_by_scanner_id:
       "group_by": ["o.scanner_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -689,9 +664,8 @@ security_identifier_024_by_external_type:
       "group_by": ["i.external_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "i",
-          "alias": "identifier_count"
+          "count": "i",
+          "as": "identifier_count"
         }
       ],
       "aggregation_sort": "-identifier_count",
@@ -717,9 +691,8 @@ security_identifier_025_by_project_id:
       "group_by": ["i.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "i",
-          "alias": "identifier_count"
+          "count": "i",
+          "as": "identifier_count"
         }
       ],
       "aggregation_sort": "-identifier_count",
@@ -745,9 +718,8 @@ security_scanner_026_by_vendor:
       "group_by": ["scanner.vendor"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "scanner",
-          "alias": "scanner_count"
+          "count": "scanner",
+          "as": "scanner_count"
         }
       ],
       "aggregation_sort": "-scanner_count",
@@ -773,9 +745,8 @@ security_scanner_027_by_project_id:
       "group_by": ["scanner.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "scanner",
-          "alias": "scanner_count"
+          "count": "scanner",
+          "as": "scanner_count"
         }
       ],
       "aggregation_sort": "-scanner_count",
@@ -801,9 +772,8 @@ ci_pipeline_028_by_status:
       "group_by": ["pipe.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -829,9 +799,8 @@ ci_pipeline_029_by_source:
       "group_by": ["pipe.source"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -860,9 +829,8 @@ ci_pipeline_030_by_status_source:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -888,9 +856,8 @@ ci_pipeline_031_by_protected:
       "group_by": ["pipe.protected"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -916,9 +883,8 @@ ci_pipeline_032_by_project_id:
       "group_by": ["pipe.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "failed_pipeline_count"
+          "count": "pipe",
+          "as": "failed_pipeline_count"
         }
       ],
       "aggregation_sort": "-failed_pipeline_count",
@@ -944,15 +910,12 @@ ci_pipeline_033_avg_duration_by_status:
       "group_by": ["pipe.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         },
         {
-          "function": "avg",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "avg_duration"
+          "avg": "pipe.duration",
+          "as": "avg_duration"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -978,9 +941,8 @@ ci_pipeline_034_by_ref:
       "group_by": ["pipe.ref"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -1006,9 +968,8 @@ ci_job_035_by_status:
       "group_by": ["job.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -1034,9 +995,8 @@ ci_job_036_by_when:
       "group_by": ["job.when"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -1065,9 +1025,8 @@ ci_job_037_by_status_when:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -1093,9 +1052,8 @@ ci_job_038_by_allow_failure:
       "group_by": ["job.allow_failure"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -1121,9 +1079,8 @@ ci_job_039_by_retried:
       "group_by": ["job.retried"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -1149,9 +1106,8 @@ ci_job_040_by_failure_reason:
       "group_by": ["job.failure_reason"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "failed_job_count"
+          "count": "job",
+          "as": "failed_job_count"
         }
       ],
       "aggregation_sort": "-failed_job_count",
@@ -1177,9 +1133,8 @@ ci_job_041_by_project_id:
       "group_by": ["job.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "failed_job_count"
+          "count": "job",
+          "as": "failed_job_count"
         }
       ],
       "aggregation_sort": "-failed_job_count",
@@ -1205,9 +1160,8 @@ ci_job_042_by_runner_id:
       "group_by": ["job.runner_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -1233,9 +1187,8 @@ ci_job_043_by_ref:
       "group_by": ["job.ref"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -1261,9 +1214,8 @@ ci_stage_044_by_status:
       "group_by": ["stage.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "stage",
-          "alias": "stage_count"
+          "count": "stage",
+          "as": "stage_count"
         }
       ],
       "aggregation_sort": "-stage_count",
@@ -1289,9 +1241,8 @@ ci_stage_045_by_name:
       "group_by": ["stage.name"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "stage",
-          "alias": "stage_count"
+          "count": "stage",
+          "as": "stage_count"
         }
       ],
       "aggregation_sort": "-stage_count",
@@ -1317,9 +1268,8 @@ ci_stage_046_by_position:
       "group_by": ["stage.position"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "stage",
-          "alias": "stage_count"
+          "count": "stage",
+          "as": "stage_count"
         }
       ],
       "aggregation_sort": "-stage_count",
@@ -1345,9 +1295,8 @@ ci_deployment_047_by_status:
       "group_by": ["dep.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "dep",
-          "alias": "deployment_count"
+          "count": "dep",
+          "as": "deployment_count"
         }
       ],
       "aggregation_sort": "-deployment_count",
@@ -1373,9 +1322,8 @@ ci_deployment_048_by_ref:
       "group_by": ["dep.ref"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "dep",
-          "alias": "deployment_count"
+          "count": "dep",
+          "as": "deployment_count"
         }
       ],
       "aggregation_sort": "-deployment_count",
@@ -1401,9 +1349,8 @@ ci_deployment_049_by_archived:
       "group_by": ["dep.archived"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "dep",
-          "alias": "deployment_count"
+          "count": "dep",
+          "as": "deployment_count"
         }
       ],
       "aggregation_sort": "-deployment_count",
@@ -1429,9 +1376,8 @@ ci_environment_050_by_state:
       "group_by": ["env.state"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "env",
-          "alias": "environment_count"
+          "count": "env",
+          "as": "environment_count"
         }
       ],
       "aggregation_sort": "-environment_count",
@@ -1457,9 +1403,8 @@ ci_environment_051_by_tier:
       "group_by": ["env.tier"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "env",
-          "alias": "environment_count"
+          "count": "env",
+          "as": "environment_count"
         }
       ],
       "aggregation_sort": "-environment_count",
@@ -1488,9 +1433,8 @@ ci_environment_052_by_state_tier:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "env",
-          "alias": "environment_count"
+          "count": "env",
+          "as": "environment_count"
         }
       ],
       "aggregation_sort": "-environment_count",
@@ -1516,9 +1460,8 @@ code_review_mr_056_by_state:
       "group_by": ["mr.state"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1544,9 +1487,8 @@ code_review_mr_057_by_merge_status:
       "group_by": ["mr.merge_status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1572,9 +1514,8 @@ code_review_mr_058_by_draft:
       "group_by": ["mr.draft"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1600,9 +1541,8 @@ code_review_mr_059_by_squash:
       "group_by": ["mr.squash"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1631,9 +1571,8 @@ code_review_mr_060_by_state_draft:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1659,9 +1598,8 @@ code_review_mr_061_by_project_id:
       "group_by": ["mr.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1687,9 +1625,8 @@ code_review_mr_062_by_author_id:
       "group_by": ["mr.author_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1715,9 +1652,8 @@ code_review_mr_063_by_target_branch:
       "group_by": ["mr.target_branch"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1743,15 +1679,12 @@ code_review_mr_064_avg_diff_by_state:
       "group_by": ["mr.state"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         },
         {
-          "function": "avg",
-          "target": "mr",
-          "property": "diff_size",
-          "alias": "avg_diff_size"
+          "avg": "mr.diff_size",
+          "as": "avg_diff_size"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -1777,9 +1710,8 @@ planning_work_item_065_by_state:
       "group_by": ["wi.state"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "work_item_count"
+          "count": "wi",
+          "as": "work_item_count"
         }
       ],
       "aggregation_sort": "-work_item_count",
@@ -1805,9 +1737,8 @@ planning_work_item_066_by_type:
       "group_by": ["wi.work_item_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "work_item_count"
+          "count": "wi",
+          "as": "work_item_count"
         }
       ],
       "aggregation_sort": "-work_item_count",
@@ -1833,9 +1764,8 @@ planning_work_item_067_by_confidential:
       "group_by": ["wi.confidential"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "work_item_count"
+          "count": "wi",
+          "as": "work_item_count"
         }
       ],
       "aggregation_sort": "-work_item_count",
@@ -1864,9 +1794,8 @@ planning_work_item_068_by_state_type:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "work_item_count"
+          "count": "wi",
+          "as": "work_item_count"
         }
       ],
       "aggregation_sort": "-work_item_count",
@@ -1892,9 +1821,8 @@ planning_work_item_069_by_project_id:
       "group_by": ["wi.project_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "open_work_item_count"
+          "count": "wi",
+          "as": "open_work_item_count"
         }
       ],
       "aggregation_sort": "-open_work_item_count",
@@ -1920,9 +1848,8 @@ planning_work_item_070_by_namespace_id:
       "group_by": ["wi.namespace_id"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "open_work_item_count"
+          "count": "wi",
+          "as": "open_work_item_count"
         }
       ],
       "aggregation_sort": "-open_work_item_count",
@@ -1948,9 +1875,8 @@ project_071_by_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "project_count"
+          "count": "p",
+          "as": "project_count"
         }
       ],
       "aggregation_sort": "-project_count",
@@ -1976,9 +1902,8 @@ project_072_by_archived:
       "group_by": ["p.archived"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "project_count"
+          "count": "p",
+          "as": "project_count"
         }
       ],
       "aggregation_sort": "-project_count",
@@ -2007,15 +1932,12 @@ project_073_by_visibility_archived:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "project_count"
+          "count": "p",
+          "as": "project_count"
         },
         {
-          "function": "max",
-          "target": "p",
-          "property": "updated_at",
-          "alias": "latest_update"
+          "max": "p.updated_at",
+          "as": "latest_update"
         }
       ],
       "aggregation_sort": "-project_count",
@@ -2052,9 +1974,8 @@ join_vulnerability_project_074_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -2094,9 +2015,8 @@ join_vulnerability_project_075_by_vulnerability_and_visibility:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -2133,9 +2053,8 @@ join_security_scan_project_076_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -2172,9 +2091,8 @@ join_security_scan_pipeline_077_by_pipeline_status:
       "group_by": ["pipe.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -2212,9 +2130,8 @@ join_security_scan_job_078_by_job_status:
       "group_by": ["job.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -2251,9 +2168,8 @@ join_finding_project_079_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -2290,9 +2206,8 @@ join_finding_scanner_080_by_scanner_vendor:
       "group_by": ["scanner.vendor"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -2329,9 +2244,8 @@ join_occurrence_project_082_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -2368,9 +2282,8 @@ join_occurrence_vulnerability_083_by_vulnerability_state:
       "group_by": ["v.state"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -2407,9 +2320,8 @@ join_occurrence_identifier_084_by_identifier_type:
       "group_by": ["i.external_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "o",
-          "alias": "occurrence_count"
+          "count": "o",
+          "as": "occurrence_count"
         }
       ],
       "aggregation_sort": "-occurrence_count",
@@ -2446,9 +2358,8 @@ join_pipeline_project_085_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -2485,9 +2396,8 @@ join_job_pipeline_086_by_pipeline_status:
       "group_by": ["pipe.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -2524,9 +2434,8 @@ join_job_project_087_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "failed_job_count"
+          "count": "job",
+          "as": "failed_job_count"
         }
       ],
       "aggregation_sort": "-failed_job_count",
@@ -2563,9 +2472,8 @@ join_pipeline_job_088_by_job_status:
       "group_by": ["job.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -2602,9 +2510,8 @@ join_pipeline_stage_089_by_stage_status:
       "group_by": ["stage.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "stage",
-          "alias": "stage_count"
+          "count": "stage",
+          "as": "stage_count"
         }
       ],
       "aggregation_sort": "-stage_count",
@@ -2641,9 +2548,8 @@ join_stage_job_090_by_job_status:
       "group_by": ["job.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -2680,9 +2586,8 @@ join_merge_request_project_091_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -2719,9 +2624,8 @@ join_merge_request_pipeline_092_by_pipeline_status:
       "group_by": ["pipe.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_request_count"
+          "count": "mr",
+          "as": "merge_request_count"
         }
       ],
       "aggregation_sort": "-merge_request_count",
@@ -2758,9 +2662,8 @@ join_work_item_project_093_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "work_item_count"
+          "count": "wi",
+          "as": "work_item_count"
         }
       ],
       "aggregation_sort": "-work_item_count",
@@ -2797,9 +2700,8 @@ join_work_item_group_094_by_group_visibility:
       "group_by": ["g.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "work_item_count"
+          "count": "wi",
+          "as": "work_item_count"
         }
       ],
       "aggregation_sort": "-work_item_count",
@@ -2836,9 +2738,8 @@ join_deployment_environment_095_by_environment_tier:
       "group_by": ["env.tier"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "dep",
-          "alias": "deployment_count"
+          "count": "dep",
+          "as": "deployment_count"
         }
       ],
       "aggregation_sort": "-deployment_count",
@@ -2875,9 +2776,8 @@ join_deployment_project_096_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "dep",
-          "alias": "deployment_count"
+          "count": "dep",
+          "as": "deployment_count"
         }
       ],
       "aggregation_sort": "-deployment_count",
@@ -2914,9 +2814,8 @@ join_environment_project_097_by_project_visibility:
       "group_by": ["p.visibility_level"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "env",
-          "alias": "environment_count"
+          "count": "env",
+          "as": "environment_count"
         }
       ],
       "aggregation_sort": "-environment_count",
@@ -2953,9 +2852,8 @@ join_vulnerability_finding_098_by_finding_severity:
       "group_by": ["f.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -2992,9 +2890,8 @@ join_security_scan_finding_099_by_finding_severity:
       "group_by": ["f.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "finding_count"
+          "count": "f",
+          "as": "finding_count"
         }
       ],
       "aggregation_sort": "-finding_count",
@@ -3034,15 +2931,12 @@ join_pipeline_project_100_by_status_and_visibility:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         },
         {
-          "function": "avg",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "avg_duration"
+          "avg": "pipe.duration",
+          "as": "avg_duration"
         }
       ],
       "aggregation_sort": "-pipeline_count",

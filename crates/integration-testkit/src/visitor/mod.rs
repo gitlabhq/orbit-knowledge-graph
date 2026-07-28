@@ -1164,7 +1164,7 @@ pub(crate) mod tests {
             columns: Some(vec![ColumnDescriptor {
                 name: "c".to_string(),
                 function: "count".to_string(),
-                target: Some("u".to_string()),
+                target: "u".to_string(),
                 property: None,
             }]),
             group_columns: Some(vec![]),
@@ -1182,7 +1182,7 @@ pub(crate) mod tests {
             columns: Some(vec![ColumnDescriptor {
                 name: "c".to_string(),
                 function: "count".to_string(),
-                target: Some("u".to_string()),
+                target: "u".to_string(),
                 property: None,
             }]),
             group_columns: Some(vec![GroupColumnDescriptor {

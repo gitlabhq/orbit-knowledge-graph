@@ -68,7 +68,7 @@ pub fn aggregation_column(name: &str, function: &str) -> ColumnDescriptor {
     ColumnDescriptor {
         name: name.into(),
         function: function.into(),
-        target: None,
+        target: "n".into(),
         property: None,
     }
 }

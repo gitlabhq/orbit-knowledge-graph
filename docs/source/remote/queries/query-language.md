@@ -426,24 +426,21 @@ for pipeline history.
 
 ## Aggregation
 
-Aggregation queries use `aggregations`.
+Aggregation queries use `aggregations`. Each aggregation is an object with a
+single function key whose value is what to aggregate, plus an optional `as`
+output column name: `{"avg": "mr.merge_duration", "as": "avg_dur"}`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `function` | `string` | `count`, `sum`, `avg`, `min`, or `max`. |
-| `target` | `string` | Node alias to aggregate. |
-| `property` | `string` | Property to aggregate. Required for `sum`, `avg`, `min`, and `max`. |
-| `alias` | `string` | Name of the output column. |
+| Function key | Value | Supported property types |
+|--------------|-------|--------------------------|
+| `count` | `"node"` (count matching rows) or `"node.property"` (count non-null values) | Any |
+| `sum` | `"node.property"` | Numeric only |
+| `avg` | `"node.property"` | Numeric only |
+| `min` | `"node.property"` | Numeric, string, boolean, `Date`, or `DateTime` |
+| `max` | `"node.property"` | Numeric, string, boolean, `Date`, or `DateTime` |
 
-Property type support depends on the function:
-
-| Function | Requires `property` | Supported property types |
-|----------|---------------------|--------------------------|
-| `count` | No | N/A |
-| `sum` | Yes | Numeric only |
-| `avg` | Yes | Numeric only |
-| `min` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
-| `max` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+Without `as`, the output column name is derived as `<function>_<node>`
+(`count_mr`) or `<function>_<node>_<property>` (`avg_mr_merge_duration`).
+Reference these names in `aggregation_sort`.
 
 `sum` and `avg` reject `DateTime` properties with a validation error. To
 aggregate over dates, use `min` or `max`.
@@ -500,7 +497,7 @@ Count merged merge requests per project:
   ],
   "group_by": ["project"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "merged_mrs"}
+    { "count": "mr", "as": "merged_mrs" }
   ],
   "aggregation_sort": "-merged_mrs",
   "limit": 10
@@ -521,7 +518,7 @@ Count detected vulnerabilities by severity:
   ],
   "group_by": ["v.severity"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+    { "count": "v", "as": "vulnerability_count" }
   ],
   "aggregation_sort": "-vulnerability_count",
   "limit": 10

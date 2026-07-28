@@ -441,7 +441,7 @@ fn aggregation_function_appears_in_header() {
         ("c", json!(5)),
     ])]);
     let out = enc(&r);
-    assert!(out.contains("aggregations:c(count)"));
+    assert!(out.contains("aggregations:c(count:n)"));
     assert!(out.contains("group_by:severity(property)"));
 }
 
@@ -454,7 +454,7 @@ fn aggregation_descriptor_carries_target_node_alias() {
     r.columns = Some(vec![ColumnDescriptor {
         name: "user_count".into(),
         function: "count".into(),
-        target: Some("u".into()),
+        target: "u".into(),
         property: None,
     }]);
     r.group_columns = Some(vec![]);
@@ -470,7 +470,7 @@ fn aggregation_descriptor_carries_target_dot_property_for_max_over_property() {
     r.columns = Some(vec![ColumnDescriptor {
         name: "latest_update".into(),
         function: "max".into(),
-        target: Some("v".into()),
+        target: "v".into(),
         property: Some("updated_at".into()),
     }]);
     r.group_columns = Some(vec![]);
@@ -701,7 +701,7 @@ fn ungrouped_aggregation_emits_single_row() {
     r.group_columns = Some(vec![]);
     r.rows = Some(vec![agg_row(&[("total", json!(42))])]);
     let out = enc(&r);
-    assert!(out.contains("aggregations:total(count)"));
+    assert!(out.contains("aggregations:total(count:n)"));
     assert!(out.contains("rows:1"));
     assert!(
         !out.contains("group_by:"),

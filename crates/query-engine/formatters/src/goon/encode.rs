@@ -145,10 +145,9 @@ fn write_header(
 /// from `max(v.updated_at)` (max of v.updated_at) — both used to encode as
 /// just `count` / `max`.
 fn format_aggregation_descriptor(col: &ColumnDescriptor) -> String {
-    let body = match (&col.target, &col.property) {
-        (Some(target), Some(property)) => format!("{}:{target}.{property}", col.function),
-        (Some(target), None) => format!("{}:{target}", col.function),
-        (None, _) => col.function.clone(),
+    let body = match &col.property {
+        Some(property) => format!("{}:{}.{property}", col.function, col.target),
+        None => format!("{}:{}", col.function, col.target),
     };
     format!("{}({body})", col.name)
 }

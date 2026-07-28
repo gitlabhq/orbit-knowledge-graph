@@ -87,7 +87,7 @@ fn build_aggregation(
 
     for agg in aggregations {
         let agg_expr = build_agg_expr(plan, &agg.expr, if_cond);
-        select.push(SelectExpr::new(agg_expr, &agg.alias));
+        select.push(SelectExpr::new(agg_expr, agg.output_name()));
     }
 
     let mut order_by = Vec::new();

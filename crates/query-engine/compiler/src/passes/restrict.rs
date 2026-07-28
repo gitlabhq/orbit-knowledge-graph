@@ -714,7 +714,7 @@ mod tests {
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(function, "_u", property),
-                    alias: "_agg".into(),
+                    alias: Some("_agg".into()),
                 }],
                 ..Default::default()
             },
@@ -744,7 +744,7 @@ mod tests {
                 }],
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(AggFunction::Count, "_u", None),
-                    alias: "_agg".into(),
+                    alias: Some("_agg".into()),
                 }],
                 ..Default::default()
             },
@@ -764,7 +764,7 @@ mod tests {
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(function, "_u", property),
-                    alias: "_agg".into(),
+                    alias: Some("_agg".into()),
                 }],
                 ..Default::default()
             },

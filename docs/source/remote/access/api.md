@@ -96,9 +96,8 @@ Put the request body in `request.json`:
     "group_by": ["p"],
     "aggregations": [
       {
-        "function": "count",
-        "target": "pl",
-        "alias": "failed_pipelines"
+        "count": "pl",
+        "as": "failed_pipelines"
       }
     ],
     "aggregation_sort": "-failed_pipelines",
@@ -135,9 +134,7 @@ An example response:
     ],
     "columns": [
       {
-        "name": "failed_pipelines",
-        "function": "count",
-        "target": "pl"
+        "count": "pl"
       }
     ],
     "rows": [

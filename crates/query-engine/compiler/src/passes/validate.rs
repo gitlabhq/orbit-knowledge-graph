@@ -736,7 +736,7 @@ impl<'a> Validator<'a> {
 
         let mut seen_output_names = seen_group_output_names.clone();
         for agg in &input.aggregation.metrics {
-            let alias = &agg.alias;
+            let alias = agg.output_name();
             if !seen_output_names.insert(alias.clone()) {
                 return Err(QueryError::Validation(format!(
                     "aggregation \"{alias}\" conflicts with another output column"
@@ -882,7 +882,7 @@ impl<'a> Validator<'a> {
                     .aggregation
                     .metrics
                     .iter()
-                    .map(|agg| agg.alias.clone()),
+                    .map(crate::input::InputAggregationMetric::output_name),
             );
             if !output_names.contains(&sort.column) {
                 return Err(QueryError::ReferenceError(format!(
