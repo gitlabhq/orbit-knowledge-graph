@@ -572,6 +572,21 @@ impl Default for CodeBackfillSweepConfig {
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+    /// Mutation duration scales with table size, not delete volume: measured at
+    /// 27 minutes on a 12.4B-row edge table.
+    #[serde(default = "default_table_cleanup_mutation_timeout_secs")]
+    pub mutation_timeout_secs: u64,
+}
+
+fn default_table_cleanup_mutation_timeout_secs() -> u64 {
+    3600
+}
+
+impl TableCleanupConfig {
+    #[must_use]
+    pub fn mutation_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.mutation_timeout_secs)
+    }
 }
 
 impl Default for TableCleanupConfig {
@@ -580,6 +595,7 @@ impl Default for TableCleanupConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 0 3 * * *".into()),
             },
+            mutation_timeout_secs: default_table_cleanup_mutation_timeout_secs(),
         }
     }
 }
