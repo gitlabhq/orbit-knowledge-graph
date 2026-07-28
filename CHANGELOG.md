@@ -1,3 +1,25 @@
+## [0.92.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.91.1...v0.92.0) (2026-07-28)
+
+### ⚠ BREAKING CHANGES
+
+* **dsl:** merge min_hops and max_hops into a single hops field
+
+### Features
+
+* **code-graph:** add Zig language support (Phase 1 - definitions) ([cf2cd82](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cf2cd8258d7163206f4c87818e86215e332a70bf)) by Jonathan Bowe
+
+### Fixes
+
+* **indexer:** index transferred projects and groups once at their current path ([7440175](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/744017564890f6ebf77b026bac88ece977a1e094)) by Jean-Gabriel Doyon
+* **ontology:** preserve driver-row cardinality in HAS_VULNERABILITY extract ([01f850b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/01f850b765a2fb61817896dad64528e631102a46)) by Jean-Gabriel Doyon
+
+### Other
+
+* **dsl:** group_by keys as strings with fallback ([8a057c4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8a057c48b35fa93ba4bb2a91d715567fb673797c)) by Aaron Algutifan
+* **dsl:** merge min_hops and max_hops into a single hops field ([7de0ba6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7de0ba6396c387ca6677f0b406e00790dcb21dc0)) by Aaron Algutifan
+* **gitlab-client:** add circuit-breaker wiring tests for CircuitBreakingGitlabClient ([0bbd323](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0bbd3234956885abef774fcbcc632dac19321c7b)) by ANBUCHELVAN GANESAN CSE
+* **tools:** compile tool descriptions from versioned YAML prompts ([67cd0c4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/67cd0c4317f2c7dd3a470c5ffee8f8f8a3f9ec24)) by Michael Angelo Rivera
+
 ## [0.91.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.91.0...v0.91.1) (2026-07-27)
 
 ### Fixes
