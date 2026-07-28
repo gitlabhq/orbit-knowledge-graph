@@ -16,7 +16,19 @@ const CHECKPOINT_TABLE: &str = "checkpoint";
 /// The pipeline appends `.{plan_name}` to form the full key, so all
 /// checkpoints for a namespace share this prefix followed by a dot.
 pub fn namespace_position_key(namespace_id: i64) -> String {
-    format!("ns.{namespace_id}")
+    format!("{NAMESPACE_KEY_PREFIX}{namespace_id}")
+}
+
+pub const NAMESPACE_KEY_PREFIX: &str = "ns.";
+
+/// Inverse of [`namespace_position_key`], tolerating the `.{plan_name}` and
+/// partition suffixes the pipeline appends.
+pub fn namespace_id_from_key(key: &str) -> Option<i64> {
+    key.strip_prefix(NAMESPACE_KEY_PREFIX)?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
 }
 
 #[derive(Debug, Error)]
@@ -380,5 +392,22 @@ mod tests {
         let decoded = decode_cursor_column(&encoded).unwrap().unwrap();
         assert_eq!(Some(decoded.cursor), cursor);
         assert_eq!(decoded.floor, floor);
+    }
+}
+
+#[cfg(test)]
+mod namespace_key_tests {
+    use super::*;
+
+    #[test]
+    fn namespace_id_from_key_tolerates_plan_and_partition_suffixes() {
+        assert_eq!(namespace_id_from_key("ns.42.MergeRequest"), Some(42));
+        assert_eq!(namespace_id_from_key("ns.7.Job.p1of3"), Some(7));
+        assert_eq!(namespace_id_from_key("maintenance.something"), None);
+    }
+
+    #[test]
+    fn namespace_id_from_key_inverts_namespace_position_key() {
+        assert_eq!(namespace_id_from_key(&namespace_position_key(99)), Some(99));
     }
 }
