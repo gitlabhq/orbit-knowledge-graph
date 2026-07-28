@@ -379,7 +379,7 @@ skill-version-bump-check:
 
 prompt-version-bump-check:
   stage: lint
-  image: python:3.12-alpine
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -390,9 +390,9 @@ prompt-version-bump-check:
     - |
       if ! git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1; then
         git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=50
-        export BASE_REF_OVERRIDE="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        export CI_MERGE_REQUEST_DIFF_BASE_SHA="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
       fi
-      python3 scripts/check-prompt-version-bump.py --ci --no-worktree ${BASE_REF_OVERRIDE:+--base-ref "$BASE_REF_OVERRIDE"}
+      sh scripts/check-prompt-version-bump.sh
 
 iglu-schema-check:
   stage: lint
