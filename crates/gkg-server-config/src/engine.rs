@@ -616,10 +616,7 @@ impl Default for MigrationCompletionConfig {
     }
 }
 
-/// Tombstones stale FK-derived "latest"/single-value edges whose endpoint no
-/// longer matches the owner node's current FK column. ReplacingMergeTree keys
-/// the edge on its (mutable) `target_id`, so an FK change orphans the old edge
-/// instead of replacing it; this sweep reconciles them off the indexing path.
+/// Tombstones edges a node's pipeline stopped emitting, off the indexing path.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct StaleEdgeReconciliationConfig {
