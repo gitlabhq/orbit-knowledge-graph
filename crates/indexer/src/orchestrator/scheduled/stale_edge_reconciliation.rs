@@ -15,19 +15,16 @@ use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
 
-/// Prefix of every per-namespace SDLC pipeline checkpoint (`ns.<id>.<Entity>`).
+/// Keys look like `ns.<id>.<Entity>`, or `ns.<id>.<Entity>.p1of3` when partitioned.
 const NAMESPACE_CHECKPOINT_PREFIX: &str = "ns.";
 
-/// Edge identity, matching the sort key every edge table shares.
+/// Every edge table shares this sort key, so it doubles as edge identity.
 const EDGE_SORT_KEY: &str =
     "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
 
-/// One tombstone statement: every relationship kind a single owner node emits
-/// into a single edge table on a single endpoint.
-///
-/// Kinds are grouped rather than swept individually because the scan cost is
-/// driven by the owner's traversal paths, not by the number of kinds — batching
-/// two kinds measured the same as one.
+/// Kinds are batched rather than swept one at a time because scan cost tracks
+/// the owner's traversal paths, not the number of kinds: two kinds in one
+/// statement measured the same as one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconciliationGroup {
     owner_entity: String,
@@ -41,10 +38,9 @@ struct ReconciliationGroup {
     relationship_kinds: Vec<String>,
 }
 
-/// Periodic, dispatcher-side sweep that tombstones stale FK-derived edges.
-///
-/// The watermark cursor advances only on full success; re-tombstoning is a
-/// no-op, so a failed run just widens the next window.
+/// Periodic, dispatcher-side sweep that tombstones edges their owner stopped
+/// emitting. Stateless: each run scans a fixed lookback, so a failed run costs
+/// nothing beyond the rows it skipped.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -61,7 +57,7 @@ impl StaleEdgeReconciliation {
         metrics: ScheduledTaskMetrics,
         config: StaleEdgeReconciliationConfig,
     ) -> Self {
-        let groups = reconciliation_groups(ontology);
+        let groups = group_mutable_edges_by_owner(ontology);
         let kinds: Vec<&str> = groups
             .iter()
             .flat_map(|group| group.relationship_kinds.iter().map(String::as_str))
@@ -103,9 +99,9 @@ impl ScheduledTask for StaleEdgeReconciliation {
 
 impl StaleEdgeReconciliation {
     async fn reconcile_all(&self) -> Result<(), TaskError> {
-        let excluded = self.in_flight_namespaces().await?;
-        // `_version` is a Siphon source watermark, so the window bounds how far
-        // back the owner scan reaches, not how long ago the sweep last ran.
+        let pending = self.find_namespaces_with_pending_writes().await?;
+        // `_version` is a Siphon source watermark, so this bounds how far back
+        // the owner scan reaches, not how long ago the sweep last ran.
         let cursor = (Utc::now() - self.config.lookback())
             .format(TIMESTAMP_FORMAT)
             .to_string();
@@ -118,17 +114,18 @@ impl StaleEdgeReconciliation {
                 edge_table = group.edge_table,
                 kinds = ?group.relationship_kinds,
                 cursor = cursor,
-                excluded_namespaces = excluded.len(),
+                pending_namespaces = pending.len(),
                 "reconcile started",
             );
             let statement_start = Instant::now();
-            let result = self.reconcile_one(group, &cursor, &excluded).await;
+            let result = self.reconcile_group(group, &cursor, &pending).await;
             let elapsed = statement_start.elapsed();
-            let label = group.relationship_kinds.join(",");
             match result {
                 Ok(()) => {
-                    self.metrics
-                        .record_query_duration(&label, elapsed.as_secs_f64());
+                    self.metrics.record_query_duration(
+                        &group.relationship_kinds.join(","),
+                        elapsed.as_secs_f64(),
+                    );
                     info!(
                         owner = group.owner_entity,
                         edge_table = group.edge_table,
@@ -161,28 +158,24 @@ impl StaleEdgeReconciliation {
         Ok(())
     }
 
-    async fn reconcile_one(
+    async fn reconcile_group(
         &self,
         group: &ReconciliationGroup,
         cursor: &str,
-        excluded: &[i64],
+        pending_namespaces: &[i64],
     ) -> Result<(), TaskError> {
         self.graph
-            .query(&build_reconcile_sql(group, excluded))
+            .query(&build_tombstone_statement(group, pending_namespaces))
             .param("cursor", cursor)
             .execute()
             .await
             .map_err(TaskError::new)
     }
 
-    /// Namespaces whose SDLC pipelines have writes in flight.
-    ///
     /// `save_completed` clears `cursor_values` only once every page of a run has
-    /// drained, so a set cursor means edges for that namespace may not have
-    /// landed yet and comparing versions would tombstone them. Partitioned loads
-    /// checkpoint under child keys (`ns.7.Job.p1of3`), so the prefix scan has to
-    /// consider those too.
-    async fn in_flight_namespaces(&self) -> Result<Vec<i64>, TaskError> {
+    /// drained, so a set cursor means this namespace's edges may not have landed
+    /// yet and comparing versions would tombstone them.
+    async fn find_namespaces_with_pending_writes(&self) -> Result<Vec<i64>, TaskError> {
         let checkpoints = self
             .checkpoint_store
             .load_by_prefix(NAMESPACE_CHECKPOINT_PREFIX)
@@ -192,7 +185,7 @@ impl StaleEdgeReconciliation {
         let mut ids: Vec<i64> = checkpoints
             .iter()
             .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
-            .filter_map(|(key, _)| checkpoint_namespace_id(key))
+            .filter_map(|(key, _)| parse_namespace_id_from_checkpoint_key(key))
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -200,8 +193,7 @@ impl StaleEdgeReconciliation {
     }
 }
 
-/// `ns.<namespace_id>.<Entity>` → `namespace_id`.
-fn checkpoint_namespace_id(key: &str) -> Option<i64> {
+fn parse_namespace_id_from_checkpoint_key(key: &str) -> Option<i64> {
     key.strip_prefix(NAMESPACE_CHECKPOINT_PREFIX)?
         .split('.')
         .next()?
@@ -209,9 +201,9 @@ fn checkpoint_namespace_id(key: &str) -> Option<i64> {
         .ok()
 }
 
-fn reconciliation_groups(ontology: &Ontology) -> Vec<ReconciliationGroup> {
-    let mut by_key: BTreeMap<(String, String, &'static str), Vec<String>> = BTreeMap::new();
-    let mut tables: BTreeMap<String, String> = BTreeMap::new();
+fn group_mutable_edges_by_owner(ontology: &Ontology) -> Vec<ReconciliationGroup> {
+    let mut kinds_by_group: BTreeMap<(String, String, &'static str), Vec<String>> = BTreeMap::new();
+    let mut owner_tables_by_entity: BTreeMap<String, String> = BTreeMap::new();
 
     for node in ontology.nodes() {
         if node.global {
@@ -222,18 +214,18 @@ fn reconciliation_groups(ontology: &Ontology) -> Vec<ReconciliationGroup> {
                 if !mapping.mutable {
                     continue;
                 }
-                let Some(owner_id_column) = owner_endpoint(mapping, &node.name) else {
+                let Some(owner_id_column) = find_owner_id_column(mapping, &node.name) else {
                     continue;
                 };
                 let edge_table = prefixed_table_name(
                     ontology.edge_table_for_relationship(&mapping.label),
                     *SCHEMA_VERSION,
                 );
-                tables.insert(
+                owner_tables_by_entity.insert(
                     node.name.clone(),
                     prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
                 );
-                by_key
+                kinds_by_group
                     .entry((node.name.clone(), edge_table, owner_id_column))
                     .or_default()
                     .push(mapping.label.clone());
@@ -241,13 +233,13 @@ fn reconciliation_groups(ontology: &Ontology) -> Vec<ReconciliationGroup> {
         }
     }
 
-    by_key
+    kinds_by_group
         .into_iter()
         .map(|((owner_entity, edge_table, owner_id_column), mut kinds)| {
             kinds.sort();
             kinds.dedup();
             ReconciliationGroup {
-                owner_node_table: tables[&owner_entity].clone(),
+                owner_node_table: owner_tables_by_entity[&owner_entity].clone(),
                 owner_entity,
                 edge_table,
                 owner_id_column,
@@ -262,11 +254,9 @@ fn reconciliation_groups(ontology: &Ontology) -> Vec<ReconciliationGroup> {
         .collect()
 }
 
-/// Which edge endpoint carries the owner's own id, if either does.
-///
-/// A mapping whose owner side is not bound to the node's `id` (polymorphic or
-/// derived endpoints) has no owner row to compare against and is skipped.
-fn owner_endpoint(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
+/// `None` for polymorphic or derived endpoints: with no side bound to the
+/// owner's `id` there is no owner row to compare versions against.
+fn find_owner_id_column(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
     let binds_owner = |node_ref: &NodeRef| {
         matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
             && node_ref.field == "id"
@@ -280,12 +270,9 @@ fn owner_endpoint(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str
     }
 }
 
-/// Builds the single tombstone statement for one group.
-///
 /// Staleness is `edge._version < owner._version`: the ETL re-emits every edge of
 /// a source row stamped with that row's `_version`, so an edge left behind was
-/// not re-emitted. That needs no per-relationship FK knowledge, which is why one
-/// statement can cover every kind the owner emits.
+/// not re-emitted.
 ///
 /// Both sides dedup with `LIMIT 1 BY` rather than `FINAL`. `FINAL` defeats
 /// granule pruning on `_version` (measured 26.5M rows vs 22K for one window),
@@ -294,7 +281,7 @@ fn owner_endpoint(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str
 /// inside the owner dedup is safe — a key whose newest version predates the
 /// cursor has no version at or after it — but `_deleted` must stay outside on
 /// both sides, where it reproduces `FINAL` dropping tombstoned keys.
-fn build_reconcile_sql(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
+fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
     let ReconciliationGroup {
         owner_node_table,
         edge_table,
@@ -310,8 +297,7 @@ fn build_reconcile_sql(group: &ReconciliationGroup, excluded_namespaces: &[i64])
         .collect::<Vec<_>>()
         .join(", ");
 
-    // A namespace mid-write has edges that have not landed yet; sweeping it
-    // would tombstone them. Usually empty, so the predicate usually vanishes.
+    // A namespace mid-write has edges that have not landed yet.
     let namespace_guard = if excluded_namespaces.is_empty() {
         String::new()
     } else {
@@ -361,7 +347,7 @@ mod tests {
 
     fn groups() -> Vec<ReconciliationGroup> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        reconciliation_groups(&ontology)
+        group_mutable_edges_by_owner(&ontology)
     }
 
     fn find<'a>(
@@ -469,7 +455,7 @@ mod tests {
             array_field: None,
             mutable: true,
         };
-        assert_eq!(owner_endpoint(&polymorphic, "MergeRequest"), None);
+        assert_eq!(find_owner_id_column(&polymorphic, "MergeRequest"), None);
     }
 
     #[test]
@@ -483,7 +469,7 @@ mod tests {
 
     #[test]
     fn sql_pins_owner_kind_and_batches_every_relationship_kind() {
-        let sql = build_reconcile_sql(&fixture(), &[]);
+        let sql = build_tombstone_statement(&fixture(), &[]);
 
         assert!(sql.contains("INSERT INTO v57_gl_ci_edge"), "{sql}");
         assert!(sql.contains("FROM v57_gl_pipeline "), "{sql}");
@@ -498,7 +484,7 @@ mod tests {
 
     #[test]
     fn staleness_compares_versions_and_stamps_from_the_owner() {
-        let sql = build_reconcile_sql(&fixture(), &[]);
+        let sql = build_tombstone_statement(&fixture(), &[]);
 
         assert!(sql.contains("edge._version < owner._version"), "{sql}");
         assert!(sql.contains("target_kind, _version, _deleted)"), "{sql}");
@@ -508,7 +494,7 @@ mod tests {
 
     #[test]
     fn both_sides_dedup_without_final_and_filter_deleted_after() {
-        let sql = build_reconcile_sql(&fixture(), &[]);
+        let sql = build_tombstone_statement(&fixture(), &[]);
 
         assert!(!sql.contains("FINAL"), "{sql}");
         assert_eq!(sql.matches("LIMIT 1 BY").count(), 2, "{sql}");
@@ -531,18 +517,27 @@ mod tests {
     }
 
     #[test]
-    fn in_flight_namespaces_are_excluded_from_the_owner_scan() {
-        let sql = build_reconcile_sql(&fixture(), &[7, 42]);
+    fn find_namespaces_with_pending_writes_are_excluded_from_the_owner_scan() {
+        let sql = build_tombstone_statement(&fixture(), &[7, 42]);
         assert!(sql.contains("NOT IN (7, 42)"), "{sql}");
 
-        let clean = build_reconcile_sql(&fixture(), &[]);
+        let clean = build_tombstone_statement(&fixture(), &[]);
         assert!(!clean.contains("NOT IN ("), "{clean}");
     }
 
     #[test]
-    fn checkpoint_namespace_id_reads_the_id_segment() {
-        assert_eq!(checkpoint_namespace_id("ns.42.MergeRequest"), Some(42));
-        assert_eq!(checkpoint_namespace_id("ns.7.Job.p1of3"), Some(7));
-        assert_eq!(checkpoint_namespace_id("maintenance.something"), None);
+    fn parse_namespace_id_from_checkpoint_key_reads_the_id_segment() {
+        assert_eq!(
+            parse_namespace_id_from_checkpoint_key("ns.42.MergeRequest"),
+            Some(42)
+        );
+        assert_eq!(
+            parse_namespace_id_from_checkpoint_key("ns.7.Job.p1of3"),
+            Some(7)
+        );
+        assert_eq!(
+            parse_namespace_id_from_checkpoint_key("maintenance.something"),
+            None
+        );
     }
 }

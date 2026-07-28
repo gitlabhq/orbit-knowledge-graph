@@ -657,12 +657,6 @@ impl Default for StaleEdgeReconciliationConfig {
 }
 
 /// Typed per-task configuration for all registered scheduled tasks.
-///
-/// Kebab-case is the canonical spelling in YAML, but `GKG_*` environment keys
-/// can only ever produce snake_case (config-rs splits on `__` and lowercases),
-/// so every multi-word task also accepts its snake_case alias. Without the
-/// alias an override like `GKG_SCHEDULE__TASKS__STALE_EDGE_RECONCILIATION__CRON`
-/// silently matches nothing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(deny_unknown_fields)]
@@ -673,15 +667,15 @@ pub struct ScheduledTasksConfiguration {
     pub namespace: NamespaceDispatcherConfig,
     #[serde(default)]
     pub siphon: SiphonRouterConfig,
-    #[serde(default, alias = "code_backfill")]
+    #[serde(default)]
     pub code_backfill: CodeBackfillSweepConfig,
-    #[serde(default, alias = "table_cleanup")]
+    #[serde(default)]
     pub table_cleanup: TableCleanupConfig,
-    #[serde(default, alias = "namespace_deletion")]
+    #[serde(default)]
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
-    #[serde(default, alias = "migration_completion")]
+    #[serde(default)]
     pub migration_completion: MigrationCompletionConfig,
-    #[serde(default, alias = "stale_edge_reconciliation")]
+    #[serde(default)]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
 }
 

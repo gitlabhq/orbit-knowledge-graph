@@ -372,14 +372,6 @@ handlers:
                 "GKG_FEATURES__STOP_MERGES_ON_RETIRE__NAMESPACES",
                 "9970,1234",
             )
-            .env(
-                "GKG_SCHEDULE__TASKS__STALE_EDGE_RECONCILIATION__CRON",
-                "0 */5 * * * *",
-            )
-            .env(
-                "GKG_SCHEDULE__TASKS__STALE_EDGE_RECONCILIATION__LOOKBACK_SECS",
-                "3600",
-            )
             .output()
             .expect("failed to spawn subprocess");
 
@@ -432,14 +424,6 @@ handlers:
             values["flag_for_5555"], false,
             "a namespace outside the list should not be enabled"
         );
-        assert_eq!(
-            values["stale_edge_cron"], "0 */5 * * * *",
-            "a kebab-case task key must still bind from its snake_case env var"
-        );
-        assert_eq!(
-            values["stale_edge_lookback_secs"], 3600,
-            "a kebab-case task key must still bind from its snake_case env var"
-        );
     }
 
     /// Subprocess helper: loads config with real process env vars and prints
@@ -467,8 +451,6 @@ handlers:
                 "flag_for_9970": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(9970)),
                 "flag_for_1234": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(1234)),
                 "flag_for_5555": config.features.is_enabled_for(Feature::StopMergesOnRetire, Some(5555)),
-                "stale_edge_cron": config.schedule.tasks.stale_edge_reconciliation.schedule.cron,
-                "stale_edge_lookback_secs": config.schedule.tasks.stale_edge_reconciliation.lookback_secs,
             })
         );
     }

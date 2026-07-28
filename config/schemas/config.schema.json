@@ -1555,7 +1555,7 @@
       "additionalProperties": false
     },
     "ScheduledTasksConfiguration": {
-      "description": "Typed per-task configuration for all registered scheduled tasks.\n\nKebab-case is the canonical spelling in YAML, but `GKG_*` environment keys\ncan only ever produce snake_case (config-rs splits on `__` and lowercases),\nso every multi-word task also accepts its snake_case alias. Without the\nalias an override like `GKG_SCHEDULE__TASKS__STALE_EDGE_RECONCILIATION__CRON`\nsilently matches nothing.",
+      "description": "Typed per-task configuration for all registered scheduled tasks.",
       "type": "object",
       "properties": {
         "code-backfill": {
