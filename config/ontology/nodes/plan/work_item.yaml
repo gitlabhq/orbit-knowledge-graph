@@ -185,6 +185,7 @@ pipelines:
             field: namespace_id
             kind: Group
           label: IN_GROUP
+          mutable: true
         - from:
             field: id
             kind: WorkItem
@@ -199,6 +200,7 @@ pipelines:
             field: id
             kind: WorkItem
           label: CLOSED
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:

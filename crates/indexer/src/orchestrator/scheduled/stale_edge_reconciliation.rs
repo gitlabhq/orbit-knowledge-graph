@@ -1,34 +1,44 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use ontology::{EdgeMapping, NodeEntity, NodeRef, NodeRefKind, Ontology};
+use chrono::Utc;
+use ontology::{EdgeMapping, NodeRef, NodeRefKind, Ontology};
 use tracing::{info, warn};
 
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
-use crate::durability::WriteDurability;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
 
+/// Prefix of every per-namespace SDLC pipeline checkpoint (`ns.<id>.<Entity>`).
+const NAMESPACE_CHECKPOINT_PREFIX: &str = "ns.";
+
+/// Edge identity, matching the sort key every edge table shares.
+const EDGE_SORT_KEY: &str =
+    "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
+
+/// One tombstone statement: every relationship kind a single owner node emits
+/// into a single edge table on a single endpoint.
+///
+/// Kinds are grouped rather than swept individually because the scan cost is
+/// driven by the owner's traversal paths, not by the number of kinds — batching
+/// two kinds measured the same as one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ReconciliationSpec {
-    relationship_kind: String,
-    edge_table: String,
+struct ReconciliationGroup {
+    owner_entity: String,
     owner_node_table: String,
-    /// Graph node-table column holding the current FK value; can differ from the
-    /// edge-map (extract) key, e.g. `closed_by_id` vs `metric_latest_closed_by_id`.
-    owner_fk_column: String,
-    source_kind: String,
-    target_kind: String,
-    /// Edge endpoint holding the owner's id (the join key); the `other` endpoint
-    /// is what must equal the owner's current FK, else the edge is stale.
+    edge_table: String,
+    /// Edge endpoint holding the owner's id; also picks the `*_kind` column that
+    /// pins the owner's node type. `gl_edge` is shared, so without that pin the
+    /// join would match unrelated node types that share the integer id space.
     owner_id_column: &'static str,
-    other_id_column: &'static str,
+    owner_kind_column: &'static str,
+    relationship_kinds: Vec<String>,
 }
 
 /// Periodic, dispatcher-side sweep that tombstones stale FK-derived edges.
@@ -38,7 +48,7 @@ struct ReconciliationSpec {
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
-    specs: Vec<ReconciliationSpec>,
+    groups: Vec<ReconciliationGroup>,
     metrics: ScheduledTaskMetrics,
     config: StaleEdgeReconciliationConfig,
 }
@@ -51,20 +61,20 @@ impl StaleEdgeReconciliation {
         metrics: ScheduledTaskMetrics,
         config: StaleEdgeReconciliationConfig,
     ) -> Self {
-        let specs = reconciliation_specs(ontology);
-        let kinds: Vec<&str> = specs
+        let groups = reconciliation_groups(ontology);
+        let kinds: Vec<&str> = groups
             .iter()
-            .map(|spec| spec.relationship_kind.as_str())
+            .flat_map(|group| group.relationship_kinds.iter().map(String::as_str))
             .collect();
         info!(
-            specs = specs.len(),
+            groups = groups.len(),
             ?kinds,
-            "stale-edge reconciliation specs resolved",
+            "stale-edge reconciliation groups resolved",
         );
         Self {
             graph,
             checkpoint_store,
-            specs,
+            groups,
             metrics,
             config,
         }
@@ -93,42 +103,35 @@ impl ScheduledTask for StaleEdgeReconciliation {
 
 impl StaleEdgeReconciliation {
     async fn reconcile_all(&self) -> Result<(), TaskError> {
-        // Capture before reading so rows written mid-run are caught next time, not lost.
-        let new_watermark = Utc::now();
-        let last_watermark = self
-            .checkpoint_store
-            .load(CHECKPOINT_KEY)
-            .await
-            .map_err(TaskError::new)?
-            .map(|checkpoint| checkpoint.watermark)
-            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        let cursor = last_watermark.format(TIMESTAMP_FORMAT).to_string();
+        let excluded = self.in_flight_namespaces().await?;
+        // `_version` is a Siphon source watermark, so the window bounds how far
+        // back the owner scan reaches, not how long ago the sweep last ran.
+        let cursor = (Utc::now() - self.config.lookback())
+            .format(TIMESTAMP_FORMAT)
+            .to_string();
 
-        let full_scan = last_watermark == DateTime::<Utc>::UNIX_EPOCH;
         let mut failed = 0u64;
-        for spec in &self.specs {
+        for group in &self.groups {
             info!(
-                relationship_kind = spec.relationship_kind,
-                source_kind = spec.source_kind,
-                target_kind = spec.target_kind,
-                owner = spec.owner_node_table,
-                edge_table = spec.edge_table,
+                owner = group.owner_entity,
+                owner_table = group.owner_node_table,
+                edge_table = group.edge_table,
+                kinds = ?group.relationship_kinds,
                 cursor = cursor,
-                full_scan,
+                excluded_namespaces = excluded.len(),
                 "reconcile started",
             );
             let statement_start = Instant::now();
-            let result = self.reconcile_one(spec, &cursor).await;
+            let result = self.reconcile_one(group, &cursor, &excluded).await;
             let elapsed = statement_start.elapsed();
+            let label = group.relationship_kinds.join(",");
             match result {
                 Ok(()) => {
                     self.metrics
-                        .record_query_duration(&spec.relationship_kind, elapsed.as_secs_f64());
+                        .record_query_duration(&label, elapsed.as_secs_f64());
                     info!(
-                        relationship_kind = spec.relationship_kind,
-                        owner = spec.owner_node_table,
-                        cursor = cursor,
-                        full_scan,
+                        owner = group.owner_entity,
+                        edge_table = group.edge_table,
                         duration_ms = elapsed.as_millis() as u64,
                         outcome = "success",
                         "reconcile completed",
@@ -138,10 +141,8 @@ impl StaleEdgeReconciliation {
                     failed += 1;
                     self.metrics.record_error(self.name(), "reconcile");
                     warn!(
-                        relationship_kind = spec.relationship_kind,
-                        owner = spec.owner_node_table,
-                        cursor = cursor,
-                        full_scan,
+                        owner = group.owner_entity,
+                        edge_table = group.edge_table,
                         duration_ms = elapsed.as_millis() as u64,
                         outcome = "error",
                         %error,
@@ -152,165 +153,205 @@ impl StaleEdgeReconciliation {
         }
 
         if failed > 0 {
-            // Leave the cursor where it was so the next run re-scans this window.
             return Err(TaskError::new(format!(
                 "{failed}/{} reconcile statements failed",
-                self.specs.len()
+                self.groups.len()
             )));
         }
-
-        self.checkpoint_store
-            .save_completed(CHECKPOINT_KEY, &new_watermark, WriteDurability::Durable)
-            .await
-            .map_err(TaskError::new)?;
-
         Ok(())
     }
 
     async fn reconcile_one(
         &self,
-        spec: &ReconciliationSpec,
+        group: &ReconciliationGroup,
         cursor: &str,
+        excluded: &[i64],
     ) -> Result<(), TaskError> {
         self.graph
-            .query(&build_reconcile_sql(spec))
+            .query(&build_reconcile_sql(group, excluded))
             .param("cursor", cursor)
             .execute()
             .await
             .map_err(TaskError::new)
     }
+
+    /// Namespaces whose SDLC pipelines have writes in flight.
+    ///
+    /// `save_completed` clears `cursor_values` only once every page of a run has
+    /// drained, so a set cursor means edges for that namespace may not have
+    /// landed yet and comparing versions would tombstone them. Partitioned loads
+    /// checkpoint under child keys (`ns.7.Job.p1of3`), so the prefix scan has to
+    /// consider those too.
+    async fn in_flight_namespaces(&self) -> Result<Vec<i64>, TaskError> {
+        let checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(NAMESPACE_CHECKPOINT_PREFIX)
+            .await
+            .map_err(TaskError::new)?;
+
+        let mut ids: Vec<i64> = checkpoints
+            .iter()
+            .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
+            .filter_map(|(key, _)| checkpoint_namespace_id(key))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        Ok(ids)
+    }
 }
 
-fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
-    let mut specs = Vec::new();
+/// `ns.<namespace_id>.<Entity>` → `namespace_id`.
+fn checkpoint_namespace_id(key: &str) -> Option<i64> {
+    key.strip_prefix(NAMESPACE_CHECKPOINT_PREFIX)?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn reconciliation_groups(ontology: &Ontology) -> Vec<ReconciliationGroup> {
+    let mut by_key: BTreeMap<(String, String, &'static str), Vec<String>> = BTreeMap::new();
+    let mut tables: BTreeMap<String, String> = BTreeMap::new();
+
     for node in ontology.nodes() {
         if node.global {
             continue;
         }
         for pipeline in &node.pipelines {
             for mapping in pipeline.transform.edges() {
-                if let Some(spec) = reconciliation_spec(ontology, node, mapping) {
-                    specs.push(spec);
+                if !mapping.mutable {
+                    continue;
                 }
+                let Some(owner_id_column) = owner_endpoint(mapping, &node.name) else {
+                    continue;
+                };
+                let edge_table = prefixed_table_name(
+                    ontology.edge_table_for_relationship(&mapping.label),
+                    *SCHEMA_VERSION,
+                );
+                tables.insert(
+                    node.name.clone(),
+                    prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
+                );
+                by_key
+                    .entry((node.name.clone(), edge_table, owner_id_column))
+                    .or_default()
+                    .push(mapping.label.clone());
             }
         }
     }
-    specs
-}
 
-fn is_scalar_edge(mapping: &EdgeMapping) -> bool {
-    mapping.array_field.is_none()
-}
-
-fn reconciliation_spec(
-    ontology: &Ontology,
-    node: &NodeEntity,
-    mapping: &EdgeMapping,
-) -> Option<ReconciliationSpec> {
-    if !mapping.mutable {
-        return None;
-    }
-    if !is_scalar_edge(mapping) {
-        return None;
-    }
-
-    let owner = owner_node_ref(mapping, &node.name)?;
-    let other = other_node_ref(mapping, &node.name)?;
-    let NodeRefKind::Literal(other_kind) = &other.kind else {
-        return None;
-    };
-    let owner_fk_column = node
-        .fields
-        .iter()
-        .find(|field| field.column_name() == Some(other.field.as_str()))
-        .map(|field| field.name.clone())?;
-
-    let edge_table = prefixed_table_name(
-        ontology.edge_table_for_relationship(&mapping.label),
-        *SCHEMA_VERSION,
-    );
-    let owner_node_table = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
-
-    let (source_kind, target_kind, owner_id_column, other_id_column) =
-        if std::ptr::addr_eq(owner, &mapping.source) {
-            (
-                node.name.clone(),
-                other_kind.clone(),
-                "source_id",
-                "target_id",
-            )
-        } else {
-            (
-                other_kind.clone(),
-                node.name.clone(),
-                "target_id",
-                "source_id",
-            )
-        };
-
-    Some(ReconciliationSpec {
-        relationship_kind: mapping.label.clone(),
-        edge_table,
-        owner_node_table,
-        owner_fk_column,
-        source_kind,
-        target_kind,
-        owner_id_column,
-        other_id_column,
-    })
-}
-
-fn owner_node_ref<'a>(mapping: &'a EdgeMapping, node_name: &str) -> Option<&'a NodeRef> {
-    [&mapping.source, &mapping.target]
+    by_key
         .into_iter()
-        .find(|node_ref| {
-            matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
-                && node_ref.field == "id"
+        .map(|((owner_entity, edge_table, owner_id_column), mut kinds)| {
+            kinds.sort();
+            kinds.dedup();
+            ReconciliationGroup {
+                owner_node_table: tables[&owner_entity].clone(),
+                owner_entity,
+                edge_table,
+                owner_id_column,
+                owner_kind_column: if owner_id_column == "source_id" {
+                    "source_kind"
+                } else {
+                    "target_kind"
+                },
+                relationship_kinds: kinds,
+            }
         })
+        .collect()
 }
 
-fn other_node_ref<'a>(mapping: &'a EdgeMapping, node_name: &str) -> Option<&'a NodeRef> {
-    [&mapping.source, &mapping.target]
-        .into_iter()
-        .find(|node_ref| !matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name && node_ref.field == "id"))
-}
-
-/// Builds the single tombstone statement for one spec.
+/// Which edge endpoint carries the owner's own id, if either does.
 ///
-/// `source_kind`/`target_kind` are pinned to concrete node types so a kind
-/// emitted from several FK columns into the same table (e.g. `TRIGGERED` from
-/// both `merge_request_id` and `user_id`) reconciles each variant in isolation.
-fn build_reconcile_sql(spec: &ReconciliationSpec) -> String {
-    let ReconciliationSpec {
-        relationship_kind,
-        edge_table,
+/// A mapping whose owner side is not bound to the node's `id` (polymorphic or
+/// derived endpoints) has no owner row to compare against and is skipped.
+fn owner_endpoint(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
+    let binds_owner = |node_ref: &NodeRef| {
+        matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
+            && node_ref.field == "id"
+    };
+    if binds_owner(&mapping.source) {
+        Some("source_id")
+    } else if binds_owner(&mapping.target) {
+        Some("target_id")
+    } else {
+        None
+    }
+}
+
+/// Builds the single tombstone statement for one group.
+///
+/// Staleness is `edge._version < owner._version`: the ETL re-emits every edge of
+/// a source row stamped with that row's `_version`, so an edge left behind was
+/// not re-emitted. That needs no per-relationship FK knowledge, which is why one
+/// statement can cover every kind the owner emits.
+///
+/// Both sides dedup with `LIMIT 1 BY` rather than `FINAL`. `FINAL` defeats
+/// granule pruning on `_version` (measured 26.5M rows vs 22K for one window),
+/// and on the edge side an un-deduped scan makes superseded copies of live edges
+/// look stale (measured 18,879 false positives against 0). Pushing the cursor
+/// inside the owner dedup is safe — a key whose newest version predates the
+/// cursor has no version at or after it — but `_deleted` must stay outside on
+/// both sides, where it reproduces `FINAL` dropping tombstoned keys.
+fn build_reconcile_sql(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
+    let ReconciliationGroup {
         owner_node_table,
-        owner_fk_column,
-        source_kind,
-        target_kind,
+        edge_table,
         owner_id_column,
-        other_id_column,
-    } = spec;
+        owner_kind_column,
+        owner_entity,
+        relationship_kinds,
+    } = group;
+
+    let kinds = relationship_kinds
+        .iter()
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // A namespace mid-write has edges that have not landed yet; sweeping it
+    // would tombstone them. Usually empty, so the predicate usually vanishes.
+    let namespace_guard = if excluded_namespaces.is_empty() {
+        String::new()
+    } else {
+        let ids = excluded_namespaces
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" AND toInt64OrZero(extract(traversal_path, '^[0-9]+/([0-9]+)/')) NOT IN ({ids})")
+    };
 
     format!(
         "INSERT INTO {edge_table} \
-           (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _deleted) \
+           (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version, _deleted) \
          WITH owner AS ( \
-           SELECT id, traversal_path, {owner_fk_column} AS current_fk \
-           FROM {owner_node_table} FINAL \
-           WHERE _version >= {{cursor:String}} \
+           SELECT id, traversal_path, _version FROM ( \
+             SELECT id, traversal_path, _version, _deleted \
+             FROM {owner_node_table} \
+             WHERE _version >= {{cursor:String}}{namespace_guard} \
+             ORDER BY traversal_path, id, _version DESC \
+             LIMIT 1 BY traversal_path, id \
+           ) WHERE _deleted = false \
+         ), \
+         edge AS ( \
+           SELECT {EDGE_SORT_KEY}, _version FROM ( \
+             SELECT {EDGE_SORT_KEY}, _version, _deleted \
+             FROM {edge_table} \
+             WHERE relationship_kind IN ({kinds}) \
+               AND {owner_kind_column} = '{owner_entity}' \
+               AND traversal_path IN (SELECT traversal_path FROM owner) \
+               AND {owner_id_column} IN (SELECT id FROM owner) \
+             ORDER BY {EDGE_SORT_KEY}, _version DESC \
+             LIMIT 1 BY {EDGE_SORT_KEY} \
+           ) WHERE _deleted = false \
          ) \
          SELECT edge.traversal_path, edge.relationship_kind, edge.source_id, edge.source_kind, \
-                edge.target_id, edge.target_kind, true \
-         FROM {edge_table} edge \
+                edge.target_id, edge.target_kind, owner._version, true \
+         FROM edge \
          JOIN owner ON owner.id = edge.{owner_id_column} AND owner.traversal_path = edge.traversal_path \
-         WHERE edge.relationship_kind = '{relationship_kind}' \
-           AND edge.source_kind = '{source_kind}' \
-           AND edge.target_kind = '{target_kind}' \
-           AND edge._deleted = false \
-           AND edge.traversal_path IN (SELECT traversal_path FROM owner) \
-           AND edge.{owner_id_column} IN (SELECT id FROM owner) \
-           AND (owner.current_fk IS NULL OR edge.{other_id_column} != owner.current_fk)"
+         WHERE edge._version < owner._version"
     )
 }
 
@@ -318,135 +359,96 @@ fn build_reconcile_sql(spec: &ReconciliationSpec) -> String {
 mod tests {
     use super::*;
 
-    fn specs() -> Vec<ReconciliationSpec> {
+    fn groups() -> Vec<ReconciliationGroup> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        reconciliation_specs(&ontology)
+        reconciliation_groups(&ontology)
     }
 
     fn find<'a>(
-        specs: &'a [ReconciliationSpec],
-        kind: &str,
-        owner_table_suffix: &str,
-    ) -> &'a ReconciliationSpec {
-        specs
+        groups: &'a [ReconciliationGroup],
+        owner: &str,
+        edge_table_suffix: &str,
+        endpoint: &str,
+    ) -> &'a ReconciliationGroup {
+        groups
             .iter()
-            .find(|s| {
-                s.relationship_kind == kind && s.owner_node_table.ends_with(owner_table_suffix)
+            .find(|g| {
+                g.owner_entity == owner
+                    && g.edge_table.ends_with(edge_table_suffix)
+                    && g.owner_id_column == endpoint
             })
-            .unwrap_or_else(|| panic!("expected spec {kind} owned by *{owner_table_suffix}"))
+            .unwrap_or_else(|| panic!("expected group {owner}/*{edge_table_suffix}/{endpoint}"))
     }
 
-    fn mapping(relationship_kind: &str) -> EdgeMapping {
-        EdgeMapping {
-            source: NodeRef {
-                field: "user_id".to_string(),
-                kind: NodeRefKind::Literal("User".to_string()),
-                property_inputs: Default::default(),
-                enrich: false,
-            },
-            target: NodeRef {
-                field: "id".to_string(),
-                kind: NodeRefKind::Literal("MergeRequest".to_string()),
-                property_inputs: Default::default(),
-                enrich: false,
-            },
-            label: relationship_kind.to_string(),
-            array_field: None,
-            mutable: true,
+    fn fixture() -> ReconciliationGroup {
+        ReconciliationGroup {
+            owner_entity: "Pipeline".to_string(),
+            owner_node_table: "v57_gl_pipeline".to_string(),
+            edge_table: "v57_gl_ci_edge".to_string(),
+            owner_id_column: "target_id",
+            owner_kind_column: "target_kind",
+            relationship_kinds: vec!["TRIGGERED".to_string(), "AUTO_CANCELED_BY".to_string()],
         }
-    }
-
-    fn merge_request_node(ontology: &Ontology) -> &NodeEntity {
-        ontology
-            .get_node("MergeRequest")
-            .expect("MergeRequest node")
     }
 
     #[test]
     fn outgoing_edge_owner_is_source() {
-        let specs = specs();
-        let diff = find(&specs, "HAS_LATEST_DIFF", "gl_merge_request");
-        assert_eq!(diff.owner_id_column, "source_id");
-        assert_eq!(diff.other_id_column, "target_id");
-        assert_eq!(diff.source_kind, "MergeRequest");
-        assert_eq!(diff.target_kind, "MergeRequestDiff");
-        assert_eq!(diff.owner_fk_column, "latest_merge_request_diff_id");
-    }
-
-    #[test]
-    fn incoming_edge_owner_is_target() {
-        let specs = specs();
-        let edited = find(&specs, "LAST_EDITED_BY", "gl_merge_request");
-        assert_eq!(edited.owner_id_column, "target_id");
-        assert_eq!(edited.other_id_column, "source_id");
-        assert_eq!(edited.source_kind, "User");
-        assert_eq!(edited.target_kind, "MergeRequest");
-    }
-
-    #[test]
-    fn derives_exactly_the_mutable_kinds_from_the_ontology() {
-        let specs = specs();
-        let kinds: std::collections::BTreeSet<&str> =
-            specs.iter().map(|s| s.relationship_kind.as_str()).collect();
-        assert_eq!(
-            kinds,
-            [
-                "HAS_HEAD_PIPELINE",
-                "HAS_LATEST_DIFF",
-                "IN_MILESTONE",
-                "LAST_EDITED_BY",
-                "UPDATED_BY"
-            ]
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>(),
+        let groups = groups();
+        let diff = find(&groups, "MergeRequest", "gl_diff_edge", "source_id");
+        assert_eq!(diff.owner_kind_column, "source_kind");
+        assert!(
+            diff.relationship_kinds
+                .contains(&"HAS_LATEST_DIFF".to_string())
         );
     }
 
     #[test]
-    fn immutable_fk_kinds_are_not_marked_mutable() {
-        let specs = specs();
+    fn incoming_edge_owner_is_target() {
+        let groups = groups();
+        let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
+        assert_eq!(incoming.owner_kind_column, "target_kind");
+        assert!(
+            incoming
+                .relationship_kinds
+                .contains(&"LAST_EDITED_BY".to_string())
+        );
+    }
+
+    #[test]
+    fn kinds_sharing_owner_and_table_collapse_into_one_group() {
+        let groups = groups();
+        let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
+        assert!(
+            incoming.relationship_kinds.len() > 1,
+            "UPDATED_BY and LAST_EDITED_BY share an owner, table and endpoint so they \
+             must batch into one statement: {incoming:?}",
+        );
+    }
+
+    #[test]
+    fn only_mutable_mappings_are_swept() {
+        let groups = groups();
+        let swept: std::collections::BTreeSet<&str> = groups
+            .iter()
+            .flat_map(|g| g.relationship_kinds.iter().map(String::as_str))
+            .collect();
         for immutable in [
             "IN_PROJECT",
             "AUTHORED",
             "HAS_JOB",
             "IN_PIPELINE",
-            "CLOSED",
             "MERGED_AT_COMMIT",
+            "HAS_IDENTIFIER",
         ] {
             assert!(
-                !specs.iter().any(|s| s.relationship_kind == immutable),
+                !swept.contains(immutable),
                 "{immutable} is not marked mutable in the ontology and must not be swept",
             );
         }
     }
 
     #[test]
-    fn non_mutable_edge_is_skipped() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let immutable = EdgeMapping {
-            mutable: false,
-            ..mapping("AUTHORED")
-        };
-        assert!(
-            reconciliation_spec(&ontology, merge_request_node(&ontology), &immutable).is_none()
-        );
-    }
-
-    #[test]
-    fn mutable_array_edge_is_skipped() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let array_edge = EdgeMapping {
-            array_field: Some("user_id".to_string()),
-            ..mapping("REVIEWER")
-        };
-        assert!(
-            reconciliation_spec(&ontology, merge_request_node(&ontology), &array_edge).is_none()
-        );
-    }
-
-    #[test]
-    fn mutable_polymorphic_edge_is_skipped() {
-        let ontology = Ontology::load_embedded().unwrap();
+    fn polymorphic_endpoint_has_no_owner_row_to_compare() {
         let polymorphic = EdgeMapping {
             source: NodeRef {
                 field: "noteable_id".to_string(),
@@ -457,46 +459,90 @@ mod tests {
                     mapping: Default::default(),
                 },
             },
-            ..mapping("HAS_NOTE")
+            target: NodeRef {
+                field: "user_id".to_string(),
+                kind: NodeRefKind::Literal("User".to_string()),
+                property_inputs: Default::default(),
+                enrich: false,
+            },
+            label: "HAS_NOTE".to_string(),
+            array_field: None,
+            mutable: true,
         };
-        assert!(
-            reconciliation_spec(&ontology, merge_request_node(&ontology), &polymorphic).is_none()
-        );
+        assert_eq!(owner_endpoint(&polymorphic, "MergeRequest"), None);
     }
 
     #[test]
-    fn every_spec_targets_a_versioned_table() {
+    fn every_group_targets_versioned_tables() {
         let prefix = format!("v{}_", *SCHEMA_VERSION);
-        for spec in specs() {
-            assert!(spec.edge_table.starts_with(&prefix), "{spec:?}");
-            assert!(spec.owner_node_table.starts_with(&prefix), "{spec:?}");
+        for group in groups() {
+            assert!(group.edge_table.starts_with(&prefix), "{group:?}");
+            assert!(group.owner_node_table.starts_with(&prefix), "{group:?}");
         }
     }
 
     #[test]
-    fn sql_pins_kinds_and_compares_other_node_ref() {
-        let spec = ReconciliationSpec {
-            relationship_kind: "TRIGGERED".to_string(),
-            edge_table: "v57_gl_ci_edge".to_string(),
-            owner_node_table: "v57_gl_pipeline".to_string(),
-            owner_fk_column: "merge_request_id".to_string(),
-            source_kind: "MergeRequest".to_string(),
-            target_kind: "Pipeline".to_string(),
-            owner_id_column: "target_id",
-            other_id_column: "source_id",
-        };
-        let sql = build_reconcile_sql(&spec);
+    fn sql_pins_owner_kind_and_batches_every_relationship_kind() {
+        let sql = build_reconcile_sql(&fixture(), &[]);
 
         assert!(sql.contains("INSERT INTO v57_gl_ci_edge"), "{sql}");
-        assert!(sql.contains("v57_gl_pipeline FINAL"), "{sql}");
+        assert!(sql.contains("FROM v57_gl_pipeline "), "{sql}");
         assert!(sql.contains("_version >= {cursor:String}"), "{sql}");
-
-        assert!(sql.contains("relationship_kind = 'TRIGGERED'"), "{sql}");
-        assert!(sql.contains("source_kind = 'MergeRequest'"), "{sql}");
+        assert!(
+            sql.contains("relationship_kind IN ('TRIGGERED', 'AUTO_CANCELED_BY')"),
+            "{sql}"
+        );
         assert!(sql.contains("target_kind = 'Pipeline'"), "{sql}");
+        assert!(!sql.contains("source_kind = "), "{sql}");
+    }
 
-        assert!(sql.contains("source_id != "), "{sql}");
-        assert!(!sql.contains("target_id != "), "{sql}");
-        assert!(sql.contains("IS NULL OR"), "{sql}");
+    #[test]
+    fn staleness_compares_versions_and_stamps_from_the_owner() {
+        let sql = build_reconcile_sql(&fixture(), &[]);
+
+        assert!(sql.contains("edge._version < owner._version"), "{sql}");
+        assert!(sql.contains("target_kind, _version, _deleted)"), "{sql}");
+        assert!(sql.contains("owner._version, true"), "{sql}");
+        assert!(!sql.contains("now64"), "{sql}");
+    }
+
+    #[test]
+    fn both_sides_dedup_without_final_and_filter_deleted_after() {
+        let sql = build_reconcile_sql(&fixture(), &[]);
+
+        assert!(!sql.contains("FINAL"), "{sql}");
+        assert_eq!(sql.matches("LIMIT 1 BY").count(), 2, "{sql}");
+
+        // A `_deleted` filter inside either dedup would drop a tombstoned newest
+        // row and let a superseded one win, which is how valid edges get retired.
+        for dedup in [
+            "LIMIT 1 BY traversal_path, id",
+            "LIMIT 1 BY traversal_path, relationship_kind",
+        ] {
+            let at = sql
+                .find(dedup)
+                .unwrap_or_else(|| panic!("{dedup} missing: {sql}"));
+            let filter = sql[at..].find("_deleted = false").map(|i| i + at);
+            assert!(
+                filter.is_some(),
+                "{dedup} has no trailing _deleted filter: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn in_flight_namespaces_are_excluded_from_the_owner_scan() {
+        let sql = build_reconcile_sql(&fixture(), &[7, 42]);
+        assert!(sql.contains("NOT IN (7, 42)"), "{sql}");
+
+        let clean = build_reconcile_sql(&fixture(), &[]);
+        assert!(!clean.contains("NOT IN ("), "{clean}");
+    }
+
+    #[test]
+    fn checkpoint_namespace_id_reads_the_id_segment() {
+        assert_eq!(checkpoint_namespace_id("ns.42.MergeRequest"), Some(42));
+        assert_eq!(checkpoint_namespace_id("ns.7.Job.p1of3"), Some(7));
+        assert_eq!(checkpoint_namespace_id("maintenance.something"), None);
     }
 }

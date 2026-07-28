@@ -254,6 +254,7 @@ pipelines:
             field: auto_canceled_by_id
             kind: Pipeline
           label: AUTO_CANCELED_BY
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:

@@ -625,19 +625,44 @@ impl Default for MigrationCompletionConfig {
 pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+    /// How far back (seconds) each run scans owner `_version`.
+    ///
+    /// Must exceed the lag between a source change and its graph write, or a
+    /// late-landing row is never reconciled. Widening it past that buys almost
+    /// nothing: measured on production, 30 min found 172 stale edges and 6 h
+    /// found 183, for 9x the rows read.
+    #[serde(default = "default_stale_edge_lookback_secs")]
+    pub lookback_secs: u64,
+}
+
+fn default_stale_edge_lookback_secs() -> u64 {
+    60 * 60
+}
+
+impl StaleEdgeReconciliationConfig {
+    pub fn lookback(&self) -> chrono::TimeDelta {
+        chrono::TimeDelta::seconds(self.lookback_secs as i64)
+    }
 }
 
 impl Default for StaleEdgeReconciliationConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                cron: Some("0 */30 * * * *".into()),
+                cron: Some("0 */15 * * * *".into()),
             },
+            lookback_secs: default_stale_edge_lookback_secs(),
         }
     }
 }
 
 /// Typed per-task configuration for all registered scheduled tasks.
+///
+/// Kebab-case is the canonical spelling in YAML, but `GKG_*` environment keys
+/// can only ever produce snake_case (config-rs splits on `__` and lowercases),
+/// so every multi-word task also accepts its snake_case alias. Without the
+/// alias an override like `GKG_SCHEDULE__TASKS__STALE_EDGE_RECONCILIATION__CRON`
+/// silently matches nothing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(deny_unknown_fields)]
@@ -648,15 +673,15 @@ pub struct ScheduledTasksConfiguration {
     pub namespace: NamespaceDispatcherConfig,
     #[serde(default)]
     pub siphon: SiphonRouterConfig,
-    #[serde(default)]
+    #[serde(default, alias = "code_backfill")]
     pub code_backfill: CodeBackfillSweepConfig,
-    #[serde(default)]
+    #[serde(default, alias = "table_cleanup")]
     pub table_cleanup: TableCleanupConfig,
-    #[serde(default)]
+    #[serde(default, alias = "namespace_deletion")]
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
-    #[serde(default)]
+    #[serde(default, alias = "migration_completion")]
     pub migration_completion: MigrationCompletionConfig,
-    #[serde(default)]
+    #[serde(default, alias = "stale_edge_reconciliation")]
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
 }
 
@@ -859,7 +884,7 @@ mod tests {
         );
         assert_eq!(
             tasks.stale_edge_reconciliation.schedule.cron.as_deref(),
-            Some("0 */30 * * * *")
+            Some("0 */15 * * * *")
         );
     }
 
