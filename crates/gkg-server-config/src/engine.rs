@@ -625,12 +625,8 @@ impl Default for MigrationCompletionConfig {
 pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    /// How far back (seconds) each run scans owner `_version`.
-    ///
     /// Must exceed the lag between a source change and its graph write, or a
-    /// late-landing row is never reconciled. Widening it past that buys almost
-    /// nothing: measured on production, 30 min found 172 stale edges and 6 h
-    /// found 183, for 9x the rows read.
+    /// late-landing row is never reconciled. Widening it further buys little.
     #[serde(default = "default_stale_edge_lookback_secs")]
     pub lookback_secs: u64,
 }

@@ -7,7 +7,7 @@ use chrono::Utc;
 use ontology::{EdgeMapping, NodeRef, NodeRefKind, Ontology};
 use tracing::{info, warn};
 
-use crate::checkpoint::CheckpointStore;
+use crate::checkpoint::{CheckpointStore, NAMESPACE_KEY_PREFIX, namespace_id_from_key};
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
@@ -15,32 +15,22 @@ use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
 
-/// Keys look like `ns.<id>.<Entity>`, or `ns.<id>.<Entity>.p1of3` when partitioned.
-const NAMESPACE_CHECKPOINT_PREFIX: &str = "ns.";
-
-/// Every edge table shares this sort key, so it doubles as edge identity.
-const EDGE_SORT_KEY: &str =
-    "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
-
-/// Kinds are batched rather than swept one at a time because scan cost tracks
-/// the owner's traversal paths, not the number of kinds: two kinds in one
-/// statement measured the same as one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconciliationGroup {
-    owner_entity: String,
-    owner_node_table: String,
+    emitting_node: String,
+    emitting_node_table: String,
     edge_table: String,
     /// Edge endpoint holding the owner's id; also picks the `*_kind` column that
     /// pins the owner's node type. `gl_edge` is shared, so without that pin the
     /// join would match unrelated node types that share the integer id space.
-    owner_id_column: &'static str,
-    owner_kind_column: &'static str,
+    emitting_node_id_column: &'static str,
+    emitting_node_kind_column: &'static str,
     relationship_kinds: Vec<String>,
+    edge_sort_key: String,
 }
 
-/// Periodic, dispatcher-side sweep that tombstones edges their owner stopped
-/// emitting. Stateless: each run scans a fixed lookback, so a failed run costs
-/// nothing beyond the rows it skipped.
+/// Tombstones edges a node's pipeline stopped emitting. Stateless: each run scans a
+/// fixed lookback rather than resuming from a cursor.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -57,7 +47,7 @@ impl StaleEdgeReconciliation {
         metrics: ScheduledTaskMetrics,
         config: StaleEdgeReconciliationConfig,
     ) -> Self {
-        let groups = group_mutable_edges_by_owner(ontology);
+        let groups = group_mutable_edges_by_emitting_node(ontology);
         let kinds: Vec<&str> = groups
             .iter()
             .flat_map(|group| group.relationship_kinds.iter().map(String::as_str))
@@ -100,8 +90,6 @@ impl ScheduledTask for StaleEdgeReconciliation {
 impl StaleEdgeReconciliation {
     async fn reconcile_all(&self) -> Result<(), TaskError> {
         let pending = self.find_namespaces_with_pending_writes().await?;
-        // `_version` is a Siphon source watermark, so this bounds how far back
-        // the owner scan reaches, not how long ago the sweep last ran.
         let cursor = (Utc::now() - self.config.lookback())
             .format(TIMESTAMP_FORMAT)
             .to_string();
@@ -109,8 +97,8 @@ impl StaleEdgeReconciliation {
         let mut failed = 0u64;
         for group in &self.groups {
             info!(
-                owner = group.owner_entity,
-                owner_table = group.owner_node_table,
+                emitting_node = group.emitting_node,
+                emitting_node_table = group.emitting_node_table,
                 edge_table = group.edge_table,
                 kinds = ?group.relationship_kinds,
                 cursor = cursor,
@@ -127,7 +115,7 @@ impl StaleEdgeReconciliation {
                         elapsed.as_secs_f64(),
                     );
                     info!(
-                        owner = group.owner_entity,
+                        emitting_node = group.emitting_node,
                         edge_table = group.edge_table,
                         duration_ms = elapsed.as_millis() as u64,
                         outcome = "success",
@@ -138,7 +126,7 @@ impl StaleEdgeReconciliation {
                     failed += 1;
                     self.metrics.record_error(self.name(), "reconcile");
                     warn!(
-                        owner = group.owner_entity,
+                        emitting_node = group.emitting_node,
                         edge_table = group.edge_table,
                         duration_ms = elapsed.as_millis() as u64,
                         outcome = "error",
@@ -178,14 +166,14 @@ impl StaleEdgeReconciliation {
     async fn find_namespaces_with_pending_writes(&self) -> Result<Vec<i64>, TaskError> {
         let checkpoints = self
             .checkpoint_store
-            .load_by_prefix(NAMESPACE_CHECKPOINT_PREFIX)
+            .load_by_prefix(NAMESPACE_KEY_PREFIX)
             .await
             .map_err(TaskError::new)?;
 
         let mut ids: Vec<i64> = checkpoints
             .iter()
             .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
-            .filter_map(|(key, _)| parse_namespace_id_from_checkpoint_key(key))
+            .filter_map(|(key, _)| namespace_id_from_key(key))
             .collect();
         ids.sort_unstable();
         ids.dedup();
@@ -193,17 +181,9 @@ impl StaleEdgeReconciliation {
     }
 }
 
-fn parse_namespace_id_from_checkpoint_key(key: &str) -> Option<i64> {
-    key.strip_prefix(NAMESPACE_CHECKPOINT_PREFIX)?
-        .split('.')
-        .next()?
-        .parse()
-        .ok()
-}
-
-fn group_mutable_edges_by_owner(ontology: &Ontology) -> Vec<ReconciliationGroup> {
+fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGroup> {
     let mut kinds_by_group: BTreeMap<(String, String, &'static str), Vec<String>> = BTreeMap::new();
-    let mut owner_tables_by_entity: BTreeMap<String, String> = BTreeMap::new();
+    let mut tables_by_emitting_node: BTreeMap<String, String> = BTreeMap::new();
 
     for node in ontology.nodes() {
         if node.global {
@@ -214,19 +194,20 @@ fn group_mutable_edges_by_owner(ontology: &Ontology) -> Vec<ReconciliationGroup>
                 if !mapping.mutable {
                     continue;
                 }
-                let Some(owner_id_column) = find_owner_id_column(mapping, &node.name) else {
+                let Some(emitting_node_id_column) =
+                    find_emitting_node_id_column(mapping, &node.name)
+                else {
                     continue;
                 };
-                let edge_table = prefixed_table_name(
-                    ontology.edge_table_for_relationship(&mapping.label),
-                    *SCHEMA_VERSION,
-                );
-                owner_tables_by_entity.insert(
+                let edge_table = ontology
+                    .edge_table_for_relationship(&mapping.label)
+                    .to_string();
+                tables_by_emitting_node.insert(
                     node.name.clone(),
                     prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
                 );
                 kinds_by_group
-                    .entry((node.name.clone(), edge_table, owner_id_column))
+                    .entry((node.name.clone(), edge_table, emitting_node_id_column))
                     .or_default()
                     .push(mapping.label.clone());
             }
@@ -235,60 +216,61 @@ fn group_mutable_edges_by_owner(ontology: &Ontology) -> Vec<ReconciliationGroup>
 
     kinds_by_group
         .into_iter()
-        .map(|((owner_entity, edge_table, owner_id_column), mut kinds)| {
-            kinds.sort();
-            kinds.dedup();
-            ReconciliationGroup {
-                owner_node_table: owner_tables_by_entity[&owner_entity].clone(),
-                owner_entity,
-                edge_table,
-                owner_id_column,
-                owner_kind_column: if owner_id_column == "source_id" {
-                    "source_kind"
-                } else {
-                    "target_kind"
-                },
-                relationship_kinds: kinds,
-            }
-        })
+        .map(
+            |((emitting_node, edge_table, emitting_node_id_column), mut kinds)| {
+                kinds.sort();
+                kinds.dedup();
+                let edge_sort_key = ontology
+                    .edge_table_config(&edge_table)
+                    .map(|config| config.sort_key.join(", "))
+                    .unwrap_or_default();
+                ReconciliationGroup {
+                    emitting_node_table: tables_by_emitting_node[&emitting_node].clone(),
+                    emitting_node,
+                    edge_table: prefixed_table_name(&edge_table, *SCHEMA_VERSION),
+                    emitting_node_id_column,
+                    emitting_node_kind_column: if emitting_node_id_column == "source_id" {
+                        "source_kind"
+                    } else {
+                        "target_kind"
+                    },
+                    relationship_kinds: kinds,
+                    edge_sort_key,
+                }
+            },
+        )
         .collect()
 }
 
-/// `None` for polymorphic or derived endpoints: with no side bound to the
-/// owner's `id` there is no owner row to compare versions against.
-fn find_owner_id_column(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
-    let binds_owner = |node_ref: &NodeRef| {
+/// `None` when neither side binds the emitting node's `id`, so there is no node row to compare against.
+fn find_emitting_node_id_column(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
+    let binds_emitting_node = |node_ref: &NodeRef| {
         matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
             && node_ref.field == "id"
     };
-    if binds_owner(&mapping.source) {
+    if binds_emitting_node(&mapping.source) {
         Some("source_id")
-    } else if binds_owner(&mapping.target) {
+    } else if binds_emitting_node(&mapping.target) {
         Some("target_id")
     } else {
         None
     }
 }
 
-/// Staleness is `edge._version < owner._version`: the ETL re-emits every edge of
-/// a source row stamped with that row's `_version`, so an edge left behind was
-/// not re-emitted.
+/// An edge is stale when the ETL did not re-emit it at its emitting node's `_version`.
 ///
-/// Both sides dedup with `LIMIT 1 BY` rather than `FINAL`. `FINAL` defeats
-/// granule pruning on `_version` (measured 26.5M rows vs 22K for one window),
-/// and on the edge side an un-deduped scan makes superseded copies of live edges
-/// look stale (measured 18,879 false positives against 0). Pushing the cursor
-/// inside the owner dedup is safe — a key whose newest version predates the
-/// cursor has no version at or after it — but `_deleted` must stay outside on
-/// both sides, where it reproduces `FINAL` dropping tombstoned keys.
+/// `FINAL` would defeat granule pruning on `_version`, and an un-deduped edge
+/// scan makes superseded copies of live edges look stale, so both sides use
+/// `LIMIT 1 BY` with `_deleted` applied after the dedup.
 fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
     let ReconciliationGroup {
-        owner_node_table,
+        emitting_node_table,
         edge_table,
-        owner_id_column,
-        owner_kind_column,
-        owner_entity,
+        emitting_node_id_column,
+        emitting_node_kind_column,
+        emitting_node,
         relationship_kinds,
+        edge_sort_key,
     } = group;
 
     let kinds = relationship_kinds
@@ -297,7 +279,6 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
         .collect::<Vec<_>>()
         .join(", ");
 
-    // A namespace mid-write has edges that have not landed yet.
     let namespace_guard = if excluded_namespaces.is_empty() {
         String::new()
     } else {
@@ -312,32 +293,32 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
     format!(
         "INSERT INTO {edge_table} \
            (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version, _deleted) \
-         WITH owner AS ( \
+         WITH emitter AS ( \
            SELECT id, traversal_path, _version FROM ( \
              SELECT id, traversal_path, _version, _deleted \
-             FROM {owner_node_table} \
+             FROM {emitting_node_table} \
              WHERE _version >= {{cursor:String}}{namespace_guard} \
              ORDER BY traversal_path, id, _version DESC \
              LIMIT 1 BY traversal_path, id \
            ) WHERE _deleted = false \
          ), \
          edge AS ( \
-           SELECT {EDGE_SORT_KEY}, _version FROM ( \
-             SELECT {EDGE_SORT_KEY}, _version, _deleted \
+           SELECT {edge_sort_key}, _version FROM ( \
+             SELECT {edge_sort_key}, _version, _deleted \
              FROM {edge_table} \
              WHERE relationship_kind IN ({kinds}) \
-               AND {owner_kind_column} = '{owner_entity}' \
-               AND traversal_path IN (SELECT traversal_path FROM owner) \
-               AND {owner_id_column} IN (SELECT id FROM owner) \
-             ORDER BY {EDGE_SORT_KEY}, _version DESC \
-             LIMIT 1 BY {EDGE_SORT_KEY} \
+               AND {emitting_node_kind_column} = '{emitting_node}' \
+               AND traversal_path IN (SELECT traversal_path FROM emitter) \
+               AND {emitting_node_id_column} IN (SELECT id FROM emitter) \
+             ORDER BY {edge_sort_key}, _version DESC \
+             LIMIT 1 BY {edge_sort_key} \
            ) WHERE _deleted = false \
          ) \
          SELECT edge.traversal_path, edge.relationship_kind, edge.source_id, edge.source_kind, \
-                edge.target_id, edge.target_kind, owner._version, true \
+                edge.target_id, edge.target_kind, emitter._version, true \
          FROM edge \
-         JOIN owner ON owner.id = edge.{owner_id_column} AND owner.traversal_path = edge.traversal_path \
-         WHERE edge._version < owner._version"
+         JOIN emitter ON emitter.id = edge.{emitting_node_id_column} AND emitter.traversal_path = edge.traversal_path \
+         WHERE edge._version < emitter._version"
     )
 }
 
@@ -345,9 +326,12 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
 mod tests {
     use super::*;
 
+    const EDGE_SORT_KEY_FIXTURE: &str =
+        "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
+
     fn groups() -> Vec<ReconciliationGroup> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        group_mutable_edges_by_owner(&ontology)
+        group_mutable_edges_by_emitting_node(&ontology)
     }
 
     fn find<'a>(
@@ -359,21 +343,22 @@ mod tests {
         groups
             .iter()
             .find(|g| {
-                g.owner_entity == owner
+                g.emitting_node == owner
                     && g.edge_table.ends_with(edge_table_suffix)
-                    && g.owner_id_column == endpoint
+                    && g.emitting_node_id_column == endpoint
             })
             .unwrap_or_else(|| panic!("expected group {owner}/*{edge_table_suffix}/{endpoint}"))
     }
 
     fn fixture() -> ReconciliationGroup {
         ReconciliationGroup {
-            owner_entity: "Pipeline".to_string(),
-            owner_node_table: "v57_gl_pipeline".to_string(),
+            emitting_node: "Pipeline".to_string(),
+            emitting_node_table: "v57_gl_pipeline".to_string(),
             edge_table: "v57_gl_ci_edge".to_string(),
-            owner_id_column: "target_id",
-            owner_kind_column: "target_kind",
+            emitting_node_id_column: "target_id",
+            emitting_node_kind_column: "target_kind",
             relationship_kinds: vec!["TRIGGERED".to_string(), "AUTO_CANCELED_BY".to_string()],
+            edge_sort_key: EDGE_SORT_KEY_FIXTURE.to_string(),
         }
     }
 
@@ -381,7 +366,7 @@ mod tests {
     fn outgoing_edge_owner_is_source() {
         let groups = groups();
         let diff = find(&groups, "MergeRequest", "gl_diff_edge", "source_id");
-        assert_eq!(diff.owner_kind_column, "source_kind");
+        assert_eq!(diff.emitting_node_kind_column, "source_kind");
         assert!(
             diff.relationship_kinds
                 .contains(&"HAS_LATEST_DIFF".to_string())
@@ -392,7 +377,7 @@ mod tests {
     fn incoming_edge_owner_is_target() {
         let groups = groups();
         let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
-        assert_eq!(incoming.owner_kind_column, "target_kind");
+        assert_eq!(incoming.emitting_node_kind_column, "target_kind");
         assert!(
             incoming
                 .relationship_kinds
@@ -455,7 +440,10 @@ mod tests {
             array_field: None,
             mutable: true,
         };
-        assert_eq!(find_owner_id_column(&polymorphic, "MergeRequest"), None);
+        assert_eq!(
+            find_emitting_node_id_column(&polymorphic, "MergeRequest"),
+            None
+        );
     }
 
     #[test]
@@ -463,7 +451,7 @@ mod tests {
         let prefix = format!("v{}_", *SCHEMA_VERSION);
         for group in groups() {
             assert!(group.edge_table.starts_with(&prefix), "{group:?}");
-            assert!(group.owner_node_table.starts_with(&prefix), "{group:?}");
+            assert!(group.emitting_node_table.starts_with(&prefix), "{group:?}");
         }
     }
 
@@ -486,9 +474,9 @@ mod tests {
     fn staleness_compares_versions_and_stamps_from_the_owner() {
         let sql = build_tombstone_statement(&fixture(), &[]);
 
-        assert!(sql.contains("edge._version < owner._version"), "{sql}");
+        assert!(sql.contains("edge._version < emitter._version"), "{sql}");
         assert!(sql.contains("target_kind, _version, _deleted)"), "{sql}");
-        assert!(sql.contains("owner._version, true"), "{sql}");
+        assert!(sql.contains("emitter._version, true"), "{sql}");
         assert!(!sql.contains("now64"), "{sql}");
     }
 
@@ -517,27 +505,11 @@ mod tests {
     }
 
     #[test]
-    fn find_namespaces_with_pending_writes_are_excluded_from_the_owner_scan() {
+    fn namespaces_with_pending_writes_are_excluded_from_the_scan() {
         let sql = build_tombstone_statement(&fixture(), &[7, 42]);
         assert!(sql.contains("NOT IN (7, 42)"), "{sql}");
 
         let clean = build_tombstone_statement(&fixture(), &[]);
         assert!(!clean.contains("NOT IN ("), "{clean}");
-    }
-
-    #[test]
-    fn parse_namespace_id_from_checkpoint_key_reads_the_id_segment() {
-        assert_eq!(
-            parse_namespace_id_from_checkpoint_key("ns.42.MergeRequest"),
-            Some(42)
-        );
-        assert_eq!(
-            parse_namespace_id_from_checkpoint_key("ns.7.Job.p1of3"),
-            Some(7)
-        );
-        assert_eq!(
-            parse_namespace_id_from_checkpoint_key("maintenance.something"),
-            None
-        );
     }
 }
