@@ -484,7 +484,7 @@
         },
         "hops": {
           "type": "array",
-          "description": "Inclusive [min, max] hop range; [2, 2] means exactly 2 hops. Capped to prevent resource exhaustion.",
+          "description": "Inclusive [min, max] hop range; [2, 2] means exactly 2 hops.",
           "default": [1, 1],
           "items": {
             "type": "integer",
