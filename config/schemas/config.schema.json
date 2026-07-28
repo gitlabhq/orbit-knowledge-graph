@@ -1752,7 +1752,6 @@
           "default": null
         },
         "mutation_timeout_secs": {
-          "description": "Applying a key set is an asynchronous mutation whose duration scales with\ntable size rather than delete volume — measured at 27 minutes on a\n12.4B-row edge table, so the ceiling has to clear that comfortably.",
           "type": "integer",
           "format": "uint64",
           "default": 3600,

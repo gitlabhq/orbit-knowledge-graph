@@ -249,8 +249,6 @@ fn checkpoint_key_for_table(table: &str) -> String {
     format!("{CHECKPOINT_KEY_PREFIX}.{table}")
 }
 
-/// `GROUP BY ... argMax` is the obvious alternative and exceeded 7.45 GiB on
-/// v85_gl_code_edge; `LIMIT 1 BY` streams in primary-key order and peaks under 1 GiB.
 fn build_pending_deletes_table_sql(table: &ReplacingMergeTreeTable) -> String {
     let keys = table.sort_key_as_sql_list();
     let source = &table.name;
@@ -266,8 +264,6 @@ fn build_pending_deletes_table_sql(table: &ReplacingMergeTreeTable) -> String {
     )
 }
 
-/// A mutation re-evaluates its `IN` subquery once per part, so pointing it at the
-/// source table left 13 parts at zero progress after 20 minutes.
 fn build_delete_pending_keys_sql(table: &ReplacingMergeTreeTable) -> String {
     let keys = table.sort_key_as_sql_list();
     format!(
@@ -277,9 +273,6 @@ fn build_delete_pending_keys_sql(table: &ReplacingMergeTreeTable) -> String {
     )
 }
 
-/// Auxiliary tables are excluded: they are internal bookkeeping, and their
-/// system columns vary (`namespace_storage_snapshot` has no `_deleted`,
-/// `code_indexing_checkpoint` versions on a `UInt64`).
 fn list_replacing_merge_tree_tables(ontology: &ontology::Ontology) -> Vec<ReplacingMergeTreeTable> {
     let mut tables = Vec::new();
 
