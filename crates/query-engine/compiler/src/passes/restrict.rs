@@ -743,6 +743,7 @@ mod tests {
                     node: "_u".into(),
                     property: property.into(),
                     truncate: None,
+                    alias: None,
                 }],
                 metrics: vec![InputAggregationMetric {
                     function: AggFunction::Count,

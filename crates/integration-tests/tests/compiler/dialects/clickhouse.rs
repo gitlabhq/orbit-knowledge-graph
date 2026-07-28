@@ -96,7 +96,7 @@ fn group_by_property_truncate_month_wraps_column() {
             {"id": "u", "entity": "Note", "filters": {"confidential": {"eq": false}}}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [{"month": "u.created_at"}],
+        "group_by": [{"key": "u.created_at", "truncate": "month"}],
         "limit": 50
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -121,7 +121,7 @@ fn group_by_property_truncate_all_units_compile() {
                     {{"id": "u", "entity": "Note", "node_ids": [1]}}
                 ],
                 "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
-                "group_by": [{{"{unit}": "u.created_at"}}],
+                "group_by": [{{"key": "u.created_at", "truncate": "{unit}"}}],
                 "limit": 10
             }}"#
         );
@@ -155,7 +155,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
             {"id": "u", "entity": "Note"}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [{"minute": "u.created_at"}],
+        "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
     let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
@@ -174,7 +174,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
             {"id": "u", "entity": "Note", "node_ids": [1, 2]}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [{"minute": "u.created_at"}],
+        "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -194,7 +194,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
             {"id": "u", "entity": "Note", "filters": {"created_at": {"gte": "2026-04-01T00:00:00Z"}}}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [{"hour": "u.created_at"}],
+        "group_by": [{"key": "u.created_at", "truncate": "hour"}],
         "limit": 50
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -214,7 +214,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [{"month": "u.confidential"}],
+        "group_by": [{"key": "u.confidential", "truncate": "month"}],
         "limit": 10
     }"#;
     let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
@@ -233,7 +233,7 @@ fn group_by_truncate_custom_alias_preserved() {
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [{"month": "u.created_at"}],
+        "group_by": [{"key": "u.created_at", "truncate": "month"}],
         "limit": 10
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();

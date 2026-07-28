@@ -113,7 +113,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
                 {"id": "n", "entity": "Note", "filters": {"created_at": {"gte": "2024-01-01T00:00:00Z"}}}
             ],
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
-            "group_by": [{"month": "n.created_at"}],
+            "group_by": [{"key": "n.created_at", "truncate": "month"}],
             "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
             "aggregation_sort": "n_created_at_month",
             "limit": 20

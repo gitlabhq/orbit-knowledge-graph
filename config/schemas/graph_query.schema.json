@@ -589,7 +589,7 @@
       }
     },
     "GroupByKey": {
-      "description": "Group key: \"node\" returns an entity object per bucket, \"node.property\" returns the scalar value. Output column: node id or node_property (plus _unit when truncated).",
+      "description": "Group key: \"node\" returns an entity object per bucket, \"node.property\" returns the scalar value. Output column: node id or node_property (plus _unit when truncated), overridable with the object form's \"as\".",
       "oneOf": [
         {
           "type": "string",
@@ -598,16 +598,22 @@
         },
         {
           "type": "object",
-          "description": "Truncate a Date/DateTime property before grouping, keyed by unit: {\"month\": \"mr.created_at\"}. minute/hour require node_ids or a filter on the property.",
-          "minProperties": 1,
-          "maxProperties": 1,
-          "propertyNames": {
-            "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
+          "description": "Group key with date truncation and/or a custom output column name: {\"key\": \"mr.created_at\", \"truncate\": \"month\", \"as\": \"month\"}. truncate needs a Date/DateTime property; minute/hour require node_ids or a filter on it. At least one of truncate/as.",
+          "required": ["key"],
+          "anyOf": [{ "required": ["truncate"] }, { "required": ["as"] }],
+          "properties": {
+            "key": {
+              "type": "string",
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,63}(\\.[a-zA-Z_][a-zA-Z0-9_]{0,63})?$"
+            },
+            "truncate": {
+              "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
+            },
+            "as": {
+              "$ref": "#/$defs/Identifier"
+            }
           },
-          "additionalProperties": {
-            "type": "string",
-            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,63}\\.[a-zA-Z_][a-zA-Z0-9_]{0,63}$"
-          }
+          "additionalProperties": false
         }
       ]
     },

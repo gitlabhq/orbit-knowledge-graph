@@ -45,6 +45,7 @@ fn build_aggregation(
                 node,
                 property,
                 truncate,
+                ..
             } => {
                 let col = Expr::col(node, property);
                 let expr = match truncate {

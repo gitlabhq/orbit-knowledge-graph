@@ -458,12 +458,17 @@ Group keys support these shapes:
 |-----------|-------|--------------|
 | Node | `"<node-id>"` (e.g. `"p"`) | A nested entity object in each row. |
 | Property | `"<node-id>.<property>"` (e.g. `"mr.state"`) | A scalar bucket value in each row. |
-| Truncated date | `{"<unit>": "<node-id>.<property>"}` (e.g. `{"month": "mr.created_at"}`) | The property truncated to the start of the unit. |
+| Truncated date | `{"key": "<node-id>.<property>", "truncate": "<unit>"}` | The property truncated to the start of the unit. |
 
 Output column names are derived: node keys use the node ID (`p`), property
 keys use `<node>_<property>` (`mr_state`), and truncated keys append the unit
 (`mr_created_at_month`). Reference these names in `aggregation_sort`.
 Duplicate group or aggregate output names are rejected.
+
+Use the derived names. Only when a consumer requires a specific column name,
+rename with the object form's optional `as`: `{"key": "mr.state", "as":
+"state"}`, or with truncation `{"key": "mr.created_at", "truncate": "month",
+"as": "month"}`.
 
 Truncation units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and
 `year`, and apply only to `Date`/`DateTime` properties. `minute` and `hour`
