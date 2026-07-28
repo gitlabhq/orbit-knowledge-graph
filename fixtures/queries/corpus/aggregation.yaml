@@ -20,13 +20,7 @@ vulnerabilities_by_severity:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["v.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -54,13 +48,7 @@ vulnerabilities_by_state:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "state"
-        }
-      ],
+      "group_by": ["v.state"],
       "aggregations": [
         {
           "function": "count",
@@ -88,13 +76,7 @@ vulnerabilities_by_report_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "report_type"
-        }
-      ],
+      "group_by": ["v.report_type"],
       "aggregations": [
         {
           "function": "count",
@@ -123,18 +105,8 @@ vulnerabilities_by_severity_and_state:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity",
-          "alias": "severity_bucket"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "state",
-          "alias": "state_bucket"
-        }
+        "v.severity",
+        "v.state"
       ],
       "aggregations": [
         {
@@ -179,17 +151,8 @@ vulnerabilities_by_project_and_severity:
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity",
-          "alias": "severity"
-        }
+        "p",
+        "v.severity"
       ],
       "aggregations": [
         {
@@ -224,13 +187,7 @@ security_scans_by_scan_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type"
-        }
-      ],
+      "group_by": ["s.scan_type"],
       "aggregations": [
         {
           "function": "count",
@@ -258,13 +215,7 @@ security_scans_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "status"
-        }
-      ],
+      "group_by": ["s.status"],
       "aggregations": [
         {
           "function": "count",
@@ -308,17 +259,8 @@ security_scans_by_project_and_scan_type:
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type",
-          "alias": "scan_type"
-        }
+        "p",
+        "s.scan_type"
       ],
       "aggregations": [
         {
@@ -347,13 +289,7 @@ projects_by_visibility:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -381,13 +317,7 @@ merge_requests_by_state:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state"
-        }
-      ],
+      "group_by": ["mr.state"],
       "aggregations": [
         {
           "function": "count",
@@ -416,18 +346,8 @@ merge_requests_by_state_and_draft:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state",
-          "alias": "state"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "draft",
-          "alias": "draft"
-        }
+        "mr.state",
+        "mr.draft"
       ],
       "aggregations": [
         {
@@ -462,13 +382,7 @@ pipelines_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -496,13 +410,7 @@ pipeline_duration_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -536,13 +444,7 @@ jobs_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "status"
-        }
-      ],
+      "group_by": ["j.status"],
       "aggregations": [
         {
           "function": "count",
@@ -571,18 +473,8 @@ jobs_by_status_and_when:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "status",
-          "alias": "status"
-        },
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "when",
-          "alias": "when"
-        }
+        "j.status",
+        "j.when"
       ],
       "aggregations": [
         {
@@ -622,13 +514,7 @@ vulnerabilities_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -667,13 +553,7 @@ pipelines_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -717,17 +597,8 @@ project_pipeline_status_matrix:
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status",
-          "alias": "pipeline_status"
-        }
+        "p",
+        "pipe.status"
       ],
       "aggregations": [
         {

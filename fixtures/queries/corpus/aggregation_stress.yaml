@@ -20,13 +20,7 @@ security_vulnerability_001_by_severity:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["v.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -54,13 +48,7 @@ security_vulnerability_002_by_state:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "state"
-        }
-      ],
+      "group_by": ["v.state"],
       "aggregations": [
         {
           "function": "count",
@@ -88,13 +76,7 @@ security_vulnerability_003_by_report_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "report_type"
-        }
-      ],
+      "group_by": ["v.report_type"],
       "aggregations": [
         {
           "function": "count",
@@ -123,16 +105,8 @@ security_vulnerability_004_by_resolution_flags:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "resolved_on_default_branch"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "present_on_default_branch"
-        }
+        "v.resolved_on_default_branch",
+        "v.present_on_default_branch"
       ],
       "aggregations": [
         {
@@ -162,16 +136,8 @@ security_vulnerability_005_by_severity_state:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "state"
-        }
+        "v.severity",
+        "v.state"
       ],
       "aggregations": [
         {
@@ -201,21 +167,9 @@ security_vulnerability_006_by_report_type_severity_state:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "report_type"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "state"
-        }
+        "v.report_type",
+        "v.severity",
+        "v.state"
       ],
       "aggregations": [
         {
@@ -244,13 +198,7 @@ security_vulnerability_007_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["v.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -278,13 +226,7 @@ security_vulnerability_008_latest_detected_by_project:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["v.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -318,13 +260,7 @@ security_scan_009_by_scan_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type"
-        }
-      ],
+      "group_by": ["s.scan_type"],
       "aggregations": [
         {
           "function": "count",
@@ -352,13 +288,7 @@ security_scan_010_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "status"
-        }
-      ],
+      "group_by": ["s.status"],
       "aggregations": [
         {
           "function": "count",
@@ -387,16 +317,8 @@ security_scan_011_by_type_status:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type"
-        },
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "status"
-        }
+        "s.scan_type",
+        "s.status"
       ],
       "aggregations": [
         {
@@ -425,13 +347,7 @@ security_scan_012_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["s.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -459,13 +375,7 @@ security_scan_013_by_pipeline_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "pipeline_id"
-        }
-      ],
+      "group_by": ["s.pipeline_id"],
       "aggregations": [
         {
           "function": "count",
@@ -493,13 +403,7 @@ security_finding_014_by_severity:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["f.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -527,13 +431,7 @@ security_finding_015_by_deduplicated:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "deduplicated"
-        }
-      ],
+      "group_by": ["f.deduplicated"],
       "aggregations": [
         {
           "function": "count",
@@ -561,13 +459,7 @@ security_finding_016_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["f.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -595,13 +487,7 @@ security_finding_017_by_scan_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "scan_id"
-        }
-      ],
+      "group_by": ["f.scan_id"],
       "aggregations": [
         {
           "function": "count",
@@ -629,13 +515,7 @@ security_finding_018_by_scanner_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "scanner_id"
-        }
-      ],
+      "group_by": ["f.scanner_id"],
       "aggregations": [
         {
           "function": "count",
@@ -663,13 +543,7 @@ security_occurrence_019_by_severity:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "o",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["o.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -697,13 +571,7 @@ security_occurrence_020_by_report_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "o",
-          "property": "report_type"
-        }
-      ],
+      "group_by": ["o.report_type"],
       "aggregations": [
         {
           "function": "count",
@@ -732,16 +600,8 @@ security_occurrence_021_by_severity_report_type:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "o",
-          "property": "severity"
-        },
-        {
-          "kind": "property",
-          "node": "o",
-          "property": "report_type"
-        }
+        "o.severity",
+        "o.report_type"
       ],
       "aggregations": [
         {
@@ -770,13 +630,7 @@ security_occurrence_022_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "o",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["o.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -804,13 +658,7 @@ security_occurrence_023_by_scanner_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "o",
-          "property": "scanner_id"
-        }
-      ],
+      "group_by": ["o.scanner_id"],
       "aggregations": [
         {
           "function": "count",
@@ -838,13 +686,7 @@ security_identifier_024_by_external_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "i",
-          "property": "external_type"
-        }
-      ],
+      "group_by": ["i.external_type"],
       "aggregations": [
         {
           "function": "count",
@@ -872,13 +714,7 @@ security_identifier_025_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "i",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["i.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -906,13 +742,7 @@ security_scanner_026_by_vendor:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "scanner",
-          "property": "vendor"
-        }
-      ],
+      "group_by": ["scanner.vendor"],
       "aggregations": [
         {
           "function": "count",
@@ -940,13 +770,7 @@ security_scanner_027_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "scanner",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["scanner.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -974,13 +798,7 @@ ci_pipeline_028_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -1008,13 +826,7 @@ ci_pipeline_029_by_source:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "source"
-        }
-      ],
+      "group_by": ["pipe.source"],
       "aggregations": [
         {
           "function": "count",
@@ -1043,16 +855,8 @@ ci_pipeline_030_by_status_source:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "source"
-        }
+        "pipe.status",
+        "pipe.source"
       ],
       "aggregations": [
         {
@@ -1081,13 +885,7 @@ ci_pipeline_031_by_protected:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "protected"
-        }
-      ],
+      "group_by": ["pipe.protected"],
       "aggregations": [
         {
           "function": "count",
@@ -1115,13 +913,7 @@ ci_pipeline_032_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["pipe.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -1149,13 +941,7 @@ ci_pipeline_033_avg_duration_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -1189,13 +975,7 @@ ci_pipeline_034_by_ref:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "ref"
-        }
-      ],
+      "group_by": ["pipe.ref"],
       "aggregations": [
         {
           "function": "count",
@@ -1223,13 +1003,7 @@ ci_job_035_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "status"
-        }
-      ],
+      "group_by": ["job.status"],
       "aggregations": [
         {
           "function": "count",
@@ -1257,13 +1031,7 @@ ci_job_036_by_when:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "when"
-        }
-      ],
+      "group_by": ["job.when"],
       "aggregations": [
         {
           "function": "count",
@@ -1292,16 +1060,8 @@ ci_job_037_by_status_when:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "status"
-        },
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "when"
-        }
+        "job.status",
+        "job.when"
       ],
       "aggregations": [
         {
@@ -1330,13 +1090,7 @@ ci_job_038_by_allow_failure:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "allow_failure"
-        }
-      ],
+      "group_by": ["job.allow_failure"],
       "aggregations": [
         {
           "function": "count",
@@ -1364,13 +1118,7 @@ ci_job_039_by_retried:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "retried"
-        }
-      ],
+      "group_by": ["job.retried"],
       "aggregations": [
         {
           "function": "count",
@@ -1398,13 +1146,7 @@ ci_job_040_by_failure_reason:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "failure_reason"
-        }
-      ],
+      "group_by": ["job.failure_reason"],
       "aggregations": [
         {
           "function": "count",
@@ -1432,13 +1174,7 @@ ci_job_041_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["job.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -1466,13 +1202,7 @@ ci_job_042_by_runner_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "runner_id"
-        }
-      ],
+      "group_by": ["job.runner_id"],
       "aggregations": [
         {
           "function": "count",
@@ -1500,13 +1230,7 @@ ci_job_043_by_ref:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "ref"
-        }
-      ],
+      "group_by": ["job.ref"],
       "aggregations": [
         {
           "function": "count",
@@ -1534,13 +1258,7 @@ ci_stage_044_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "stage",
-          "property": "status"
-        }
-      ],
+      "group_by": ["stage.status"],
       "aggregations": [
         {
           "function": "count",
@@ -1568,13 +1286,7 @@ ci_stage_045_by_name:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "stage",
-          "property": "name"
-        }
-      ],
+      "group_by": ["stage.name"],
       "aggregations": [
         {
           "function": "count",
@@ -1602,13 +1314,7 @@ ci_stage_046_by_position:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "stage",
-          "property": "position"
-        }
-      ],
+      "group_by": ["stage.position"],
       "aggregations": [
         {
           "function": "count",
@@ -1636,13 +1342,7 @@ ci_deployment_047_by_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "dep",
-          "property": "status"
-        }
-      ],
+      "group_by": ["dep.status"],
       "aggregations": [
         {
           "function": "count",
@@ -1670,13 +1370,7 @@ ci_deployment_048_by_ref:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "dep",
-          "property": "ref"
-        }
-      ],
+      "group_by": ["dep.ref"],
       "aggregations": [
         {
           "function": "count",
@@ -1704,13 +1398,7 @@ ci_deployment_049_by_archived:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "dep",
-          "property": "archived"
-        }
-      ],
+      "group_by": ["dep.archived"],
       "aggregations": [
         {
           "function": "count",
@@ -1738,13 +1426,7 @@ ci_environment_050_by_state:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "env",
-          "property": "state"
-        }
-      ],
+      "group_by": ["env.state"],
       "aggregations": [
         {
           "function": "count",
@@ -1772,13 +1454,7 @@ ci_environment_051_by_tier:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "env",
-          "property": "tier"
-        }
-      ],
+      "group_by": ["env.tier"],
       "aggregations": [
         {
           "function": "count",
@@ -1807,16 +1483,8 @@ ci_environment_052_by_state_tier:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "env",
-          "property": "state"
-        },
-        {
-          "kind": "property",
-          "node": "env",
-          "property": "tier"
-        }
+        "env.state",
+        "env.tier"
       ],
       "aggregations": [
         {
@@ -1845,13 +1513,7 @@ code_review_mr_056_by_state:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state"
-        }
-      ],
+      "group_by": ["mr.state"],
       "aggregations": [
         {
           "function": "count",
@@ -1879,13 +1541,7 @@ code_review_mr_057_by_merge_status:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "merge_status"
-        }
-      ],
+      "group_by": ["mr.merge_status"],
       "aggregations": [
         {
           "function": "count",
@@ -1913,13 +1569,7 @@ code_review_mr_058_by_draft:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "draft"
-        }
-      ],
+      "group_by": ["mr.draft"],
       "aggregations": [
         {
           "function": "count",
@@ -1947,13 +1597,7 @@ code_review_mr_059_by_squash:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "squash"
-        }
-      ],
+      "group_by": ["mr.squash"],
       "aggregations": [
         {
           "function": "count",
@@ -1982,16 +1626,8 @@ code_review_mr_060_by_state_draft:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "draft"
-        }
+        "mr.state",
+        "mr.draft"
       ],
       "aggregations": [
         {
@@ -2020,13 +1656,7 @@ code_review_mr_061_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["mr.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -2054,13 +1684,7 @@ code_review_mr_062_by_author_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "author_id"
-        }
-      ],
+      "group_by": ["mr.author_id"],
       "aggregations": [
         {
           "function": "count",
@@ -2088,13 +1712,7 @@ code_review_mr_063_by_target_branch:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "target_branch"
-        }
-      ],
+      "group_by": ["mr.target_branch"],
       "aggregations": [
         {
           "function": "count",
@@ -2122,13 +1740,7 @@ code_review_mr_064_avg_diff_by_state:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state"
-        }
-      ],
+      "group_by": ["mr.state"],
       "aggregations": [
         {
           "function": "count",
@@ -2162,13 +1774,7 @@ planning_work_item_065_by_state:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "state"
-        }
-      ],
+      "group_by": ["wi.state"],
       "aggregations": [
         {
           "function": "count",
@@ -2196,13 +1802,7 @@ planning_work_item_066_by_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "work_item_type"
-        }
-      ],
+      "group_by": ["wi.work_item_type"],
       "aggregations": [
         {
           "function": "count",
@@ -2230,13 +1830,7 @@ planning_work_item_067_by_confidential:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "confidential"
-        }
-      ],
+      "group_by": ["wi.confidential"],
       "aggregations": [
         {
           "function": "count",
@@ -2265,16 +1859,8 @@ planning_work_item_068_by_state_type:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "state"
-        },
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "work_item_type"
-        }
+        "wi.state",
+        "wi.work_item_type"
       ],
       "aggregations": [
         {
@@ -2303,13 +1889,7 @@ planning_work_item_069_by_project_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "project_id"
-        }
-      ],
+      "group_by": ["wi.project_id"],
       "aggregations": [
         {
           "function": "count",
@@ -2337,13 +1917,7 @@ planning_work_item_070_by_namespace_id:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "namespace_id"
-        }
-      ],
+      "group_by": ["wi.namespace_id"],
       "aggregations": [
         {
           "function": "count",
@@ -2371,13 +1945,7 @@ project_071_by_visibility:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -2405,13 +1973,7 @@ project_072_by_archived:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "archived"
-        }
-      ],
+      "group_by": ["p.archived"],
       "aggregations": [
         {
           "function": "count",
@@ -2440,16 +2002,8 @@ project_073_by_visibility_archived:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        },
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "archived"
-        }
+        "p.visibility_level",
+        "p.archived"
       ],
       "aggregations": [
         {
@@ -2495,13 +2049,7 @@ join_vulnerability_project_074_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -2541,16 +2089,8 @@ join_vulnerability_project_075_by_vulnerability_and_visibility:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        },
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
+        "v.severity",
+        "p.visibility_level"
       ],
       "aggregations": [
         {
@@ -2590,13 +2130,7 @@ join_security_scan_project_076_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -2635,13 +2169,7 @@ join_security_scan_pipeline_077_by_pipeline_status:
           "to": "pipe"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -2681,13 +2209,7 @@ join_security_scan_job_078_by_job_status:
           "to": "job"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "status"
-        }
-      ],
+      "group_by": ["job.status"],
       "aggregations": [
         {
           "function": "count",
@@ -2726,13 +2248,7 @@ join_finding_project_079_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -2771,13 +2287,7 @@ join_finding_scanner_080_by_scanner_vendor:
           "to": "scanner"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "scanner",
-          "property": "vendor"
-        }
-      ],
+      "group_by": ["scanner.vendor"],
       "aggregations": [
         {
           "function": "count",
@@ -2816,13 +2326,7 @@ join_occurrence_project_082_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -2861,13 +2365,7 @@ join_occurrence_vulnerability_083_by_vulnerability_state:
           "to": "v"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "state"
-        }
-      ],
+      "group_by": ["v.state"],
       "aggregations": [
         {
           "function": "count",
@@ -2906,13 +2404,7 @@ join_occurrence_identifier_084_by_identifier_type:
           "to": "i"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "i",
-          "property": "external_type"
-        }
-      ],
+      "group_by": ["i.external_type"],
       "aggregations": [
         {
           "function": "count",
@@ -2951,13 +2443,7 @@ join_pipeline_project_085_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -2996,13 +2482,7 @@ join_job_pipeline_086_by_pipeline_status:
           "to": "pipe"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -3041,13 +2521,7 @@ join_job_project_087_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -3086,13 +2560,7 @@ join_pipeline_job_088_by_job_status:
           "to": "job"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "status"
-        }
-      ],
+      "group_by": ["job.status"],
       "aggregations": [
         {
           "function": "count",
@@ -3131,13 +2599,7 @@ join_pipeline_stage_089_by_stage_status:
           "to": "stage"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "stage",
-          "property": "status"
-        }
-      ],
+      "group_by": ["stage.status"],
       "aggregations": [
         {
           "function": "count",
@@ -3176,13 +2638,7 @@ join_stage_job_090_by_job_status:
           "to": "job"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "status"
-        }
-      ],
+      "group_by": ["job.status"],
       "aggregations": [
         {
           "function": "count",
@@ -3221,13 +2677,7 @@ join_merge_request_project_091_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -3266,13 +2716,7 @@ join_merge_request_pipeline_092_by_pipeline_status:
           "to": "pipe"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -3311,13 +2755,7 @@ join_work_item_project_093_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -3356,13 +2794,7 @@ join_work_item_group_094_by_group_visibility:
           "to": "g"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "g",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["g.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -3401,13 +2833,7 @@ join_deployment_environment_095_by_environment_tier:
           "to": "env"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "env",
-          "property": "tier"
-        }
-      ],
+      "group_by": ["env.tier"],
       "aggregations": [
         {
           "function": "count",
@@ -3446,13 +2872,7 @@ join_deployment_project_096_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -3491,13 +2911,7 @@ join_environment_project_097_by_project_visibility:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
-      ],
+      "group_by": ["p.visibility_level"],
       "aggregations": [
         {
           "function": "count",
@@ -3536,13 +2950,7 @@ join_vulnerability_finding_098_by_finding_severity:
           "to": "f"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["f.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -3581,13 +2989,7 @@ join_security_scan_finding_099_by_finding_severity:
           "to": "f"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "f",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["f.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -3627,16 +3029,8 @@ join_pipeline_project_100_by_status_and_visibility:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        },
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level"
-        }
+        "pipe.status",
+        "p.visibility_level"
       ],
       "aggregations": [
         {

@@ -383,7 +383,7 @@ mod tests {
                     {"id": "mr", "entity": "MergeRequest"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-                "group_by": [{"kind": "node", "node": "u"}],
+                "group_by": ["u"],
                 "aggregations": [{"function": "count", "target": "mr", "alias": "c"}],
                 "limit": 10}"#,
         );
@@ -655,7 +655,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "group_by": [{"kind": "node", "node": "u"}],
+                "group_by": ["u"],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
                 "aggregation_sort": "-c",
                 "limit": 10}"#,

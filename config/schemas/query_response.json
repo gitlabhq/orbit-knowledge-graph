@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v3",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v4",
   "title": "Orbit unified query response",
   "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",

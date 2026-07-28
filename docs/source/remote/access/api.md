@@ -93,7 +93,7 @@ Put the request body in `request.json`:
     "relationships": [
       {"type": "IN_PROJECT", "from": "pl", "to": "p"}
     ],
-    "group_by": [{"kind": "node", "node": "p"}],
+    "group_by": ["p"],
     "aggregations": [
       {
         "function": "count",

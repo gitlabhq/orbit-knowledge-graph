@@ -157,7 +157,7 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
+            "group_by": ["u"],
             "aggregations": [{"function": "count", "target": "mr", "alias": "open_mr_count"}],
             "limit": 10
         }"#,
@@ -307,7 +307,7 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
             "limit": 20
         }"#,

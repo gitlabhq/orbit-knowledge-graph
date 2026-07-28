@@ -103,7 +103,7 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
             "limit": 10
         }"#,
@@ -269,7 +269,7 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
             "limit": 10
         }"#,
@@ -645,7 +645,7 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
             "limit": 10
         }"#,

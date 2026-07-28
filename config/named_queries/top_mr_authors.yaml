@@ -12,8 +12,7 @@ query:
         state: merged
   relationships:
     - { type: AUTHORED, from: u, to: mr }
-  group_by:
-    - { kind: node, node: u }
+  group_by: [u]
   aggregations:
     - { function: count, target: mr, alias: mr_count }
   aggregation_sort: "-mr_count"

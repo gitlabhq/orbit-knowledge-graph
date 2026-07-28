@@ -132,7 +132,7 @@ fn invalid_group_by_property_lists_valid_fields() {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-            "group_by": [{"kind": "property", "node": "p", "property": "reviewer_count"}],
+            "group_by": ["p.reviewer_count"],
             "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
             "limit": 10
         }"#,
@@ -163,15 +163,36 @@ fn malformed_group_by_entry_shows_expected_shapes() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(msg.contains("\"kind\""), "got: {msg}");
     assert!(
-        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
+        msg.contains("\"<node-id>.<property>\"") && msg.contains("\"truncate\""),
         "got: {msg}"
     );
 }
 
 #[test]
-fn bare_string_group_by_entry_shows_expected_shapes() {
+fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
+    let err = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "group_by": ["p.name.x"],
+            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("/group_by/0"), "got: {msg}");
+    assert!(
+        msg.contains("\"<node-id>\"") && msg.contains("\"<node-id>.<property>\""),
+        "got: {msg}"
+    );
+}
+
+#[test]
+fn bare_string_group_by_unknown_node_names_the_reference() {
     let err = compile(
         r#"{
             "query_type": "aggregation",
@@ -185,12 +206,7 @@ fn bare_string_group_by_entry_shows_expected_shapes() {
     )
     .unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(msg.contains("\"kind\""), "got: {msg}");
-    assert!(
-        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
-        "got: {msg}"
-    );
+    assert!(msg.contains("undefined node \"name\""), "got: {msg}");
 }
 
 #[test]
@@ -414,7 +430,7 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
             {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": [{"kind": "node", "node": "u"}],
+        "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
         "limit": 10
     }"#;
@@ -550,7 +566,7 @@ fn multi_hop_aggregation() {
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
-        "group_by": [{"kind": "node", "node": "u"}],
+        "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
         "limit": 10
     }"#;
@@ -1508,7 +1524,7 @@ fn calls_aggregation_compiles() {
             {"id": "callee", "entity": "Definition"}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "group_by": [{"kind": "node", "node": "callee"}],
+        "group_by": ["callee"],
         "aggregations": [{"function": "count", "target": "caller", "alias": "callers"}],
         "limit": 1
     }"#;
