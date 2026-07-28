@@ -625,8 +625,6 @@ impl Default for MigrationCompletionConfig {
 pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    /// Must exceed the lag between a source change and its graph write, or a
-    /// late-landing row is never reconciled. Widening it further buys little.
     #[serde(default = "default_stale_edge_lookback_secs")]
     pub lookback_secs: u64,
 }
@@ -645,7 +643,7 @@ impl Default for StaleEdgeReconciliationConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                cron: Some("0 */15 * * * *".into()),
+                cron: Some("0 */30 * * * *".into()),
             },
             lookback_secs: default_stale_edge_lookback_secs(),
         }
@@ -874,7 +872,7 @@ mod tests {
         );
         assert_eq!(
             tasks.stale_edge_reconciliation.schedule.cron.as_deref(),
-            Some("0 */15 * * * *")
+            Some("0 */30 * * * *")
         );
     }
 

@@ -264,7 +264,7 @@
             "events_stream_name": "siphon_stream_main_db"
           },
           "stale-edge-reconciliation": {
-            "cron": "0 */15 * * * *",
+            "cron": "0 */30 * * * *",
             "lookback_secs": 3600
           },
           "table-cleanup": {
@@ -1543,7 +1543,7 @@
               "events_stream_name": "siphon_stream_main_db"
             },
             "stale-edge-reconciliation": {
-              "cron": "0 */15 * * * *",
+              "cron": "0 */30 * * * *",
               "lookback_secs": 3600
             },
             "table-cleanup": {
@@ -1599,7 +1599,7 @@
         "stale-edge-reconciliation": {
           "$ref": "#/$defs/StaleEdgeReconciliationConfig",
           "default": {
-            "cron": "0 */15 * * * *",
+            "cron": "0 */30 * * * *",
             "lookback_secs": 3600
           }
         },
@@ -1669,7 +1669,6 @@
           "default": null
         },
         "lookback_secs": {
-          "description": "Must exceed the lag between a source change and its graph write, or a\nlate-landing row is never reconciled. Widening it further buys little.",
           "type": "integer",
           "format": "uint64",
           "default": 3600,
