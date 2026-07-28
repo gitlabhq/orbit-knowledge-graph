@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ontology::Ontology;
 use serde_json::json;
 
-use super::prompts;
+use super::prompt;
 use super::registry::{ToolDefinition, ToolRegistry, list_commands_description, params};
 
 pub struct V2ToolRegistry;
@@ -36,7 +36,7 @@ impl V2ToolRegistry {
     fn invoke_command() -> ToolDefinition {
         ToolDefinition {
             name: "invoke_command".into(),
-            description: prompts::invoke_command::DESCRIPTION.into(),
+            description: prompt("invoke_command").description().into(),
             parameters: json!({
                 "type": "object",
                 "required": ["command_name"],
@@ -68,7 +68,7 @@ impl V2CommandRegistry {
     fn query_graph() -> ToolDefinition {
         ToolDefinition {
             name: "query_graph".into(),
-            description: prompts::tools::query_graph_v2::DESCRIPTION.into(),
+            description: prompt("tools/query_graph_v2").description().into(),
             parameters: json!({
                 "type": "object",
                 "required": ["query"],
@@ -84,7 +84,7 @@ impl V2CommandRegistry {
     fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: prompts::tools::get_graph_schema_v2::DESCRIPTION.into(),
+            description: prompt("tools/get_graph_schema_v2").description().into(),
             parameters: params::get_graph_schema_parameters(),
         }
     }
@@ -92,7 +92,7 @@ impl V2CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: prompts::tools::get_query_dsl::DESCRIPTION.into(),
+            description: prompt("tools/get_query_dsl").description().into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -106,7 +106,7 @@ impl V2CommandRegistry {
     fn get_response_format() -> ToolDefinition {
         ToolDefinition {
             name: "get_response_format".into(),
-            description: prompts::tools::get_response_format::DESCRIPTION.into(),
+            description: prompt("tools/get_response_format").description().into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

@@ -4,6 +4,8 @@ fn main() {
         println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,@loader_path/deps");
     }
 
+    validate_prompts();
+
     // Release jobs run on `vX.Y.Z` tags (.gitlab/ci/release-local.yml), so
     // CI_COMMIT_TAG is the authoritative release version. `git describe` is a
     // best-effort convenience for local/dev builds; the static Cargo.toml
@@ -37,4 +39,12 @@ fn main() {
     // Rebuild when HEAD or refs move so dev builds don't report a stale tag.
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/refs");
+}
+
+/// Fails the build when a prompt file under `config/prompts/local/` is
+/// invalid; the same files are embedded via rust-embed at runtime.
+fn validate_prompts() {
+    let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("local");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    gkg_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
 }

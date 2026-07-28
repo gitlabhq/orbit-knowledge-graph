@@ -1,45 +1,21 @@
-//! Agent-facing prompt registry: [`embed!`] compiles the versioned YAML
-//! prompt files under `config/prompts/` into modules of string constants,
-//! so a malformed prompt fails the build rather than shipping.
+//! Agent-facing prompt registry: parses and validates the versioned YAML
+//! prompt files under `config/prompts/`, embedded via rust-embed. Consumer
+//! build scripts call [`Prompts::load_dir`] so a malformed prompt fails the
+//! build; at runtime the same files load through [`Prompts::load_embedded`].
 
-use std::fmt::Write as _;
+use std::collections::BTreeMap;
 use std::path::Path;
 
-use proc_macro::TokenStream;
+use rust_embed::Embed;
 use serde::Deserialize;
 
-/// Embeds a subdirectory of `PROMPTS_DIR` (`.cargo/config.toml` env) as one
-/// `pub mod <name>` per prompt file, mirroring nested directories as nested
-/// modules: `gkg_prompts::embed!("remote");`.
-///
-/// Each module exposes the prompt's present fields as `SUMMARY`, `SHORT`,
-/// and `DESCRIPTION` constants — or `DESCRIPTION_TEMPLATE` when the prompt
-/// declares `variables:`, whose names are checked against the MiniJinja
-/// template's placeholders at expansion time.
-#[proc_macro]
-pub fn embed(input: TokenStream) -> TokenStream {
-    let input = input.to_string();
-    let subdir = parse_string_literal(&input)
-        .unwrap_or_else(|| panic!("expected a string literal, e.g. embed!(\"remote\")"));
-    let prompts_dir =
-        std::env::var("PROMPTS_DIR").expect("PROMPTS_DIR must be set via .cargo/config.toml [env]");
-    let dir = Path::new(&prompts_dir).join(subdir);
-
-    let source = render_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
-    source
-        .parse()
-        .expect("generated prompt modules should be valid Rust")
-}
-
-fn parse_string_literal(input: &str) -> Option<&str> {
-    let input = input.trim();
-    let inner = input.strip_prefix('"')?.strip_suffix('"')?;
-    (!inner.contains('"')).then_some(inner)
-}
+#[derive(Embed)]
+#[folder = "$PROMPTS_DIR"]
+struct PromptFiles;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Prompt {
+pub struct Prompt {
     name: String,
     version: String,
     summary: Option<String>,
@@ -50,6 +26,32 @@ struct Prompt {
 }
 
 impl Prompt {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn summary(&self) -> &str {
+        self.summary
+            .as_deref()
+            .unwrap_or_else(|| panic!("prompt `{}` has no summary", self.name))
+    }
+
+    pub fn short(&self) -> &str {
+        self.short
+            .as_deref()
+            .unwrap_or_else(|| panic!("prompt `{}` has no short form", self.name))
+    }
+
+    pub fn description(&self) -> &str {
+        self.description
+            .as_deref()
+            .unwrap_or_else(|| panic!("prompt `{}` has no description", self.name))
+    }
+
     fn fields(&self) -> [(&'static str, Option<&str>); 3] {
         [
             ("summary", self.summary.as_deref()),
@@ -113,13 +115,6 @@ impl Prompt {
                  declared variables {declared:?}"
             ));
         }
-        for variable in &self.variables {
-            if !is_rust_ident(variable) {
-                return Err(format!(
-                    "prompt `{stem}`: variable `{variable}` is not a valid identifier"
-                ));
-            }
-        }
         Ok(())
     }
 }
@@ -134,96 +129,95 @@ fn template_placeholders(template: &str) -> Result<Vec<String>, minijinja::Error
         .collect())
 }
 
-const RUST_KEYWORDS: &[&str] = &[
-    "abstract", "as", "async", "await", "become", "box", "break", "const", "continue", "crate",
-    "do", "dyn", "else", "enum", "extern", "false", "final", "fn", "for", "gen", "if", "impl",
-    "in", "let", "loop", "macro", "match", "mod", "move", "mut", "override", "priv", "pub", "ref",
-    "return", "self", "Self", "static", "struct", "super", "trait", "true", "try", "type",
-    "typeof", "unsafe", "unsized", "use", "virtual", "where", "while", "yield",
-];
-
-fn is_rust_ident(s: &str) -> bool {
-    if RUST_KEYWORDS.contains(&s) {
-        return false;
-    }
-    let mut chars = s.chars();
-    chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-fn render_dir(dir: &Path) -> Result<String, String> {
-    let mut entries: Vec<_> = std::fs::read_dir(dir)
-        .map_err(|e| format!("reading {}: {e}", dir.display()))?
-        .collect::<Result<_, _>>()
-        .map_err(|e| format!("reading {}: {e}", dir.display()))?;
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-
-    let mut out = String::new();
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .filter(|name| is_rust_ident(name))
-                .ok_or_else(|| {
-                    format!("prompt directory {} is not an identifier", path.display())
-                })?;
-            let _ = write!(out, "pub mod {name} {{\n{}}}\n", render_dir(&path)?);
-            continue;
-        }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("yml") {
-            continue;
-        }
-        out.push_str(&render_prompt_module(&path)?);
-    }
-
-    if out.is_empty() {
-        return Err(format!("no prompt files found in {}", dir.display()));
-    }
-    Ok(out)
-}
-
-fn render_prompt_module(path: &Path) -> Result<String, String> {
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .filter(|stem| is_rust_ident(stem))
-        .ok_or_else(|| format!("prompt file name {} is not an identifier", path.display()))?;
-    let raw =
-        std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+fn parse_prompt(key: &str, raw: &str) -> Result<Prompt, String> {
     let mut prompt: Prompt =
-        serde_yaml::from_str(&raw).map_err(|e| format!("parsing {}: {e}", path.display()))?;
+        serde_yaml::from_str(raw).map_err(|e| format!("parsing prompt `{key}`: {e}"))?;
     prompt.summary = prompt.summary.map(|s| s.trim_end().to_string());
     prompt.short = prompt.short.map(|s| s.trim_end().to_string());
     prompt.description = prompt.description.map(|s| s.trim_end().to_string());
+    let stem = key.rsplit('/').next().unwrap_or(key);
     prompt.validate(stem)?;
-    Ok(render_module(&prompt, path))
+    Ok(prompt)
 }
 
-fn render_module(prompt: &Prompt, source: &Path) -> String {
-    let mut out = format!("pub mod {} {{\n", prompt.name);
-    // include_str! puts the file in rustc's dep-info, so editing a prompt
-    // recompiles the consuming crate.
-    let _ = writeln!(
-        out,
-        "    const _: &str = include_str!({:?});",
-        source.display()
-    );
-    for (field, value) in prompt.fields() {
-        if let Some(value) = value {
-            let name = if field == "description" && !prompt.variables.is_empty() {
-                "DESCRIPTION_TEMPLATE".to_string()
-            } else {
-                field.to_uppercase()
+/// Prompts for one scope (a top-level directory of `config/prompts/`),
+/// keyed by relative path without the `.yml` extension, e.g.
+/// `tools/query_graph` in the `remote` scope.
+pub struct Prompts(BTreeMap<String, Prompt>);
+
+impl Prompts {
+    /// Loads a scope from the files embedded at compile time. In debug
+    /// builds rust-embed reads them from disk instead, so local prompt
+    /// edits show up without recompiling.
+    pub fn load_embedded(scope: &str) -> Result<Self, String> {
+        let prefix = format!("{scope}/");
+        let mut prompts = BTreeMap::new();
+        for path in PromptFiles::iter() {
+            let Some(key) = path
+                .strip_prefix(&prefix)
+                .and_then(|rest| rest.strip_suffix(".yml"))
+            else {
+                continue;
             };
-            let _ = writeln!(out, "    pub const {name}: &str = {value:?};");
+            let file = PromptFiles::get(&path)
+                .ok_or_else(|| format!("embedded prompt `{path}` unreadable"))?;
+            let raw = std::str::from_utf8(&file.data)
+                .map_err(|e| format!("prompt `{path}` is not UTF-8: {e}"))?;
+            prompts.insert(key.to_string(), parse_prompt(key, raw)?);
         }
+        if prompts.is_empty() {
+            return Err(format!("no prompt files embedded for scope `{scope}`"));
+        }
+        Ok(Self(prompts))
     }
-    out.push_str("}\n");
-    out
+
+    /// Loads a scope directory from the filesystem. Consumer build scripts
+    /// call this so an invalid prompt fails the build.
+    pub fn load_dir(dir: &Path) -> Result<Self, String> {
+        let mut prompts = BTreeMap::new();
+        load_dir_into(dir, "", &mut prompts)?;
+        if prompts.is_empty() {
+            return Err(format!("no prompt files found in {}", dir.display()));
+        }
+        Ok(Self(prompts))
+    }
+
+    pub fn get(&self, key: &str) -> Option<&Prompt> {
+        self.0.get(key)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Prompt)> {
+        self.0.iter().map(|(key, prompt)| (key.as_str(), prompt))
+    }
+}
+
+fn load_dir_into(
+    dir: &Path,
+    prefix: &str,
+    prompts: &mut BTreeMap<String, Prompt>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
+    for entry in entries {
+        let path = entry
+            .map_err(|e| format!("reading {}: {e}", dir.display()))?
+            .path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("non-UTF-8 file name: {}", path.display()))?;
+        if path.is_dir() {
+            load_dir_into(&path, &format!("{prefix}{name}/"), prompts)?;
+            continue;
+        }
+        let Some(stem) = name.strip_suffix(".yml") else {
+            continue;
+        };
+        let key = format!("{prefix}{stem}");
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|e| format!("reading {}: {e}", path.display()))?;
+        prompts.insert(key.clone(), parse_prompt(&key, &raw)?);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -281,14 +275,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_rust_keyword_variables() {
-        let p = prompt("name: a\nversion: 1.0.0\nvariables: [type]\ndescription: \"{{ type }}\"");
-        assert!(p.validate("a").is_err());
-        assert!(!is_rust_ident("mod"));
-        assert!(is_rust_ident("query_graph"));
-    }
-
-    #[test]
     fn validate_accepts_matching_template_variables() {
         let p =
             prompt("name: a\nversion: 1.0.0\nvariables: [who]\ndescription: \"Hello {{ who }}\"");
@@ -296,21 +282,30 @@ mod tests {
     }
 
     #[test]
-    fn render_emits_present_fields_and_template_const() {
-        let source = Path::new("/tmp/a.yml");
-        let plain = render_module(
-            &prompt("name: a\nversion: 1.0.0\nsummary: Sum\ndescription: \"Line\\nbreak\""),
-            source,
-        );
-        assert!(plain.contains("pub mod a {"));
-        assert!(plain.contains("pub const SUMMARY: &str = \"Sum\";"));
-        assert!(plain.contains("pub const DESCRIPTION: &str = \"Line\\nbreak\";"));
-        assert!(plain.contains("include_str!(\"/tmp/a.yml\")"));
+    fn parse_prompt_normalizes_trailing_block_scalar_newlines() {
+        let p = parse_prompt("a", "name: a\nversion: 1.0.0\ndescription: |\n  text\n").unwrap();
+        assert_eq!(p.description(), "text");
+    }
 
-        let templated = render_module(
-            &prompt("name: a\nversion: 1.0.0\nvariables: [who]\ndescription: \"Hi {{ who }}\""),
-            source,
-        );
-        assert!(templated.contains("pub const DESCRIPTION_TEMPLATE: &str = \"Hi {{ who }}\";"));
+    #[test]
+    fn embedded_scopes_load_and_contain_expected_prompts() {
+        let remote = Prompts::load_embedded("remote").expect("remote prompts load");
+        assert!(remote.get("list_commands").is_some());
+        assert!(remote.get("invoke_command").is_some());
+        assert!(remote.get("tools/query_graph").is_some());
+
+        let local = Prompts::load_embedded("local").expect("local prompts load");
+        assert!(local.get("index").is_some());
+        assert_eq!(local.get("index").unwrap().name(), "index");
+    }
+
+    #[test]
+    fn load_dir_matches_embedded_keys() {
+        let dir = Path::new(env!("PROMPTS_DIR")).join("remote");
+        let from_fs = Prompts::load_dir(&dir).expect("remote prompts load from fs");
+        let embedded = Prompts::load_embedded("remote").expect("remote prompts load embedded");
+        let fs_keys: Vec<&str> = from_fs.iter().map(|(key, _)| key).collect();
+        let embedded_keys: Vec<&str> = embedded.iter().map(|(key, _)| key).collect();
+        assert_eq!(fs_keys, embedded_keys);
     }
 }

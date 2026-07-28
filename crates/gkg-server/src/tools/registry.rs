@@ -4,7 +4,7 @@ use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::prompts;
+use super::prompt;
 use super::schema::condensed_query_schema;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,21 +14,23 @@ pub struct ToolDefinition {
     pub parameters: serde_json::Value,
 }
 
-pub(super) const COMMAND_SUMMARIES: [(&str, &str); 4] = [
-    ("query_graph", prompts::tools::query_graph::SUMMARY),
-    (
-        "get_graph_schema",
-        prompts::tools::get_graph_schema::SUMMARY,
-    ),
-    ("get_query_dsl", prompts::tools::get_query_dsl::SUMMARY),
-    (
-        "get_response_format",
-        prompts::tools::get_response_format::SUMMARY,
-    ),
-];
+pub(super) fn command_summaries() -> [(&'static str, &'static str); 4] {
+    [
+        ("query_graph", prompt("tools/query_graph").summary()),
+        (
+            "get_graph_schema",
+            prompt("tools/get_graph_schema").summary(),
+        ),
+        ("get_query_dsl", prompt("tools/get_query_dsl").summary()),
+        (
+            "get_response_format",
+            prompt("tools/get_response_format").summary(),
+        ),
+    ]
+}
 
 pub(super) fn list_commands_description() -> String {
-    let commands = COMMAND_SUMMARIES
+    let commands = command_summaries()
         .iter()
         .map(|(name, summary)| format!("- {name}: {summary}"))
         .collect::<Vec<_>>()
@@ -38,10 +40,10 @@ pub(super) fn list_commands_description() -> String {
     environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
     environment
         .render_str(
-            prompts::list_commands::DESCRIPTION_TEMPLATE,
+            prompt("list_commands").description(),
             minijinja::context! { commands },
         )
-        .expect("template placeholders are validated against the prompt file at compile time")
+        .expect("template placeholders are validated against the prompt file at build time")
 }
 
 pub(super) mod params {
@@ -121,7 +123,7 @@ impl ToolRegistry {
     pub(super) fn query_graph() -> ToolDefinition {
         // Inline TOON kept for back-compat (one release cycle); a follow-up
         // strips it once `get_query_dsl` adoption is verified.
-        let base_description = prompts::tools::query_graph::DESCRIPTION;
+        let base_description = prompt("tools/query_graph").description();
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
@@ -146,7 +148,7 @@ impl ToolRegistry {
     pub(super) fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: prompts::tools::get_graph_schema::DESCRIPTION.into(),
+            description: prompt("tools/get_graph_schema").description().into(),
             parameters: params::get_graph_schema_parameters(),
         }
     }
@@ -169,7 +171,7 @@ impl ToolRegistry {
     fn invoke_command() -> ToolDefinition {
         ToolDefinition {
             name: "invoke_command".into(),
-            description: prompts::invoke_command::DESCRIPTION.into(),
+            description: prompt("invoke_command").description().into(),
             parameters: json!({
                 "type": "object",
                 "required": ["command_name"],
@@ -201,7 +203,7 @@ impl CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: prompts::tools::get_query_dsl::DESCRIPTION.into(),
+            description: prompt("tools/get_query_dsl").description().into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -215,7 +217,7 @@ impl CommandRegistry {
     fn get_response_format() -> ToolDefinition {
         ToolDefinition {
             name: "get_response_format".into(),
-            description: prompts::tools::get_response_format::DESCRIPTION.into(),
+            description: prompt("tools/get_response_format").description().into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -313,7 +315,7 @@ mod tests {
     fn command_summary_mapping_matches_registered_commands() {
         for command in all_commands() {
             assert!(
-                COMMAND_SUMMARIES
+                command_summaries()
                     .iter()
                     .any(|(name, _summary)| *name == command.name),
                 "{} missing from command summaries",
@@ -329,7 +331,7 @@ mod tests {
             .chain(all_v2_tools())
             .filter(|tool| tool.name == "list_commands")
         {
-            for (name, summary) in COMMAND_SUMMARIES {
+            for (name, summary) in command_summaries() {
                 assert!(
                     tool.description.contains(name),
                     "{} missing command name {name}",

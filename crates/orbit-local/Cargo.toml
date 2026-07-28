@@ -34,5 +34,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
 
+[build-dependencies]
+gkg-prompts = { path = "../gkg-prompts" }
+
 [dev-dependencies]
 tempfile = { workspace = true }

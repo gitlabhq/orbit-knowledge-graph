@@ -5156,6 +5156,7 @@ name = "gkg-prompts"
 version = "0.1.0"
 dependencies = [
  "minijinja",
+ "rust-embed",
  "semver",
  "serde",
  "serde_yaml",

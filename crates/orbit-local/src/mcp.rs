@@ -55,15 +55,6 @@ pub struct OrbitLocalServer {
     tool_router: ToolRouter<Self>,
 }
 
-fn mcp_description(name: &str) -> &'static str {
-    match name {
-        "run_sql" => descriptions::run_sql::DESCRIPTION,
-        "get_graph_schema" => descriptions::get_graph_schema::DESCRIPTION,
-        "index" => descriptions::index::DESCRIPTION,
-        other => unreachable!("tool `{other}` has no entry in `descriptions`"),
-    }
-}
-
 async fn blocking_tool<F>(f: F) -> Result<CallToolResult, ErrorData>
 where
     F: FnOnce() -> Result<String> + Send + 'static,
@@ -82,7 +73,7 @@ impl OrbitLocalServer {
     pub fn new() -> Self {
         let mut tool_router = ToolRouter::new();
         for mut route in Self::tool_router() {
-            route.attr.description = Some(mcp_description(route.name()).into());
+            route.attr.description = Some(descriptions::mcp(route.name()).into());
             tool_router.add_route(route);
         }
         Self { tool_router }
@@ -202,7 +193,7 @@ mod tests {
         for tool in &tools {
             assert_eq!(
                 tool.description.as_deref(),
-                Some(mcp_description(&tool.name))
+                Some(descriptions::mcp(&tool.name))
             );
         }
     }
