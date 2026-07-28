@@ -1,0 +1,3 @@
+name: mcp_serve
+version: 1.0.0
+short: Serve the local graph to MCP-compatible AI agents

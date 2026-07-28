@@ -1,0 +1,11 @@
+name: list_commands
+version: 1.1.0
+variables: [commands]
+description: >-
+  List Orbit Knowledge Graph commands with descriptions and input schemas.
+  Use this before invoke_command to discover available command details.
+
+
+  Available commands:
+
+  {{ commands }}

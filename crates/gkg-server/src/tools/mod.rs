@@ -1,3 +1,15 @@
+use std::sync::LazyLock;
+
+static PROMPTS: LazyLock<gkg_prompts::Prompts> = LazyLock::new(|| {
+    gkg_prompts::Prompts::load_embedded("remote").expect("prompts are validated by build.rs")
+});
+
+fn prompt(key: &str) -> &'static gkg_prompts::Prompt {
+    PROMPTS
+        .get(key)
+        .unwrap_or_else(|| panic!("prompt `{key}` missing from config/prompts/remote"))
+}
+
 mod registry;
 mod schema;
 mod service;

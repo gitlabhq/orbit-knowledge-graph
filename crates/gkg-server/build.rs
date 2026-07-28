@@ -1,10 +1,17 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    validate_prompts();
     validate_named_queries();
     validate_migration_ledger();
     validate_authored_etl_sql();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
+}
+
+fn validate_prompts() {
+    let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("remote");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    gkg_prompts::Prompts::load_dir(&dir).unwrap_or_else(|e| panic!("{e}"));
 }
 
 /// Fails the build on ontology/DDL drift from the fingerprint snapshot or a

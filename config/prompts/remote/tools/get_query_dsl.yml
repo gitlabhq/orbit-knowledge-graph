@@ -1,0 +1,6 @@
+name: get_query_dsl
+version: 1.0.0
+summary: Return the query_graph JSON DSL grammar and version.
+description: >-
+  Return the query_graph JSON DSL grammar and version. Use this before
+  composing query_graph parameters.

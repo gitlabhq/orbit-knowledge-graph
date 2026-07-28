@@ -5154,6 +5154,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkg-prompts"
+version = "0.1.0"
+dependencies = [
+ "minijinja",
+ "rust-embed",
+ "semver",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
 name = "gkg-server"
 version = "0.1.0"
 dependencies = [
@@ -5171,6 +5182,7 @@ dependencies = [
  "gkg-analytics",
  "gkg-billing",
  "gkg-observability",
+ "gkg-prompts",
  "gkg-server-config",
  "gkg-utils",
  "health-check",
@@ -5180,6 +5192,7 @@ dependencies = [
  "labkit",
  "labkit-events",
  "mimalloc",
+ "minijinja",
  "moka",
  "named-queries",
  "nats-client",
@@ -8383,6 +8396,7 @@ dependencies = [
  "duckdb-client",
  "dunce",
  "gitalisk-core",
+ "gkg-prompts",
  "gkg-utils",
  "mimalloc",
  "ontology",
