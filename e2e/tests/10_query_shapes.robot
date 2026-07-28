@@ -50,7 +50,7 @@ Truncated Date Group Key Serializes As An ISO Date String
     ...                server versions.
     [Tags]    query-shapes
     ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"key": "w.created_at", "truncate": "month"}], "aggregations": [{"function": "count", "target": "w", "alias": "n"}], "limit": 5}
+    ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"key": "w.created_at", "truncate": "month"}], "aggregations": [{"count": "w", "as": "n"}], "limit": 5}
     ${resp}=    Orbit Query    ${query}
     ${month}=    Aggregation Value    ${resp}    w_created_at_month
     ${month}=    Convert To String    ${month}
