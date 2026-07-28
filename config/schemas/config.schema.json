@@ -264,7 +264,8 @@
             "events_stream_name": "siphon_stream_main_db"
           },
           "stale-edge-reconciliation": {
-            "cron": "0 */30 * * * *"
+            "cron": "0 */30 * * * *",
+            "lookback_secs": 3600
           },
           "table-cleanup": {
             "cron": "0 0 3 * * *"
@@ -1542,7 +1543,8 @@
               "events_stream_name": "siphon_stream_main_db"
             },
             "stale-edge-reconciliation": {
-              "cron": "0 */30 * * * *"
+              "cron": "0 */30 * * * *",
+              "lookback_secs": 3600
             },
             "table-cleanup": {
               "cron": "0 0 3 * * *"
@@ -1597,7 +1599,8 @@
         "stale-edge-reconciliation": {
           "$ref": "#/$defs/StaleEdgeReconciliationConfig",
           "default": {
-            "cron": "0 */30 * * * *"
+            "cron": "0 */30 * * * *",
+            "lookback_secs": 3600
           }
         },
         "table-cleanup": {
@@ -1654,7 +1657,7 @@
       }
     },
     "StaleEdgeReconciliationConfig": {
-      "description": "Tombstones stale FK-derived \"latest\"/single-value edges whose endpoint no\nlonger matches the owner node's current FK column. ReplacingMergeTree keys\nthe edge on its (mutable) `target_id`, so an FK change orphans the old edge\ninstead of replacing it; this sweep reconciles them off the indexing path.",
+      "description": "Tombstones edges a node's pipeline stopped emitting, off the indexing path.",
       "type": "object",
       "properties": {
         "cron": {
@@ -1664,6 +1667,12 @@
             "null"
           ],
           "default": null
+        },
+        "lookback_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 0
         }
       },
       "additionalProperties": false

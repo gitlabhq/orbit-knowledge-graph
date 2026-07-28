@@ -366,6 +366,7 @@ pipelines:
             field: id
             kind: MergeRequest
           label: MERGED
+          mutable: true
         - from:
             field: updated_by_id
             kind: User

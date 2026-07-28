@@ -112,6 +112,7 @@ pipelines:
             field: id
             kind: Group
           label: OWNER
+          mutable: true
         - from:
             field: parent_id
             kind: Group
@@ -119,6 +120,7 @@ pipelines:
             field: id
             kind: Group
           label: CONTAINS
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:

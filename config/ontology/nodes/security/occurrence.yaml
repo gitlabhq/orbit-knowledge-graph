@@ -194,6 +194,7 @@ pipelines:
             field: scanner_id
             kind: VulnerabilityScanner
           label: DETECTED_BY
+          mutable: true
         - from:
             field: id
             kind: VulnerabilityOccurrence
