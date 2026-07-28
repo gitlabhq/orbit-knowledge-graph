@@ -24,6 +24,8 @@ The [Orbit 19.0 DoD](https://gitlab.com/gitlab-org/gitlab/-/work_items/593790) l
 
 Motivating scenario: an entity type should be usable to power a GitLab-native feature (e.g. surfaced only through DAP or internal tooling) but withheld from a customer calling the REST API or an external MCP agent directly with the same credentials — not because their GitLab role doesn't permit it, but because GitLab hasn't yet decided to offer that data as a general-purpose queryable surface outside its own products.
 
+**This applies identically on GitLab.com, Self-Managed, and Dedicated.** It's tempting to assume channel gating needs deployment-specific handling the way tenant isolation does (organization boundaries look different on a single-tenant Self-Managed instance than on GitLab.com), but that's the wrong mental model here: channel gating has nothing to do with data tenancy or organization boundaries — `traversal_path` and `organization_id` already own that, unchanged by this ADR. Channel gating is about restricting the *surface area* through which any of Orbit's data — the customer's own, already-tenant-scoped data — can be pulled out directly, regardless of who operates the instance. A Self-Managed customer's own admin querying their own instance's Orbit API directly is exactly the case this ADR restricts, the same as it would on GitLab.com.
+
 # Decision
 
 Add a **channel allowlist** alongside the existing role floor, enforced by a new compiler pass that mirrors `SecurityPass` exactly, and composed with it via AND — channel gating can only narrow what role-based access already permits, never widen it.
@@ -47,6 +49,8 @@ redaction:
 There's no dedicated group for "DAP only" — that's just `channel_allowlist: [dap_internal]`, a single raw channel name, since groups exist purely as a convenience for sets that come up repeatedly, not as the only way to reference a channel. Mixing is valid too: `channel_allowlist: [internal_only, dap_internal]` is equivalent to `channel_allowlist: [core_feature, dap_internal]`.
 
 `frontend` is deliberately **not** included in `internal_only`, and this is a resolved decision rather than an open question — see Section 8 for the mechanism this implies for GitLab UI features that need `internal_only` data. The group→channel-set mapping is a small, centrally maintained table rather than something duplicated per entity, so adding a new group later means adding one row here, not touching every entity that references an existing group.
+
+`channel_allowlist` values and the group definitions are **GitLab-defined, not per-org configurable.** This is a deliberate scope decision: the whole point of this ADR is that GitLab controls which data ships as a general-purpose queryable surface, for product/monetization reasons that are GitLab's to make — not a customer-tunable policy knob. An org admin can't loosen or tighten an entity's `channel_allowlist` any more than they can today grant themselves a role `required_role` doesn't recognize.
 
 **Fails closed:** an entity with an empty or absent `channel_allowlist` resolves to no allowed channels — nobody sees it, not even `core_feature`. Visibility must be explicitly opted into per entity, whether via raw channel names, a group, or both. This is the same posture `required_role` could have taken but didn't (it defaults to `reporter`, i.e. fails open); channel gating deliberately chooses the stricter default, because an unassigned `channel_allowlist` is far more likely to mean "nobody's decided yet" than "no restriction intended."
 
@@ -84,7 +88,7 @@ Runs alongside `SecurityPass`. For each `gl_*` alias, resolves the target entity
 
 ## 5. Schema discovery
 
-`get_graph_schema` / `GetQueryDsl` must reflect channel visibility per caller, not return a static schema. Open question (see below): omit gated entities entirely, or annotate them as present-but-restricted. Either is better than today's implicit behavior of returning `Bool(false)` rows with no explanation — an external agent burning calls against an entity it can never see is a discoverability bug, not just a security one.
+`get_graph_schema` / `GetQueryDsl` must reflect channel visibility per caller, not return a static schema. **Resolved: omit channel-gated entities entirely for a restricted caller — no "requires internal channel" annotation, no partial disclosure.** The caller should not be able to tell that gating is happening at all; a schema that lists a restricted entity with a note explaining why it's restricted still discloses that the entity exists and that GitLab is deliberately withholding it, which is itself the kind of product/policy signal this ADR exists to keep out of the general-purpose surface. This does mean an external agent gets no explanation when it can't find an entity it might expect — accepted as the correct tradeoff, since the alternative leaks the existence of the policy rather than just its effect.
 
 ## 6. Named queries
 
@@ -102,6 +106,18 @@ So the rule is: **the frontend never holds a token capable of querying `internal
 
 This means every new frontend feature that wants `internal_only` data requires a small amount of net-new Rails API surface — deliberately, since that's the checkpoint where GitLab decides what shape of the data reaches the browser (aggregated counts vs. raw rows, for instance), rather than handing the frontend a general traversal/aggregation capability it could be tricked or coaxed into misusing. This is the same shape as the existing `POST /api/v4/orbit/query` vs. dashboard split already implied by ADR 003 — the dashboard doesn't get raw MCP-style query access either, it goes through Rails-defined endpoints.
 
+## 9. CI safeguards: presence/validity linter and widening review gate
+
+Two separate CI checks, addressing two separate risks.
+
+**Presence/validity linter.** A CI job parses every file under `config/ontology/nodes/**` and fails the build if any node's `channel_allowlist` is missing, empty, or contains an entry that isn't a recognized raw channel name or a recognized group name from the group table in Section 1. This is the same pattern the named-queries system already uses to fail the build on drift against `config/schemas/named_query.schema.json` — catching "forgot to add it" or "typo'd a channel name" at build time instead of in production.
+
+**Widening review gate.** Loosening a `channel_allowlist` — most notably moving an entity from `internal_only` (or a bare `dap_internal`/`core_feature` list) to `all_interfaces`, or otherwise adding `external_agent` to an entity's resolved channel set — is a product/business decision, not a routine code change; it's the exact thing this ADR exists to make deliberate rather than incidental. CODEOWNERS alone can't express this, because it operates on file paths, not on semantic diffs of a YAML value inside a file people touch for unrelated reasons (adding a new entity, fixing an edge, renaming a property).
+
+The mechanism: a CI job resolves each entity's `channel_allowlist` on both sides of the MR diff (target branch vs. source branch) and compares the resolved channel sets. If any entity's resolved set **gains** channels — in particular if it gains `external_agent` or otherwise becomes equivalent to `all_interfaces` — the job fails until a required-approval label (e.g. `~"channel-widening-approved"`) is present, and that label is restricted via a merge request approval rule to a small product/security approver group, the same kind of gate already used for `security_manager`-required entities. Narrowing a `channel_allowlist` — the safe direction — never triggers this gate, so entities can be locked down without friction while opening them up gets deliberate scrutiny.
+
+This is layered on top of, not instead of, whatever CODEOWNERS entry already exists on `config/ontology/nodes/**` as a whole — the widening gate is a semantic tripwire that file-level CODEOWNERS can't provide by itself.
+
 # Alternatives considered
 
 **A. Gate at the Rails routing layer only (Seam A/B in [Duo/Orbit prompt routing](../duo_orbit_prompt_routing.md)).** Rejected as insufficient: those seams are binary per-surface (Orbit reachable or not for this flow) and already serve a different purpose (feature rollout, not entity-level data control). They can't express "this entity only, for this channel."
@@ -114,19 +130,15 @@ This means every new frontend feature that wants `internal_only` data requires a
 
 # Consequences
 
-**Positive:** Fine-grained entity control without re-architecting the compiler; reuses a mechanism already proven for `required_role`; auditable via existing telemetry patterns.
+**Positive:** Fine-grained entity control without re-architecting the compiler; reuses a mechanism already proven for `required_role`; auditable via existing telemetry patterns; the Section 9 CI safeguards give this a concrete, enforced guardrail against both silent misconfiguration and unreviewed widening, rather than relying on ontology authors remembering to be careful.
 
 **Negative / risks:**
 - This changes an existing customer-facing promise. Current messaging (design-partner materials, RFP responses) states Orbit surfaces "the same data" regardless of access path, gated only by GitLab role. Channel gating means a Security Manager querying via CLI could see *less* than the same person asking Duo — a real behavior change, not just plumbing, and it needs Product/Legal sign-off before any entity actually sets `channel_allowlist`.
-- **The fail-closed default makes this a breaking migration, not an additive one.** The moment `ChannelPass` ships, every entity in `config/ontology/nodes/**` with an empty or missing `channel_allowlist` goes dark for all channels — including `core_feature`, meaning even internal Rails-to-GKG calls would see nothing. This requires a full audit and explicit `channel_allowlist` population across the existing ontology *before* `ChannelPass` is enabled, not after. Rollout needs a safeguard (feature-flagged pass, or a required-in-CI lint that fails the build if any node has an empty `channel_allowlist` or references an unknown channel/group name) to prevent an entity silently going blind because someone forgot the field — the same risk `security.md` already calls out for `required_role`, but fail-closed makes the blast radius "everyone" instead of "unprivileged roles." A reasonable default sweep for the initial migration: set every currently-unrestricted entity's `channel_allowlist` to `[all_interfaces]` explicitly, so the audit is "confirm this is intentional," not "decide from scratch."
-- Schema-discovery UX is unresolved (see below) and matters for agent usability — doubly so now, since a fail-closed default means *newly added* entities will be invisible-by-default too, and schema responses need to make that legible rather than look like a bug.
+- **The fail-closed default makes this a breaking migration, not an additive one.** The moment `ChannelPass` ships, every entity in `config/ontology/nodes/**` with an empty or missing `channel_allowlist` goes dark for all channels — including `core_feature`, meaning even internal Rails-to-GKG calls would see nothing. This requires a full audit and explicit `channel_allowlist` population across the existing ontology *before* `ChannelPass` is enabled, not after. See Section 9 for the CI presence/validity linter that catches an entity shipping with an empty or invalid `channel_allowlist` — the same risk `security.md` already calls out for `required_role`, but fail-closed makes the blast radius "everyone" instead of "unprivileged roles." A reasonable default sweep for the initial migration: set every currently-unrestricted entity's `channel_allowlist` to `[all_interfaces]` explicitly, so the audit is "confirm this is intentional," not "decide from scratch."
+- Schema-discovery now omits gated entities silently (Section 5) rather than explaining why — deliberate, since revealing the policy is itself a disclosure this ADR exists to prevent, but it does mean external agents get no error message pointing them toward the real cause when they can't find an entity they expect. That's a support/debugging cost worth naming even though it's the correct tradeoff.
 - Adds a second gating dimension to reason about alongside `required_role` — compiler and audit complexity both increase.
 
-**Open questions:**
-- Should `get_graph_schema` omit channel-gated entities for a restricted caller, or show them with a "requires internal channel" annotation? Omitting is cleaner for agents (no dead-end tool calls) but weakens discoverability/transparency for legitimate debugging.
-- Does `channel_allowlist` need to be configurable per-org (namespace-level policy), or is a fixed, GitLab-defined value per entity sufficient for launch?
-- How does this interact with self-managed/Dedicated, where "internal feature" vs. "external" may map differently onto the deployment's own auth model?
-- What's the build-time safeguard against silent omission? The named-queries system already fails the build when a template drifts from the DSL/ontology (compiled and validated against `config/schemas/named_query.schema.json`); `channel_allowlist` likely needs the same treatment — a CI check that every ontology node has a non-empty `channel_allowlist` whose entries all resolve to a known channel or group name, so "forgot to add it" or "typo'd a channel name" produces a loud build failure rather than a quietly blind (or wrongly open) entity in production.
+**Open questions:** none remaining from the original draft — schema-discovery behavior, per-org configurability, and Self-Managed/Dedicated applicability are all resolved above (Sections 1, 5, and the Context note on deployment scope, respectively).
 
 # References
 
