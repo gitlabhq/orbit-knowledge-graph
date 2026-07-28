@@ -257,7 +257,7 @@ class is namespaced:
     ],
     "relationships": [
       {"type": "EXTENDS", "from": "child", "to": "parent",
-       "max_hops": 3}
+       "hops": [1, 3]}
     ],
     "limit": 1000
   }

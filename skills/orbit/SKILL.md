@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
-version: 0.20.0
+version: 0.21.0
 license: MIT
 metadata:
   audience: developers
@@ -86,10 +86,11 @@ All queries declare node selectors in the `nodes` array — a 1-element array
 for `neighbors` and single-node `traversal`; multi-node `traversal`,
 `aggregation`, and `path_finding` add `relationships`.
 
-- For multi-hop **traversal** edges, set `relationships[].max_hops` (and
-  optionally `min_hops`). Default 1, max 3.
+- For multi-hop **traversal** edges, set `relationships[].hops` to an
+  inclusive `[min, max]` pair (`"hops": [1, 3]`; `[2, 2]` for exactly 2).
+  Omitted means `[1, 1]`. Max 3.
 - For **path_finding** queries, set `path.max_depth` inside the required
-  `path` sub-object. Max 3. `max_hops` does not apply to `path_finding`.
+  `path` sub-object. Max 3. `hops` does not apply to `path_finding`.
   When endpoints use filters, include `path.rel_types` to bound fan-out;
   path_finding follows edges only in their schema direction (see
   [recipe pitfall](references/recipes.md#path_finding--shortest-path-between-nodes)).

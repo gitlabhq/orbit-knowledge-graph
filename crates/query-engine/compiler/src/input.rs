@@ -562,10 +562,8 @@ pub struct InputRelationship {
     pub types: Vec<String>,
     pub from: String,
     pub to: String,
-    #[serde(default = "default_hops")]
-    pub min_hops: u32,
-    #[serde(default = "default_hops")]
-    pub max_hops: u32,
+    #[serde(default)]
+    pub hops: HopRange,
     #[serde(default)]
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
@@ -589,8 +587,56 @@ pub struct InputRelationship {
     pub scope_preserving: bool,
 }
 
-fn default_hops() -> u32 {
-    1
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HopRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+impl Default for HopRange {
+    fn default() -> Self {
+        Self { min: 1, max: 1 }
+    }
+}
+
+impl<'de> Deserialize<'de> for HopRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_hops(Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_hops(value: Value) -> Result<HopRange, String> {
+    let as_hop_count = |v: &Value| -> Result<u32, String> {
+        let n = v
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| format!("hops bound must be a positive integer, got {v}"))?;
+        if n == 0 {
+            return Err("hops bounds must be at least 1".to_string());
+        }
+        Ok(n)
+    };
+    let Value::Array(arr) = &value else {
+        return Err(format!(
+            "hops must be a [min, max] pair (e.g. [1, 3]; [2, 2] for exactly 2), got {value}"
+        ));
+    };
+    let [min, max] = arr.as_slice() else {
+        return Err(format!(
+            "hops must be a [min, max] pair, got {} element(s)",
+            arr.len()
+        ));
+    };
+    let (min, max) = (as_hop_count(min)?, as_hop_count(max)?);
+    if min > max {
+        return Err(format!(
+            "hops range [{min}, {max}] is inverted: min must not exceed max"
+        ));
+    }
+    Ok(HopRange { min, max })
 }
 
 fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -1029,6 +1075,46 @@ mod tests {
 
     fn order_by(spec: &str) -> InputOrderBy {
         serde_json::from_str(&format!("\"{spec}\"")).expect("order_by parses")
+    }
+
+    fn hops(json: &str) -> Result<HopRange, String> {
+        serde_json::from_str::<HopRange>(json).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn hops_pair_means_inclusive_range() {
+        assert_eq!(hops("[1, 3]").unwrap(), HopRange { min: 1, max: 3 });
+        assert_eq!(hops("[2, 2]").unwrap(), HopRange { min: 2, max: 2 });
+    }
+
+    #[test]
+    fn hops_bare_integer_rejects_with_pair_example() {
+        let err = hops("2").unwrap_err();
+        assert!(err.contains("[min, max] pair"), "{err}");
+    }
+
+    #[test]
+    fn hops_omitted_defaults_to_single_hop() {
+        let rel: InputRelationship =
+            serde_json::from_str(r#"{"type": "CONTAINS", "from": "a", "to": "b"}"#).unwrap();
+        assert_eq!(rel.hops, HopRange { min: 1, max: 1 });
+    }
+
+    #[test]
+    fn hops_inverted_pair_rejects_with_ordering_error() {
+        let err = hops("[3, 1]").unwrap_err();
+        assert!(err.contains("inverted"), "{err}");
+    }
+
+    #[test]
+    fn hops_zero_bound_rejects() {
+        assert!(hops("[0, 2]").unwrap_err().contains("at least 1"));
+    }
+
+    #[test]
+    fn hops_wrong_arity_rejects() {
+        let err = hops("[1, 2, 3]").unwrap_err();
+        assert!(err.contains("[min, max] pair"), "{err}");
     }
 
     #[test]

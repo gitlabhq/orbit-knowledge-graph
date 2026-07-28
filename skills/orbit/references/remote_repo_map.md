@@ -66,7 +66,7 @@ python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api cra
 
 Walks the `EXTENDS` graph from a base type down to descendants. Depth is capped
 at 3 because Orbit Remote caps traversal depth server-side. The helper issues a
-single server-side multi-hop traversal (`min_hops`/`max_hops`) regardless of
+single server-side multi-hop traversal (a `hops` range) regardless of
 depth, and prints the definition type, FQN, and `file_path:line` for each
 descendant, ordered by file path. The result set is the same regardless of how
 the depth is reached, so results are not labelled per hop (the Orbit response

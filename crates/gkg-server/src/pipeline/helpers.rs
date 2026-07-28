@@ -136,14 +136,14 @@ fn classify_execution_error(msg: &str) -> String {
             // MEMORY_LIMIT_EXCEEDED
             "Query used too much memory. This usually means the query is \
              scanning too much data. Try: add a project_id filter, use \
-             node_ids to pin specific entities, or reduce max_hops/max_depth."
+             node_ids to pin specific entities, or reduce hops/max_depth."
                 .to_string()
         }
         Some(159) | Some(160) => {
             // TIMEOUT_EXCEEDED / TOO_SLOW
             "Query timed out. The query is likely scanning a large portion \
              of the graph. Try: add selective filters (project_id, state), \
-             reduce max_hops/max_depth, specify rel_types, or use node_ids \
+             reduce hops/max_depth, specify rel_types, or use node_ids \
              to pin high-cardinality entities like Definition or File."
                 .to_string()
         }

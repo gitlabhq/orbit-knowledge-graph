@@ -37,12 +37,7 @@ fn main() {
 
     check_maximum(
         &schema,
-        "/$defs/RelationshipSelector/properties/max_hops",
-        MAX_HOPS_CAP,
-    );
-    check_maximum(
-        &schema,
-        "/$defs/RelationshipSelector/properties/min_hops",
+        "/$defs/RelationshipSelector/properties/hops/items",
         MAX_HOPS_CAP,
     );
     check_maximum(

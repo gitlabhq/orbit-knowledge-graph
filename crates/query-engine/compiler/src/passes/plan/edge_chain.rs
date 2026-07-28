@@ -269,8 +269,8 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 from_node: rel.from.clone(),
                 to_node: rel.to.clone(),
                 direction: rel.direction,
-                min_hops: rel.min_hops,
-                max_hops: rel.max_hops,
+                min_hops: rel.hops.min,
+                max_hops: rel.hops.max,
                 fk,
                 scope_preserving: rel.scope_preserving,
                 filters: rel

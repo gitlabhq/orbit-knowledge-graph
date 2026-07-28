@@ -340,8 +340,7 @@ q10_multi_hop_group_contains:
           "type": "CONTAINS",
           "from": "g",
           "to": "p",
-          "min_hops": 1,
-          "max_hops": 3
+          "hops": [1, 3]
         }
       ],
       "limit": 20
@@ -1010,8 +1009,7 @@ q28_multi_hop_contains_agg:
           "type": "CONTAINS",
           "from": "g",
           "to": "p",
-          "min_hops": 1,
-          "max_hops": 3
+          "hops": [1, 3]
         }
       ],
       "group_by": ["g"],

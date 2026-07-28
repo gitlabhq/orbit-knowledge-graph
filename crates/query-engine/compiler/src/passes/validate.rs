@@ -297,10 +297,10 @@ impl<'a> Validator<'a> {
                         .into(),
                 ));
             }
-            if rel.max_hops > MAX_HOPS_CAP {
+            if rel.hops.max > MAX_HOPS_CAP {
                 return Err(QueryError::DepthExceeded(format!(
-                    "max_hops ({}) must not exceed {MAX_HOPS_CAP}",
-                    rel.max_hops
+                    "hops upper bound ({}) must not exceed {MAX_HOPS_CAP}",
+                    rel.hops.max
                 )));
             }
             if rel.types.len() > MAX_REL_TYPES {
@@ -2299,7 +2299,7 @@ mod tests {
                     {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
         );
         assert_rejects(
@@ -2309,7 +2309,7 @@ mod tests {
                     {"id": "u", "entity": "User"},
                     {"id": "p", "entity": "Project"}
                 ],
-                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "hops": [1, 2]}]
             }"#,
             "full edge table scans",
         );

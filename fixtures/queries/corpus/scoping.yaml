@@ -376,7 +376,7 @@ subgrp_fullpath_workitem_in_group:
     }
 
 subgrp_id_workitem_transitive_contains:
-  desc: "Transitive subgroup descent. Group CONTAINS Group (max_hops 2) down to a nested subgroup, then WorkItem IN_GROUP that subgroup, scoped by the TOP group id. Proves the top-group prefix still prunes across a Group->Group hop."
+  desc: "Transitive subgroup descent. Group CONTAINS Group (hops [1, 2]) down to a nested subgroup, then WorkItem IN_GROUP that subgroup, scoped by the TOP group id. Proves the top-group prefix still prunes across a Group->Group hop."
   category: traversal
   suite: scoping
   query: |
@@ -389,7 +389,7 @@ subgrp_id_workitem_transitive_contains:
       ],
       "relationships": [
         {"type": "IN_GROUP", "from": "wi", "to": "sub"},
-        {"type": "CONTAINS", "from": "g", "to": "sub", "min_hops": 1, "max_hops": 2}
+        {"type": "CONTAINS", "from": "g", "to": "sub", "hops": [1, 2]}
       ],
       "limit": 50
     }
