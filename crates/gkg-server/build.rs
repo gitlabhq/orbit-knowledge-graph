@@ -8,8 +8,6 @@ fn main() {
     regenerate_protos();
 }
 
-/// Fails the build when a prompt file under `config/prompts/remote/` is
-/// invalid; the same files are embedded via rust-embed at runtime.
 fn validate_prompts() {
     let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("remote");
     println!("cargo:rerun-if-changed={}", dir.display());

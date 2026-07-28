@@ -1,4 +1,3 @@
-# The server appends the TOON-condensed DSL grammar at runtime (back-compat).
 name: query_graph
 version: 1.0.0
 summary: Execute permission-aware graph queries over GitLab SDLC and code entities.

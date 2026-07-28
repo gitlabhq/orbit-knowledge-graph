@@ -41,8 +41,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../../.git/refs");
 }
 
-/// Fails the build when a prompt file under `config/prompts/local/` is
-/// invalid; the same files are embedded via rust-embed at runtime.
 fn validate_prompts() {
     let dir = std::path::Path::new(env!("PROMPTS_DIR")).join("local");
     println!("cargo:rerun-if-changed={}", dir.display());

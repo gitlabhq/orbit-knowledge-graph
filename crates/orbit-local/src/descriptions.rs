@@ -1,6 +1,3 @@
-//! Subcommand and MCP tool descriptions from the versioned YAML prompts
-//! under `config/prompts/local/`, validated at build time by `build.rs`.
-
 use std::sync::LazyLock;
 
 static PROMPTS: LazyLock<gkg_prompts::Prompts> = LazyLock::new(|| {

@@ -1,8 +1,3 @@
-//! Agent-facing prompt registry: parses and validates the versioned YAML
-//! prompt files under `config/prompts/`, embedded via rust-embed. Consumer
-//! build scripts call [`Prompts::load_dir`] so a malformed prompt fails the
-//! build; at runtime the same files load through [`Prompts::load_embedded`].
-
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -140,15 +135,9 @@ fn parse_prompt(key: &str, raw: &str) -> Result<Prompt, String> {
     Ok(prompt)
 }
 
-/// Prompts for one scope (a top-level directory of `config/prompts/`),
-/// keyed by relative path without the `.yml` extension, e.g.
-/// `tools/query_graph` in the `remote` scope.
 pub struct Prompts(BTreeMap<String, Prompt>);
 
 impl Prompts {
-    /// Loads a scope from the files embedded at compile time. In debug
-    /// builds rust-embed reads them from disk instead, so local prompt
-    /// edits show up without recompiling.
     pub fn load_embedded(scope: &str) -> Result<Self, String> {
         let prefix = format!("{scope}/");
         let mut prompts = BTreeMap::new();
@@ -171,8 +160,6 @@ impl Prompts {
         Ok(Self(prompts))
     }
 
-    /// Loads a scope directory from the filesystem. Consumer build scripts
-    /// call this so an invalid prompt fails the build.
     pub fn load_dir(dir: &Path) -> Result<Self, String> {
         let mut prompts = BTreeMap::new();
         load_dir_into(dir, "", &mut prompts)?;
