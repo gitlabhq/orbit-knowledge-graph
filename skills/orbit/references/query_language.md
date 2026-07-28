@@ -456,13 +456,24 @@ Group keys support these shapes:
 
 | Group key | Shape | Result value |
 |-----------|-------|--------------|
-| Node | `{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}` | A nested entity object in each row. |
-| Property | `{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}` | A scalar bucket value in each row. |
+| Node | `"<node-id>"` (e.g. `"p"`) | A nested entity object in each row. |
+| Property | `"<node-id>.<property>"` (e.g. `"mr.state"`) | A scalar bucket value in each row. |
+| Truncated date | `{"key": "<node-id>.<property>", "truncate": "<unit>"}` | The property truncated to the start of the unit. |
 
-If you omit `alias`, node groups use the node ID as the output key. Property
-groups use the property name when it is unique in the `group_by` list, or
-`<node>_<property>` when needed to avoid ambiguity. Duplicate group or aggregate
-output names are rejected.
+Output column names are derived: node keys use the node ID (`p`), property
+keys use `<node>_<property>` (`mr_state`), and truncated keys append the unit
+(`mr_created_at_month`). Reference these names in `aggregation_sort`.
+Duplicate group or aggregate output names are rejected.
+
+Use the derived names. Only when a consumer requires a specific column name,
+rename with the object form's optional `as`: `{"key": "mr.state", "as":
+"state"}`, or with truncation `{"key": "mr.created_at", "truncate": "month",
+"as": "month"}`.
+
+Truncation units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and
+`year`, and apply only to `Date`/`DateTime` properties. `minute` and `hour`
+require `node_ids` or a filter on the truncated property to bound bucket
+cardinality.
 
 Property groups must reference a real ClickHouse-backed, filterable property
 that the caller is allowed to use. Virtual fields and unfilterable fields are
@@ -488,7 +499,7 @@ Count merged merge requests per project:
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "project"}
   ],
-  "group_by": [{"kind": "node", "node": "project"}],
+  "group_by": ["project"],
   "aggregations": [
     {"function": "count", "target": "mr", "alias": "merged_mrs"}
   ],
@@ -509,9 +520,7 @@ Count detected vulnerabilities by severity:
       "filters": {"state": "detected"}
     }
   ],
-  "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-  ],
+  "group_by": ["v.severity"],
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vulnerability_count"}
   ],

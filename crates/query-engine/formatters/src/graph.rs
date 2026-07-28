@@ -690,7 +690,7 @@ mod tests {
 
     fn make_property_grouped_aggregation_output() -> PipelineOutput {
         let schema = Arc::new(Schema::new(vec![
-            Field::new("severity", DataType::Utf8, false),
+            Field::new("v_severity", DataType::Utf8, false),
             Field::new("vulnerability_count", DataType::Int64, false),
         ]));
         let batch = RecordBatch::try_new(
@@ -723,7 +723,7 @@ mod tests {
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "aggregation",
                     "nodes": [{"id": "v", "entity": "Vulnerability"}],
-                    "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+                    "group_by": ["v.severity"],
                     "aggregations": [{
                         "function": "count",
                         "target": "v",
@@ -771,7 +771,7 @@ mod tests {
         assert_eq!(
             group_columns,
             vec![GroupColumnDescriptor {
-                name: "severity".into(),
+                name: "v_severity".into(),
                 kind: "property".into(),
                 node: "v".into(),
                 property: Some("severity".into()),
@@ -786,7 +786,7 @@ mod tests {
         let rows = response.rows.expect("property grouped rows");
         assert_eq!(rows.len(), 2);
         assert_eq!(
-            rows[0].get("severity").and_then(Value::as_str),
+            rows[0].get("v_severity").and_then(Value::as_str),
             Some("critical")
         );
         assert_eq!(

@@ -144,12 +144,7 @@ q5:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -219,12 +214,7 @@ q7:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -513,12 +503,7 @@ q17:
           "to": "note"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "author"
-        }
-      ],
+      "group_by": ["author"],
       "aggregations": [
         {
           "function": "count",
@@ -608,12 +593,7 @@ q20:
           "to": "mr"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "author"
-        }
-      ],
+      "group_by": ["author"],
       "aggregations": [
         {
           "function": "count",
@@ -661,12 +641,7 @@ q21:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -883,13 +858,7 @@ q29:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["v.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -917,13 +886,7 @@ q30:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state"
-        }
-      ],
+      "group_by": ["mr.state"],
       "aggregations": [
         {
           "function": "count",
@@ -951,13 +914,7 @@ q31:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status"
-        }
-      ],
+      "group_by": ["pipe.status"],
       "aggregations": [
         {
           "function": "count",
@@ -992,18 +949,8 @@ q32:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "status",
-          "alias": "job_status"
-        },
-        {
-          "kind": "property",
-          "node": "job",
-          "property": "when",
-          "alias": "job_when"
-        }
+        "job.status",
+        "job.when"
       ],
       "aggregations": [
         {
@@ -1033,18 +980,8 @@ q33:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity",
-          "alias": "severity"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "state",
-          "alias": "state"
-        }
+        "v.severity",
+        "v.state"
       ],
       "aggregations": [
         {
@@ -1086,17 +1023,8 @@ q34:
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state",
-          "alias": "mr_state"
-        }
+        "p",
+        "mr.state"
       ],
       "aggregations": [
         {

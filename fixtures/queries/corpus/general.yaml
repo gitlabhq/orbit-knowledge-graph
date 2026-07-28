@@ -129,12 +129,7 @@ q4_3_node_agg_mr_count_per_author:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "u"
-        }
-      ],
+      "group_by": ["u"],
       "aggregations": [
         {
           "function": "count",
@@ -171,12 +166,7 @@ q5_source_side_mr_count:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -450,12 +440,7 @@ q12_failed_pipelines_per_project_in_group:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -538,12 +523,7 @@ q14_multi_agg_avg_diff_size_count:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "u"
-        }
-      ],
+      "group_by": ["u"],
       "aggregations": [
         {
           "function": "avg",
@@ -626,12 +606,7 @@ q16_reviewer_count_per_mr:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "mr"
-        }
-      ],
+      "group_by": ["mr"],
       "aggregations": [
         {
           "function": "count",
@@ -702,12 +677,7 @@ q18_wide_datetime_pipeline_agg:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -773,12 +743,7 @@ q20_vulnerability_count_in_project:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -816,12 +781,7 @@ q21_calls_aggregation:
           "to": "d2"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "d1"
-        }
-      ],
+      "group_by": ["d1"],
       "aggregations": [
         {
           "function": "count",
@@ -941,12 +901,7 @@ q24_job_pipeline_project_agg:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "pipe"
-        }
-      ],
+      "group_by": ["pipe"],
       "aggregations": [
         {
           "function": "count",
@@ -1059,12 +1014,7 @@ q28_multi_hop_contains_agg:
           "max_hops": 3
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "g"
-        }
-      ],
+      "group_by": ["g"],
       "aggregations": [
         {
           "function": "count",
@@ -1340,12 +1290,7 @@ q35_group_project_mr_agg:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -1393,12 +1338,7 @@ a1_note_count_per_project_in_group:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -1447,12 +1387,7 @@ a2_stage_count_per_pipeline:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "pipe"
-        }
-      ],
+      "group_by": ["pipe"],
       "aggregations": [
         {
           "function": "count",
@@ -1491,12 +1426,7 @@ a3_user_membership_count:
           "to": "g"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "g"
-        }
-      ],
+      "group_by": ["g"],
       "aggregations": [
         {
           "function": "count",
@@ -1921,12 +1851,7 @@ e1_avg_count_pipeline_duration:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "avg",
@@ -1981,12 +1906,7 @@ e2_sum_lines_per_user:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "u"
-        }
-      ],
+      "group_by": ["u"],
       "aggregations": [
         {
           "function": "sum",
@@ -2072,12 +1992,7 @@ f2_milestone_mr_count:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "m"
-        }
-      ],
+      "group_by": ["m"],
       "aggregations": [
         {
           "function": "count",
@@ -2155,12 +2070,7 @@ g2_directory_file_count:
           "to": "f"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "dir"
-        }
-      ],
+      "group_by": ["dir"],
       "aggregations": [
         {
           "function": "count",
@@ -2458,12 +2368,7 @@ i1_job_count_by_failure:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "j"
-        }
-      ],
+      "group_by": ["j"],
       "aggregations": [
         {
           "function": "count",
@@ -2504,12 +2409,7 @@ i2_mr_count_by_target_branch:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "mr"
-        }
-      ],
+      "group_by": ["mr"],
       "aggregations": [
         {
           "function": "count",
@@ -2546,12 +2446,7 @@ i3_pipeline_count_by_source:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "pipe"
-        }
-      ],
+      "group_by": ["pipe"],
       "aggregations": [
         {
           "function": "count",
@@ -2597,12 +2492,7 @@ i4_vulnoccurrence_per_vulnerability:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "v"
-        }
-      ],
+      "group_by": ["v"],
       "aggregations": [
         {
           "function": "count",
@@ -2650,12 +2540,7 @@ i5_note_count_per_mr:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "mr"
-        }
-      ],
+      "group_by": ["mr"],
       "aggregations": [
         {
           "function": "count",
@@ -2704,12 +2589,7 @@ i6_label_usage_workitem_per_label:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "l"
-        }
-      ],
+      "group_by": ["l"],
       "aggregations": [
         {
           "function": "count",
@@ -2737,13 +2617,7 @@ i7_vulnerability_count_by_severity:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["v.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -2771,13 +2645,7 @@ i8_security_scan_count_by_scan_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type"
-        }
-      ],
+      "group_by": ["s.scan_type"],
       "aggregations": [
         {
           "function": "count",
@@ -2806,18 +2674,8 @@ i9_pipeline_count_by_status_and_source:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status",
-          "alias": "pipeline_status"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "source",
-          "alias": "pipeline_source"
-        }
+        "pipe.status",
+        "pipe.source"
       ],
       "aggregations": [
         {
@@ -2847,18 +2705,8 @@ i10_merge_request_state_draft_matrix:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state",
-          "alias": "mr_state"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "draft",
-          "alias": "draft"
-        }
+        "mr.state",
+        "mr.draft"
       ],
       "aggregations": [
         {
@@ -2908,18 +2756,8 @@ i11_project_visibility_and_mr_state:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level",
-          "alias": "project_visibility"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state",
-          "alias": "mr_state"
-        }
+        "p.visibility_level",
+        "mr.state"
       ],
       "aggregations": [
         {
@@ -2964,17 +2802,8 @@ i12_project_and_vulnerability_severity:
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity",
-          "alias": "severity"
-        }
+        "p",
+        "v.severity"
       ],
       "aggregations": [
         {

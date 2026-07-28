@@ -226,12 +226,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -273,12 +268,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "sum",
@@ -322,12 +312,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -502,12 +487,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -549,12 +529,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -648,12 +623,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -774,12 +744,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -860,12 +825,7 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
           "function": "count",
@@ -945,13 +905,7 @@
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["v.severity"],
       "aggregations": [
         {
           "function": "count",
@@ -979,13 +933,7 @@
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type"
-        }
-      ],
+      "group_by": ["s.scan_type"],
       "aggregations": [
         {
           "function": "count",
@@ -1014,18 +962,8 @@
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status",
-          "alias": "status"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "source",
-          "alias": "source"
-        }
+        "pipe.status",
+        "pipe.source"
       ],
       "aggregations": [
         {
@@ -1070,17 +1008,8 @@
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status",
-          "alias": "pipeline_status"
-        }
+        "p",
+        "pipe.status"
       ],
       "aggregations": [
         {

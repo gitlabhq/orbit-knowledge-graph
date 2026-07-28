@@ -176,7 +176,7 @@ proj_id_mr_count_by_state_agg:
         {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
+      "group_by": ["mr.state"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 10
@@ -194,7 +194,7 @@ proj_full_path_mr_count_by_state_agg:
         {"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
+      "group_by": ["mr.state"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 10
@@ -290,7 +290,7 @@ grp_id_milestone_count_by_state_agg:
         {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "m", "to": "g"}],
-      "group_by": [{"kind": "property", "node": "m", "property": "state", "alias": "ms_state"}],
+      "group_by": ["m.state"],
       "aggregations": [{"function": "count", "target": "m", "alias": "ms_count"}],
       "aggregation_sort": "-ms_count",
       "limit": 10
@@ -332,7 +332,7 @@ grp_id_count_mrs_aggregation_MOTIVATING:
         {"type": "IN_PROJECT", "from": "mr", "to": "p"},
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
-      "group_by": [{"kind": "node", "node": "p"}],
+      "group_by": ["p"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 50
@@ -354,7 +354,7 @@ subgrp_id_count_mrs_aggregation_deeper_prefix:
         {"type": "IN_PROJECT", "from": "mr", "to": "p"},
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
-      "group_by": [{"kind": "node", "node": "p"}],
+      "group_by": ["p"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 50
@@ -410,7 +410,7 @@ grp_id_vuln_count_by_severity_agg:
         {"type": "IN_PROJECT", "from": "v", "to": "p"},
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
-      "group_by": [{"kind": "property", "node": "v", "property": "severity", "alias": "sev"}],
+      "group_by": ["v.severity"],
       "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
       "aggregation_sort": "-vuln_count",
       "limit": 20
@@ -459,7 +459,7 @@ grp_id_count_workitems_aggregation:
         {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
-      "group_by": [{"kind": "property", "node": "wi", "property": "work_item_type", "alias": "wi_type"}],
+      "group_by": ["wi.work_item_type"],
       "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
       "aggregation_sort": "-wi_count",
       "limit": 20
@@ -550,7 +550,7 @@ proj_full_path_mr_count_agg_scoped:
         {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "node", "node": "p"}],
+      "group_by": ["p"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 10
@@ -745,7 +745,7 @@ proj_id_mr_by_state:
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
+      "group_by": ["mr.state"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 10,
@@ -770,7 +770,7 @@ group_id_mr_by_author:
         {"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"},
         {"type": "CONTAINS", "from": "g", "to": "p", "direction": "outgoing"}
       ],
-      "group_by": [{"kind": "node", "node": "author", "alias": "author"}],
+      "group_by": ["author"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 20,
@@ -789,7 +789,7 @@ group_fullpath_wi_by_state:
         {"id": "g", "entity": "Group", "filters": {"full_path": {"eq": "{{GROUP_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g", "direction": "outgoing"}],
-      "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "wi_state"}],
+      "group_by": ["wi.state"],
       "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
       "aggregation_sort": "-wi_count",
       "limit": 10,
@@ -930,7 +930,7 @@ project_id_in_multi:
         {"id": "p", "entity": "Project"}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "node", "node": "p"}],
+      "group_by": ["p"],
       "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
       "aggregation_sort": "-mr_count",
       "limit": 20,
@@ -1002,7 +1002,7 @@ unknown_namespace_id_group_empty:
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"namespace_id": {"eq": {{UNKNOWN_ID}}}}}
       ],
-      "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "state"}],
+      "group_by": ["wi.state"],
       "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
       "aggregation_sort": "-wi_count",
       "limit": 10,
@@ -1054,7 +1054,7 @@ mr_ids_changed_paths_agg:
         {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
         {"type": "HAS_FILE", "from": "d", "to": "f"}
       ],
-      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+      "group_by": ["f.old_path"],
       "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
       "aggregation_sort": "-changes",
       "limit": 40
@@ -1078,7 +1078,7 @@ pipeline_filter_changed_paths_agg:
         {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
         {"type": "HAS_FILE", "from": "d", "to": "f"}
       ],
-      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+      "group_by": ["f.old_path"],
       "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
       "aggregation_sort": "-changes",
       "limit": 60
