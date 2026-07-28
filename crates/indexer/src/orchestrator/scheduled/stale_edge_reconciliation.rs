@@ -20,9 +20,6 @@ struct ReconciliationGroup {
     emitting_node: String,
     emitting_node_table: String,
     edge_table: String,
-    /// Also picks the `*_kind` column pinning the node type: `gl_edge` is
-    /// shared, so without that pin the
-    /// join would match unrelated node types that share the integer id space.
     emitting_node_id_column: &'static str,
     emitting_node_kind_column: &'static str,
     relationship_kinds: Vec<String>,
@@ -160,9 +157,7 @@ impl StaleEdgeReconciliation {
             .map_err(TaskError::new)
     }
 
-    /// `save_completed` clears `cursor_values` only once every page of a run has
-    /// drained, so a set cursor means this namespace's edges may not have landed
-    /// yet and comparing versions would tombstone them.
+    /// A set cursor means the run is mid-flight, so its edges may not have landed yet.
     async fn find_namespaces_with_pending_writes(&self) -> Result<Vec<i64>, TaskError> {
         let checkpoints = self
             .checkpoint_store
@@ -257,11 +252,6 @@ fn find_emitting_node_id_column(mapping: &EdgeMapping, node_name: &str) -> Optio
     }
 }
 
-/// An edge is stale when the ETL did not re-emit it at its emitting node's `_version`.
-///
-/// `FINAL` would defeat granule pruning on `_version`, and an un-deduped edge
-/// scan makes superseded copies of live edges look stale, so both sides use
-/// `LIMIT 1 BY` with `_deleted` applied after the dedup.
 fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
     let ReconciliationGroup {
         emitting_node_table,
