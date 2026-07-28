@@ -997,8 +997,7 @@ mod tests {
                 "type": "MEMBER_OF",
                 "from": "u",
                 "to": "p",
-                "min_hops": 1,
-                "max_hops": 3
+                "hops": [1, 3]
             }],
             "limit": 25
         }"#;
@@ -1031,8 +1030,7 @@ mod tests {
                 "type": "MEMBER_OF",
                 "from": "u",
                 "to": "p",
-                "min_hops": 1,
-                "max_hops": 2
+                "hops": [1, 2]
             }],
             "limit": 25
         }"#;
@@ -1061,8 +1059,7 @@ mod tests {
                 "type": "CONTAINS",
                 "from": "p",
                 "to": "f",
-                "min_hops": 1,
-                "max_hops": 2
+                "hops": [1, 2]
             }],
             "group_by": ["p"],
             "aggregations": [{"function": "count", "target": "f"}],
@@ -1101,7 +1098,7 @@ mod tests {
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 3}
+                {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 3]}
             ],
             "group_by": ["g"],
             "aggregations": [{"function": "count", "target": "u", "alias": "n"}],

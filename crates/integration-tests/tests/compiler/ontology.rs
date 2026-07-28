@@ -506,7 +506,7 @@ fn multi_hop_traversal_generates_union_subquery() {
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 3}],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 3]}],
         "limit": 25
     }"#;
 
@@ -519,14 +519,14 @@ fn multi_hop_traversal_generates_union_subquery() {
 }
 
 #[test]
-fn multi_hop_with_min_hops_filter() {
+fn multi_hop_with_floor_filter() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 2, "max_hops": 3}],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [2, 3]}],
         "limit": 10
     }"#;
 
@@ -544,7 +544,7 @@ fn single_hop_does_not_generate_recursive_cte() {
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "n", "entity": "Note", "columns": ["confidential"]}
         ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "min_hops": 1, "max_hops": 1}],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "hops": [1, 1]}],
         "limit": 25
     }"#;
 
@@ -565,7 +565,7 @@ fn multi_hop_aggregation() {
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 2]}],
         "group_by": ["u"],
         "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
         "limit": 10

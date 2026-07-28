@@ -65,7 +65,7 @@ async fn data_correctness() {
         traversal::traversal_variable_length_reaches_depth_2,
         traversal::traversal_incoming_direction,
         traversal::traversal_with_filter_narrows_results,
-        traversal::traversal_variable_length_min_hops_skips_shallow,
+        traversal::traversal_variable_length_floor_skips_shallow,
         traversal::traversal_variable_length_includes_depth_2_path_to_project,
         traversal::aggregation_variable_length_counts_all_depths,
         traversal::traversal_variable_length_with_redaction_at_depth,

@@ -133,7 +133,7 @@ pub(super) async fn sip_prefilter_multi_hop_returns_correct_results(ctx: &TestCo
                 {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
                 {"id": "child", "entity": "Group", "columns": ["name"]}
             ],
-            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 1, "max_hops": 2}],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "hops": [1, 2]}],
             "limit": 10
         }"#,
         &allow_all(),

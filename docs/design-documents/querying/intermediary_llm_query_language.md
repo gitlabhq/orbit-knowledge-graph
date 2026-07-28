@@ -138,7 +138,7 @@ Relationships connect nodes in the query:
   "from": "u",
   "to": "mr",
   "direction": "outgoing",
-  "max_hops": 1
+  "hops": [1, 1]
 }
 ```
 
@@ -148,8 +148,7 @@ Relationships connect nodes in the query:
 | `from` | `string` | Source node variable ID. |
 | `to` | `string` | Target node variable ID. |
 | `direction` | `string` | `outgoing` (default), `incoming`, or `both`. |
-| `min_hops` | `integer` | Minimum hops (0-3, default: 1). |
-| `max_hops` | `integer` | Maximum hops (1-3, default: 1). |
+| `hops` | `array` | Inclusive `[min, max]` hop range; `[2, 2]` means exactly 2. Bounds 1-3, default `[1, 1]`. |
 | `filters` | `object` | Filters on relationship properties. |
 
 ## Query Types
@@ -467,9 +466,9 @@ If a value is not in the allow-list, we reject the request with a validation err
 
 **Constraint enforcement:**
 
-Each relationship step has a hard-coded `max_hops` cap, and the schema enforces the same bounds:
+Each relationship step has a hard-coded hop cap, and the schema enforces the same bounds:
 
-- `max_hops` limited to 3 to prevent resource exhaustion
+- `hops` upper bound limited to 3 to prevent resource exhaustion
 - `limit` capped at 1000 results (default: 30)
 - Path `max_depth` limited to 3
 - `node_ids` capped at 500 per node selector

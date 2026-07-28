@@ -570,7 +570,7 @@ fn null_metric_value_renders_as_bare_null_not_dropped() {
 
 #[test]
 fn variable_length_traversal_edges_carry_depth() {
-    // Variable-length traversal (`max_hops>1`) tags each hit with the hop
+    // Variable-length traversal (`hops` above 1) tags each hit with the hop
     // it was found at. Without surfacing it, depth-1 and depth-3 results
     // are indistinguishable in the output.
     let mut deep = edge("MEMBER_OF", "User", 1, "Group", 200);
