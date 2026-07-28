@@ -2,7 +2,7 @@
 # Production values come from Helm chart values, GKG_* env vars, and /etc/secrets/ mounts.
 #
 # Do not rename this file. The filename "default" is a deploy contract: the Helm chart
-# (gkg-helm-charts) renders the runtime config into a ConfigMap keyed `default.yaml` mounted
+# (orbit-helm-charts) renders the runtime config into a ConfigMap keyed `default.yaml` mounted
 # at /app/config, and the loader reads it via `config::File::with_name("config/default")`
 # (crates/gkg-server-config/src/app.rs). Renaming breaks config loading in every deployed pod.
 

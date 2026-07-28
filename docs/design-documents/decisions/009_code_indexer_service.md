@@ -68,7 +68,7 @@ To support a transition period where operators may not have deployed the new ser
 
 #### 4. Helm chart: new `codeIndexer` deployment
 
-In `gkg-helm-charts`, add a new deployment under `templates/code-indexer/`:
+In `orbit-helm-charts`, add a new deployment under `templates/code-indexer/`:
 
 | File | Purpose |
 |---|---|
