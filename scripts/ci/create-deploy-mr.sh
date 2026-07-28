@@ -60,7 +60,7 @@ if [[ -z "$old_schema" ]]; then
 elif [[ "$old_schema" == "$new_schema" ]]; then
   schema_sentence="No schema migration: both are schema v${new_schema}, plain image swap."
 else
-  schema_sentence="Schema migration v${old_schema} to v${new_schema}: full backfill expected (hours at prod scale); plan to run /monitor-rollout and merge during working hours."
+  schema_sentence="Schema migration v${old_schema} to v${new_schema}: full backfill expected (hours at prod scale); merge during working hours and monitor the rollout."
 fi
 
 mr_title="chore(gkg): bump orbit-stg + orbit-prd image to ${VERSION}"
