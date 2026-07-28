@@ -271,7 +271,7 @@
           },
           "table-cleanup": {
             "cron": "0 0 3 * * *",
-            "mutation_timeout_secs": 3600
+            "delete_timeout_secs": 3600
           }
         }
       }
@@ -1555,7 +1555,7 @@
             },
             "table-cleanup": {
               "cron": "0 0 3 * * *",
-              "mutation_timeout_secs": 3600
+              "delete_timeout_secs": 3600
             }
           }
         }
@@ -1615,7 +1615,7 @@
           "$ref": "#/$defs/TableCleanupConfig",
           "default": {
             "cron": "0 0 3 * * *",
-            "mutation_timeout_secs": 3600
+            "delete_timeout_secs": 3600
           }
         }
       },
@@ -1751,7 +1751,7 @@
           ],
           "default": null
         },
-        "mutation_timeout_secs": {
+        "delete_timeout_secs": {
           "type": "integer",
           "format": "uint64",
           "default": 3600,

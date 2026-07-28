@@ -1,10 +1,12 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use clickhouse_client::FromArrowColumn;
 use gkg_utils::arrow::ArrowUtils;
+use ontology::constants::TRAVERSAL_PATH_COLUMN;
 use tracing::{info, warn};
 
 use crate::checkpoint::CheckpointStore;
@@ -15,7 +17,6 @@ use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const CHECKPOINT_KEY_PREFIX: &str = "maintenance.table_cleanup";
-const MUTATION_POLL_INTERVAL: Duration = Duration::from_secs(15);
 
 struct ReplacingMergeTreeTable {
     name: String,
@@ -23,12 +24,33 @@ struct ReplacingMergeTreeTable {
 }
 
 impl ReplacingMergeTreeTable {
-    fn pending_deletes_table_name(&self) -> String {
-        format!("{}_pending_deletes", self.name)
-    }
-
     fn sort_key_as_sql_list(&self) -> String {
         self.sort_key.join(", ")
+    }
+
+    fn sorts_by_traversal_path(&self) -> bool {
+        self.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
+    }
+}
+
+enum DeleteScope {
+    NamespaceRoot(String),
+    WholeTable,
+}
+
+impl DeleteScope {
+    fn predicate(&self) -> &'static str {
+        match self {
+            Self::NamespaceRoot(_) => "startsWith(traversal_path, {root:String})",
+            Self::WholeTable => "1 = 1",
+        }
+    }
+
+    fn root(&self) -> &str {
+        match self {
+            Self::NamespaceRoot(root) => root,
+            Self::WholeTable => "",
+        }
     }
 }
 
@@ -86,19 +108,19 @@ impl TableCleanup {
     async fn apply_tombstones_to_all_tables(&self) -> Result<(), TaskError> {
         let mut cleaned = 0u64;
         let mut failed = 0u64;
-        let mut rows_deleted = 0u64;
+        let mut scopes_swept = 0u64;
 
         for table in &self.tables {
             let table_start = Instant::now();
             match self.apply_tombstones_to_table(table).await {
-                Ok(keys) => {
+                Ok(scopes) => {
                     cleaned += 1;
-                    rows_deleted += keys;
+                    scopes_swept += scopes;
                     let elapsed = table_start.elapsed().as_secs_f64();
                     self.metrics.record_query_duration(&table.name, elapsed);
                     info!(
                         table = table.name,
-                        keys,
+                        scopes,
                         duration_ms = (elapsed * 1000.0) as u64,
                         "applied pending tombstones"
                     );
@@ -111,7 +133,7 @@ impl TableCleanup {
             }
         }
 
-        info!(cleaned, failed, rows_deleted, "table cleanup complete");
+        info!(cleaned, failed, scopes_swept, "table cleanup complete");
 
         if failed > 0 {
             return Err(TaskError::new(format!(
@@ -130,27 +152,69 @@ impl TableCleanup {
         let watermark = Utc::now();
         let cursor = self.load_cursor(&table.name).await?;
 
-        self.drop_pending_deletes_table(table).await?;
-        self.graph
-            .query(&build_pending_deletes_table_sql(table))
-            .param("cursor", cursor.format(TIMESTAMP_FORMAT).to_string())
-            .execute()
-            .await
-            .map_err(TaskError::new)?;
-
-        let keys = self.count_pending_delete_keys(table).await?;
-        if keys > 0 {
-            self.graph
-                .query(&build_delete_pending_keys_sql(table))
-                .execute()
-                .await
-                .map_err(TaskError::new)?;
-            self.wait_for_delete_mutation_to_finish(table).await?;
+        let scopes = self.list_scopes_with_new_tombstones(table, cursor).await?;
+        for scope in &scopes {
+            self.delete_tombstoned_keys_in_scope(table, scope).await?;
         }
 
-        self.drop_pending_deletes_table(table).await?;
         self.save_cursor(&table.name, &watermark).await?;
-        Ok(keys)
+        Ok(scopes.len() as u64)
+    }
+
+    async fn list_scopes_with_new_tombstones(
+        &self,
+        table: &ReplacingMergeTreeTable,
+        cursor: DateTime<Utc>,
+    ) -> Result<Vec<DeleteScope>, TaskError> {
+        let cursor = cursor.format(TIMESTAMP_FORMAT).to_string();
+        if !table.sorts_by_traversal_path() {
+            let batches = self
+                .graph
+                .query(&build_count_new_tombstones_sql(table))
+                .param("cursor", cursor)
+                .fetch_arrow()
+                .await
+                .map_err(TaskError::new)?;
+            let tombstones = batches
+                .first()
+                .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, "tombstones", 0))
+                .unwrap_or(0);
+            return Ok(if tombstones > 0 {
+                vec![DeleteScope::WholeTable]
+            } else {
+                Vec::new()
+            });
+        }
+
+        let batches = self
+            .graph
+            .query(&build_namespace_roots_with_new_tombstones_sql(table))
+            .param("cursor", cursor)
+            .fetch_arrow()
+            .await
+            .map_err(TaskError::new)?;
+        Ok(String::extract_column(&batches, 0)
+            .map_err(TaskError::new)?
+            .into_iter()
+            .map(DeleteScope::NamespaceRoot)
+            .collect())
+    }
+
+    async fn delete_tombstoned_keys_in_scope(
+        &self,
+        table: &ReplacingMergeTreeTable,
+        scope: &DeleteScope,
+    ) -> Result<(), TaskError> {
+        self.graph
+            .query(&build_delete_tombstoned_keys_sql(
+                table,
+                scope,
+                self.config.delete_timeout_secs,
+            ))
+            .param("root", scope.root().to_string())
+            .execute()
+            .await
+            .map_err(TaskError::new)
     }
 
     async fn load_cursor(&self, table: &str) -> Result<DateTime<Utc>, TaskError> {
@@ -173,103 +237,47 @@ impl TableCleanup {
             .await
             .map_err(TaskError::new)
     }
-
-    async fn count_pending_delete_keys(
-        &self,
-        table: &ReplacingMergeTreeTable,
-    ) -> Result<u64, TaskError> {
-        let batches = self
-            .graph
-            .query("SELECT count() AS keys FROM {table:Identifier}")
-            .param("table", table.pending_deletes_table_name())
-            .fetch_arrow()
-            .await
-            .map_err(TaskError::new)?;
-        Ok(batches
-            .first()
-            .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, "keys", 0))
-            .unwrap_or(0))
-    }
-
-    async fn drop_pending_deletes_table(
-        &self,
-        table: &ReplacingMergeTreeTable,
-    ) -> Result<(), TaskError> {
-        self.graph
-            .query("DROP TABLE IF EXISTS {table:Identifier}")
-            .param("table", table.pending_deletes_table_name())
-            .execute()
-            .await
-            .map_err(TaskError::new)
-    }
-
-    async fn wait_for_delete_mutation_to_finish(
-        &self,
-        table: &ReplacingMergeTreeTable,
-    ) -> Result<(), TaskError> {
-        let deadline = Instant::now() + self.config.mutation_timeout();
-        loop {
-            if self.delete_mutation_finished(table).await? {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(TaskError::new(format!(
-                    "delete mutation on {} did not finish within {:?}",
-                    table.name,
-                    self.config.mutation_timeout()
-                )));
-            }
-            tokio::time::sleep(MUTATION_POLL_INTERVAL).await;
-        }
-    }
-
-    async fn delete_mutation_finished(
-        &self,
-        table: &ReplacingMergeTreeTable,
-    ) -> Result<bool, TaskError> {
-        let batches = self
-            .graph
-            .query(
-                "SELECT count() AS unfinished FROM system.mutations \
-                 WHERE database = currentDatabase() AND table = {table:String} AND is_done = 0",
-            )
-            .param("table", table.name.clone())
-            .fetch_arrow()
-            .await
-            .map_err(TaskError::new)?;
-        let unfinished = batches
-            .first()
-            .and_then(|batch| ArrowUtils::get_column::<UInt64Type>(batch, "unfinished", 0))
-            .unwrap_or(0);
-        Ok(unfinished == 0)
-    }
 }
 
 fn checkpoint_key_for_table(table: &str) -> String {
     format!("{CHECKPOINT_KEY_PREFIX}.{table}")
 }
 
-fn build_pending_deletes_table_sql(table: &ReplacingMergeTreeTable) -> String {
-    let keys = table.sort_key_as_sql_list();
-    let source = &table.name;
-    let pending = table.pending_deletes_table_name();
+fn build_count_new_tombstones_sql(table: &ReplacingMergeTreeTable) -> String {
     format!(
-        "CREATE TABLE {pending} ENGINE = MergeTree ORDER BY ({keys}) \
-         AS SELECT {keys} FROM ( \
-           SELECT {keys}, _deleted FROM {source} \
-           WHERE _version > {{cursor:String}} \
-           ORDER BY {keys}, _version DESC \
-           LIMIT 1 BY {keys} \
-         ) WHERE _deleted"
+        "SELECT count() AS tombstones FROM {} WHERE _deleted AND _version > {{cursor:String}}",
+        table.name
     )
 }
 
-fn build_delete_pending_keys_sql(table: &ReplacingMergeTreeTable) -> String {
-    let keys = table.sort_key_as_sql_list();
+fn build_namespace_roots_with_new_tombstones_sql(table: &ReplacingMergeTreeTable) -> String {
     format!(
-        "DELETE FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {})",
-        table.name,
-        table.pending_deletes_table_name()
+        "SELECT DISTINCT arrayStringConcat(arraySlice(arrayFilter(part -> part != '', \
+           splitByChar('/', traversal_path)), 1, 2), '/') || '/' AS root \
+         FROM {} \
+         WHERE _deleted AND _version > {{cursor:String}}",
+        table.name
+    )
+}
+
+fn build_delete_tombstoned_keys_sql(
+    table: &ReplacingMergeTreeTable,
+    scope: &DeleteScope,
+    delete_timeout_secs: u64,
+) -> String {
+    let keys = table.sort_key_as_sql_list();
+    let name = &table.name;
+    let scope = scope.predicate();
+    format!(
+        "DELETE FROM {name} WHERE {scope} AND ({keys}) IN ( \
+           SELECT {keys} FROM ( \
+             SELECT {keys}, _deleted FROM {name} \
+             WHERE {scope} \
+             ORDER BY {keys}, _version DESC \
+             LIMIT 1 BY {keys} \
+           ) WHERE _deleted \
+         ) \
+         SETTINGS lightweight_deletes_sync = 2, max_execution_time = {delete_timeout_secs}"
     )
 }
 
@@ -355,34 +363,56 @@ mod tests {
     }
 
     #[test]
-    fn pending_deletes_selects_keys_whose_newest_version_is_a_tombstone() {
+    fn delete_considers_only_the_newest_version_of_each_key() {
         let tables = all_replacing_merge_tree_tables();
-        let sql = build_pending_deletes_table_sql(find_table_ending_in(&tables, "gl_edge"));
+        let table = find_table_ending_in(&tables, "gl_edge");
+        let sql =
+            build_delete_tombstoned_keys_sql(table, &DeleteScope::NamespaceRoot("1/9/".into()), 60);
 
         assert!(sql.contains("LIMIT 1 BY"), "sql: {sql}");
         assert!(sql.contains("_version DESC"), "sql: {sql}");
         assert!(sql.contains("WHERE _deleted"), "sql: {sql}");
-        assert!(sql.contains("_version > {cursor:String}"), "sql: {sql}");
     }
 
     #[test]
-    fn delete_reads_keys_from_the_materialised_table_not_the_source() {
+    fn delete_waits_for_the_mutation_instead_of_polling_system_mutations() {
         let tables = all_replacing_merge_tree_tables();
-        let table = find_table_ending_in(&tables, "gl_edge");
-        let sql = build_delete_pending_keys_sql(table);
+        let sql = build_delete_tombstoned_keys_sql(
+            find_table_ending_in(&tables, "gl_edge"),
+            &DeleteScope::WholeTable,
+            900,
+        );
 
-        assert!(
-            sql.starts_with(&format!("DELETE FROM {}", table.name)),
+        assert!(sql.contains("lightweight_deletes_sync = 2"), "sql: {sql}");
+        assert!(sql.contains("max_execution_time = 900"), "sql: {sql}");
+        assert!(!sql.contains("system.mutations"), "sql: {sql}");
+    }
+
+    #[test]
+    fn namespace_scoped_delete_prunes_both_the_outer_and_inner_scan() {
+        let tables = all_replacing_merge_tree_tables();
+        let sql = build_delete_tombstoned_keys_sql(
+            find_table_ending_in(&tables, "gl_edge"),
+            &DeleteScope::NamespaceRoot("1/9970/".into()),
+            60,
+        );
+
+        assert_eq!(
+            sql.matches("startsWith(traversal_path, {root:String})")
+                .count(),
+            2,
             "sql: {sql}"
         );
-        assert!(
-            sql.contains(&format!(
-                "IN (SELECT {} FROM {}",
-                table.sort_key_as_sql_list(),
-                table.pending_deletes_table_name()
-            )),
-            "sql: {sql}"
-        );
+    }
+
+    #[test]
+    fn global_tables_are_swept_without_a_path_predicate() {
+        let tables = all_replacing_merge_tree_tables();
+        let user = find_table_ending_in(&tables, "gl_user");
+        assert!(!user.sorts_by_traversal_path());
+
+        let sql = build_delete_tombstoned_keys_sql(user, &DeleteScope::WholeTable, 60);
+        assert!(!sql.contains("traversal_path"), "sql: {sql}");
     }
 
     #[test]
