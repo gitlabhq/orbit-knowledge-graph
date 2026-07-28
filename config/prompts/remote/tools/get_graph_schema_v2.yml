@@ -1,0 +1,6 @@
+name: get_graph_schema_v2
+version: 1.0.0
+description: >-
+  Return the graph schema. Pass expand_nodes (or its alias entity_types) with
+  the node types relevant to the user's question to include their properties
+  and relationships.

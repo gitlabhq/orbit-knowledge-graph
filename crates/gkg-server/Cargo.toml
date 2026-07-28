@@ -26,10 +26,12 @@ clickhouse-client = { path = "../clickhouse-client" }
 gkg-analytics = { path = "../gkg-analytics" }
 gkg-billing = { path = "../gkg-billing" }
 gkg-observability = { workspace = true }
+gkg-prompts = { path = "../gkg-prompts" }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 health-check = { workspace = true }
 indexer = { path = "../indexer" }
+minijinja = { workspace = true }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
@@ -61,6 +63,7 @@ toon-format = { workspace = true }
 
 [build-dependencies]
 compiler = { path = "../query-engine/compiler" }
+gkg-prompts = { path = "../gkg-prompts" }
 named-queries = { path = "../named-queries" }
 ontology = { path = "../ontology" }
 tonic-prost-build = { workspace = true }

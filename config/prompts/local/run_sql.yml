@@ -1,0 +1,11 @@
+name: run_sql
+version: 1.0.0
+short: Run a read-only SQL query against the local DuckDB graph
+description: >-
+  Run a read-only SQL query against the local DuckDB graph
+
+
+  Accepts an array of DuckDB SQL statements; each runs sequentially and its
+  rows are returned as the element of the result array at the same index.
+  Call `get_graph_schema` first if you do not know the tables. Large result
+  sets are rejected — add `LIMIT` or narrow the projection.
