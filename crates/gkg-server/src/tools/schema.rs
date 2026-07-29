@@ -242,6 +242,40 @@ mod tests {
     }
 
     #[test]
+    fn query_schema_accepts_aggregation_without_alias_and_requires_one_function_key() {
+        let query = |aggregations: Value| {
+            serde_json::json!({
+                "query_type": "aggregation",
+                "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}],
+                "aggregations": aggregations,
+                "limit": 1
+            })
+        };
+
+        let errors = validate_query_schema(query(
+            serde_json::json!([{"count": "mr"}, {"avg": "mr.added_lines"}]),
+        ));
+        assert!(
+            errors.is_empty(),
+            "expected schema success for alias-less aggregations, got: {errors:?}"
+        );
+
+        let errors = validate_query_schema(query(
+            serde_json::json!([{"count": "mr", "sum": "mr.added_lines"}]),
+        ));
+        assert!(
+            !errors.is_empty(),
+            "expected schema failure for two function keys in one aggregation"
+        );
+
+        let errors = validate_query_schema(query(serde_json::json!([{"as": "total"}])));
+        assert!(
+            !errors.is_empty(),
+            "expected schema failure for an aggregation with no function key"
+        );
+    }
+
+    #[test]
     fn query_schema_accepts_constrained_multi_node_scalar_aggregation() {
         let errors = validate_query_schema(serde_json::json!({
             "query_type": "aggregation",
