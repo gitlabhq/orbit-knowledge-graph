@@ -29,7 +29,7 @@
     },
     "aggregations": {
       "type": "array",
-      "description": "Aggregations to compute, each an operator-keyed object with an \"as\" output column name. Required when query_type is 'aggregation'.",
+      "description": "Aggregations to compute. Required when query_type is 'aggregation'.",
       "default": [],
       "maxItems": 10,
       "items": {
