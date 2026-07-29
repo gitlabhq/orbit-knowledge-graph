@@ -65,6 +65,9 @@ fn condense_value(value: &mut Value) {
 
 fn condense_object(map: &mut Map<String, Value>) {
     map.remove("default");
+    map.remove("pattern");
+    map.remove("$schema");
+    map.remove("title");
 
     let should_remove = matches!(
         map.get("description"),
@@ -140,6 +143,15 @@ mod tests {
             toon.contains("Required for disconnected multi-node aggregation"),
             "Should tell agents when group_by is required"
         );
+    }
+
+    #[test]
+    fn condensed_schema_strips_patterns_and_metadata() {
+        let toon = condensed_query_schema().expect("Should condense");
+
+        assert!(!toon.contains("a-zA-Z0-9_"), "Should strip regex patterns");
+        assert!(!toon.contains("(?<"), "Should strip named capture groups");
+        assert!(!toon.contains("json-schema.org"), "Should strip $schema");
     }
 
     #[test]
