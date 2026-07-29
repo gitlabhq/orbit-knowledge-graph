@@ -147,9 +147,8 @@ q5:
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
       "aggregation_sort": "-mr_count",
@@ -217,9 +216,8 @@ q7:
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "total_pipelines"
+          "count": "pipe",
+          "as": "total_pipelines"
         }
       ],
       "limit": 20
@@ -295,9 +293,8 @@ q10:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vuln_count"
+          "count": "v",
+          "as": "vuln_count"
         }
       ],
       "limit": 10
@@ -354,9 +351,8 @@ q12:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "count"
+          "count": "wi",
+          "as": "count"
         }
       ],
       "limit": 10
@@ -506,9 +502,8 @@ q17:
       "group_by": ["author"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "note",
-          "alias": "note_count"
+          "count": "note",
+          "as": "note_count"
         }
       ],
       "aggregation_sort": "-note_count",
@@ -596,9 +591,8 @@ q20:
       "group_by": ["author"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
       "aggregation_sort": "-mr_count",
@@ -644,9 +638,8 @@ q21:
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "reviewer",
-          "alias": "reviewer_count"
+          "count": "reviewer",
+          "as": "reviewer_count"
         }
       ],
       "limit": 15
@@ -861,9 +854,8 @@ q29:
       "group_by": ["v.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "total"
+          "count": "v",
+          "as": "total"
         }
       ],
       "aggregation_sort": "-total",
@@ -889,9 +881,8 @@ q30:
       "group_by": ["mr.state"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
       "aggregation_sort": "-mr_count",
@@ -917,15 +908,12 @@ q31:
       "group_by": ["pipe.status"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         },
         {
-          "function": "avg",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "avg_duration"
+          "avg": "pipe.duration",
+          "as": "avg_duration"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -954,9 +942,8 @@ q32:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "job",
-          "alias": "job_count"
+          "count": "job",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -985,9 +972,8 @@ q33:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vuln_count"
+          "count": "v",
+          "as": "vuln_count"
         }
       ],
       "aggregation_sort": "-vuln_count",
@@ -1028,9 +1014,8 @@ q34:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
       "aggregation_sort": "-mr_count",

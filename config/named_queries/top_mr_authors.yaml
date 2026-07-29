@@ -14,6 +14,6 @@ query:
     - { type: AUTHORED, from: u, to: mr }
   group_by: [u]
   aggregations:
-    - { function: count, target: mr, alias: mr_count }
+    - { count: mr, as: mr_count }
   aggregation_sort: "-mr_count"
   limit: 100

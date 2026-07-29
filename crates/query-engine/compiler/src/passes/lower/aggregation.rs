@@ -24,10 +24,6 @@ pub fn emit_aggregation(
     Ok(Node::Query(Box::new(q)))
 }
 
-fn default_alias(func: AggFunction) -> String {
-    func.as_sql().to_lowercase()
-}
-
 fn build_aggregation(
     plan: &Plan,
     aggregations: &[InputAggregationMetric],
@@ -90,11 +86,8 @@ fn build_aggregation(
     }
 
     for agg in aggregations {
-        let owned_default = default_alias(agg.function);
-        let alias = agg.alias.as_deref().unwrap_or(&owned_default);
-
-        let agg_expr = build_agg_expr(plan, agg, if_cond);
-        select.push(SelectExpr::new(agg_expr, alias));
+        let agg_expr = build_agg_expr(plan, &agg.expr, if_cond);
+        select.push(SelectExpr::new(agg_expr, agg.output_name()));
     }
 
     let mut order_by = Vec::new();
@@ -118,52 +111,35 @@ fn build_aggregation(
 /// `if_cond` is present only on the LIMIT BY dedup path; it switches the
 /// aggregates to `-If` combinators. `COUNT(col)` is kept as-is rather than
 /// `countIf` because it must count non-null values of the column.
-fn build_agg_expr(plan: &Plan, agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr {
-    let count_drops_col = matches!(agg.function, AggFunction::Count)
-        && agg
-            .target
-            .as_deref()
-            .and_then(|t| plan.nodes.get(t))
-            .is_some_and(|np| matches!(np.hydration, HydrationStrategy::Skip));
-
-    match if_cond {
-        Some(cond) => match agg.function {
-            AggFunction::Count => {
-                if let (Some(target), Some(prop)) = (&agg.target, &agg.property)
-                    && !count_drops_col
-                {
-                    Expr::func(
-                        agg.function.as_sql_if(),
-                        vec![Expr::col(target, prop), cond.clone()],
-                    )
-                } else {
-                    Expr::func(agg.function.as_sql_if(), vec![cond.clone()])
-                }
+fn build_agg_expr(plan: &Plan, expr: &AggExpr, if_cond: Option<&Expr>) -> Expr {
+    match expr {
+        AggExpr::Count(target) => match (counted_column(plan, target), if_cond) {
+            (Some(col), Some(cond)) => {
+                Expr::func(AggFunction::Count.as_sql_if(), vec![col, cond.clone()])
             }
-            _ => {
-                let target = agg.target.as_deref().unwrap_or("*");
-                let prop = agg.property.as_deref().unwrap_or("id");
-                Expr::func(
-                    agg.function.as_sql_if(),
-                    vec![Expr::col(target, prop), cond.clone()],
-                )
-            }
+            (None, Some(cond)) => Expr::func(AggFunction::Count.as_sql_if(), vec![cond.clone()]),
+            (Some(col), None) => Expr::func("COUNT", vec![col]),
+            (None, None) => Expr::func("COUNT", vec![]),
         },
-        None => match agg.function {
-            AggFunction::Count => {
-                if let (Some(target), Some(prop)) = (&agg.target, &agg.property)
-                    && !count_drops_col
-                {
-                    Expr::func("COUNT", vec![Expr::col(target, prop)])
-                } else {
-                    Expr::func("COUNT", vec![])
-                }
+        AggExpr::Sum(prop)
+        | AggExpr::Avg(prop)
+        | AggExpr::Min(prop)
+        | AggExpr::Max(prop)
+        | AggExpr::Collect(prop) => {
+            let col = Expr::col(&prop.node, &prop.property);
+            match if_cond {
+                Some(cond) => Expr::func(expr.function().as_sql_if(), vec![col, cond.clone()]),
+                None => Expr::func(expr.function().as_sql(), vec![col]),
             }
-            _ => {
-                let target = agg.target.as_deref().unwrap_or("*");
-                let prop = agg.property.as_deref().unwrap_or("id");
-                Expr::func(agg.function.as_sql(), vec![Expr::col(target, prop)])
-            }
-        },
+        }
     }
+}
+
+fn counted_column(plan: &Plan, target: &TargetRef) -> Option<Expr> {
+    let property = target.property.as_deref()?;
+    let dropped = plan
+        .nodes
+        .get(target.node.as_str())
+        .is_some_and(|np| matches!(np.hydration, HydrationStrategy::Skip));
+    (!dropped).then(|| Expr::col(&target.node, property))
 }

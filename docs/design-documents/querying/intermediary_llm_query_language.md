@@ -176,9 +176,13 @@ Match nodes and relationships, return matching entities.
 
 Group and aggregate results.
 
+Each aggregation is an object with a single function key (`count`, `sum`,
+`avg`, `min`, `max`) whose value is a `"node"` or `"node.property"` reference,
+plus an optional `as` output column name. Without `as`, the column name derives
+as `<function>_<node>[_<property>]`.
+
 Use top-level `group_by` to group aggregation rows. It applies to every
-aggregation in the query. A node group uses
-`{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}`.
+aggregation in the query. A node group is the node ID string (`"u"`).
 
 ```json orbit-query
 {
@@ -192,23 +196,23 @@ aggregation in the query. A node group uses
   ],
   "group_by": ["u"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "mr_count"}
+    { "count": "mr", "as": "mr_count" }
   ],
   "limit": 10,
   "aggregation_sort": "-mr_count"
 }
 ```
 
-Use top-level `group_by` entries with `kind: "property"` to group by scalar
-properties, such as dashboard buckets. Property groups use
-`{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}`.
+Property groups are `"node.property"` strings (`"mr.state"`), such as
+dashboard buckets. Date properties can be bucketed with the object form
+`{"key": "mr.created_at", "truncate": "month", "as": "<optional-name>"}`.
 They must reference ClickHouse-backed, filterable properties allowed for the
 caller. Virtual fields and unfilterable fields are rejected during validation.
 
-`group_by` supports up to four keys and can mix node and property groups. If
-`alias` is omitted, node groups use the node ID. Property groups use the property
-name when unique, or `<node>_<property>` when needed to avoid ambiguity.
-Duplicate group or aggregate output names are rejected.
+`group_by` supports up to four keys and can mix node and property groups.
+Node groups name their column after the node ID; property groups use
+`<node>_<property>` (plus `_<unit>` when truncated), overridable with the
+object form's `as`. Duplicate group or aggregate output names are rejected.
 
 ```json orbit-query
 {
@@ -218,7 +222,7 @@ Duplicate group or aggregate output names are rejected.
   ],
   "group_by": ["v.severity"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+    { "count": "v", "as": "vulnerability_count" }
   ],
   "limit": 10,
   "aggregation_sort": "-vulnerability_count"

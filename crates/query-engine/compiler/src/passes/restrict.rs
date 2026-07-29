@@ -330,10 +330,10 @@ pub fn restrict(
     }
 
     for agg in &input.aggregation.metrics {
-        let (Some(prop), Some(target)) = (&agg.property, &agg.target) else {
+        let Some(prop) = agg.expr.property() else {
             continue;
         };
-        let Some(entity) = entity_of(input, target) else {
+        let Some(entity) = entity_of(input, agg.expr.node()) else {
             continue;
         };
         if ontology.is_admin_only(entity, prop) {
@@ -362,7 +362,7 @@ pub fn restrict(
 mod tests {
     use super::*;
     use crate::input::{
-        AggFunction, FilterOp, InputAggregation, InputAggregationMetric, InputFilter,
+        AggExpr, AggFunction, FilterOp, InputAggregation, InputAggregationMetric, InputFilter,
         InputGroupByKey, InputNode, InputOrderBy, OrderDirection, QueryType,
     };
 
@@ -713,9 +713,7 @@ mod tests {
             relationships: vec![rel("_u", "_g")],
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
-                    function,
-                    target: Some("_u".into()),
-                    property: property.map(String::from),
+                    expr: AggExpr::from_parts(function, "_u", property),
                     alias: Some("_agg".into()),
                 }],
                 ..Default::default()
@@ -745,9 +743,7 @@ mod tests {
                     alias: None,
                 }],
                 metrics: vec![InputAggregationMetric {
-                    function: AggFunction::Count,
-                    target: Some("_u".into()),
-                    property: None,
+                    expr: AggExpr::from_parts(AggFunction::Count, "_u", None),
                     alias: Some("_agg".into()),
                 }],
                 ..Default::default()
@@ -767,9 +763,7 @@ mod tests {
             }],
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
-                    function,
-                    target: Some("_u".into()),
-                    property: property.map(String::from),
+                    expr: AggExpr::from_parts(function, "_u", property),
                     alias: Some("_agg".into()),
                 }],
                 ..Default::default()

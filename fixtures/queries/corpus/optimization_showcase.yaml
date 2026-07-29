@@ -229,9 +229,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merged_mr_count"
+          "count": "mr",
+          "as": "merged_mr_count"
         }
       ],
       "aggregation_sort": "-merged_mr_count",
@@ -271,10 +270,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "sum",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "total_pipeline_seconds"
+          "sum": "pipe.duration",
+          "as": "total_pipeline_seconds"
         }
       ],
       "aggregation_sort": "-total_pipeline_seconds",
@@ -315,9 +312,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merged_mr_count"
+          "count": "mr",
+          "as": "merged_mr_count"
         }
       ],
       "aggregation_sort": "-merged_mr_count",
@@ -490,9 +486,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
       "aggregation_sort": "-mr_count",
@@ -532,9 +527,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
       "aggregation_sort": "-job_count",
@@ -626,9 +620,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -747,9 +740,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merged_non_draft_count"
+          "count": "mr",
+          "as": "merged_non_draft_count"
         }
       ],
       "aggregation_sort": "-merged_non_draft_count",
@@ -828,9 +820,8 @@
       "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "failed_job_count"
+          "count": "j",
+          "as": "failed_job_count"
         }
       ],
       "aggregation_sort": "-failed_job_count",
@@ -908,9 +899,8 @@
       "group_by": ["v.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
       "aggregation_sort": "-vulnerability_count",
@@ -936,9 +926,8 @@
       "group_by": ["s.scan_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
       "aggregation_sort": "-scan_count",
@@ -967,9 +956,8 @@
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
       "aggregation_sort": "-pipeline_count",
@@ -1013,15 +1001,12 @@
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         },
         {
-          "function": "avg",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "avg_duration"
+          "avg": "pipe.duration",
+          "as": "avg_duration"
         }
       ],
       "aggregation_sort": "-pipeline_count",

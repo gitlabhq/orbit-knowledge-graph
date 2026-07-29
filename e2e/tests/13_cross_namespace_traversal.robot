@@ -80,7 +80,7 @@ Project Scoped Multi Hop Aggregation Counts Cross Namespace Project
     ${r1}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
     ${r2}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
     ${r3}=    Create Dictionary    type=IN_PROJECT    from=rel    to=p2
-    ${agg}=    Create Dictionary    function=count    target=p2    alias=xns_project_count
+    ${agg}=    Create Dictionary    count=p2    as=xns_project_count
     ${query}=    Create Dictionary    query_type=aggregation
     ...    nodes=${{[$p, $wi, $rel, $p2]}}    relationships=${{[$r1, $r2, $r3]}}    aggregations=${{[$agg]}}
     Wait Until Aggregation At Least    ${query}    xns_project_count    1
@@ -119,7 +119,7 @@ Group Scoped Multi Hop Aggregation Counts Cross Namespace Related Issue
     ${r1}=    Create Dictionary    type=CONTAINS    from=g    to=p
     ${r2}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
     ${r3}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
-    ${agg}=    Create Dictionary    function=count    target=rel    alias=related_count
+    ${agg}=    Create Dictionary    count=rel    as=related_count
     ${query}=    Create Dictionary    query_type=aggregation
     ...    nodes=${{[$g, $p, $wi, $rel]}}    relationships=${{[$r1, $r2, $r3]}}    aggregations=${{[$agg]}}
     Wait Until Aggregation At Least    ${query}    related_count    1

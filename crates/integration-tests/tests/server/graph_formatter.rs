@@ -569,7 +569,7 @@ async fn aggregation_count_exact(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
+            "aggregations": [{"count": "g", "as": "group_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -631,7 +631,7 @@ async fn aggregation_redaction(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
+            "aggregations": [{"count": "g", "as": "group_count"}],
             "limit": 10
         }"#,
         &svc,
@@ -1119,7 +1119,7 @@ async fn aggregation_sum(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id", "alias": "id_sum"}],
+            "aggregations": [{"sum": "u.id", "as": "id_sum"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1167,7 +1167,7 @@ async fn aggregation_avg(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "avg", "target": "u", "property": "id", "alias": "avg_id"}],
+            "aggregations": [{"avg": "u.id", "as": "avg_id"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1209,8 +1209,8 @@ async fn aggregation_min_max(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
+                {"min": "u.id", "as": "min_id"},
+                {"max": "u.id", "as": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -1242,7 +1242,7 @@ async fn aggregation_min_string(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "min", "target": "u", "property": "username", "alias": "min_username"}
+                {"min": "u.username", "as": "min_username"}
             ],
             "limit": 10
         }"#,
@@ -1273,9 +1273,9 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "count", "target": "u", "alias": "member_count"},
-                {"function": "avg", "target": "u", "property": "id", "alias": "avg_id"},
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"}
+                {"count": "u", "as": "member_count"},
+                {"avg": "u.id", "as": "avg_id"},
+                {"min": "u.id", "as": "min_id"}
             ],
             "limit": 10
         }"#,
@@ -1325,7 +1325,7 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
+            "aggregations": [{"count": "g", "as": "total"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1359,9 +1359,9 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
             "aggregations": [
-                {"function": "count", "target": "g", "alias": "total"},
-                {"function": "min", "target": "g", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "g", "property": "id", "alias": "max_id"}
+                {"count": "g", "as": "total"},
+                {"min": "g.id", "as": "min_id"},
+                {"max": "g.id", "as": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -1398,7 +1398,7 @@ async fn grouped_aggregation_uses_node_group_rows(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
+            "aggregations": [{"count": "g", "as": "group_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1435,7 +1435,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
+            "aggregations": [{"count": "g", "as": "total"}],
             "limit": 10
         }"#,
         &svc,
@@ -2335,7 +2335,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
 // When the query omits `alias`, the column `name` in the response MUST equal
 // the function name (e.g. "count", "sum", "avg"). Regression guard for the
 // v2 compiler bug where the default was "agg_result" instead.
-async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
+async fn no_alias_grouped_count_uses_derived_name(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
@@ -2346,7 +2346,7 @@ async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "g"}],
+            "aggregations": [{"count": "g"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2356,27 +2356,27 @@ async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
     let columns = value["columns"].as_array().unwrap();
     assert_eq!(columns.len(), 1);
     assert_eq!(
-        columns[0]["name"], "count",
-        "default alias must be the function name, not 'agg_result'"
+        columns[0]["name"], "count_g",
+        "default output name must derive from the expression"
     );
     assert_eq!(columns[0]["function"], "count");
 
     let nodes = aggregation_nodes(&value, "u");
     let alice = find_node(&nodes, "User", 1);
     assert!(
-        alice.get("count").is_some(),
-        "aggregate value must appear under key 'count' in the node group row"
+        alice.get("count_g").is_some(),
+        "aggregate value must appear under key 'count_g' in the node group row"
     );
-    assert_eq!(alice["count"].as_i64().unwrap(), 2);
+    assert_eq!(alice["count_g"].as_i64().unwrap(), 2);
 }
 
-async fn no_alias_ungrouped_count_uses_function_name(ctx: &TestContext) {
+async fn no_alias_ungrouped_count_uses_derived_name(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"function": "count", "target": "g"}],
+            "aggregations": [{"count": "g"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2386,15 +2386,15 @@ async fn no_alias_ungrouped_count_uses_function_name(ctx: &TestContext) {
     let columns = value["columns"].as_array().unwrap();
     assert_eq!(columns.len(), 1);
     assert_eq!(
-        columns[0]["name"], "count",
-        "ungrouped default alias must be function name"
+        columns[0]["name"], "count_g",
+        "ungrouped default output name must derive from the expression"
     );
     assert_eq!(columns[0]["function"], "count");
     let row = first_aggregation_row(&value);
-    assert_eq!(row["count"].as_i64().unwrap(), 5);
+    assert_eq!(row["count_g"].as_i64().unwrap(), 5);
 }
 
-async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
+async fn no_alias_multi_agg_each_uses_own_derived_name(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
@@ -2406,9 +2406,9 @@ async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "count", "target": "u"},
-                {"function": "min", "target": "u", "property": "id"},
-                {"function": "max", "target": "u", "property": "id"}
+                {"count": "u"},
+                {"min": "u.id"},
+                {"max": "u.id"}
             ],
             "limit": 10
         }"#,
@@ -2418,15 +2418,24 @@ async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
 
     let columns = value["columns"].as_array().unwrap();
     assert_eq!(columns.len(), 3);
-    assert_eq!(columns[0]["name"], "count");
-    assert_eq!(columns[1]["name"], "min");
-    assert_eq!(columns[2]["name"], "max");
+    assert_eq!(columns[0]["name"], "count_u");
+    assert_eq!(columns[1]["name"], "min_u_id");
+    assert_eq!(columns[2]["name"], "max_u_id");
 
     let nodes = aggregation_nodes(&value, "g");
     let g100 = find_node(&nodes, "Group", 100);
-    assert!(g100.get("count").is_some(), "count key must exist on node");
-    assert!(g100.get("min").is_some(), "min key must exist on node");
-    assert!(g100.get("max").is_some(), "max key must exist on node");
+    assert!(
+        g100.get("count_u").is_some(),
+        "count_u key must exist on node"
+    );
+    assert!(
+        g100.get("min_u_id").is_some(),
+        "min_u_id key must exist on node"
+    );
+    assert!(
+        g100.get("max_u_id").is_some(),
+        "max_u_id key must exist on node"
+    );
 }
 
 async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
@@ -2440,8 +2449,8 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u"}],
-            "aggregation_sort": "-count",
+            "aggregations": [{"count": "u"}],
+            "aggregation_sort": "-count_u",
             "limit": 10
         }"#,
         &allow_all(),
@@ -2450,18 +2459,18 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
 
     let columns = value["columns"].as_array().unwrap();
     assert_eq!(
-        columns[0]["name"], "count",
-        "sorted aggregation default alias must be function name"
+        columns[0]["name"], "count_u",
+        "sorted aggregation default output name must derive from the expression"
     );
 
     let nodes = aggregation_nodes(&value, "g");
     assert!(!nodes.is_empty());
     assert!(
-        nodes.iter().all(|n| n.get("count").is_some()),
-        "all nodes must carry 'count' key"
+        nodes.iter().all(|n| n.get("count_u").is_some()),
+        "all nodes must carry 'count_u' key"
     );
 
-    let counts: Vec<i64> = nodes.iter().filter_map(|n| n["count"].as_i64()).collect();
+    let counts: Vec<i64> = nodes.iter().filter_map(|n| n["count_u"].as_i64()).collect();
     for w in counts.windows(2) {
         assert!(w[0] >= w[1], "expected descending order: {counts:?}");
     }
@@ -2506,9 +2515,9 @@ async fn graph_formatter_e2e() {
         ungrouped_multiple_functions_emits_aggregates,
         grouped_aggregation_uses_node_group_rows,
         ungrouped_count_with_redaction,
-        no_alias_grouped_count_uses_function_name,
-        no_alias_ungrouped_count_uses_function_name,
-        no_alias_multi_agg_each_uses_own_function_name,
+        no_alias_grouped_count_uses_derived_name,
+        no_alias_ungrouped_count_uses_derived_name,
+        no_alias_multi_agg_each_uses_own_derived_name,
         no_alias_aggregation_with_sort,
         path_finding_exact_path,
         path_finding_with_rel_types,

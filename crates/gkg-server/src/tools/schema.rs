@@ -230,7 +230,7 @@ mod tests {
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));
@@ -238,6 +238,40 @@ mod tests {
         assert!(
             errors.iter().any(|error| error.contains("group_by")),
             "expected group_by schema error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn query_schema_accepts_aggregation_without_alias_and_requires_one_function_key() {
+        let query = |aggregations: Value| {
+            serde_json::json!({
+                "query_type": "aggregation",
+                "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}],
+                "aggregations": aggregations,
+                "limit": 1
+            })
+        };
+
+        let errors = validate_query_schema(query(
+            serde_json::json!([{"count": "mr"}, {"avg": "mr.added_lines"}]),
+        ));
+        assert!(
+            errors.is_empty(),
+            "expected schema success for alias-less aggregations, got: {errors:?}"
+        );
+
+        let errors = validate_query_schema(query(
+            serde_json::json!([{"count": "mr", "sum": "mr.added_lines"}]),
+        ));
+        assert!(
+            !errors.is_empty(),
+            "expected schema failure for two function keys in one aggregation"
+        );
+
+        let errors = validate_query_schema(query(serde_json::json!([{"as": "total"}])));
+        assert!(
+            !errors.is_empty(),
+            "expected schema failure for an aggregation with no function key"
         );
     }
 
@@ -253,7 +287,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "merged_mr_count"}
+                {"count": "mr", "as": "merged_mr_count"}
             ],
             "limit": 1
         }));
@@ -270,7 +304,7 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));
@@ -294,7 +328,7 @@ mod tests {
             ],
             "group_by": ["p"],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));
