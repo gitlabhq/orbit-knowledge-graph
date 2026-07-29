@@ -1,3 +1,20 @@
+## [0.92.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.92.0...v0.92.1) (2026-07-29)
+
+### ⚠ BREAKING CHANGES
+
+* **dsl:** operator-keyed aggregations with optional as
+
+### Fixes
+
+* **indexer:** reconcile stale edges by version instead of per-relationship foreign keys ([e358fbd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e358fbdea0bce0263bba3a89b43ba076ed977fef)) by Jean-Gabriel Doyon
+
+### Other
+
+* **ci:** drop slash-command mention from deploy MR message ([765a670](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/765a6708f26b8d1e7f068b062f3dca4f4b12bb9a)) by Jean-Gabriel Doyon
+* **dsl:** operator-keyed aggregations with optional as ([f881783](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f8817830bd9483e65282c9e9038068158b5958bf)) by Aaron Algutifan
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([16dfc60](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/16dfc60e479626f6eb1dcf78881f9941c0555291)) by Orbit automation bot
+* rename gkg-helm-charts references to orbit-helm-charts ([57cdc68](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/57cdc68b7d86bc38958944a6224b4c27e57778f6)) by Michael Angelo Rivera
+
 ## [0.92.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.91.1...v0.92.0) (2026-07-28)
 
 ### ⚠ BREAKING CHANGES
