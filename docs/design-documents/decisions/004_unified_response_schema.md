@@ -291,7 +291,7 @@ The frontend builds composite IDs (`"User:42"`) for deduplication. Property name
 { "name": "mr_count", "function": "count", "target": "m" }
 ```
 
-Optional fields: `target` (node alias being aggregated) and `property` (field being aggregated, absent for plain `count`). Present for all aggregation queries so the consumer can display correct table headers while reading metric values from `rows`.
+`target` names the node alias being aggregated; optional `property` names the field being aggregated (absent for a plain node `count`). Present for all aggregation queries so the consumer can display correct table headers while reading metric values from `rows`.
 
 **Edge:** two nodes connected by type and ID.
 

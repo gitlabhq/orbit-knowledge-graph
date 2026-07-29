@@ -48,7 +48,7 @@ Orbit Count Nodes
     [Documentation]    Count all nodes of a given entity type. Used for smoke checks.
     [Arguments]    ${entity}
     ${headers}=    GitLab Auth Headers
-    ${agg}=    Create Dictionary    function=count    target=n
+    ${agg}=    Create Dictionary    count=n    as=count
     ${node}=    Create Dictionary    id=n    entity=${entity}
     ${query}=    Create Dictionary
     ...    query_type=aggregation    nodes=${{[${node}]}}    aggregations=${{[${agg}]}}
@@ -250,7 +250,7 @@ Orbit Count Nodes With Filters
     [Documentation]    Aggregation count(*) of ${entity} matching ${filters} (dict). Returns int.
     [Arguments]    ${entity}    ${filters}
     ${node}=    Create Dictionary    id=n    entity=${entity}    filters=${filters}
-    ${agg}=    Create Dictionary    function=count    target=n
+    ${agg}=    Create Dictionary    count=n    as=count
     ${query}=    Create Dictionary    query_type=aggregation
     ...    nodes=${{[$node]}}    aggregations=${{[$agg]}}
     ${resp}=    Orbit Query    ${query}

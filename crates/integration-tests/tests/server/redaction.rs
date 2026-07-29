@@ -2284,7 +2284,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "limit": 10
     }"#;
 
@@ -2376,7 +2376,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "limit": 10
     }"#;
 

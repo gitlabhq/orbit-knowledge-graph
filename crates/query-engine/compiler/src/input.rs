@@ -687,15 +687,149 @@ pub struct InputAggregation {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct InputAggregationMetric {
-    pub function: AggFunction,
-    #[serde(default)]
-    pub target: Option<String>,
-    #[serde(default)]
-    pub property: Option<String>,
-    #[serde(default)]
+    #[serde(flatten)]
+    pub expr: AggExpr,
+    #[serde(rename = "as", default)]
     pub alias: Option<String>,
+}
+
+impl InputAggregationMetric {
+    pub fn output_name(&self) -> String {
+        self.alias
+            .clone()
+            .unwrap_or_else(|| self.expr.derived_name())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, strum::EnumDiscriminants)]
+#[serde(rename_all = "lowercase")]
+#[strum_discriminants(
+    name(AggFunction),
+    vis(pub),
+    derive(strum::Display),
+    strum(serialize_all = "lowercase")
+)]
+pub enum AggExpr {
+    Count(TargetRef),
+    Sum(PropertyRef),
+    Avg(PropertyRef),
+    Min(PropertyRef),
+    Max(PropertyRef),
+    Collect(PropertyRef),
+}
+
+impl AggExpr {
+    pub fn function(&self) -> AggFunction {
+        self.into()
+    }
+
+    pub fn node(&self) -> &str {
+        match self {
+            Self::Count(target) => &target.node,
+            Self::Sum(prop)
+            | Self::Avg(prop)
+            | Self::Min(prop)
+            | Self::Max(prop)
+            | Self::Collect(prop) => &prop.node,
+        }
+    }
+
+    pub fn property(&self) -> Option<&str> {
+        match self {
+            Self::Count(target) => target.property.as_deref(),
+            Self::Sum(prop)
+            | Self::Avg(prop)
+            | Self::Min(prop)
+            | Self::Max(prop)
+            | Self::Collect(prop) => Some(&prop.property),
+        }
+    }
+
+    pub fn derived_name(&self) -> String {
+        let function = self.function();
+        let node = self.node();
+        match self.property() {
+            Some(property) => format!("{function}_{node}_{property}"),
+            None => format!("{function}_{node}"),
+        }
+    }
+}
+
+#[cfg(test)]
+impl AggExpr {
+    pub(crate) fn from_parts(function: AggFunction, node: &str, property: Option<&str>) -> Self {
+        let prop_ref = |property: &str| PropertyRef {
+            node: node.to_owned(),
+            property: property.to_owned(),
+        };
+        match function {
+            AggFunction::Count => Self::Count(TargetRef {
+                node: node.to_owned(),
+                property: property.map(str::to_owned),
+            }),
+            AggFunction::Sum => Self::Sum(prop_ref(property.expect("sum needs a property"))),
+            AggFunction::Avg => Self::Avg(prop_ref(property.expect("avg needs a property"))),
+            AggFunction::Min => Self::Min(prop_ref(property.expect("min needs a property"))),
+            AggFunction::Max => Self::Max(prop_ref(property.expect("max needs a property"))),
+            AggFunction::Collect => {
+                Self::Collect(prop_ref(property.expect("collect needs a property")))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetRef {
+    pub node: String,
+    pub property: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for TargetRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let caps = crate::passes::validate::node_ref_regex()
+            .captures(&spec)
+            .ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "aggregation target {spec:?} must be \"node\" or \"node.property\""
+                ))
+            })?;
+        Ok(TargetRef {
+            node: caps["node"].to_owned(),
+            property: caps.name("property").map(|p| p.as_str().to_owned()),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyRef {
+    pub node: String,
+    pub property: String,
+}
+
+impl<'de> Deserialize<'de> for PropertyRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let caps = crate::passes::validate::node_ref_regex()
+            .captures(&spec)
+            .filter(|caps| caps.name("property").is_some())
+            .ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "aggregation target {spec:?} must be \"node.property\""
+                ))
+            })?;
+        Ok(PropertyRef {
+            node: caps["node"].to_owned(),
+            property: caps["property"].to_owned(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -734,7 +868,7 @@ fn parse_group_by_spec(
     truncate: Option<TruncateUnit>,
     alias: Option<String>,
 ) -> Result<InputGroupByKey, String> {
-    let caps = crate::passes::validate::group_by_key_regex()
+    let caps = crate::passes::validate::node_ref_regex()
         .captures(spec)
         .ok_or_else(|| match truncate {
             Some(unit) => format!(
@@ -914,18 +1048,6 @@ pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
         InputGroupByKey::Node { .. } => "node",
         InputGroupByKey::Property { .. } => "property",
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum AggFunction {
-    Count,
-    Sum,
-    Avg,
-    Min,
-    Max,
-    Collect,
 }
 
 impl AggFunction {
@@ -1471,15 +1593,90 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [{"id": "n"}, {"id": "u"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "aggregation_sort": "-note_count"
         }"#,
         )
         .unwrap();
 
         assert_eq!(input.query_type, QueryType::Aggregation);
-        assert_eq!(input.aggregation.metrics[0].function, AggFunction::Count);
+        assert_eq!(
+            input.aggregation.metrics[0].expr,
+            AggExpr::Count(TargetRef {
+                node: "n".into(),
+                property: None
+            })
+        );
+        assert_eq!(input.aggregation.metrics[0].output_name(), "note_count");
         assert!(input.aggregation.sort.is_some());
+    }
+
+    #[test]
+    fn aggregation_value_forms() {
+        let input = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "mr"}],
+            "aggregations": [
+                {"count": "mr.merged_at", "as": "merged"},
+                {"avg": "mr.merge_duration", "as": "avg_dur"}
+            ]
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input.aggregation.metrics[0].expr,
+            AggExpr::Count(TargetRef {
+                node: "mr".into(),
+                property: Some("merged_at".into())
+            })
+        );
+        assert_eq!(
+            input.aggregation.metrics[1].expr,
+            AggExpr::Avg(PropertyRef {
+                node: "mr".into(),
+                property: "merge_duration".into()
+            })
+        );
+    }
+
+    #[test]
+    fn aggregation_rejects_bare_node_for_property_functions() {
+        let err = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "mr"}],
+            "aggregations": [{"sum": "mr", "as": "total"}]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("node.property"), "got: {err}");
+    }
+
+    #[test]
+    fn aggregation_derives_output_name_without_alias() {
+        let input = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "mr"}],
+            "aggregations": [
+                {"count": "mr"},
+                {"avg": "mr.merge_duration"},
+                {"max": "mr.additions", "as": "biggest"}
+            ]
+        }"#,
+        )
+        .unwrap();
+
+        let names: Vec<String> = input
+            .aggregation
+            .metrics
+            .iter()
+            .map(InputAggregationMetric::output_name)
+            .collect();
+        assert_eq!(names, ["count_mr", "avg_mr_merge_duration", "biggest"]);
     }
 
     fn group_by_key(json: &str) -> Result<InputGroupByKey, String> {
@@ -1590,7 +1787,7 @@ mod tests {
                 {"key": "mr.created_at", "truncate": "month"},
                 {"key": "mr.target_branch", "as": "branch"}
             ],
-            "aggregations": [{"function": "count", "target": "mr"}]
+            "aggregations": [{"count": "mr", "as": "count"}]
         }"#,
         )
         .unwrap();

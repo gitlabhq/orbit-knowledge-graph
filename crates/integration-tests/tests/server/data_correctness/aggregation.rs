@@ -11,7 +11,7 @@ pub(super) async fn aggregation_count_returns_correct_values(ctx: &TestContext) 
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -37,7 +37,7 @@ pub(super) async fn aggregation_wildcard_user_to_mr_counts_inferred_edges(ctx: &
             ],
             "relationships": [{"type": "*", "from": "u", "to": "mr"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_edge_count"}],
+            "aggregations": [{"count": "mr", "as": "mr_edge_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -63,7 +63,7 @@ pub(super) async fn aggregation_count_group_contains_projects(ctx: &TestContext)
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -89,7 +89,7 @@ pub(super) async fn aggregation_sort_orders_by_aggregate_value(ctx: &TestContext
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "aggregation_sort": "-member_count",
             "limit": 10
         }"#,
@@ -114,7 +114,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
             ],
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
             "group_by": [{"key": "n.created_at", "truncate": "month"}],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "aggregation_sort": "n_created_at_month",
             "limit": 20
         }"#,
@@ -179,7 +179,7 @@ pub(super) async fn aggregation_sum_produces_correct_totals(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id", "alias": "id_sum"}],
+            "aggregations": [{"sum": "u.id", "as": "id_sum"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -206,7 +206,7 @@ pub(super) async fn aggregation_redaction_excludes_unauthorized_from_counts(ctx:
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &svc,
@@ -231,7 +231,7 @@ pub(super) async fn aggregation_avg_produces_correct_values(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "avg", "target": "u", "property": "id", "alias": "avg_id"}],
+            "aggregations": [{"avg": "u.id", "as": "avg_id"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -258,8 +258,8 @@ pub(super) async fn aggregation_min_max_produce_correct_values(ctx: &TestContext
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
+                {"min": "u.id", "as": "min_id"},
+                {"max": "u.id", "as": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -289,7 +289,7 @@ pub(super) async fn aggregation_min_on_string_column(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "min", "target": "u", "property": "username", "alias": "first_username"}],
+            "aggregations": [{"min": "u.username", "as": "first_username"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -316,9 +316,9 @@ pub(super) async fn aggregation_multiple_functions_in_one_query(ctx: &TestContex
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
             "aggregations": [
-                {"function": "count", "target": "u", "alias": "cnt"},
-                {"function": "avg", "target": "u", "property": "id", "alias": "avg_id"},
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"}
+                {"count": "u", "as": "cnt"},
+                {"avg": "u.id", "as": "avg_id"},
+                {"min": "u.id", "as": "min_id"}
             ],
             "limit": 10
         }"#,
@@ -352,7 +352,7 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -379,7 +379,7 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -406,7 +406,7 @@ pub(super) async fn aggregation_path_multiple_groups(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -435,7 +435,7 @@ pub(super) async fn aggregation_sum_with_restricted_path(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id", "alias": "id_sum"}],
+            "aggregations": [{"sum": "u.id", "as": "id_sum"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -464,7 +464,7 @@ pub(super) async fn aggregation_nested_path_includes_child_projects(ctx: &TestCo
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -488,7 +488,7 @@ pub(super) async fn aggregation_no_group_by_with_filtered_other_node(ctx: &TestC
                 {"id": "u", "entity": "User", "node_ids": [1]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
+            "aggregations": [{"count": "mr", "as": "total_mrs"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -514,7 +514,7 @@ pub(super) async fn aggregation_no_group_by_preserves_relationship_kind(ctx: &Te
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "total_authored"}],
+            "aggregations": [{"count": "mr", "as": "total_authored"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -538,7 +538,7 @@ pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -570,7 +570,7 @@ pub(super) async fn aggregation_group_by_non_default_redaction_id_column(ctx: &T
             "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
             "group_by": ["d"],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "mr_count"}
+                {"count": "mr", "as": "mr_count"}
             ],
             "limit": 10
         }"#,
@@ -605,7 +605,7 @@ pub(super) async fn aggregation_three_node_with_cascade_intermediate(ctx: &TestC
                 {"type": "HAS_NOTE", "from": "mr", "to": "n"}
             ],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -645,7 +645,7 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -677,7 +677,7 @@ pub(super) async fn aggregation_no_alias_defaults_to_function_name(ctx: &TestCon
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "mr"}],
+            "aggregations": [{"count": "mr", "as": "count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -701,7 +701,7 @@ pub(super) async fn aggregation_no_alias_sum_defaults_to_function_name(ctx: &Tes
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id"}],
+            "aggregations": [{"sum": "u.id", "as": "sum"}],
             "limit": 10
         }"#,
         &allow_all(),

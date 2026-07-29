@@ -106,7 +106,7 @@ Rank the most frequent job failures across your organization:
     }
   ],
   "group_by": ["j.name"],
-  "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
+  "aggregations": [{ "count": "j", "as": "failures" }],
   "aggregation_sort": "-failures",
   "limit": 40
 }
@@ -135,7 +135,7 @@ that appears under three or more projects is a shared-template hot spot.
     "j.name",
     "p.full_path"
   ],
-  "aggregations": [{"function": "count", "target": "j", "alias": "failures"}],
+  "aggregations": [{ "count": "j", "as": "failures" }],
   "aggregation_sort": "-failures",
   "limit": 200
 }
@@ -160,7 +160,7 @@ pipelines those pipelines triggered.
     }
   ],
   "group_by": ["pl.merge_request_id"],
-  "aggregations": [{"function": "count", "target": "pl", "alias": "failed_pipelines"}],
+  "aggregations": [{ "count": "pl", "as": "failed_pipelines" }],
   "aggregation_sort": "-failed_pipelines",
   "limit": 20
 }
@@ -184,7 +184,7 @@ incomplete coverage rather than authoritative.
     {"type": "HAS_FILE", "from": "d", "to": "f"}
   ],
   "group_by": ["f.old_path"],
-  "aggregations": [{"function": "count", "target": "d", "alias": "diff_snapshots"}],
+  "aggregations": [{ "count": "d", "as": "diff_snapshots" }],
   "aggregation_sort": "-diff_snapshots",
   "limit": 20
 }
@@ -257,7 +257,7 @@ Find the most active contributors to a project:
   ],
   "group_by": ["u"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "merged_mrs"}
+    { "count": "mr", "as": "merged_mrs" }
   ],
   "aggregation_sort": "-merged_mrs",
   "limit": 10
@@ -344,7 +344,7 @@ Rank the definitions that the most code imports:
   ],
   "group_by": ["def"],
   "aggregations": [
-    {"function": "count", "target": "sym", "alias": "import_count"}
+    { "count": "sym", "as": "import_count" }
   ],
   "aggregation_sort": "-import_count",
   "limit": 20
@@ -383,7 +383,7 @@ Find projects with the most failed pipelines:
   ],
   "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "pl", "alias": "failed_count"}
+    { "count": "pl", "as": "failed_count" }
   ],
   "aggregation_sort": "-failed_count",
   "limit": 10
@@ -467,7 +467,7 @@ Count vulnerabilities by project:
   ],
   "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vuln_count"}
+    { "count": "v", "as": "vuln_count" }
   ],
   "aggregation_sort": "-vuln_count",
   "limit": 20
@@ -488,7 +488,7 @@ Count vulnerabilities by severity:
   ],
   "group_by": ["v.severity"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vuln_count"}
+    { "count": "v", "as": "vuln_count" }
   ],
   "aggregation_sort": "-vuln_count",
   "limit": 10

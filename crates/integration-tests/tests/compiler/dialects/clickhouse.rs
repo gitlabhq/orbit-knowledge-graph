@@ -77,7 +77,7 @@ fn aggregation_query() {
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "group_by": ["u"],
-        "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+        "aggregations": [{"count": "n", "as": "note_count"}],
         "limit": 10
     }"#;
 
@@ -95,7 +95,7 @@ fn group_by_property_truncate_month_wraps_column() {
         "nodes": [
             {"id": "u", "entity": "Note", "filters": {"confidential": {"eq": false}}}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "aggregations": [{"count": "u", "as": "n"}],
         "group_by": [{"key": "u.created_at", "truncate": "month"}],
         "limit": 50
     }"#;
@@ -120,7 +120,7 @@ fn group_by_property_truncate_all_units_compile() {
                 "nodes": [
                     {{"id": "u", "entity": "Note", "node_ids": [1]}}
                 ],
-                "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
+                "aggregations": [{{"count": "u", "as": "n"}}],
                 "group_by": [{{"key": "u.created_at", "truncate": "{unit}"}}],
                 "limit": 10
             }}"#
@@ -154,7 +154,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         "nodes": [
             {"id": "u", "entity": "Note"}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "aggregations": [{"count": "u", "as": "n"}],
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
@@ -173,7 +173,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         "nodes": [
             {"id": "u", "entity": "Note", "node_ids": [1, 2]}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "aggregations": [{"count": "u", "as": "n"}],
         "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
@@ -193,7 +193,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         "nodes": [
             {"id": "u", "entity": "Note", "filters": {"created_at": {"gte": "2026-04-01T00:00:00Z"}}}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "aggregations": [{"count": "u", "as": "n"}],
         "group_by": [{"key": "u.created_at", "truncate": "hour"}],
         "limit": 50
     }"#;
@@ -213,7 +213,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
         "nodes": [
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "aggregations": [{"count": "u", "as": "n"}],
         "group_by": [{"key": "u.confidential", "truncate": "month"}],
         "limit": 10
     }"#;
@@ -232,7 +232,7 @@ fn group_by_truncate_custom_alias_preserved() {
         "nodes": [
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "aggregations": [{"count": "u", "as": "n"}],
         "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
         "limit": 10
     }"#;
@@ -725,7 +725,7 @@ fn scoped_aggregation_injects_tight_prefix() {
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
         "group_by": ["p"],
-        "aggregations": [{"function": "count", "target": "wi", "alias": "c"}],
+        "aggregations": [{"count": "wi", "as": "c"}],
         "limit": 100
     }"#;
     assert!(render_scoped(json).contains(SCOPED_PREFIX));

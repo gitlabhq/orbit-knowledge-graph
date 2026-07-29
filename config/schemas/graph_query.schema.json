@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v11",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v12",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -29,7 +29,7 @@
     },
     "aggregations": {
       "type": "array",
-      "description": "Aggregation functions to apply. Required when query_type is 'aggregation'.",
+      "description": "Aggregations to compute. Required when query_type is 'aggregation'.",
       "default": [],
       "maxItems": 10,
       "items": {
@@ -543,45 +543,51 @@
       "enum": ["outgoing", "incoming", "both"],
       "default": "outgoing"
     },
+    "NodeOrPropertyRef": {
+      "type": "string",
+      "description": "Reference to a node (\"mr\") or a scalar property (\"mr.merge_duration\").",
+      "pattern": "^(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})(\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63}))?$"
+    },
+    "NodePropertyRef": {
+      "type": "string",
+      "description": "Reference to a scalar property as \"node.property\".",
+      "pattern": "^(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63})$"
+    },
     "Aggregation": {
       "type": "object",
-      "description": "Aggregation function specification",
-      "required": ["function"],
+      "description": "One aggregation as a single function key, e.g. {\"avg\": \"mr.merge_duration\", \"as\": \"avg_dur\"}. Output column: \"as\" when given, else function_node or function_node_property.",
       "properties": {
-        "function": {
-          "$ref": "#/$defs/AggFunction",
-          "description": "Aggregation function to apply"
+        "count": {
+          "$ref": "#/$defs/NodeOrPropertyRef",
+          "description": "Count rows where the node matched (\"mr\") or non-null values of a property (\"mr.merged_at\")."
         },
-        "target": {
+        "sum": { "$ref": "#/$defs/NodePropertyRef" },
+        "avg": { "$ref": "#/$defs/NodePropertyRef" },
+        "min": { "$ref": "#/$defs/NodePropertyRef" },
+        "max": { "$ref": "#/$defs/NodePropertyRef" },
+        "collect": { "$ref": "#/$defs/NodePropertyRef" },
+        "as": {
           "$ref": "#/$defs/Identifier",
-          "description": "Node variable to aggregate over. If omitted, aggregates all matching nodes."
-        },
-        "property": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Property to aggregate. Required for sum, avg, min, max functions."
-        },
-        "alias": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Output column alias for the aggregation result"
+          "description": "Custom output column name; referenced by aggregation_sort."
         }
       },
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "function": { "enum": ["sum", "avg", "min", "max"] }
-        }
-      },
-      "then": {
-        "required": ["property"]
-      }
+      "oneOf": [
+        { "required": ["count"] },
+        { "required": ["sum"] },
+        { "required": ["avg"] },
+        { "required": ["min"] },
+        { "required": ["max"] },
+        { "required": ["collect"] }
+      ],
+      "maxProperties": 2,
+      "additionalProperties": false
     },
     "GroupByKey": {
       "description": "Group key: \"node\" returns an entity object per bucket, \"node.property\" returns the scalar value. Output column: node id or node_property (plus _unit when truncated), overridable with the object form's \"as\".",
       "oneOf": [
         {
-          "type": "string",
-          "description": "Group by a node (\"p\") or a scalar property (\"mr.state\").",
-          "pattern": "^(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})(\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63}))?$"
+          "$ref": "#/$defs/NodeOrPropertyRef",
+          "description": "Group by a node (\"p\") or a scalar property (\"mr.state\")."
         },
         {
           "type": "object",
@@ -590,8 +596,7 @@
           "anyOf": [{ "required": ["truncate"] }, { "required": ["as"] }],
           "properties": {
             "key": {
-              "type": "string",
-              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,63}(\\.[a-zA-Z_][a-zA-Z0-9_]{0,63})?$"
+              "$ref": "#/$defs/NodeOrPropertyRef"
             },
             "truncate": {
               "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
@@ -603,11 +608,6 @@
           "additionalProperties": false
         }
       ]
-    },
-    "AggFunction": {
-      "type": "string",
-      "description": "Available aggregation functions",
-      "enum": ["count", "sum", "avg", "min", "max", "collect"]
     },
     "PathConfig": {
       "type": "object",

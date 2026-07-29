@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v4",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v5",
   "title": "Orbit unified query response",
   "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
@@ -110,12 +110,12 @@
     },
     "column": {
       "type": "object",
-      "required": ["name", "function"],
+      "required": ["name", "function", "target"],
       "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string",
-          "description": "Output column name. Matches the row key for the aggregate value. Either the user-supplied alias or the function name (e.g. 'count')."
+          "description": "Output column name. Matches the row key for the aggregate value. Either the user-supplied \"as\" or the derived function_node[_property] name (e.g. 'count_mr')."
         },
         "function": {
           "type": "string",
@@ -124,7 +124,7 @@
         },
         "target": {
           "type": "string",
-          "description": "Node alias being aggregated over (e.g. 'u' for User). Absent when the function has no explicit target."
+          "description": "Node alias being aggregated over (e.g. 'u' for User)."
         },
         "property": {
           "type": "string",

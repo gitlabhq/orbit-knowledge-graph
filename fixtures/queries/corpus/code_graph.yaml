@@ -121,9 +121,8 @@ q4:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "caller",
-          "alias": "caller_count"
+          "count": "caller",
+          "as": "caller_count"
         }
       ],
       "limit": 1
@@ -148,9 +147,8 @@ q5:
       "group_by": ["d.definition_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "d",
-          "alias": "definition_count"
+          "count": "d",
+          "as": "definition_count"
         }
       ],
       "aggregation_sort": "-definition_count",
@@ -176,9 +174,8 @@ q6:
       "group_by": ["f.language"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "file_count"
+          "count": "f",
+          "as": "file_count"
         }
       ],
       "aggregation_sort": "-file_count",
@@ -222,9 +219,8 @@ q7:
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "d",
-          "alias": "definition_count"
+          "count": "d",
+          "as": "definition_count"
         }
       ],
       "aggregation_sort": "-definition_count",
@@ -250,9 +246,8 @@ q8:
       "group_by": ["sym.import_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "sym",
-          "alias": "import_count"
+          "count": "sym",
+          "as": "import_count"
         }
       ],
       "aggregation_sort": "-import_count",

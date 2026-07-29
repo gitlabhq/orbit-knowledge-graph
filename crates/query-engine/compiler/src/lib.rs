@@ -336,7 +336,7 @@ mod tests {
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "group_by": ["p"],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
+            "aggregations": [{"count": "mr", "as": "total_mrs"}],
             "limit": 10
         }"#;
 
@@ -363,9 +363,8 @@ mod tests {
             "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
             "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "f",
-                "alias": "files"
+                "count": "f",
+                "as": "files"
             }],
             "limit": 10
         }"#;
@@ -401,9 +400,8 @@ mod tests {
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "open_mrs"
+                "count": "mr",
+                "as": "open_mrs"
             }],
             "limit": 10
         }"#;
@@ -433,7 +431,7 @@ mod tests {
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "project"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#;
 
@@ -501,7 +499,7 @@ mod tests {
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "project"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#;
 
@@ -526,7 +524,7 @@ mod tests {
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#;
 
@@ -923,9 +921,8 @@ mod tests {
             ],
             "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "merged_mrs"
+                "count": "mr",
+                "as": "merged_mrs"
             }],
             "limit": 5
         }"#;
@@ -966,9 +963,8 @@ mod tests {
             ],
             "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "user_mrs"
+                "count": "mr",
+                "as": "user_mrs"
             }],
             "limit": 5
         }"#;
@@ -1062,7 +1058,7 @@ mod tests {
                 "hops": [1, 2]
             }],
             "group_by": ["p"],
-            "aggregations": [{"function": "count", "target": "f"}],
+            "aggregations": [{"count": "f", "as": "count"}],
             "limit": 10
         }"#;
 
@@ -1101,7 +1097,7 @@ mod tests {
                 {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 3]}
             ],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+            "aggregations": [{"count": "u", "as": "n"}],
             "limit": 3
         }"#;
 
@@ -1218,7 +1214,7 @@ mod tests {
                 {"type": "HAS_LABEL", "from": "mr", "to": "cl"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}]
+            "aggregations": [{"count": "mr", "as": "c"}]
         }"#;
         let sql = compile_sql(query);
         assert!(
@@ -1242,7 +1238,7 @@ mod tests {
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "cl"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}]
+            "aggregations": [{"count": "mr", "as": "c"}]
         }"#;
         let sql = compile_sql(query);
         assert!(
@@ -1293,9 +1289,8 @@ mod tests {
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "group_by": ["u"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "n"
+                "count": "mr",
+                "as": "n"
             }],
             "limit": 10
         }"#;
@@ -1327,10 +1322,8 @@ mod tests {
             ],
             "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "u",
-                "property": "id",
-                "alias": "closers_count"
+                "count": "u.id",
+                "as": "closers_count"
             }],
             "limit": 20
         }"#;
@@ -1360,9 +1353,8 @@ mod tests {
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
             "group_by": ["proj"],
             "aggregations": [{
-                "function": "count",
-                "target": "v",
-                "alias": "n"
+                "count": "v",
+                "as": "n"
             }],
             "limit": 10
         }"#;
@@ -1384,9 +1376,8 @@ mod tests {
             ],
             "group_by": ["p.visibility_level"],
             "aggregations": [{
-                "function": "count",
-                "target": "p",
-                "alias": "project_count"
+                "count": "p",
+                "as": "project_count"
             }],
             "limit": 10
         }"#;
@@ -1418,9 +1409,8 @@ mod tests {
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
             "group_by": ["v.severity"],
             "aggregations": [{
-                "function": "count",
-                "target": "v",
-                "alias": "vulnerability_count"
+                "count": "v",
+                "as": "vulnerability_count"
             }],
             "limit": 10
         }"#;
@@ -1458,7 +1448,7 @@ mod tests {
                     ],
                     "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
                     "group_by": ["p"],
-                    "aggregations": [{"function": "count", "target": "mr", "alias": "merged_mrs"}],
+                    "aggregations": [{"count": "mr", "as": "merged_mrs"}],
                     "limit": 10
                 }"#,
             ),
@@ -1551,7 +1541,7 @@ mod tests {
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
             "group_by": ["j"],
-            "aggregations": [{"function": "count", "target": "j", "alias": "fail_count"}],
+            "aggregations": [{"count": "j", "as": "fail_count"}],
             "limit": 20
         }"#;
 
@@ -1622,7 +1612,7 @@ mod tests {
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
             "group_by": ["proj"],
-            "aggregations": [{"function": "count", "target": "j", "alias": "failed_jobs"}],
+            "aggregations": [{"count": "j", "as": "failed_jobs"}],
             "limit": 200
         }"#;
 
@@ -1682,7 +1672,7 @@ mod tests {
                 {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
                 {"type": "HAS_FILE", "from": "d", "to": "f"}
             ],
-            "aggregations": [{"function": "count", "target": "f", "alias": "appearances"}],
+            "aggregations": [{"count": "f", "as": "appearances"}],
             "group_by": ["f.old_path"],
             "limit": 60
         }"#;
@@ -1705,7 +1695,7 @@ mod tests {
 
     fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
         let query = format!(
-            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"function":"count","target":"{agg}","alias":"c"}}],"limit":20}}"#
+            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"count":"{agg}","as":"c"}}],"limit":20}}"#
         );
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
@@ -1782,7 +1772,7 @@ mod tests {
                 {"type": "CONTAINS", "from": "g", "to": "p"}
             ],
             "group_by": ["p"],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "limit": 10
         }"#;
 
@@ -1814,7 +1804,7 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "n"}
             ],
             "group_by": ["p"],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "limit": 10
         }"#;
 
@@ -1960,9 +1950,8 @@ mod tests {
             ],
             "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "user_mrs"
+                "count": "mr",
+                "as": "user_mrs"
             }],
             "limit": 5
         }"#;

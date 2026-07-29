@@ -158,7 +158,7 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "group_by": ["u"],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "open_mr_count"}],
+            "aggregations": [{"count": "mr", "as": "open_mr_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -308,7 +308,7 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
             "group_by": ["g"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 20
         }"#,
         &allow_all(),
