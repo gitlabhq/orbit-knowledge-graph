@@ -473,6 +473,7 @@ mod tests {
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
                 required_access_level: 20,
+                has_narrow_channel_allowlist: false,
             },
         );
         ctx.add_entity_auth(
@@ -483,6 +484,7 @@ mod tests {
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
                 required_access_level: 20,
+                has_narrow_channel_allowlist: false,
             },
         );
         ctx
@@ -936,6 +938,7 @@ mod tests {
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
                     required_access_level: 20,
+                    has_narrow_channel_allowlist: false,
                 },
             );
             ctx.add_entity_auth(
@@ -946,6 +949,7 @@ mod tests {
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
+                    has_narrow_channel_allowlist: false,
                 },
             );
 
@@ -989,6 +993,7 @@ mod tests {
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
                     required_access_level: 20,
+                    has_narrow_channel_allowlist: false,
                 },
             );
             ctx.add_entity_auth(
@@ -999,6 +1004,7 @@ mod tests {
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
+                    has_narrow_channel_allowlist: false,
                 },
             );
 
@@ -1036,6 +1042,7 @@ mod tests {
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
+                    has_narrow_channel_allowlist: false,
                 },
             );
             ctx.add_entity_auth(
@@ -1046,6 +1053,7 @@ mod tests {
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
                     required_access_level: 20,
+                    has_narrow_channel_allowlist: false,
                 },
             );
 

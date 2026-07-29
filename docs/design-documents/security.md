@@ -10,6 +10,8 @@ The Knowledge Graph allows querying across an entire GitLab namespace. To preven
 
 All access to the Knowledge Graph is proxied through GitLab Rails, which acts as the primary authentication and authorization gateway. This ensures no user or agent can bypass the existing GitLab permission model. As part of the broader Auth Architecture program, these controls will evolve to integrate with future GitLab auth services. Until we have a finalized auth service, Rails remains the enforcement point and source of truth.
 
+On top of the role-based layers, entities are also gated by **channel** — the surface the request arrived on (external agent, DAP, internal Rails, or the frontend session). Channel gating is compiled into the same SQL predicate machinery as role scoping, composes with it via AND, and controls what shape of the ontology reaches the caller (see [ADR 013: Entity-Level Channel Gating](decisions/013_entity_channel_gating.md)). Its goal is orthogonal to authorization: role scoping decides whether a user is permitted to see rows they already own; channel gating decides which channels GitLab has chosen to expose an entity through, independent of the caller's role.
+
 For the Duo-specific routing layer that sits *upstream* of these authorization checks — i.e. whether a Duo agent ever reaches the Orbit MCP server in the first place — see [Duo / Orbit prompt routing architecture](duo_orbit_prompt_routing.md). The two systems compose: routing decides whether the request happens, and the layers below decide what data the request can see.
 
 ## Access Model: Reporter+ Scope with Per-Entity Role Floors

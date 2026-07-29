@@ -317,10 +317,28 @@
             "owner"
           ],
           "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
+        },
+        "channel_allowlist": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "external_agent",
+              "dap_internal",
+              "core_feature",
+              "frontend",
+              "all_interfaces",
+              "internal_only"
+            ]
+          },
+          "description": "Channels through which this entity may be queried (ADR 013). Entries are raw channel names (external_agent, dap_internal, core_feature, frontend) or group aliases (all_interfaces = every channel; internal_only = core_feature only). Composed AND with required_role: channel gating can only narrow role-based access. Fail-closed: a missing or empty list resolves to no allowed channels, so nobody sees the entity, not even core_feature. The build-time ontology check rejects any node whose channel_allowlist is missing."
         }
       },
       "required": [
-        "resource_type"
+        "resource_type",
+        "channel_allowlist"
       ],
       "additionalProperties": false
     },

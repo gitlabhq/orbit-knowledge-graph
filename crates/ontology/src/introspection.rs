@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::{EdgeEntity, Field, Ontology};
+use crate::{Channel, EdgeEntity, Field, Ontology};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntrospectionScope {
@@ -41,15 +41,24 @@ pub enum SchemaNode {
 }
 
 /// `expand_nodes`: pass `["*"]` to expand every node, or specific names.
+///
+/// Callers that don't want channel gating (build scripts, tests, the local
+/// CLI reading its own DuckDB) pass `channel: None` and see every node.
+/// Live server callers pass the caller's channel so entities whose
+/// `channel_allowlist` excludes it are omitted entirely — ADR 013 §5's
+/// "no partial disclosure" rule. The absence itself is the signal; there is
+/// no "requires internal channel" annotation because leaking the policy is
+/// what the ADR exists to prevent.
 #[must_use]
 pub fn build_schema_response(
     ontology: &Ontology,
     scope: IntrospectionScope,
     expand_nodes: &[String],
+    channel: Option<Channel>,
 ) -> SchemaResponse {
     SchemaResponse {
-        domains: build_domains(ontology, scope, expand_nodes),
-        edges: build_edge_names(ontology, scope),
+        domains: build_domains(ontology, scope, expand_nodes, channel),
+        edges: build_edge_names(ontology, scope, channel),
     }
 }
 
@@ -57,6 +66,7 @@ fn build_domains(
     ontology: &Ontology,
     scope: IntrospectionScope,
     expand_nodes: &[String],
+    channel: Option<Channel>,
 ) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
 
@@ -67,6 +77,9 @@ fn build_domains(
 
     for node in ontology.nodes() {
         if scope == IntrospectionScope::Local && !local_names.contains(&node.name.as_str()) {
+            continue;
+        }
+        if !node_visible_on_channel(node, channel) {
             continue;
         }
 
@@ -88,7 +101,7 @@ fn build_domains(
 
             let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
 
-            let (outgoing, incoming) = node_relationships(ontology, scope, &node.name);
+            let (outgoing, incoming) = node_relationships(ontology, scope, &node.name, channel);
 
             SchemaNode::Expanded {
                 name: node.name.clone(),
@@ -109,7 +122,11 @@ fn build_domains(
         .collect()
 }
 
-fn build_edge_names(ontology: &Ontology, scope: IntrospectionScope) -> Vec<String> {
+fn build_edge_names(
+    ontology: &Ontology,
+    scope: IntrospectionScope,
+    channel: Option<Channel>,
+) -> Vec<String> {
     let local_names: Vec<&str> = match scope {
         IntrospectionScope::Local => ontology.local_entity_names(),
         IntrospectionScope::All => Vec::new(),
@@ -119,18 +136,23 @@ fn build_edge_names(ontology: &Ontology, scope: IntrospectionScope) -> Vec<Strin
         .edge_names()
         .filter(|edge_name| {
             let variants = ontology.get_edge(edge_name).unwrap_or(&[]);
-            !filter_variants(variants, scope, &local_names).is_empty()
+            !filter_variants(variants, scope, &local_names, ontology, channel).is_empty()
         })
         .map(|name| name.to_string())
         .collect()
 }
 
+// An edge variant is only surfaced when both endpoints are visible on the
+// caller's channel — otherwise mentioning it would leak the gated endpoint's
+// existence (ADR 013 §5).
 fn filter_variants<'a>(
     variants: &'a [EdgeEntity],
     scope: IntrospectionScope,
     local_names: &[&str],
+    ontology: &Ontology,
+    channel: Option<Channel>,
 ) -> Vec<&'a EdgeEntity> {
-    match scope {
+    let base: Vec<&EdgeEntity> = match scope {
         IntrospectionScope::All => variants.iter().collect(),
         IntrospectionScope::Local => variants
             .iter()
@@ -139,18 +161,30 @@ fn filter_variants<'a>(
                     && local_names.contains(&e.target_kind.as_str())
             })
             .collect(),
-    }
+    };
+    base.into_iter()
+        .filter(|e| {
+            entity_visible_on_channel(ontology, &e.source_kind, channel)
+                && entity_visible_on_channel(ontology, &e.target_kind, channel)
+        })
+        .collect()
 }
 
 fn node_relationships(
     ontology: &Ontology,
     scope: IntrospectionScope,
     node_name: &str,
+    channel: Option<Channel>,
 ) -> (Vec<String>, Vec<String>) {
     let local_names: Vec<&str> = match scope {
         IntrospectionScope::Local => ontology.local_entity_names(),
         IntrospectionScope::All => Vec::new(),
     };
+
+    // Callers already checked the anchor node is visible; this filters the
+    // *other* endpoint of each variant so we don't advertise edges to nodes
+    // the caller can't see (which would itself disclose the gated node's
+    // existence).
 
     let mut outgoing = Vec::new();
     let mut incoming = Vec::new();
@@ -159,7 +193,7 @@ fn node_relationships(
         let Some(variants) = ontology.get_edge(edge_name) else {
             continue;
         };
-        let filtered = filter_variants(variants, scope, &local_names);
+        let filtered = filter_variants(variants, scope, &local_names, ontology, channel);
 
         let mut out_targets: Vec<&str> = filtered
             .iter()
@@ -188,6 +222,36 @@ fn node_relationships(
     outgoing.sort();
     incoming.sort();
     (outgoing, incoming)
+}
+
+/// True when this node is visible to the caller's channel. Callers that
+/// pass `channel: None` (build scripts, local CLI) always see everything;
+/// live-server callers pass their channel and see only entities whose
+/// `channel_allowlist` includes it.
+///
+/// A node without a redaction block has no channel gate, so it is visible
+/// to every channel — the compiler's ChannelPass treats it the same way
+/// (returning `None` from `channel_allowlist_for_table` = "no gate applies").
+fn node_visible_on_channel(node: &crate::NodeEntity, channel: Option<Channel>) -> bool {
+    let Some(channel) = channel else {
+        return true;
+    };
+    match &node.redaction {
+        Some(r) => r.channel_allowlist.allows(channel),
+        None => true,
+    }
+}
+
+fn entity_visible_on_channel(
+    ontology: &Ontology,
+    entity_name: &str,
+    channel: Option<Channel>,
+) -> bool {
+    let Some(node) = ontology.get_node(entity_name) else {
+        // Non-node endpoint (edge to a derived entity, etc.) — no gate.
+        return true;
+    };
+    node_visible_on_channel(node, channel)
 }
 
 fn format_property(field: &Field) -> String {
@@ -220,7 +284,7 @@ mod tests {
     #[test]
     fn local_scope_has_only_local_entities() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
+        let response = build_schema_response(&ont, IntrospectionScope::Local, &[], None);
 
         let all_node_names: Vec<String> = response
             .domains
@@ -252,7 +316,7 @@ mod tests {
     #[test]
     fn local_scope_edges_are_present() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
+        let response = build_schema_response(&ont, IntrospectionScope::Local, &[], None);
 
         assert!(
             !response.edges.is_empty(),
@@ -266,8 +330,12 @@ mod tests {
     #[test]
     fn local_expand_definition_includes_traversal_path() {
         let ont = load();
-        let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["Definition".to_string()]);
+        let response = build_schema_response(
+            &ont,
+            IntrospectionScope::Local,
+            &["Definition".to_string()],
+            None,
+        );
 
         let props = response
             .domains
@@ -288,7 +356,7 @@ mod tests {
     #[test]
     fn all_scope_contains_server_entities() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::All, &[]);
+        let response = build_schema_response(&ont, IntrospectionScope::All, &[], None);
         let names: Vec<String> = response
             .domains
             .iter()
@@ -306,7 +374,8 @@ mod tests {
     #[test]
     fn wildcard_expands_every_node() {
         let ont = load();
-        let response = build_schema_response(&ont, IntrospectionScope::Local, &["*".to_string()]);
+        let response =
+            build_schema_response(&ont, IntrospectionScope::Local, &["*".to_string()], None);
         for domain in &response.domains {
             for node in &domain.nodes {
                 assert!(
@@ -321,7 +390,7 @@ mod tests {
     fn expanded_nodes_list_relationships() {
         let ont = load();
         let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]);
+            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()], None);
 
         let file = response
             .domains
@@ -357,7 +426,7 @@ mod tests {
     fn property_format_is_name_colon_type() {
         let ont = load();
         let response =
-            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()]);
+            build_schema_response(&ont, IntrospectionScope::Local, &["File".to_string()], None);
         let props = response
             .domains
             .iter()

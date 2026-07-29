@@ -1,4 +1,5 @@
 use crate::error::{QueryError, Result};
+use ontology::Channel;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -105,6 +106,16 @@ pub struct SecurityContext {
     /// ANDs onto that node's scan only; it never narrows `traversal_paths`,
     /// which still drive the broad per-alias authz filter.
     pub scope_prefixes: HashMap<String, String>,
+    /// Channel derived by Rails from the request's authentication mechanism
+    /// (ADR 013). Consumed by [`crate::passes::channel::ChannelPass`] to gate
+    /// each `gl_*` alias against its entity's `channel_allowlist`.
+    ///
+    /// `None` disables the pass entirely and is only appropriate for
+    /// unit-test fixtures that construct `SecurityContext` before channel
+    /// gating shipped — production code paths (JWT → `SecurityContext`)
+    /// always populate this. When `None`, ChannelPass short-circuits and
+    /// no alias is filtered.
+    pub channel: Option<Channel>,
 }
 
 impl SecurityContext {
@@ -142,7 +153,14 @@ impl SecurityContext {
             realm: None,
             is_gitlab_team_member: false,
             scope_prefixes: HashMap::new(),
+            channel: None,
         })
+    }
+
+    #[must_use]
+    pub fn with_channel(mut self, channel: Channel) -> Self {
+        self.channel = Some(channel);
+        self
     }
 
     pub fn with_role(mut self, admin: bool, min_access_level: Option<u32>) -> Self {

@@ -16,6 +16,7 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
+pub mod channel;
 pub mod constants;
 mod entities;
 pub mod errors;
@@ -28,6 +29,8 @@ pub mod migrations;
 pub mod pipelines;
 pub mod query_dsl;
 pub mod sql_template;
+
+pub use channel::{Channel, ChannelAllowlist, ChannelAllowlistEntry, ChannelGroup};
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
@@ -517,7 +520,32 @@ impl Ontology {
             id_column: id_column.into(),
             ability: "read".to_string(),
             required_role: RequiredRole::Reporter,
+            // Tests that don't care about channel gating default to
+            // "everyone" so pre-ADR-013 compiler tests keep passing.
+            channel_allowlist: crate::ChannelAllowlist::from_entries(vec![
+                crate::ChannelAllowlistEntry::Group(crate::ChannelGroup::AllInterfaces),
+            ]),
         });
+        self
+    }
+
+    /// Override the `channel_allowlist` on a node's existing redaction config.
+    /// Panics if the node is missing or has no redaction block. Test helper
+    /// mirroring [`Ontology::with_redaction_role`].
+    #[must_use]
+    pub fn with_redaction_channels(
+        mut self,
+        node_name: &str,
+        allowlist: crate::ChannelAllowlist,
+    ) -> Self {
+        let redaction = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"))
+            .redaction
+            .as_mut()
+            .unwrap_or_else(|| panic!("node \"{node_name}\" has no redaction config"));
+        redaction.channel_allowlist = allowlist;
         self
     }
 
@@ -731,6 +759,28 @@ impl Ontology {
             .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
             .and_then(|n| n.redaction.as_ref())
             .map(|r| r.required_role.as_access_level())
+    }
+
+    /// Resolved channel allowlist for the node backing `table`. Returns
+    /// `None` if no node owns this physical table (edge tables, CTEs) —
+    /// mirroring [`Ontology::min_access_level_for_table`]. The compiler's
+    /// [`ChannelPass`] treats `None` as "no channel gate applies" and
+    /// leaves the alias alone.
+    ///
+    /// A returned `Some(set)` is fail-closed: an empty set means nobody
+    /// (not even `core_feature`) sees this entity, so the caller's
+    /// membership check produces `Bool(false)`.
+    #[must_use]
+    pub fn channel_allowlist_for_table(
+        &self,
+        table: &str,
+    ) -> Option<std::collections::BTreeSet<crate::Channel>> {
+        let normalized = strip_schema_version_prefix(table);
+        self.nodes
+            .values()
+            .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
+            .and_then(|n| n.redaction.as_ref())
+            .map(|r| r.channel_allowlist.resolve())
     }
 
     /// Iterator over names of `admin_only` fields on the given entity.

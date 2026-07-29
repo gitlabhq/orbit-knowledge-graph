@@ -18,7 +18,11 @@ redaction:
   resource_type: user
   id_column: id
   ability: read_user
-
+  # ADR 013: no restriction yet — the initial fail-closed sweep
+  # explicitly opts every existing entity into every channel. Narrowing
+  # this to `[internal_only]`, `[dap_internal]`, etc. is a deliberate
+  # product/monetization decision reviewed via the widening CI gate.
+  channel_allowlist: [all_interfaces]
 properties:
   id:
     type: int64

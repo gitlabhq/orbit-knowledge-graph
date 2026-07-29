@@ -35,6 +35,10 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
             sc.with_role(claims.admin, claims.min_access_level)
                 .with_realm(realm)
                 .with_team_member(claims.is_gitlab_team_member.unwrap_or(false))
+                // ADR 013: prefer the explicit `channel` claim, falling back
+                // to the source_type→channel mapping until Rails ships the
+                // claim. Both sources are Rails-derived; never client-supplied.
+                .with_channel(claims.effective_channel())
         })
         .map_err(|e| e.to_string())
 }
@@ -72,6 +76,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            channel: None,
         }
     }
 

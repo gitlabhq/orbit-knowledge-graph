@@ -50,6 +50,14 @@ pub struct EntityAuthConfig {
     /// compiler can compare against per-path roles carried by `SecurityContext`
     /// without pulling the ontology crate into `types.rs`.
     pub required_access_level: u32,
+    /// True when the entity's `channel_allowlist` does not resolve to every
+    /// channel (i.e. it is either fail-closed empty, or narrower than
+    /// `all_interfaces`). Consumed by the aggregation-oracle guard in
+    /// `plan/edge_chain.rs` to keep the entity's alias in the FROM so
+    /// [`crate::passes::channel::ChannelPass`] has something to `Bool(false)`.
+    /// Mirrors the treatment already applied for `required_access_level`
+    /// above the default floor.
+    pub has_narrow_channel_allowlist: bool,
 }
 
 impl Default for EntityAuthConfig {
@@ -62,6 +70,7 @@ impl Default for EntityAuthConfig {
             // Reporter mirrors the pre-fix access gate and is the right
             // default for tests that do not care about role scoping.
             required_access_level: crate::types::DEFAULT_PATH_ACCESS_LEVEL,
+            has_narrow_channel_allowlist: false,
         }
     }
 }

@@ -21,5 +21,8 @@ jsonschema = { workspace = true }
 [build-dependencies]
 serde_json = { workspace = true }
 
+[dev-dependencies]
+named-queries = { path = "../../named-queries" }
+
 [lints]
 workspace = true

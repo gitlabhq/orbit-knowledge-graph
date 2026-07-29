@@ -70,6 +70,7 @@ mod tests {
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
                 required_access_level: 20,
+                has_narrow_channel_allowlist: false,
             },
         );
 

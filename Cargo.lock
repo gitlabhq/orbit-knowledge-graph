@@ -2223,6 +2223,7 @@ dependencies = [
  "gkg-server-config",
  "gkg-utils",
  "jsonschema",
+ "named-queries",
  "ontology",
  "opentelemetry",
  "regex",
@@ -14846,6 +14847,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "walkdir",
 ]
 
 [[package]]

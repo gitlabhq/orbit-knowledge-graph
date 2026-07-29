@@ -199,7 +199,10 @@ fn load_named_queries() -> Vec<SmokeCase> {
         named_queries::NamedQueries::load_from_dir(std::path::Path::new(NAMED_QUERIES_DIR))
             .unwrap_or_else(|e| panic!("load named queries from {NAMED_QUERIES_DIR}: {e}"));
 
-    let values = named_queries::BindingValues { current_user_id: 1 };
+    let values = named_queries::BindingValues {
+        current_user_id: 1,
+        current_channel: None,
+    };
     queries
         .iter()
         .map(|query| SmokeCase {

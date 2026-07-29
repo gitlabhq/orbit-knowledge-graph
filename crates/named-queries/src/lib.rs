@@ -192,6 +192,7 @@ mod tests {
     fn values() -> BindingValues {
         BindingValues {
             current_user_id: 42,
+            current_channel: None,
         }
     }
 

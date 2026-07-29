@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod channel_widening;
 mod dashboards;
 mod ddl;
 mod metrics_catalog;
@@ -76,6 +77,13 @@ enum Command {
         #[command(subcommand)]
         command: MigrationLedgerCommand,
     },
+    /// Fail if any entity's `channel_allowlist` (ADR 013) gained channels
+    /// between the base ref and the working tree unless the
+    /// `channel-widening-approved` label is set in `$MR_LABELS`.
+    ChannelWidening {
+        #[command(subcommand)]
+        command: ChannelWideningCommand,
+    },
     /// Regenerate the auto-derived tables in the query language reference doc
     /// from the ontology (currently the text-indexed properties table).
     QueryDocs {
@@ -86,6 +94,17 @@ enum Command {
         /// non-zero exit if they differ.
         #[arg(long)]
         check: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ChannelWideningCommand {
+    /// Compare resolved channel_allowlist sets between the base ref and
+    /// the working tree, failing on any set that gained members.
+    Check {
+        /// Base git ref to diff against. Defaults to `origin/main`.
+        #[arg(long)]
+        base: Option<String>,
     },
 }
 
@@ -244,6 +263,9 @@ async fn main() -> Result<()> {
             } => migration_ledger::bump(scope, entities, note, base, amend, new),
             MigrationLedgerCommand::Check { base } => migration_ledger::check(base),
             MigrationLedgerCommand::Snapshot => migration_ledger::snapshot(),
+        },
+        Command::ChannelWidening { command } => match command {
+            ChannelWideningCommand::Check { base } => channel_widening::run(base),
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),

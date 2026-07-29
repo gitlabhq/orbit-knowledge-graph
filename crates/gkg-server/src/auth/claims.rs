@@ -1,3 +1,4 @@
+use ontology::Channel;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// One traversal path the user holds in their scope, paired with the exact
@@ -40,6 +41,13 @@ pub struct Claims {
     pub group_traversal_ids: Vec<TraversalPathClaim>,
     #[serde(deserialize_with = "deserialize_source_type")]
     pub source_type: SourceType,
+    /// Entity-gating channel (ADR 013), derived by Rails from the request's
+    /// authentication mechanism. When absent from the JWT, GKG falls back to
+    /// [`SourceType::as_channel`] so we can roll out channel gating without
+    /// coordinating a Rails release — but the JWT-carried value takes
+    /// precedence once Rails starts sending it.
+    #[serde(default)]
+    pub channel: Option<Channel>,
     #[serde(default, rename = "session_id")]
     pub ai_session_id: Option<String>,
     #[serde(default)]
@@ -76,6 +84,40 @@ pub enum SourceType {
     Core,
     Rest,
     CodeIntelligence,
+}
+
+impl SourceType {
+    /// Best-effort fallback mapping when the JWT does not carry an explicit
+    /// `channel` claim (ADR 013 §2 wants Rails to derive it, but this lets
+    /// us ship the compiler side before the Rails change lands). The
+    /// preferred path is Rails sending `channel` directly.
+    ///
+    /// - `Frontend` → `Frontend` (browser session)
+    /// - `Dws` → `DapInternal` (Duo Agent Platform is DWS today)
+    /// - `Mcp`, `Rest` → `ExternalAgent` (customer-facing, non-DAP)
+    /// - `Core`, `CodeIntelligence` → `CoreFeature` (internal Rails / code intel worker)
+    #[must_use]
+    pub fn as_channel(self) -> Channel {
+        match self {
+            Self::Frontend => Channel::Frontend,
+            Self::Dws => Channel::DapInternal,
+            Self::Mcp | Self::Rest => Channel::ExternalAgent,
+            Self::Core | Self::CodeIntelligence => Channel::CoreFeature,
+        }
+    }
+}
+
+impl Claims {
+    /// Resolve the channel to enforce for this request. Prefers the explicit
+    /// JWT claim; falls back to [`SourceType::as_channel`] until Rails ships
+    /// the claim. Never client-supplied — both sources are Rails-derived
+    /// (the JWT is HS256-signed and `source_type` is stamped by Rails
+    /// alongside traversal tuples).
+    #[must_use]
+    pub fn effective_channel(&self) -> Channel {
+        self.channel
+            .unwrap_or_else(|| self.source_type.as_channel())
+    }
 }
 
 fn deserialize_source_type<'de, D: Deserializer<'de>>(d: D) -> Result<SourceType, D::Error> {

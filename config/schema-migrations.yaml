@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 89
+  scope: none
+  note: "ADR 013 adds `channel_allowlist: [all_interfaces]` to every node's redaction block. The field is compile-time metadata consumed by the query-compiler ChannelPass; it does not affect any ClickHouse DDL, ETL SQL, or indexed row shape, so every stored row remains byte-identical."
 - version: 88
   scope: none
   note: Marks 13 edge mappings mutable so the stale-edge sweep reconciles them. The flag is read only by the sweep's group derivation; extract SQL, transform output and DDL are untouched, so every indexed row is byte-identical.

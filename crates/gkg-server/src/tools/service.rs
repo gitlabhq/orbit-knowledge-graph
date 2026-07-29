@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use jsonschema::Validator;
-use ontology::Ontology;
 use ontology::introspection::{
     IntrospectionScope, SchemaDomain, SchemaResponse, build_schema_response,
 };
+use ontology::{Channel, Ontology};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -152,6 +152,19 @@ impl ToolService {
         tool_name: &str,
         arguments_json: &str,
     ) -> Result<ToolPlan, ExecutorError> {
+        // Backwards-compatible entry (tests, local paths): no channel gating.
+        self.resolve_with_channel(tool_name, arguments_json, None)
+    }
+
+    /// Channel-aware entry (ADR 013). Live server request handlers pass the
+    /// caller's derived channel so `get_graph_schema` returns a caller-scoped
+    /// view of the ontology.
+    pub fn resolve_with_channel(
+        &self,
+        tool_name: &str,
+        arguments_json: &str,
+        channel: Option<Channel>,
+    ) -> Result<ToolPlan, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
@@ -159,7 +172,7 @@ impl ToolService {
 
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
-            "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_graph_schema" => self.execute_get_graph_schema(&arguments, channel),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
@@ -169,6 +182,15 @@ impl ToolService {
         command_name: &str,
         arguments_json: &str,
     ) -> Result<ToolPlan, ExecutorError> {
+        self.resolve_command_with_channel(command_name, arguments_json, None)
+    }
+
+    pub fn resolve_command_with_channel(
+        &self,
+        command_name: &str,
+        arguments_json: &str,
+        channel: Option<Channel>,
+    ) -> Result<ToolPlan, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
@@ -176,15 +198,23 @@ impl ToolService {
 
         match command_name {
             "query_graph" => Err(ExecutorError::InterceptedCommand(command_name.to_string())),
-            "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_graph_schema" => self.execute_get_graph_schema(&arguments, channel),
             "get_query_dsl" => self.execute_get_query_dsl(&arguments),
             "get_response_format" => self.execute_get_response_format(&arguments),
             _ => Err(ExecutorError::NotFound(command_name.to_string())),
         }
     }
 
-    pub fn build_schema_toon(&self, expand_nodes: &[String]) -> Result<String, ExecutorError> {
-        let response = self.build_graph_schema_response(expand_nodes);
+    /// Build the schema in TOON (LLM-friendly) form. `channel` is the
+    /// caller's channel (ADR 013 §5); entities gated out of it are omitted
+    /// entirely rather than annotated, so external agents don't learn that
+    /// a hidden entity exists.
+    pub fn build_schema_toon(
+        &self,
+        expand_nodes: &[String],
+        channel: Option<Channel>,
+    ) -> Result<String, ExecutorError> {
+        let response = self.build_graph_schema_response(expand_nodes, channel);
         let options = EncodeOptions::default();
         encode(&response, &options)
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
@@ -265,13 +295,17 @@ impl ToolService {
         Ok(ToolPlan::RunGraphQuery { query_json, format })
     }
 
-    fn execute_get_graph_schema(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+    fn execute_get_graph_schema(
+        &self,
+        arguments: &Value,
+        channel: Option<Channel>,
+    ) -> Result<ToolPlan, ExecutorError> {
         let args: GetGraphSchemaArgs = serde_json::from_value(arguments.clone())
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         let format = parse_format(arguments);
         let expand_nodes = args.resolve_expand_nodes();
-        let response = self.build_graph_schema_response(&expand_nodes);
+        let response = self.build_graph_schema_response(&expand_nodes, channel);
 
         let result = match format {
             OutputFormat::Llm => {
@@ -333,16 +367,25 @@ impl ToolService {
         Ok(ToolPlan::Immediate { result })
     }
 
-    fn build_graph_schema_response(&self, expand_nodes: &[String]) -> SchemaResponse {
-        build_schema_response(&self.ontology, IntrospectionScope::All, expand_nodes)
+    fn build_graph_schema_response(
+        &self,
+        expand_nodes: &[String],
+        channel: Option<Channel>,
+    ) -> SchemaResponse {
+        build_schema_response(
+            &self.ontology,
+            IntrospectionScope::All,
+            expand_nodes,
+            channel,
+        )
     }
 
     pub fn build_domains(&self, expand_nodes: &[String]) -> Vec<SchemaDomain> {
-        self.build_graph_schema_response(expand_nodes).domains
+        self.build_graph_schema_response(expand_nodes, None).domains
     }
 
     pub fn build_edges(&self) -> Vec<String> {
-        self.build_graph_schema_response(&[]).edges
+        self.build_graph_schema_response(&[], None).edges
     }
 }
 
@@ -575,7 +618,9 @@ mod tests {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
         let service = ToolService::new(ontology);
 
-        let toon = service.build_schema_toon(&[]).expect("Should succeed");
+        let toon = service
+            .build_schema_toon(&[], None)
+            .expect("Should succeed");
         assert!(toon.contains("domains"));
         assert!(toon.contains("edges"));
     }
@@ -586,7 +631,7 @@ mod tests {
         let service = ToolService::new(ontology);
 
         let toon = service
-            .build_schema_toon(&["User".to_string()])
+            .build_schema_toon(&["User".to_string()], None)
             .expect("Should succeed");
         assert!(toon.contains("username"));
         assert!(toon.contains("props"));
@@ -634,7 +679,7 @@ mod tests {
         let service = ToolService::new(ontology);
 
         let toon = service
-            .build_schema_toon(&["FakeNode".to_string()])
+            .build_schema_toon(&["FakeNode".to_string()], None)
             .expect("Should succeed without error");
         assert!(toon.contains("domains"), "Should still return valid schema");
     }

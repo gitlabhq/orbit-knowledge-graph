@@ -153,6 +153,7 @@ mod tests {
             deployment_type: Some(".com".into()),
             realm: Some("SaaS".into()),
             is_gitlab_team_member: None,
+            channel: None,
         }
     }
 

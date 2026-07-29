@@ -24,6 +24,7 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
         })
         .collect();
 
+    let all_interfaces = ontology::ChannelGroup::AllInterfaces.channels();
     ontology
         .nodes()
         .filter_map(|n| {
@@ -33,6 +34,12 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
                 } else {
                     None
                 };
+                // "Narrow" here means "does not resolve to every channel."
+                // Both the fail-closed empty allowlist AND any partial set
+                // qualify — ChannelPass may Bool(false)-gate the alias in
+                // either case, so the plan pass must keep the alias in FROM
+                // (aggregation-oracle guard).
+                let has_narrow_channel_allowlist = r.channel_allowlist.resolve() != all_interfaces;
                 (
                     n.name.clone(),
                     EntityAuthConfig {
@@ -41,6 +48,7 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
                         auth_id_column: r.id_column.clone(),
                         owner_entity,
                         required_access_level: r.required_role.as_access_level(),
+                        has_narrow_channel_allowlist,
                     },
                 )
             })

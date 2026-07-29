@@ -803,17 +803,26 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
     }
 }
 
-/// Whether an entity requires a higher access level than the default (20).
-/// Only these entities need a FilterOnly subquery in edge-based queries so
-/// the security pass can enforce their stricter min_access_level.
+/// Whether an entity requires a per-alias redaction filter that the security
+/// or channel pass will inject. Any such entity must keep its alias in the
+/// FROM so the injecting pass has something to filter, otherwise the
+/// aggregation-oracle bypass reopens (see `docs/design-documents/security.md`
+/// and ADR 013 §4).
+///
+/// Fires when either:
+/// - The entity has a stricter-than-default `required_role`, so SecurityPass
+///   may drop paths to the empty set for a low-role caller; or
+/// - The entity has a narrow `channel_allowlist` (anything short of
+///   `all_interfaces`), so ChannelPass may `Bool(false)`-gate the alias for
+///   the wrong channel.
 fn has_elevated_access_level(np: &NodePlan, input: &Input) -> bool {
     let Some(ref entity) = np.entity else {
         return false;
     };
-    input
-        .entity_auth
-        .get(entity)
-        .is_some_and(|cfg| cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+    input.entity_auth.get(entity).is_some_and(|cfg| {
+        cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL
+            || cfg.has_narrow_channel_allowlist
+    })
 }
 
 fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {

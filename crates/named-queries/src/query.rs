@@ -11,18 +11,46 @@ use crate::{NamedQueryError, invalid};
 const BINDING_KEY: &str = "$binding";
 const PARAM_KEY: &str = "$param";
 const CURRENT_USER_ID: &str = "current_user_id";
+const CURRENT_CHANNEL: &str = "current_channel";
 
-#[derive(Debug, Clone, Copy)]
+/// Values a template may reference through `$binding`. All entries are
+/// server-resolved from trusted state (the JWT); templates cannot pass their
+/// own values in through `$param`, which is the whole point of the
+/// binding/param split (ADR 013 §6, and the original security invariant
+/// documented in ADR 011 for named queries).
+#[derive(Debug, Clone)]
 pub struct BindingValues {
     pub current_user_id: u64,
+    /// Channel-name string (`external_agent`, `dap_internal`, `core_feature`,
+    /// `frontend`). Optional so build scripts and legacy tests can render
+    /// templates without depending on a channel context; a template that
+    /// actually references `current_channel` will fail to render if this is
+    /// `None`, so channel-branching templates never silently degrade to a
+    /// missing value.
+    pub current_channel: Option<String>,
 }
 
 impl BindingValues {
-    fn entries(&self) -> [(String, Value); 1] {
-        [(
-            CURRENT_USER_ID.to_string(),
-            Value::from(self.current_user_id),
-        )]
+    /// Every known binding, in the shape the substitution table expects.
+    /// A binding with no value at request time surfaces as `Value::Null`;
+    /// [`NamedQuery::render`] refuses to complete when it substitutes a null
+    /// into a template, but validation still needs the key present so that a
+    /// template that *declares* `current_channel` under `bindings:` doesn't
+    /// look like it references an unknown binding when it hasn't run yet.
+    fn entries(&self) -> Vec<(String, Value)> {
+        vec![
+            (
+                CURRENT_USER_ID.to_string(),
+                Value::from(self.current_user_id),
+            ),
+            (
+                CURRENT_CHANNEL.to_string(),
+                match &self.current_channel {
+                    Some(c) => Value::from(c.clone()),
+                    None => Value::Null,
+                },
+            ),
+        ]
     }
 }
 
@@ -102,10 +130,27 @@ impl Placeholder {
 struct Substitution {
     available: HashMap<(Placeholder, String), Value>,
     used: HashSet<(Placeholder, String)>,
+    /// True while `NamedQuery::validate` is walking the template with placeholder
+    /// values. In this mode, a binding whose value is `Value::Null` (because it
+    /// is a "sometimes-populated" binding like `current_channel`) is treated as
+    /// present so validation doesn't reject the template outright — the check
+    /// runs at load time, before any real caller/channel exists. At render time
+    /// we flip this off and a `Null` for `current_channel` becomes an error,
+    /// which is the runtime signal that the server forgot to populate the
+    /// binding for a template that references it.
+    validate_mode: bool,
 }
 
 impl Substitution {
     fn new(values: &BindingValues, params: &Map<String, Value>) -> Self {
+        Self::build(values, params, false)
+    }
+
+    fn new_for_validate(values: &BindingValues, params: &Map<String, Value>) -> Self {
+        Self::build(values, params, true)
+    }
+
+    fn build(values: &BindingValues, params: &Map<String, Value>, validate_mode: bool) -> Self {
         let bindings = values
             .entries()
             .into_iter()
@@ -116,6 +161,7 @@ impl Substitution {
         Self {
             available: bindings.chain(params).collect(),
             used: HashSet::new(),
+            validate_mode,
         }
     }
 
@@ -188,7 +234,13 @@ impl NamedQuery {
 
     fn validate(&self) -> Result<(), NamedQueryError> {
         let params = self.example_parameters();
-        let mut ctx = Substitution::new(&BindingValues { current_user_id: 0 }, &params);
+        let mut ctx = Substitution::new_for_validate(
+            &BindingValues {
+                current_user_id: 0,
+                current_channel: None,
+            },
+            &params,
+        );
         self.substitute(&mut self.query.clone(), &mut ctx)?;
         for kind in Placeholder::ALL {
             for name in self.declared(kind) {
@@ -297,6 +349,19 @@ impl NamedQuery {
                 Placeholder::Param => format!("missing value for parameter `{name}`"),
             }));
         };
+        // At render time a Null binding value means the server didn't populate
+        // it — for `current_channel` this happens if the request routed through
+        // a code path that hasn't wired the JWT-derived channel through yet.
+        // Failing here surfaces that miswiring loudly rather than substituting
+        // JSON null into the DSL, which would either compile to a nonsensical
+        // filter or (worse) silently match everything. Validation-mode probes
+        // Null through legitimately, so template load isn't affected.
+        if !ctx.validate_mode && kind == Placeholder::Binding && matches!(resolved, Value::Null) {
+            return Err(self.invalid(format!(
+                "binding `{name}` is declared by this template but the server did not \
+                 populate it for this request"
+            )));
+        }
         Ok(resolved)
     }
 
@@ -326,6 +391,7 @@ mod tests {
     fn values() -> BindingValues {
         BindingValues {
             current_user_id: 42,
+            current_channel: None,
         }
     }
 
@@ -364,6 +430,66 @@ query:
             .render(&values(), &Map::new())
             .expect("render succeeds");
         assert_eq!(rendered, r#"{"node_ids":[42]}"#);
+    }
+
+    // A template that declares `current_channel` must LOAD (validation is a
+    // dry-run walk of the template with placeholder values), even though at
+    // load time no request has run yet and `current_channel: None` is the only
+    // value we have. If load-time validation rejected the template just because
+    // it declared a "sometimes-populated" binding, callers couldn't ship
+    // channel-branching templates at all — the whole feature would only work
+    // for templates whose bindings are always present.
+    const VALID_WITH_CHANNEL: &str = r#"
+name: q
+description: A query.
+bindings: [current_user_id, current_channel]
+query:
+  node_ids:
+    - { $binding: current_user_id }
+  channel: { $binding: current_channel }
+"#;
+
+    #[test]
+    fn validate_accepts_template_declaring_current_channel_when_not_yet_populated() {
+        parse(VALID_WITH_CHANNEL).expect(
+            "a template that declares current_channel must load even before a request populates it",
+        );
+    }
+
+    #[test]
+    fn render_substitutes_current_channel_when_populated() {
+        let query = parse(VALID_WITH_CHANNEL).expect("valid template");
+        let values = BindingValues {
+            current_user_id: 42,
+            current_channel: Some("dap_internal".to_string()),
+        };
+        let rendered = query.render(&values, &Map::new()).expect("render succeeds");
+        assert!(
+            rendered.contains(r#""channel":"dap_internal""#),
+            "current_channel must be substituted into the query, got: {rendered}"
+        );
+    }
+
+    // If the server routes a request through a code path that hasn't wired the
+    // caller's channel through, a template that references `current_channel`
+    // must fail loudly at render time rather than substituting JSON null into
+    // the DSL. Silently substituting null would either compile to a nonsensical
+    // filter or (worse) match everything — the exact class of silent-degrade
+    // that ADR 013's fail-closed posture exists to prevent.
+    #[test]
+    fn render_fails_when_current_channel_binding_is_not_populated() {
+        let query = parse(VALID_WITH_CHANNEL).expect("valid template");
+        let err = query.render(&values(), &Map::new()).expect_err(
+            "render must fail when the template references current_channel but the server didn't set it",
+        );
+        assert!(
+            err.to_string().contains("current_channel"),
+            "the error must name the missing binding, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("did not populate"),
+            "the error must explain what went wrong, got: {err}"
+        );
     }
 
     #[test]

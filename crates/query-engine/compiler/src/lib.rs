@@ -1427,6 +1427,121 @@ mod tests {
         );
     }
 
+    // ADR 013: end-to-end integration between JSON DSL → ChannelPass → SQL.
+    // A caller on a disallowed channel gets `Bool(false)` for every gated
+    // alias, closing the query to zero rows even though role and traversal
+    // paths clear.
+    #[test]
+    fn compile_gates_when_caller_channel_not_in_allowlist() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "limit": 10
+        }"#;
+
+        // Every shipped node has `channel_allowlist: [all_interfaces]`, so
+        // to actually observe gating we override Project's allowlist to a
+        // set that excludes ExternalAgent.
+        let ont = (*ONTOLOGY).clone().with_redaction_channels(
+            "Project",
+            ontology::ChannelAllowlist::from_entries(vec![
+                ontology::ChannelAllowlistEntry::Channel(ontology::Channel::DapInternal),
+            ]),
+        );
+
+        let ctx = security_ctx().with_channel(ontology::Channel::ExternalAgent);
+        let sql = compile(query, &ont, &ctx)
+            .expect(
+                "compile must succeed even when channel gates the alias — the query \
+                     shape is well-formed, ChannelPass just short-circuits the result set",
+            )
+            .base
+            .render();
+        assert!(
+            sql.contains("false") || sql.contains("FALSE"),
+            "external_agent must be Bool(false)-gated on a DAP-only Project, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn compile_passes_through_when_caller_channel_is_allowed() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "limit": 10
+        }"#;
+
+        // Every shipped node ships `[all_interfaces]`, so a caller on any
+        // channel should compile to a normal traversal without a Bool(false)
+        // conjunct injected by ChannelPass.
+        for channel in [
+            ontology::Channel::ExternalAgent,
+            ontology::Channel::DapInternal,
+            ontology::Channel::CoreFeature,
+            ontology::Channel::Frontend,
+        ] {
+            let ctx = security_ctx().with_channel(channel);
+            let sql = compile(query, &ONTOLOGY, &ctx)
+                .unwrap_or_else(|e| panic!("compile must succeed for {channel:?}: {e}"))
+                .base
+                .render();
+            // A gated alias would emit an AND-chained Bool(false); the
+            // all_interfaces baseline must not.
+            assert!(
+                !sql.contains("AND false") && !sql.contains("AND FALSE"),
+                "all_interfaces baseline must not inject a Bool(false) for {channel:?}, got:\n{sql}"
+            );
+        }
+    }
+
+    // ADR 013 §4: aggregation-oracle guard extended to channel gating.
+    // Without this, a `count(Vulnerability) group_by Project` under a gated
+    // channel could bypass ChannelPass by lowering to an edge-only aggregation
+    // that drops the Vulnerability alias from the FROM clause, leaving nothing
+    // for ChannelPass to filter — same class of bypass `required_role` closes.
+    #[test]
+    fn compile_channel_gated_aggregation_keeps_alias_in_from() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "v", "entity": "Vulnerability"},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
+            "group_by": ["proj"],
+            "aggregations": [{"count": "v", "as": "n"}],
+            "limit": 10
+        }"#;
+
+        // Narrow Vulnerability's allowlist to dap_internal only so a
+        // security_manager on external_agent trips channel gating rather than
+        // the role floor (Vulnerability already gates on security_manager;
+        // pinning the caller to SM lets us test the *channel* dimension in
+        // isolation).
+        let ont = (*ONTOLOGY).clone().with_redaction_channels(
+            "Vulnerability",
+            ontology::ChannelAllowlist::from_entries(vec![
+                ontology::ChannelAllowlistEntry::Channel(ontology::Channel::DapInternal),
+            ]),
+        );
+
+        let ctx = SecurityContext::new_with_roles(
+            1,
+            vec![crate::types::TraversalPath::new(
+                "1/",
+                crate::types::AccessLevel::SecurityManager as u32,
+            )],
+        )
+        .unwrap()
+        .with_channel(ontology::Channel::ExternalAgent);
+
+        let sql = compile(query, &ont, &ctx).unwrap().base.render();
+        assert!(
+            sql.contains("gl_vulnerability"),
+            "channel-gated entity gl_vulnerability must NOT be pruned from FROM, got:\n{sql}"
+        );
+    }
+
     #[test]
     fn node_table_reads_use_final_for_latest_rows() {
         let queries = [

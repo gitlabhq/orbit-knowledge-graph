@@ -4,8 +4,49 @@ fn main() {
     validate_named_queries();
     validate_migration_ledger();
     validate_authored_etl_sql();
+    validate_channel_allowlists();
     #[cfg(feature = "regenerate-protos")]
     regenerate_protos();
+}
+
+/// ADR 013 §9: build-time presence/validity check for `channel_allowlist`.
+///
+/// Every node in the shipped ontology must have a non-empty, syntactically
+/// valid `channel_allowlist` under its `redaction` block. An empty or missing
+/// allowlist resolves to the empty channel set (fail-closed by design), which
+/// would mean the entity is invisible to *every* channel including
+/// `core_feature` — almost always a "forgot to populate" bug rather than an
+/// intentional lockout. Failing the build catches this before the pass ships.
+///
+/// This complements the JSON schema check (`ontology-schema-validate`) but is
+/// stricter: the JSON schema alone can't tell that a *loaded* node's
+/// resolved allowlist is empty, only that the YAML is syntactically well-
+/// formed. Running here in `build.rs` also means egress-less CI environments
+/// and every local build catch the same drift, not just the CI job.
+fn validate_channel_allowlists() {
+    let ontology = ontology::Ontology::load_embedded()
+        .unwrap_or_else(|e| panic!("embedded ontology failed to load: {e}"));
+    let mut offenders = Vec::new();
+    for node in ontology.nodes() {
+        let Some(redaction) = node.redaction.as_ref() else {
+            // Nodes with no redaction block can't be gated (no ontology row
+            // → no channel_allowlist), so they're implicitly unrestricted.
+            // Consistent with the compiler's `channel_allowlist_for_table`
+            // returning None for these.
+            continue;
+        };
+        if redaction.channel_allowlist.is_fail_closed_empty() {
+            offenders.push(node.name.clone());
+        }
+    }
+    if !offenders.is_empty() {
+        panic!(
+            "ADR 013: the following nodes are missing a `channel_allowlist` (or ship an empty one), \
+             which resolves to no allowed channels — nobody would see them, not even `core_feature`. \
+             Add a non-empty `channel_allowlist:` under each node's `redaction:` block. Offenders: {}",
+            offenders.join(", ")
+        );
+    }
 }
 
 fn validate_prompts() {
@@ -83,7 +124,10 @@ fn validate_named_queries() {
     let queries = named_queries::NamedQueries::load_from_dir(&dir)
         .unwrap_or_else(|e| panic!("named queries failed to load: {e}"));
 
-    let values = named_queries::BindingValues { current_user_id: 1 };
+    let values = named_queries::BindingValues {
+        current_user_id: 1,
+        current_channel: None,
+    };
     for query in queries.iter() {
         let rendered = query
             .render(&values, &query.example_parameters())

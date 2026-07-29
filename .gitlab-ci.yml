@@ -321,6 +321,24 @@ migration-ledger-check:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
     - bash ./scripts/check-migration-ledger.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
+# ADR 013 §9 widening review gate. Complements the build-time presence linter
+# (crates/gkg-server/build.rs) with a base-ref diff so that opening an entity
+# up — most notably to `external_agent` or `all_interfaces` — requires the
+# `channel-widening-approved` label. The build-time check enforces
+# presence/validity without needing a base ref, so this job's only job is the
+# widening-diff comparison.
+channel-widening-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-only-rules
+  needs: []
+  script:
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
+    - export MR_LABELS="$CI_MERGE_REQUEST_LABELS"
+    - bash ./scripts/check-channel-widening.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
 response-schema-version-check:
   stage: lint
   image: alpine:latest

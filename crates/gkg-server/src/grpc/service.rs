@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration};
-use ontology::Ontology;
+use ontology::{Channel, Ontology};
 use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -256,7 +256,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         let plan = self
             .tool_service
-            .resolve_command(&req.command_name, parameters_json)
+            .resolve_command_with_channel(
+                &req.command_name,
+                parameters_json,
+                Some(ctx.claims.effective_channel()),
+            )
             .map_err(command_error_to_status)?;
 
         let ToolPlan::Immediate { result } = plan else {
@@ -317,6 +321,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     Ok(QueryType::Named) => {
                         let values = named_queries::BindingValues {
                             current_user_id: claims.user_id,
+                            current_channel: Some(
+                                <&str>::from(claims.effective_channel()).to_string(),
+                            ),
                         };
                         named_queries
                             .render_request(&req.query, &values)
@@ -426,16 +433,21 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
 
+        // ADR 013 §5: schema discovery is caller-scoped. The caller's channel
+        // controls which entities are returned; a gated-out entity is omitted
+        // entirely rather than annotated, so the caller can't tell it exists.
+        let channel = Some(ctx.claims.effective_channel());
+
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon_text = self
                 .tool_service
-                .build_schema_toon(&req.expand_nodes)
+                .build_schema_toon(&req.expand_nodes, channel)
                 .map_err(|e| Status::internal(e.to_string()))?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
         } else {
-            let structured = self.build_structured_schema(&req.expand_nodes);
+            let structured = self.build_structured_schema_with_channel(&req.expand_nodes, channel);
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::Structured(structured)),
             }
@@ -527,6 +539,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         let values = named_queries::BindingValues {
             current_user_id: ctx.claims.user_id,
+            current_channel: Some(<&str>::from(ctx.claims.effective_channel()).to_string()),
         };
         let queries = named_query_definitions(&self.named_queries, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -582,20 +595,45 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 }
 
 impl KnowledgeGraphServiceImpl {
-    fn build_structured_schema(&self, expand_nodes: &[String]) -> StructuredSchema {
+    /// Build the structured schema response for the caller. ADR 013 §5:
+    /// entities whose `channel_allowlist` excludes the caller's channel —
+    /// and any edges that would name them — are omitted entirely. Passing
+    /// `None` disables the gate (used by tests that pre-date channel gating).
+    fn build_structured_schema_with_channel(
+        &self,
+        expand_nodes: &[String],
+        channel: Option<Channel>,
+    ) -> StructuredSchema {
+        let visible = |entity: &str| -> bool {
+            let Some(channel) = channel else {
+                return true;
+            };
+            self.ontology
+                .get_node(entity)
+                .and_then(|node| node.redaction.as_ref())
+                .is_none_or(|r| r.channel_allowlist.allows(channel))
+        };
+
         let domains: Vec<SchemaDomain> = self
             .ontology
             .domains()
             .map(|d| SchemaDomain {
                 name: d.name.clone(),
                 description: d.description.clone(),
-                node_names: d.node_names.clone(),
+                node_names: d
+                    .node_names
+                    .iter()
+                    .filter(|n| visible(n))
+                    .cloned()
+                    .collect(),
             })
+            .filter(|d| !d.node_names.is_empty())
             .collect();
 
         let nodes: Vec<SchemaNode> = self
             .ontology
             .nodes()
+            .filter(|n| visible(&n.name))
             .map(|n| {
                 let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
 
@@ -654,13 +692,14 @@ impl KnowledgeGraphServiceImpl {
         let edges: Vec<SchemaEdge> = self
             .ontology
             .edge_names()
-            .map(|name| {
+            .filter_map(|name| {
                 let variants: Vec<SchemaEdgeVariant> = self
                     .ontology
                     .get_edge(name)
                     .map(|edges| {
                         edges
                             .iter()
+                            .filter(|e| visible(&e.source_kind) && visible(&e.target_kind))
                             .map(|e| SchemaEdgeVariant {
                                 source_type: e.source_kind.clone(),
                                 target_type: e.target_kind.clone(),
@@ -668,8 +707,13 @@ impl KnowledgeGraphServiceImpl {
                             .collect()
                     })
                     .unwrap_or_default();
+                // An edge with no visible variant after gating is dropped —
+                // mentioning it would leak the gated endpoint's existence.
+                if variants.is_empty() {
+                    return None;
+                }
 
-                SchemaEdge {
+                Some(SchemaEdge {
                     name: name.to_string(),
                     description: self
                         .ontology
@@ -677,7 +721,7 @@ impl KnowledgeGraphServiceImpl {
                         .unwrap_or_default()
                         .to_string(),
                     variants,
-                }
+                })
             })
             .collect();
 
@@ -989,7 +1033,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema_with_channel(&[], None);
 
         assert!(!response.schema_version.is_empty());
         assert!(!response.nodes.is_empty());
@@ -1019,7 +1063,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = service.build_structured_schema_with_channel(&["User".to_string()], None);
 
         let user_node = response.nodes.iter().find(|n| n.name == "User");
         assert!(user_node.is_some());
@@ -1097,7 +1141,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = service.build_structured_schema_with_channel(&["User".to_string()], None);
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
 
         let id_prop = user.properties.iter().find(|p| p.name == "id");
@@ -1126,7 +1170,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema_with_channel(&[], None);
 
         for domain in &response.domains {
             assert!(!domain.name.is_empty(), "Domain should have a name");
@@ -1150,7 +1194,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema_with_channel(&[], None);
 
         for edge in &response.edges {
             assert!(!edge.name.is_empty(), "Edge should have a name");
@@ -1178,8 +1222,10 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response =
-            service.build_structured_schema(&["User".to_string(), "Project".to_string()]);
+        let response = service.build_structured_schema_with_channel(
+            &["User".to_string(), "Project".to_string()],
+            None,
+        );
 
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
         let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
@@ -1281,6 +1327,7 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            channel: None,
         }
     }
 
@@ -1344,7 +1391,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&["*".to_string()]);
+        let response = service.build_structured_schema_with_channel(&["*".to_string()], None);
 
         assert_eq!(
             response.nodes.len(),

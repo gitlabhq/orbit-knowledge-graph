@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fmt};
 
+use crate::channel::ChannelAllowlist;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::etl::{Pipeline, ReindexSource};
 use serde::Deserialize;
@@ -307,6 +308,16 @@ pub struct RedactionConfig {
     /// ability is only granted at that level, e.g. `read_vulnerability`.
     #[serde(default = "RedactionConfig::default_required_role")]
     pub required_role: RequiredRole,
+    /// Channels through which this entity may be queried (ADR 013). A
+    /// missing or empty list resolves to the empty set — nobody can see
+    /// the entity, not even `core_feature`. This deliberately fails
+    /// closed: an unset `channel_allowlist` almost always means "nobody
+    /// decided yet," not "no restriction intended."
+    ///
+    /// Compose with `required_role` via AND: a caller must clear both the
+    /// role floor and the channel gate.
+    #[serde(default)]
+    pub channel_allowlist: ChannelAllowlist,
 }
 
 impl RedactionConfig {
