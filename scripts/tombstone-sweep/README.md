@@ -1,69 +1,108 @@
 # Tombstone sweep validation harness
 
-Validates the `maintenance.table_cleanup` sweep against production data by
-cloning a graph table (zero-copy `CLONE AS`), running the real statements on the
-clone, then dropping it. Production tables are never written to.
+Validates the `maintenance.table_cleanup` sweep against production data inside
+the `gkg_probe` scratch database. Production tables are read, never written.
 
 ```bash
-RESULTS=/tmp/sweep.txt scripts/tombstone-sweep/sweep_one_table.sh v85_gl_edge
+scripts/tombstone-sweep/run_tier.sh fast                    # every swept table, minutes each
+scripts/tombstone-sweep/run_tier.sh full v85_gl_edge ...    # zero-copy clones, real volume
+scripts/tombstone-sweep/collect_metrics.sh 2                # query_log metrics for the last 2h
 ```
 
-`chw` is the execution channel. It runs SQL as `gkg_writer` from inside a
-dispatcher pod, reading the endpoint from the pod's mounted config and the
-password from `/etc/secrets/graph/password`, so no credential reaches the
-developer machine. The ClickHouse Cloud console gateway caps statements at ~30
-seconds and therefore cannot run these statements at all.
+Two tiers, both running the exact shipped statement shapes from
+`table_cleanup.rs`:
 
-## Why the sweep needs a helper table
+- **fast** — a bounded slice of the table (`1/9970/` prefix, capped at 5M rows)
+  plus synthetic scenarios injected into every table: 50 keys whose newest
+  version becomes a tombstone (every row must go), 50 keys whose tombstone is
+  superseded by a newer live row (nothing of theirs may go). Proves statement
+  shape and row-exact accounting on every schema in under a minute per table.
+- **full** — the whole table via zero-copy clone, shipped 7-day window. Proves
+  cost and completion at real volume.
 
-Each alternative was measured against production and rejected:
+Every statement carries `log_comment='tsp:<tier>:<table>:<phase>'`. Collect
+metrics **immediately after a run**: Cloud compute nodes recycle and take their
+node-local `system.query_log` with them (a 4-hour-old run was already gone).
 
-| approach | outcome |
-|---|---|
-| `OPTIMIZE TABLE … FINAL CLEANUP` | no-op on an unpartitioned table under continuous insert; 10 consecutive daily runs reported success and left 87% of `v85_gl_edge` untouched |
-| unscoped subquery inside the `DELETE` | 13 parts at zero progress after 20 min — a mutation re-evaluates its subquery once per part |
-| per-namespace scoped `DELETE` | progresses, but mutations serialise at ~1 per 2 min, i.e. thousands of statements per night |
-| `min_age_to_force_merge_seconds` | collapses tombstones correctly and needs no helper table, but the CLEANUP variant requires whole-partition merges that never fire here, and a 25 GiB force-merge never landed |
+`chw` is the execution channel: SQL as `gkg_writer` from inside a dispatcher
+pod, endpoint from the pod's mounted config, password never leaves the pod.
+The Cloud console gateway caps statements at ~30s and cannot run any of this.
 
-## Permission constraints this harness established
+Results append to `$RESULTS` (default `/tmp/tombstone-sweep/results.jsonl`);
+`run_tier.sh` skips tables that already have an `ok` for the tier, so a died
+run resumes where it left off.
 
-- `gkg_writer` has **no** `SELECT` on `system.mutations` (`Code: 497`), so
-  completion must be confirmed by counting rows that still match the predicate.
-- `CREATE DATABASE` is granted for `gkg` only, so the helper table lives in
-  `gkg`. It is named to avoid the `v<version>_*` glob that schema GC uses.
-- `lightweight_deletes_sync = 2` waits for every replica and added 30+ minutes
-  after the data was already applied; `sync = 1` plus the row-count check is the
-  combination that ships.
+## Validation record (2026-07-29, production clones)
 
-## Measured results (7-day window, `sync = 1`)
+Fast tier: **37/37 tables pass** — every sort-key shape in the ontology, exact
+`removed == expected` accounting, `still_matching = 0`, injected tombstoned
+keys all swept, injected re-created keys all survive (the `_version DESC`
+predicate at work).
 
-| table | rows | keys | build | delete | removed | still_matching |
+Full tier (7-day window; `build`/`delete`/`settle` are wall seconds):
+
+| table | rows | keys | removed | build | delete+settle | still_matching |
 |---|---|---|---|---|---|---|
-| `v85_gl_ci_edge` | 12.41B | 21,954,193 | 61 s | ~13 min | 32,135,655 | 0 |
-| `v85_gl_job` | 1.81B | 1,908,794 | 47 s | 494 s | 3,795,149 | 0 |
-| `v85_gl_finding` | 1.57B | 653,791 | 17 s | 406 s | 954,906 | 0 |
-| `v85_gl_merge_request_diff_file` | 840M | 6,437,970 | 14 s | 300 s | 9,324,446 | not run |
-| `v85_gl_stage` | 717M | 160,092 | 8 s | 210 s | 309,016 | not run |
-| `v85_gl_imported_symbol` | 619M | 1,358,057 | 77 s | 206 s | 3,202,931 | not run |
-| `v85_gl_note` | 62.7M | 46,119 | 3 s | 63 s | 55,160 | not run |
-| `v85_gl_merge_request` | 27.3M | 15,153 | — | 21 s | 21,176 | 0 |
-| `v85_gl_commit` | 20.6M | 11,422 | 3 s | 52 s | 14,634 | not run |
-| `v85_gl_project` | 763K | 231 | 2 s | 19 s | 413 | 0 |
+| `v85_gl_diff_edge` | 960M | 9,912,369 | 13,983,096 | 53 | 535 | 0 |
+| `v85_gl_definition` ¹ | 2.21B | 13,601,215 | 27,638,284 | 248 | 922 | 0 |
+| `v85_gl_sec_edge` ¹ | 3.50B | 2,380,337 | 3,369,854 | 68 | 1,500 | 0 |
+| `v85_gl_edge` ² | 6.90B | 21,826,441 | ~73M | ~240 | ≤ 41 min | 0 |
+| `v85_gl_code_edge` ¹ ³ | 9.23B | 73,923,278 | 183,543,220 | ~28 min | 1,636 | 0 |
 
-Peak memory never exceeded 2.53 GiB against an 8 GiB cap.
+¹ ran **concurrently** with the other two ¹ tables — all passed, and the
+makespan of the three was the slowest table, not the sum.
+² transport died mid-delete (finding 1); the mutation completed on its own,
+verified by polling the remaining-count to zero.
+³ build ran concurrently with two other sweeps.
 
-`v85_gl_merge_request` also has a full row-level accounting: 15,153 keys covered
-16,164 tombstone rows plus 5,012 superseded live rows, exactly 21,176 rows were
-removed, and all 26,908,910 keys whose newest version is live were untouched.
+Peak memory across every phase collected before the logs recycled: 3.26 GiB
+(a fast-tier key build over a 293-part probe); counts carrying
+multi-million-key `IN` sets: 2.78 GiB. All against an 8 GiB cap.
 
-## Outstanding
+## What production testing established (beyond the earlier campaign)
 
-`v85_gl_edge` (6.82B) and `v85_gl_sec_edge` (3.47B) were swept and the row
-deltas observed (~41,800,000 and 3,001,676), but the harness died before
-recording build and delete durations and neither got the `still_matching` check.
-Re-run both with `sweep_one_table.sh` to close this.
+1. **A silent synchronous statement dies at ~20 minutes.** The Cloud HTTP path
+   drops an idle connection (curl exit 52). `lightweight_deletes_sync = 1` on
+   a multi-billion-row delete and a long key build both hit it. The server
+   keeps going: mutations are unaffected by client disconnect, and a
+   `CREATE TABLE AS` writes nothing to the socket until it finishes, so the
+   disconnect is never noticed. Consequence for the shipped task: submit the
+   delete with `sync = 0` and treat the existing remaining-rows poll as the
+   completion signal; keep long builds alive with
+   `send_progress_in_http_headers = 1`.
+2. **Large `IN`-set counts wedge in index analysis, unkillably.** At ~13M keys
+   the verification count hung in primary-index analysis, where
+   `max_execution_time` is never checked; `KILL QUERY` and dropping the table
+   both failed to stop it. `use_index_for_in_with_subqueries_max_values =
+   1000000` makes oversized sets skip index analysis and take a predictable
+   filtered scan. The shipped verification query needs this cap.
+3. **Cost is read-bound, so concurrency is the wall-clock lever.** Delete time
+   tracks table rows scanned, not key count.
+   `lightweight_delete_mode = 'lightweight_update'` (patch parts, 25.7+) was
+   measured at 601s vs ~494s for the mutation path on the same table — it only
+   saves writes, which were never the bottleneck (its one win: visibility is
+   immediate, settle 3s vs minutes). Running the big tables concurrently is
+   what collapses the nightly wall time from the ~2h sum to the slowest
+   table (~25–45 min); the three-way concurrent run above is the evidence.
+4. **Cross-database `CLONE AS` is broken for index-bearing tables** ("Tables
+   have different secondary indices", 26.4). The documented two-step
+   equivalent — `CREATE TABLE AS` + `ALTER TABLE … ATTACH PARTITION ALL FROM` —
+   works and is what the harness uses.
+5. **Replacing merges corrupt clone accounting.** Probe tables are
+   `SharedReplacingMergeTree`; background merges collapse duplicate versions
+   mid-run (24.2M rows on one probe), inflating the row delta. The harness
+   freezes merge scheduling on probes
+   (`max_bytes_to_merge_at_max_space_in_pool = 1`); mutations still run.
 
-Earlier runs of an async variant (poll instead of `sync = 1`) covered
-`v85_gl_code_edge` (8.87B, 77,974,551 removed), `v85_gl_definition` (2.09B,
-13,606,848) and `v85_gl_diff_edge` (940M, 8,908,369); those numbers are not
-directly comparable to the table above.
+## Earlier findings that still hold
+
+- `OPTIMIZE TABLE … FINAL CLEANUP` is a no-op on an unpartitioned table under
+  continuous insert — ten consecutive "successful" nightly runs left 87% of
+  `v85_gl_edge` untouched.
+- An unscoped `IN`-subquery inside the `DELETE` left 13 parts at zero progress
+  (a mutation re-evaluates its subquery once per part); materialising the key
+  set first is what makes the delete tractable.
+- `gkg_writer` has no `SELECT` on `system.mutations` (`Code: 497`), so
+  completion must be confirmed against the data itself.
+- `lightweight_deletes_sync = 2` waited 30+ minutes after the data was already
+  applied.
