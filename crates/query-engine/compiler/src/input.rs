@@ -696,16 +696,9 @@ pub struct InputAggregationMetric {
 
 impl InputAggregationMetric {
     pub fn output_name(&self) -> String {
-        match &self.alias {
-            Some(alias) => alias.clone(),
-            None => {
-                let function = self.expr.function();
-                match self.expr.property() {
-                    Some(property) => format!("{}_{}_{}", function, self.expr.node(), property),
-                    None => format!("{}_{}", function, self.expr.node()),
-                }
-            }
-        }
+        self.alias
+            .clone()
+            .unwrap_or_else(|| self.expr.derived_name())
     }
 }
 
@@ -750,6 +743,15 @@ impl AggExpr {
             | Self::Min(prop)
             | Self::Max(prop)
             | Self::Collect(prop) => Some(&prop.property),
+        }
+    }
+
+    pub fn derived_name(&self) -> String {
+        let function = self.function();
+        let node = self.node();
+        match self.property() {
+            Some(property) => format!("{function}_{node}_{property}"),
+            None => format!("{function}_{node}"),
         }
     }
 }
