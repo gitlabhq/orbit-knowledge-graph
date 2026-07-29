@@ -152,6 +152,7 @@ mod tests {
         assert!(!toon.contains("a-zA-Z0-9_"), "Should strip regex patterns");
         assert!(!toon.contains("(?<"), "Should strip named capture groups");
         assert!(!toon.contains("json-schema.org"), "Should strip $schema");
+        assert!(!toon.contains("GraphQueryAsJSON"), "Should strip title");
     }
 
     #[test]
