@@ -14,6 +14,8 @@ use arrow::compute;
 use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
+pub struct ArrowUtils;
+
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
 pub enum ColumnValue {
     Int64(i64),
@@ -92,8 +94,6 @@ impl From<serde_json::Value> for ColumnValue {
         }
     }
 }
-
-pub struct ArrowUtils;
 
 impl ArrowUtils {
     pub fn extract_row(batch: &RecordBatch, row_idx: usize) -> HashMap<String, ColumnValue> {
