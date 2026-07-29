@@ -709,8 +709,14 @@ impl InputAggregationMetric {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, strum::EnumDiscriminants)]
 #[serde(rename_all = "lowercase")]
+#[strum_discriminants(
+    name(AggFunction),
+    vis(pub),
+    derive(strum::Display),
+    strum(serialize_all = "lowercase")
+)]
 pub enum AggExpr {
     Count(TargetRef),
     Sum(PropertyRef),
@@ -722,14 +728,7 @@ pub enum AggExpr {
 
 impl AggExpr {
     pub fn function(&self) -> AggFunction {
-        match self {
-            Self::Count(_) => AggFunction::Count,
-            Self::Sum(_) => AggFunction::Sum,
-            Self::Avg(_) => AggFunction::Avg,
-            Self::Min(_) => AggFunction::Min,
-            Self::Max(_) => AggFunction::Max,
-            Self::Collect(_) => AggFunction::Collect,
-        }
+        self.into()
     }
 
     pub fn node(&self) -> &str {
@@ -1047,18 +1046,6 @@ pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
         InputGroupByKey::Node { .. } => "node",
         InputGroupByKey::Property { .. } => "property",
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum AggFunction {
-    Count,
-    Sum,
-    Avg,
-    Min,
-    Max,
-    Collect,
 }
 
 impl AggFunction {
