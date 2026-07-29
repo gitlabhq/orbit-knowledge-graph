@@ -153,7 +153,7 @@ fn gen_relationship(driver: &mut impl Driver, from: &str, to: &str) -> Option<Va
     Some(Value::Object(rel))
 }
 
-fn gen_aggregation(driver: &mut impl Driver, node_id: &str) -> Option<Value> {
+fn gen_aggregation(driver: &mut impl Driver, node_id: &str, index: u8) -> Option<Value> {
     let func = *pick(driver, AGG_FUNCTIONS)?;
     let mut agg = Map::new();
 
@@ -164,7 +164,11 @@ fn gen_aggregation(driver: &mut impl Driver, node_id: &str) -> Option<Value> {
         node_id.to_string()
     };
     agg.insert(func.into(), json!(target));
-    agg.insert("as".into(), json!("agg_result"));
+
+    let with_alias: bool = driver.produce()?;
+    if with_alias {
+        agg.insert("as".into(), json!(format!("agg_{index}")));
+    }
 
     Some(Value::Object(agg))
 }
@@ -210,9 +214,9 @@ impl TypeGenerator for FuzzQuery {
                 if query_type == "aggregation" {
                     let agg_count: u8 = driver.produce()?;
                     let aggs: Vec<Value> = (0..(agg_count % 3) + 1)
-                        .filter_map(|_| {
+                        .filter_map(|i| {
                             let target = pick(driver, &node_ids)?;
-                            gen_aggregation(driver, target)
+                            gen_aggregation(driver, target, i)
                         })
                         .collect();
                     query.insert("aggregations".into(), json!(aggs));

@@ -134,7 +134,9 @@ An example response:
     ],
     "columns": [
       {
-        "count": "pl"
+        "name": "failed_pipelines",
+        "function": "count",
+        "target": "pl"
       }
     ],
     "rows": [
