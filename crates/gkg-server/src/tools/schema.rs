@@ -65,6 +65,9 @@ fn condense_value(value: &mut Value) {
 
 fn condense_object(map: &mut Map<String, Value>) {
     map.remove("default");
+    map.remove("pattern");
+    map.remove("$schema");
+    map.remove("title");
 
     let should_remove = matches!(
         map.get("description"),
@@ -140,6 +143,37 @@ mod tests {
             toon.contains("Required for disconnected multi-node aggregation"),
             "Should tell agents when group_by is required"
         );
+    }
+
+    #[test]
+    fn condensed_schema_strips_patterns_and_metadata() {
+        let schema: Value =
+            serde_json::from_str(BASE_SCHEMA).expect("base schema must be valid JSON");
+        let condensed = condense_schema(schema);
+
+        for key in ["pattern", "$schema", "title"] {
+            assert_no_key(&condensed, key);
+        }
+    }
+
+    fn assert_no_key(value: &Value, key: &str) {
+        match value {
+            Value::Object(map) => {
+                assert!(
+                    !map.contains_key(key),
+                    "condensed schema should not contain `{key}` keys"
+                );
+                for nested in map.values() {
+                    assert_no_key(nested, key);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    assert_no_key(item, key);
+                }
+            }
+            _ => {}
+        }
     }
 
     #[test]

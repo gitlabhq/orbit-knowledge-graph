@@ -38,7 +38,7 @@
     },
     "group_by": {
       "type": "array",
-      "description": "Aggregation group keys. A node key (\"p\") returns an entity object per bucket; a property key (\"mr.state\") returns the scalar value.",
+      "description": "Aggregation group keys.",
       "default": [],
       "maxItems": 4,
       "items": {
@@ -62,7 +62,7 @@
     },
     "cursor": {
       "type": "object",
-      "description": "Keyset cursor. First page: omit 'after'. Later pages: pass the prior response's pagination.next_cursor; stop when it is absent. NULL sort keys paginate (they sort last).",
+      "description": "Keyset pagination. First page: omit 'after'; stop when the response has no next_cursor. NULL sort keys sort last.",
       "required": ["page_size"],
       "properties": {
         "page_size": {
@@ -73,7 +73,7 @@
         },
         "after": {
           "type": "string",
-          "description": "Continuation token from pagination.next_cursor. Changing the query (filters, order_by, shape) invalidates it; restart pagination."
+          "description": "pagination.next_cursor from the prior response. Changing the query invalidates it."
         }
       },
       "additionalProperties": false
@@ -90,7 +90,7 @@
     },
     "options": {
       "$ref": "#/$defs/QueryOptions",
-      "description": "Consumer-level preferences that affect result presentation, not query semantics."
+      "description": "Presentation options."
     }
   },
   "additionalProperties": false,
@@ -284,19 +284,19 @@
       "properties": {
         "id": {
           "$ref": "#/$defs/Identifier",
-          "description": "Variable identifier for this node (e.g., 'i', 'mr', 'user'). Used to reference this node in relationships and aggregations."
+          "description": "Variable id referenced by relationships and aggregations (e.g. 'mr')."
         },
         "entity": {
           "$ref": "#/$defs/EntityType",
-          "description": "Entity type (e.g., User, Project, MergeRequest). Determines which table to query."
+          "description": "Entity type (e.g. User, Project, MergeRequest)."
         },
         "columns": {
           "$ref": "#/$defs/ColumnSelection",
-          "description": "Columns to return for this node. Use '*' for all columns, or specify an array of column names. If omitted, the node's default_columns from the ontology are returned. Mandatory columns (id, type) are always included for redaction."
+          "description": "'*' for all columns, an array of names, or omitted for the ontology default_columns. id and type are always included."
         },
         "filters": {
           "type": "object",
-          "description": "Property filters. Keys are property names; values are an equality value, an operator object, or an array of operator objects. Limited to prevent query complexity explosion.",
+          "description": "Property filters keyed by property name.",
           "propertyNames": {
             "$ref": "#/$defs/Identifier"
           },
@@ -371,7 +371,7 @@
       "additionalProperties": false
     },
     "FilterEntry": {
-      "description": "Filter(s) on a single property. A bare value is an equality match; an operator object AND-combines its operator keys; an array of operator objects AND-combines entries (only needed to repeat an operator).",
+      "description": "A bare value is an equality match; otherwise one or more operator objects (array only to repeat an operator).",
       "oneOf": [
         {
           "$ref": "#/$defs/FilterValue",
@@ -382,7 +382,6 @@
         },
         {
           "type": "array",
-          "description": "AND-combined operator objects, for repeating an operator on the same property.",
           "items": {
             "$ref": "#/$defs/OperatorFilter"
           },
@@ -555,7 +554,7 @@
     },
     "Aggregation": {
       "type": "object",
-      "description": "One aggregation as a single function key, e.g. {\"avg\": \"mr.merge_duration\", \"as\": \"avg_dur\"}. Output column: \"as\" when given, else function_node or function_node_property.",
+      "description": "Single function key, e.g. {\"avg\": \"mr.merge_duration\", \"as\": \"avg_dur\"}. Output column: \"as\", else function_node or function_node_property.",
       "properties": {
         "count": {
           "$ref": "#/$defs/NodeOrPropertyRef",
@@ -583,15 +582,14 @@
       "additionalProperties": false
     },
     "GroupByKey": {
-      "description": "Group key: \"node\" returns an entity object per bucket, \"node.property\" returns the scalar value. Output column: node id or node_property (plus _unit when truncated), overridable with the object form's \"as\".",
+      "description": "\"node\" buckets by entity, \"node.property\" by scalar value. Output column: \"as\" when given, else node id or node_property (_unit suffix when truncated).",
       "oneOf": [
         {
-          "$ref": "#/$defs/NodeOrPropertyRef",
-          "description": "Group by a node (\"p\") or a scalar property (\"mr.state\")."
+          "$ref": "#/$defs/NodeOrPropertyRef"
         },
         {
           "type": "object",
-          "description": "Group key with date truncation and/or a custom output column name: {\"key\": \"mr.created_at\", \"truncate\": \"month\", \"as\": \"month\"}. truncate needs a Date/DateTime property; minute/hour require node_ids or a filter on it. At least one of truncate/as.",
+          "description": "Truncation and/or output name: {\"key\": \"mr.created_at\", \"truncate\": \"month\", \"as\": \"month\"}. truncate needs a Date/DateTime property; minute/hour also need node_ids or a filter on it.",
           "required": ["key"],
           "anyOf": [{ "required": ["truncate"] }, { "required": ["as"] }],
           "properties": {
@@ -634,7 +632,7 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Relationship types to traverse. Required when an endpoint uses filters or id_range (not node_ids) to constrain the frontier. Optional when both endpoints use node_ids.",
+          "description": "Relationship types to traverse. Required when an endpoint is constrained by filters or id_range; optional when both endpoints use node_ids.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
@@ -654,12 +652,12 @@
       "properties": {
         "direction": {
           "$ref": "#/$defs/Direction",
-          "description": "Direction to traverse relationships (outgoing, incoming, or both)",
+          "description": "Traversal direction (default: both).",
           "default": "both"
         },
         "rel_types": {
           "type": "array",
-          "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+          "description": "Relationship types to traverse; omitted = all.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
@@ -671,16 +669,16 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Optional presentation hints that control response shape without affecting query semantics. Only 'dynamic_columns' and 'include_debug_sql' are recognized; all other fields are ignored.",
+      "description": "Presentation hints; never affect query semantics. Unrecognized fields are ignored.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",
-          "description": "Columns fetched for dynamically-discovered entities (PathFinding, Neighbors hydration). '*' returns all columns; 'default' returns the entity's default_columns from the ontology. Defaults to 'default'.",
+          "description": "Columns for dynamically-discovered entities (path_finding, neighbors hydration): '*' = all, 'default' = ontology default_columns (the default).",
           "default": "default"
         },
         "include_debug_sql": {
           "type": "boolean",
-          "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. On SaaS: honored for GitLab team members. On self-managed/Dedicated: honored for instance admins. Defaults to false.",
+          "description": "Include compiled SQL in response metadata. Honored only for GitLab team members (SaaS) or instance admins (self-managed/Dedicated).",
           "default": false
         }
       },
