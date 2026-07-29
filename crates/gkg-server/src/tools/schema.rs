@@ -147,12 +147,33 @@ mod tests {
 
     #[test]
     fn condensed_schema_strips_patterns_and_metadata() {
-        let toon = condensed_query_schema().expect("Should condense");
+        let schema: Value =
+            serde_json::from_str(BASE_SCHEMA).expect("base schema must be valid JSON");
+        let condensed = condense_schema(schema);
 
-        assert!(!toon.contains("a-zA-Z0-9_"), "Should strip regex patterns");
-        assert!(!toon.contains("(?<"), "Should strip named capture groups");
-        assert!(!toon.contains("json-schema.org"), "Should strip $schema");
-        assert!(!toon.contains("GraphQueryAsJSON"), "Should strip title");
+        for key in ["pattern", "$schema", "title"] {
+            assert_no_key(&condensed, key);
+        }
+    }
+
+    fn assert_no_key(value: &Value, key: &str) {
+        match value {
+            Value::Object(map) => {
+                assert!(
+                    !map.contains_key(key),
+                    "condensed schema should not contain `{key}` keys"
+                );
+                for nested in map.values() {
+                    assert_no_key(nested, key);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    assert_no_key(item, key);
+                }
+            }
+            _ => {}
+        }
     }
 
     #[test]
