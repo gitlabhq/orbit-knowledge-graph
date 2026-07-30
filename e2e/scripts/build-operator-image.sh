@@ -10,7 +10,7 @@
 # lands in the operator repo proper, this script and the sm-e2e-spike CI job
 # should be removed.
 
-set -euo pipefail
+set -eo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 OPERATOR_BRANCH="${E2E_OPERATOR_BRANCH:-michaelusa/spike-orbit-crd}"
