@@ -75,8 +75,10 @@ docker push "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}"
 
 log "Operator image ready: ${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}"
 
-# Restore working directory. The script is sourced, not executed, so cd
-# persists in the caller. The trap also restores on error paths.
+# Restore working directory and shell options. The script is sourced, not
+# executed, so cd and set -u persist in the caller. build-gkg-image.sh
+# references CI_COMMIT_BRANCH which is unset in MR pipelines.
 cd "$ORIG_DIR"
 rm -rf "$WORKDIR"
 trap - EXIT
+set +u
