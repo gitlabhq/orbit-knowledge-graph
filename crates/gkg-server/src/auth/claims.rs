@@ -63,6 +63,26 @@ pub struct Claims {
     /// self-managed / Dedicated instances.
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
+    /// Channel the request arrived on (ADR 013). Absent on JWTs issued before
+    /// Rails populates it; `effective_channel` falls back to `source_type`.
+    #[serde(default)]
+    pub channel: Option<ontology::Channel>,
+}
+
+impl Claims {
+    /// The channel this request is gated on. Prefers the explicit claim; falls
+    /// back to a `source_type` mapping so this can ship before Rails sends the
+    /// claim. `Frontend`→`Frontend`, `Dws`→`DapInternal`, `Mcp`/`Rest`→
+    /// `ExternalAgent`, `Core`/`CodeIntelligence`→`CoreFeature`.
+    #[must_use]
+    pub fn effective_channel(&self) -> ontology::Channel {
+        self.channel.unwrap_or(match self.source_type {
+            SourceType::Frontend => ontology::Channel::Frontend,
+            SourceType::Dws => ontology::Channel::DapInternal,
+            SourceType::Mcp | SourceType::Rest => ontology::Channel::ExternalAgent,
+            SourceType::Core | SourceType::CodeIntelligence => ontology::Channel::CoreFeature,
+        })
+    }
 }
 
 /// Source type of the request, matching the Iglu `orbit_query` enum.
@@ -111,5 +131,59 @@ mod tests {
     #[test]
     fn unknown_source_type_falls_back_to_rest() {
         assert_eq!(parse("something_else"), SourceType::Rest);
+    }
+
+    fn claims_with(source_type: SourceType, channel: Option<ontology::Channel>) -> Claims {
+        Claims {
+            sub: String::new(),
+            iss: String::new(),
+            aud: String::new(),
+            iat: 0,
+            exp: 0,
+            user_id: 1,
+            username: String::new(),
+            admin: false,
+            organization_id: None,
+            min_access_level: None,
+            group_traversal_ids: vec![],
+            source_type,
+            ai_session_id: None,
+            instance_id: None,
+            unique_instance_id: None,
+            instance_version: None,
+            global_user_id: None,
+            host_name: None,
+            root_namespace_id: None,
+            deployment_type: None,
+            realm: None,
+            is_gitlab_team_member: None,
+            channel,
+        }
+    }
+
+    #[test]
+    fn effective_channel_prefers_explicit_claim() {
+        let c = claims_with(SourceType::Mcp, Some(ontology::Channel::CoreFeature));
+        assert_eq!(c.effective_channel(), ontology::Channel::CoreFeature);
+    }
+
+    #[test]
+    fn effective_channel_falls_back_to_source_type() {
+        assert_eq!(
+            claims_with(SourceType::Frontend, None).effective_channel(),
+            ontology::Channel::Frontend
+        );
+        assert_eq!(
+            claims_with(SourceType::Dws, None).effective_channel(),
+            ontology::Channel::DapInternal
+        );
+        assert_eq!(
+            claims_with(SourceType::Rest, None).effective_channel(),
+            ontology::Channel::ExternalAgent
+        );
+        assert_eq!(
+            claims_with(SourceType::Core, None).effective_channel(),
+            ontology::Channel::CoreFeature
+        );
     }
 }
