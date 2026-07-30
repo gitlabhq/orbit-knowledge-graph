@@ -21,28 +21,40 @@ variants:
 # `state = 5` == `reopened` in Rails `ResourceStateEvent`:
 #   app/models/resource_state_event.rb (enum :state ... .merge(reopened: 5))
 #   app/models/concerns/issuable.rb STATE_ID_MAP (opened:1, closed:2, merged:3, locked:4)
-etl:
-  - scope: namespaced
-    source: siphon_resource_state_events
-    order_by: [traversal_path, id]
-    where: "state = 5"
-    from:
-      id: user_id
-      type: User
-      enrich: [state, private_profile, admin, auditor, external, user_type]
-    to:
-      id: merge_request_id
-      type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
-  - scope: namespaced
-    source: siphon_resource_state_events
-    order_by: [traversal_path, id]
-    where: "state = 5"
-    from:
-      id: user_id
-      type: User
-      enrich: [state, private_profile, admin, auditor, external, user_type]
-    to:
-      id: issue_id
-      type: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
+indexer:
+  reindex: [siphon_resource_state_events]
+pipelines:
+  - name: REOPENED_siphon_resource_state_events_MergeRequest
+    extract:
+      type: clickhouse
+      tables: [siphon_resource_state_events]
+      fields: [user_id, merge_request_id]
+      order_by: [traversal_path, id]
+      filter: "state = 5"
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: MergeRequest, id: merge_request_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          label: REOPENED
+  - name: REOPENED_siphon_resource_state_events_WorkItem
+    extract:
+      type: clickhouse
+      tables: [siphon_resource_state_events]
+      fields: [user_id, issue_id]
+      order_by: [traversal_path, id]
+      filter: "state = 5"
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: WorkItem, id: issue_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: issue_id, kind: WorkItem, enrich: true }
+          label: REOPENED

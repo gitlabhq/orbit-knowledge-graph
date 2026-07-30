@@ -576,10 +576,7 @@ async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
 
     let ontology = load_ontology();
     for node in ontology.nodes() {
-        let Some(etl) = node.etl.as_ref() else {
-            continue;
-        };
-        if etl.scope() != ontology::EtlScope::Namespaced {
+        if !has_namespaced_pipeline(node) {
             continue;
         }
         let progress = if node.name == "WorkItem" {
@@ -700,14 +697,17 @@ fn seed_namespaced_entities(
 ) {
     let ontology = load_ontology();
     for node in ontology.nodes() {
-        let Some(etl) = node.etl.as_ref() else {
-            continue;
-        };
-        if etl.scope() != ontology::EtlScope::Namespaced {
+        if !has_namespaced_pipeline(node) {
             continue;
         }
         seed_entity_progress(mock_kv, traversal_path, &node.name, progress);
     }
+}
+
+fn has_namespaced_pipeline(node: &ontology::NodeEntity) -> bool {
+    node.pipelines
+        .iter()
+        .any(|pipeline| pipeline.scope == ontology::EtlScope::Namespaced)
 }
 
 async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) {

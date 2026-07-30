@@ -408,11 +408,13 @@ impl ArrowQuery {
 
     pub async fn fetch_arrow_streamed(
         mut self,
-        max_block_size: u64,
+        max_block_size: Option<u64>,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        self.inner = self
-            .inner
-            .with_setting("max_block_size", max_block_size.to_string());
+        if let Some(max_block_size) = max_block_size {
+            self.inner = self
+                .inner
+                .with_setting("max_block_size", max_block_size.to_string());
+        }
 
         let cursor = self
             .inner
@@ -448,7 +450,7 @@ impl ArrowQuery {
     /// `X-ClickHouse-Summary` over a `oneshot` once drained (it arrives after the body).
     pub async fn fetch_arrow_streamed_with_summary(
         mut self,
-        max_block_size: u64,
+        max_block_size: Option<u64>,
     ) -> Result<
         (
             BoxStream<'static, Result<RecordBatch, ClickHouseError>>,
@@ -456,9 +458,11 @@ impl ArrowQuery {
         ),
         ClickHouseError,
     > {
-        self.inner = self
-            .inner
-            .with_setting("max_block_size", max_block_size.to_string());
+        if let Some(max_block_size) = max_block_size {
+            self.inner = self
+                .inner
+                .with_setting("max_block_size", max_block_size.to_string());
+        }
 
         let mut cursor = self
             .inner

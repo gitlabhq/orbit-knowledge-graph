@@ -495,7 +495,15 @@ mod tests {
 
     fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
+        let plans = build_plans(
+            &ontology,
+            crate::modules::sdlc::plan::Sizing {
+                global_batch_size: 1000,
+                namespaced_batch_size: 1000,
+                overrides: &Default::default(),
+            },
+        )
+        .expect("plans should build");
         let scope_plans = match scope {
             EtlScope::Global => plans.global,
             EtlScope::Namespaced => plans.namespaced,

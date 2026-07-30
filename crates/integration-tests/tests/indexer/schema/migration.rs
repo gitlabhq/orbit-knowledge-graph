@@ -1,9 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use clickhouse_client::FromArrowColumn;
+use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
+use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
+use indexer::modules::code::config::CodeTableNames;
+use indexer::orchestrator::scheduled::{CodeStaleSweep, migration_completion};
 use indexer::schema::migration;
 use indexer::schema::version::{
     SCHEMA_VERSION, SchemaWaitError, ensure_version_table, prefixed_table_name,
@@ -12,8 +15,10 @@ use indexer::schema::version::{
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
+use ontology::migrations::MigrationScope;
 use query_engine::compiler::{
-    DictionarySource, generate_graph_dictionaries_with_prefix, generate_graph_tables_with_prefix,
+    DictionarySource, emit_create_table, generate_graph_dictionaries_with_prefix,
+    generate_graph_tables_with_prefix,
 };
 
 fn dictionary_source(config: &gkg_server_config::ClickHouseConfiguration) -> DictionarySource<'_> {
@@ -666,6 +671,36 @@ async fn read_active_version_returns_some_after_write() {
 }
 
 #[tokio::test]
+async fn repeated_status_write_survives_insert_block_dedup() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+
+    // non_replicated_deduplication_window makes a single-node table dedup like Cloud's SharedMergeTree.
+    ctx.execute(
+        "CREATE TABLE gkg_schema_version \
+         (version UInt32, \
+          status Enum8('active' = 1, 'migrating' = 2, 'retired' = 3, 'dropped' = 4), \
+          created_at DateTime DEFAULT now()) \
+         ENGINE = ReplacingMergeTree(created_at) ORDER BY version \
+         SETTINGS non_replicated_deduplication_window = 1000",
+    )
+    .await;
+
+    write_migrating_version(&client, 83).await.unwrap();
+    write_migrating_version(&client, 83).await.unwrap();
+
+    let result = ctx
+        .query("SELECT toInt64(count()) AS c FROM gkg_schema_version")
+        .await;
+    let counts = i64::extract_column(&result, 0).unwrap();
+    assert_eq!(
+        counts,
+        vec![2],
+        "both writes must persist; insert-block dedup must not drop the re-inserted (version, status) block"
+    );
+}
+
+#[tokio::test]
 async fn wait_until_ready_returns_when_version_active() {
     let ctx = TestContext::new(&[]).await;
     let client = ctx.create_client();
@@ -760,4 +795,513 @@ async fn wait_until_ready_ready_when_rebuilding_below_active() {
     )
     .await
     .unwrap();
+}
+
+const SEED_VERSION: &str = "2024-01-01 00:00:00.000000";
+const REINDEX_VERSION: &str = "2024-06-01 00:00:00.000000";
+
+fn sdlc(entities: &[&str]) -> MigrationScope {
+    MigrationScope::Sdlc(entities.iter().map(|s| s.to_string()).collect())
+}
+
+/// Drives a clone-based migration and its promotion gate, hiding table prefixes and seed timestamps.
+struct MigrationScenario {
+    ctx: TestContext,
+    ontology: ontology::Ontology,
+    metrics: MigrationMetrics,
+    active_version: u32,
+}
+
+impl MigrationScenario {
+    async fn migrating_from_active() -> Self {
+        let (ctx, ontology, metrics) = setup().await;
+        let active_version = *SCHEMA_VERSION - 1;
+        let scenario = Self {
+            ctx,
+            ontology,
+            metrics,
+            active_version,
+        };
+        scenario.create_tables(&table_prefix(active_version)).await;
+        scenario
+    }
+
+    async fn at_new_version() -> Self {
+        let (ctx, ontology, metrics) = setup().await;
+        let scenario = Self {
+            ctx,
+            ontology,
+            metrics,
+            active_version: *SCHEMA_VERSION,
+        };
+        scenario.create_tables(&table_prefix(*SCHEMA_VERSION)).await;
+        scenario
+    }
+
+    async fn seed_note(&self) {
+        let prefix = table_prefix(self.active_version);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {prefix}gl_note (traversal_path, id, _version) \
+                 VALUES ('1/100/', 5, '{SEED_VERSION}')"
+            ))
+            .await;
+    }
+
+    async fn seed_user(&self) {
+        let prefix = table_prefix(self.active_version);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {prefix}gl_user (id, username, name, state, _version) \
+                 VALUES (9, 'user9', 'User Nine', 'active', '{SEED_VERSION}')"
+            ))
+            .await;
+    }
+
+    async fn seed_merge_request(&self) {
+        let prefix = table_prefix(self.active_version);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {prefix}gl_merge_request (traversal_path, id, _version) \
+                 VALUES ('1/100/', 7, '{SEED_VERSION}')"
+            ))
+            .await;
+    }
+
+    async fn seed_edge(&self, kind: &str, source: (u64, &str), target: (u64, &str)) {
+        let prefix = table_prefix(self.active_version);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {prefix}gl_edge \
+                 (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version) \
+                 VALUES ('1/100/', '{kind}', {}, '{}', {}, '{}', '{SEED_VERSION}')",
+                source.0, source.1, target.0, target.1
+            ))
+            .await;
+    }
+
+    async fn seed_checkpoint(&self, key: &str) {
+        let table = format!("{}checkpoint", table_prefix(self.active_version));
+        insert_completed_checkpoint(&self.ctx, &table, key, SEED_VERSION).await;
+    }
+
+    async fn seed_code_checkpoint(&self, project_id: u64) {
+        let prefix = table_prefix(self.active_version);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {prefix}code_indexing_checkpoint \
+                 (traversal_path, project_id, branch, last_task_id, _version) \
+                 VALUES ('1/100/', {project_id}, 'main', 1, 1)"
+            ))
+            .await;
+    }
+
+    async fn precreate_empty_target(&self, unprefixed: &str) {
+        let new_prefix = table_prefix(*SCHEMA_VERSION);
+        let target = prefixed_table_name(unprefixed, *SCHEMA_VERSION);
+        let table = generate_graph_tables_with_prefix(&self.ontology, &new_prefix)
+            .into_iter()
+            .find(|table| table.name == target)
+            .unwrap();
+        self.ctx
+            .create_client()
+            .execute(&emit_create_table(&table))
+            .await
+            .unwrap();
+    }
+
+    async fn migrate(&self, scope: MigrationScope) {
+        migration::prepare_tables_for_migration(
+            &self.ctx.create_client(),
+            &dictionary_source(&self.ctx.config),
+            &self.ontology,
+            &self.metrics,
+            &scope,
+            self.active_version,
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn complete_reindex(&self, key: &str) {
+        let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+        insert_completed_checkpoint(&self.ctx, &table, key, REINDEX_VERSION).await;
+    }
+
+    async fn mark_reindexing(&self, key: &str, cursor: &str) {
+        let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _version) \
+                 VALUES ('{key}', '{SEED_VERSION}', '{cursor}', '{SEED_VERSION}')"
+            ))
+            .await;
+    }
+
+    async fn assert_table_row_count(&self, unprefixed: &str, expected: i64) {
+        let table = prefixed_table_name(unprefixed, *SCHEMA_VERSION);
+        assert_eq!(
+            self.count_final(&table).await,
+            expected,
+            "{table} should hold {expected} cloned row(s)"
+        );
+    }
+
+    async fn assert_table_empty(&self, unprefixed: &str) {
+        let table = prefixed_table_name(unprefixed, *SCHEMA_VERSION);
+        assert_eq!(
+            self.count_final(&table).await,
+            0,
+            "{table} should be rebuilt empty, not cloned"
+        );
+    }
+
+    async fn assert_surviving_checkpoints(&self, expected: &[&str]) {
+        let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+        let surviving = self
+            .ctx
+            .query(&format!(
+                "SELECT key FROM {table} FINAL WHERE _deleted = false ORDER BY key"
+            ))
+            .await;
+        let expected: Vec<String> = expected.iter().map(|key| key.to_string()).collect();
+        assert_eq!(
+            String::extract_column(&surviving, 0).unwrap(),
+            expected,
+            "surviving checkpoint keys in {table} do not match the expected plan set"
+        );
+    }
+
+    async fn assert_checkpoint_empty(&self) {
+        let table = prefixed_table_name("checkpoint", *SCHEMA_VERSION);
+        assert_eq!(
+            self.count_final(&table).await,
+            0,
+            "{table} should seed no plans — everything re-indexes from epoch"
+        );
+    }
+
+    async fn assert_code_checkpoint_empty(&self) {
+        let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+        assert_eq!(
+            self.count_final(&table).await,
+            0,
+            "{table} should be rebuilt empty so the code backfill re-dispatches"
+        );
+    }
+
+    async fn gate(
+        &self,
+        scope: MigrationScope,
+        enabled_namespace_ids: &[i64],
+    ) -> migration_completion::SdlcReindexProgress {
+        migration_completion::get_sdlc_reindex_progress_for_enabled_namespaces(
+            &self.ctx.create_client(),
+            &self.ontology,
+            &scope,
+            &prefixed_table_name("checkpoint", *SCHEMA_VERSION),
+            enabled_namespace_ids,
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn create_tables(&self, prefix: &str) {
+        let client = self.ctx.create_client();
+        for table in generate_graph_tables_with_prefix(&self.ontology, prefix) {
+            client.execute(&emit_create_table(&table)).await.unwrap();
+        }
+    }
+
+    async fn count_final(&self, table: &str) -> i64 {
+        let batches = self
+            .ctx
+            .query(&format!(
+                "SELECT toInt64(count()) AS cnt FROM {table} FINAL"
+            ))
+            .await;
+        i64::extract_column(&batches, 0).unwrap()[0]
+    }
+
+    async fn seed_new_code_checkpoint_watermark(&self, project_id: u64, indexed_at: &str) {
+        let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+        self.ctx
+            .execute(&format!(
+                "INSERT INTO {table} (traversal_path, project_id, branch, last_task_id, indexed_at) \
+                 VALUES ('1/100/', {project_id}, 'main', 1, '{indexed_at}')"
+            ))
+            .await;
+    }
+
+    async fn run_code_stale_sweep(&self) {
+        let table_names =
+            CodeTableNames::from_ontology(&self.ontology).expect("code tables must resolve");
+        let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
+            self.ctx.config.build_client(),
+        )));
+        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store)
+            .run_for_drained(&["1/100/".to_string()])
+            .await
+            .expect("sweep failed");
+    }
+
+    async fn live_edge_exists(&self, kind: &str, source_id: u64) -> bool {
+        let table = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+        let rows = self
+            .ctx
+            .query(&format!(
+                "SELECT source_id FROM {table} FINAL \
+                 WHERE relationship_kind = '{kind}' AND source_id = {source_id} AND _deleted = false"
+            ))
+            .await;
+        rows.first().is_some_and(|b| b.num_rows() > 0)
+    }
+}
+
+async fn insert_completed_checkpoint(ctx: &TestContext, table: &str, key: &str, version: &str) {
+    ctx.execute(&format!(
+        "INSERT INTO {table} (key, watermark, cursor_values, _version) \
+         VALUES ('{key}', '{version}', 'null', '{version}')"
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn table_local_sdlc_scope_clones_unchanged_and_rebuilds_invalidated_table() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_user().await;
+    scenario.seed_note().await;
+    scenario.seed_merge_request().await;
+    scenario
+        .seed_edge("MENTIONS", (1, "User"), (2, "Note"))
+        .await;
+
+    scenario.migrate(sdlc(&["User"])).await;
+
+    scenario.assert_table_row_count("gl_edge", 1).await;
+    scenario.assert_table_empty("gl_user").await;
+    scenario.assert_table_row_count("gl_note", 1).await;
+    scenario.assert_table_row_count("gl_merge_request", 1).await;
+}
+
+#[tokio::test]
+async fn table_local_sdlc_scope_seeds_only_unchanged_checkpoints() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_checkpoint("global.User").await;
+    scenario.seed_checkpoint("ns.100.Job.p1of2").await;
+    scenario.seed_checkpoint("ns.100.Job.p2of2").await;
+    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario
+        .seed_checkpoint("dispatch.sdlc.namespace.sweep")
+        .await;
+
+    scenario.migrate(sdlc(&["User"])).await;
+
+    scenario
+        .assert_surviving_checkpoints(&["ns.100.Job.p1of2", "ns.100.Job.p2of2", "ns.100.Note"])
+        .await;
+}
+
+#[tokio::test]
+async fn global_sdlc_gate_blocks_until_the_invalidated_plan_reindexes() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_checkpoint("global.User").await;
+
+    scenario.migrate(sdlc(&["User"])).await;
+
+    assert!(
+        !scenario.gate(sdlc(&["User"]), &[100]).await.ready,
+        "the gate must block until the invalidated plan has a completed checkpoint"
+    );
+
+    scenario.complete_reindex("global.User").await;
+    assert!(
+        scenario.gate(sdlc(&["User"]), &[100]).await.ready,
+        "the gate must promote once the invalidated global plan has a completed checkpoint"
+    );
+}
+
+#[tokio::test]
+async fn shared_edge_scope_rebuilds_every_table() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_note().await;
+    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario.seed_checkpoint("ns.100.User").await;
+
+    scenario.migrate(sdlc(&["HAS_NOTE"])).await;
+
+    scenario.assert_table_empty("gl_note").await;
+    scenario.assert_table_empty("gl_edge").await;
+    scenario.assert_checkpoint_empty().await;
+}
+
+#[tokio::test]
+async fn interrupted_clone_is_recloned_without_duplicates_on_rerun() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_note().await;
+    scenario.seed_user().await;
+    scenario.seed_checkpoint("ns.100.User").await;
+    scenario.seed_checkpoint("global.User").await;
+    scenario.precreate_empty_target("gl_note").await;
+
+    scenario.migrate(sdlc(&["User"])).await;
+    scenario.migrate(sdlc(&["User"])).await;
+
+    scenario.assert_table_row_count("gl_note", 1).await;
+    scenario
+        .assert_surviving_checkpoints(&["ns.100.User"])
+        .await;
+}
+
+#[tokio::test]
+async fn whole_sdlc_scope_rebuilds_tables_and_seeds_no_checkpoints() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_note().await;
+    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario.seed_checkpoint("global.User").await;
+
+    scenario.migrate(sdlc(&[])).await;
+
+    scenario.assert_table_empty("gl_note").await;
+    scenario.assert_checkpoint_empty().await;
+}
+
+#[tokio::test]
+async fn code_scope_clones_sdlc_intact_and_drops_only_the_code_stale_sweep_gate() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario.seed_note().await;
+    scenario.seed_checkpoint("ns.100.Note").await;
+    scenario
+        .seed_checkpoint("dispatch.sdlc.namespace.sweep")
+        .await;
+    scenario
+        .seed_checkpoint("maintenance.code_stale_sweep")
+        .await;
+    scenario.seed_code_checkpoint(42).await;
+    scenario
+        .seed_edge("MENTIONS", (9, "User"), (5, "Note"))
+        .await;
+    scenario
+        .seed_edge("CONTAINS", (1, "Directory"), (2, "File"))
+        .await;
+
+    scenario.migrate(MigrationScope::Code).await;
+
+    scenario.assert_table_row_count("gl_note", 1).await;
+    scenario.assert_table_row_count("gl_edge", 2).await;
+    scenario
+        .assert_surviving_checkpoints(&["dispatch.sdlc.namespace.sweep", "ns.100.Note"])
+        .await;
+    scenario.assert_code_checkpoint_empty().await;
+}
+
+#[tokio::test]
+async fn code_migration_clone_converges_after_reindex_and_sweep() {
+    let scenario = MigrationScenario::migrating_from_active().await;
+    scenario
+        .seed_edge("CONTAINS", (10, "Directory"), (20, "File"))
+        .await;
+    scenario
+        .seed_edge("CONTAINS", (1, "Branch"), (30, "Directory"))
+        .await;
+    scenario
+        .seed_edge("MENTIONS", (9, "User"), (5, "Note"))
+        .await;
+
+    scenario.migrate(MigrationScope::Code).await;
+    scenario
+        .seed_new_code_checkpoint_watermark(40, REINDEX_VERSION)
+        .await;
+    scenario.run_code_stale_sweep().await;
+
+    assert!(
+        !scenario.live_edge_exists("CONTAINS", 10).await,
+        "the cloned Directory-source code edge must be tombstoned once its project re-indexes"
+    );
+    assert!(
+        scenario.live_edge_exists("MENTIONS", 9).await,
+        "SDLC edges must never be touched by the code stale sweep"
+    );
+    assert!(
+        scenario.live_edge_exists("CONTAINS", 1).await,
+        "known gap: Branch-source code edges are not swept until the sweep covers Branch/Project"
+    );
+}
+
+#[tokio::test]
+async fn gate_requires_every_enabled_namespace_to_complete() {
+    let scenario = MigrationScenario::at_new_version().await;
+
+    scenario
+        .mark_reindexing("ns.100.Note", r#"{"c":["1/100/","5"]}"#)
+        .await;
+    assert!(
+        !scenario.gate(sdlc(&["Note"]), &[100]).await.ready,
+        "an in-progress cursor is not a completed pipeline"
+    );
+
+    scenario.complete_reindex("ns.100.Note").await;
+    assert!(
+        scenario.gate(sdlc(&["Note"]), &[100]).await.ready,
+        "the newer completed row must replace the in-progress cursor under FINAL"
+    );
+
+    let one_of_two = scenario.gate(sdlc(&["Note"]), &[100, 200]).await;
+    assert_eq!(one_of_two.completed_namespaces, 1);
+    assert!(
+        !one_of_two.ready,
+        "one completed namespace out of two enabled must not promote"
+    );
+
+    scenario.complete_reindex("ns.200.Note").await;
+    assert!(scenario.gate(sdlc(&["Note"]), &[100, 200]).await.ready);
+}
+
+#[tokio::test]
+async fn gate_ignores_completed_checkpoints_for_disabled_namespaces() {
+    let scenario = MigrationScenario::at_new_version().await;
+    scenario.complete_reindex("ns.100.Note").await;
+
+    let progress = scenario.gate(sdlc(&["Note"]), &[200]).await;
+
+    assert_eq!(progress.completed_namespaces, 0);
+    assert!(!progress.ready);
+}
+
+#[tokio::test]
+async fn gate_requires_every_invalidated_pipeline_including_global() {
+    let scenario = MigrationScenario::at_new_version().await;
+    scenario.complete_reindex("ns.100.Note").await;
+    scenario.complete_reindex("ns.200.Note").await;
+
+    let missing_pipeline = scenario
+        .gate(sdlc(&["Note", "MergeRequest"]), &[100, 200])
+        .await;
+    assert_eq!(missing_pipeline.completed_namespaces, 0);
+    assert!(
+        !missing_pipeline.ready,
+        "a namespace missing one of the invalidated pipelines must not count as complete"
+    );
+
+    scenario.complete_reindex("ns.100.MergeRequest").await;
+    scenario.complete_reindex("ns.200.MergeRequest").await;
+    assert!(
+        scenario
+            .gate(sdlc(&["Note", "MergeRequest"]), &[100, 200])
+            .await
+            .ready
+    );
+
+    let global_pending = scenario.gate(sdlc(&["User"]), &[100, 200]).await;
+    assert_eq!(
+        global_pending.completed_namespaces, 0,
+        "a global-only scope has no namespaced pipelines to count"
+    );
+    assert!(
+        !global_pending.ready,
+        "the gate must wait on the invalidated global pipeline"
+    );
+
+    scenario.complete_reindex("global.User").await;
+    assert!(scenario.gate(sdlc(&["User"]), &[100, 200]).await.ready);
 }

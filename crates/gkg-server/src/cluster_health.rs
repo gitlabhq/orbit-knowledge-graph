@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
+use clickhouse_client::ArrowClickHouseClient;
 use health_check::HealthStatus;
+use indexer::schema::version::read_migrating_version;
 use toon_format::{EncodeOptions, encode};
 use tracing::warn;
 
@@ -15,15 +17,20 @@ use crate::webserver::InfrastructureHealthClient;
 pub struct ClusterHealthChecker {
     version: String,
     health_client: Option<InfrastructureHealthClient>,
+    graph_client: Option<ArrowClickHouseClient>,
 }
 
 impl ClusterHealthChecker {
-    pub fn new(health_check_url: Option<String>) -> Self {
+    pub fn new(
+        health_check_url: Option<String>,
+        graph_client: Option<ArrowClickHouseClient>,
+    ) -> Self {
         let health_client = health_check_url.map(InfrastructureHealthClient::new);
 
         Self {
             version: gkg_utils::version::get().to_string(),
             health_client,
+            graph_client,
         }
     }
 
@@ -57,7 +64,29 @@ impl ClusterHealthChecker {
         client: &InfrastructureHealthClient,
     ) -> StructuredClusterHealth {
         let health_status = client.check_or_unavailable().await;
-        self.convert_health_status(health_status)
+        let services_only_failure = only_services_unhealthy(&health_status);
+        let mut structured = self.convert_health_status(health_status);
+
+        if services_only_failure {
+            self.overlay_active_migration(&mut structured).await;
+        }
+
+        structured
+    }
+
+    async fn overlay_active_migration(&self, structured: &mut StructuredClusterHealth) {
+        let Some(graph) = &self.graph_client else {
+            return;
+        };
+
+        match read_migrating_version(graph).await {
+            Ok(Some(version)) => apply_migration_status(structured, version),
+            Ok(None) => {}
+            Err(error) => warn!(
+                %error,
+                "failed to read migrating schema version; leaving cluster health unhealthy"
+            ),
+        }
     }
 
     fn convert_health_status(&self, status: HealthStatus) -> StructuredClusterHealth {
@@ -182,6 +211,7 @@ impl ClusterHealthChecker {
                 Ok(ClusterStatus::Healthy) => "healthy".to_string(),
                 Ok(ClusterStatus::Degraded) => "degraded".to_string(),
                 Ok(ClusterStatus::Unhealthy) => "unhealthy".to_string(),
+                Ok(ClusterStatus::Migrating) => "migrating".to_string(),
                 _ => "unknown".to_string(),
             }
         }
@@ -213,9 +243,35 @@ impl ClusterHealthChecker {
     }
 }
 
+fn only_services_unhealthy(status: &HealthStatus) -> bool {
+    matches!(status.status, health_check::Status::Unhealthy)
+        && status
+            .services
+            .iter()
+            .any(|s| matches!(s.status, health_check::Status::Unhealthy))
+        && !status.clickhouse.is_empty()
+        && status
+            .clickhouse
+            .iter()
+            .all(|c| matches!(c.status, health_check::Status::Healthy))
+}
+
+fn apply_migration_status(status: &mut StructuredClusterHealth, migrating_version: u32) {
+    status.status = ClusterStatus::Migrating.into();
+    status.components.push(ComponentHealth {
+        name: "schema_migration".to_string(),
+        status: ClusterStatus::Migrating.into(),
+        replicas: None,
+        metrics: HashMap::from([(
+            "migrating_version".to_string(),
+            migrating_version.to_string(),
+        )]),
+    });
+}
+
 impl Default for ClusterHealthChecker {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, None)
     }
 }
 
@@ -304,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stubbed_health_returns_healthy_structured() {
-        let checker = ClusterHealthChecker::new(None);
+        let checker = ClusterHealthChecker::new(None, None);
         let response = checker.get_cluster_health(ResponseFormat::Raw as i32).await;
 
         match response.content {
@@ -319,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stubbed_health_returns_formatted_text_for_llm() {
-        let checker = ClusterHealthChecker::new(None);
+        let checker = ClusterHealthChecker::new(None, None);
         let response = checker.get_cluster_health(ResponseFormat::Llm as i32).await;
 
         match response.content {
@@ -333,7 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stubbed_includes_mode_metric() {
-        let checker = ClusterHealthChecker::new(None);
+        let checker = ClusterHealthChecker::new(None, None);
         let response = checker.get_cluster_health(ResponseFormat::Raw as i32).await;
 
         match response.content {
@@ -353,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stubbed_health_structured_has_components() {
-        let checker = ClusterHealthChecker::new(None);
+        let checker = ClusterHealthChecker::new(None, None);
         let response = checker.get_cluster_health(ResponseFormat::Raw as i32).await;
 
         match response.content {
@@ -369,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_llm_format_contains_all_components() {
-        let checker = ClusterHealthChecker::new(None);
+        let checker = ClusterHealthChecker::new(None, None);
         let response = checker.get_cluster_health(ResponseFormat::Llm as i32).await;
 
         match response.content {
@@ -430,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn real_mode_healthy_sidecar() {
         let url = start_mock_sidecar(healthy_sidecar_response()).await;
-        let checker = ClusterHealthChecker::new(Some(url));
+        let checker = ClusterHealthChecker::new(Some(url), None);
 
         let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
 
@@ -449,7 +505,7 @@ mod tests {
     #[tokio::test]
     async fn real_mode_unhealthy_component_propagates() {
         let url = start_mock_sidecar(degraded_sidecar_response()).await;
-        let checker = ClusterHealthChecker::new(Some(url));
+        let checker = ClusterHealthChecker::new(Some(url), None);
 
         let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
 
@@ -464,7 +520,7 @@ mod tests {
     #[tokio::test]
     async fn real_mode_unreachable_sidecar_returns_unhealthy() {
         install_crypto_provider();
-        let checker = ClusterHealthChecker::new(Some("http://127.0.0.1:1".to_string()));
+        let checker = ClusterHealthChecker::new(Some("http://127.0.0.1:1".to_string()), None);
 
         let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
 
@@ -481,5 +537,65 @@ mod tests {
                 .unwrap()
                 .contains("unreachable")
         );
+    }
+
+    #[test]
+    fn apply_migration_status_sets_migrating_and_adds_component() {
+        let mut status = StructuredClusterHealth {
+            status: ClusterStatus::Unhealthy.into(),
+            timestamp: "2026-03-03T00:00:00Z".to_string(),
+            version: "0.6.0".to_string(),
+            components: vec![ComponentHealth {
+                name: "indexer".to_string(),
+                status: ClusterStatus::Unhealthy.into(),
+                replicas: Some(ReplicaStatus {
+                    ready: 0,
+                    desired: 2,
+                }),
+                metrics: HashMap::new(),
+            }],
+        };
+
+        apply_migration_status(&mut status, 2);
+
+        assert_eq!(status.status, ClusterStatus::Migrating as i32);
+        let indexer = status
+            .components
+            .iter()
+            .find(|c| c.name == "indexer")
+            .unwrap();
+        assert_eq!(indexer.status, ClusterStatus::Unhealthy as i32);
+        assert_eq!(indexer.replicas.as_ref().unwrap().ready, 0);
+        let migration = status
+            .components
+            .iter()
+            .find(|c| c.name == "schema_migration")
+            .unwrap();
+        assert_eq!(migration.status, ClusterStatus::Migrating as i32);
+        assert_eq!(
+            migration.metrics.get("migrating_version"),
+            Some(&"2".to_string())
+        );
+    }
+
+    #[test]
+    fn service_only_failure_is_only_services_unhealthy() {
+        assert!(only_services_unhealthy(&degraded_sidecar_response()));
+    }
+
+    #[test]
+    fn unhealthy_clickhouse_is_not_only_services() {
+        let mut broken_clickhouse = degraded_sidecar_response();
+        broken_clickhouse.clickhouse[0].status = Status::Unhealthy;
+        assert!(!only_services_unhealthy(&broken_clickhouse));
+
+        assert!(!only_services_unhealthy(&healthy_sidecar_response()));
+    }
+
+    #[test]
+    fn payload_without_unhealthy_service_is_not_only_services() {
+        let mut no_failing_service = degraded_sidecar_response();
+        no_failing_service.services.clear();
+        assert!(!only_services_unhealthy(&no_failing_service));
     }
 }

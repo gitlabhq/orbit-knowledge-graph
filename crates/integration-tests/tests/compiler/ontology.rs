@@ -10,9 +10,9 @@ use compiler::{
 fn valid_column_in_order_by() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
         "limit": 10,
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"}
+        "order_by": "u.username"
     }"#;
     assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
 }
@@ -22,9 +22,9 @@ fn invalid_column_in_order_by() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
             "limit": 10,
-            "order_by": {"node": "u", "property": "nonexistent_column", "direction": "ASC"}
+            "order_by": "u.nonexistent_column"
         }"#,
         &embedded_ontology(),
         &test_ctx(),
@@ -37,7 +37,7 @@ fn invalid_column_in_order_by() {
 fn valid_column_in_filter() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}},
+        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}}],
         "limit": 10
     }"#;
     assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
@@ -48,7 +48,7 @@ fn invalid_column_in_filter() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}}],
             "limit": 10
         }"#,
         &embedded_ontology(), &test_ctx(),
@@ -58,15 +58,19 @@ fn invalid_column_in_filter() {
 
 #[test]
 fn valid_column_in_aggregation() {
-    assert!(compile(
-        r#"{
+    assert!(
+        compile(
+            r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-            "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
+            "aggregations": [{"count": "p.name", "as": "name_count"}],
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(),
-    ).is_ok());
+            &embedded_ontology(),
+            &test_ctx(),
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -75,11 +79,13 @@ fn invalid_column_in_aggregation() {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
-            "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
+            "aggregations": [{"sum": "p.invalid_property", "as": "total"}],
             "limit": 10
         }"#,
-        &embedded_ontology(), &test_ctx(),
-    ).unwrap_err();
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("does not exist"));
 }
 
@@ -88,7 +94,7 @@ fn invalid_entity_type_rejected() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "NonexistentType", "node_ids": [1], "columns": ["name"]},
+            "nodes": [{"id": "n", "entity": "NonexistentType", "node_ids": [1], "columns": ["name"]}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -98,9 +104,10 @@ fn invalid_entity_type_rejected() {
     let msg = err.to_string();
     assert!(msg.contains("NonexistentType"), "got: {msg}");
     // The enrichment must surface valid candidates, not strip or truncate them.
-    assert!(msg.contains("Valid values include:"), "got: {msg}");
+    assert!(msg.contains("Valid values:"), "got: {msg}");
     assert!(msg.contains("Branch"), "got: {msg}");
-    assert!(msg.contains("get_graph_schema"), "got: {msg}");
+    assert!(msg.contains("WorkItem"), "got: {msg}");
+    assert!(!msg.contains("more —"), "got: {msg}");
 }
 
 #[test]
@@ -108,8 +115,8 @@ fn invalid_filter_key_lists_valid_candidates() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
-                     "filters": {"project_full_path": "x"}},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"],
+                     "filters": {"project_full_path": "x"}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -118,9 +125,9 @@ fn invalid_filter_key_lists_valid_candidates() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("project_full_path"), "got: {msg}");
-    assert!(msg.contains("Valid values include:"), "got: {msg}");
+    assert!(msg.contains("Valid values:"), "got: {msg}");
     assert!(msg.contains("username"), "got: {msg}");
-    assert!(msg.contains("get_graph_schema"), "got: {msg}");
+    assert!(!msg.contains("more —"), "got: {msg}");
     // The opaque "or N other candidates" truncation must not leak through.
     assert!(!msg.contains("other candidates"), "got: {msg}");
 }
@@ -131,8 +138,8 @@ fn invalid_group_by_property_lists_valid_fields() {
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-            "group_by": [{"kind": "property", "node": "p", "property": "reviewer_count"}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "group_by": ["p.reviewer_count"],
+            "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -153,7 +160,7 @@ fn malformed_group_by_entry_shows_expected_shapes() {
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
             "group_by": [{"node": "p", "property": "name"}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -162,21 +169,20 @@ fn malformed_group_by_entry_shows_expected_shapes() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(msg.contains("\"kind\""), "got: {msg}");
     assert!(
-        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
+        msg.contains("\"<node-id>.<property>\"") && msg.contains("\"truncate\""),
         "got: {msg}"
     );
 }
 
 #[test]
-fn bare_string_group_by_entry_shows_expected_shapes() {
+fn bare_string_group_by_dotted_garbage_shows_expected_shapes() {
     let err = compile(
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-            "group_by": ["name"],
-            "aggregations": [{"function": "count", "target": "p", "alias": "c"}],
+            "group_by": ["p.name.x"],
+            "aggregations": [{"count": "p", "as": "c"}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -185,11 +191,28 @@ fn bare_string_group_by_entry_shows_expected_shapes() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("/group_by/0"), "got: {msg}");
-    assert!(msg.contains("\"kind\""), "got: {msg}");
     assert!(
-        msg.contains("\"kind\": \"property\"") && msg.contains("\"kind\": \"node\""),
+        msg.contains("\"<node-id>\"") && msg.contains("\"<node-id>.<property>\""),
         "got: {msg}"
     );
+}
+
+#[test]
+fn bare_string_group_by_unknown_node_names_the_reference() {
+    let err = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+            "group_by": ["name"],
+            "aggregations": [{"count": "p", "as": "c"}],
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("undefined node \"name\""), "got: {msg}");
 }
 
 #[test]
@@ -197,7 +220,7 @@ fn invalid_column_lists_valid_candidates() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["bogus_col"]},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["bogus_col"]}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -206,7 +229,7 @@ fn invalid_column_lists_valid_candidates() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("bogus_col"), "got: {msg}");
-    assert!(msg.contains("/node/columns"), "got: {msg}");
+    assert!(msg.contains("/nodes/0/columns"), "got: {msg}");
     assert!(msg.contains("Valid values"), "got: {msg}");
     assert!(msg.contains("username"), "got: {msg}");
     // The opaque oneOf fallthrough must not leak through.
@@ -247,7 +270,7 @@ fn full_pipeline() {
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25,
-        "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
+        "order_by": "-n.created_at"
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
@@ -256,7 +279,7 @@ fn full_pipeline() {
     // AUTHORED is FK-elided via author_id — no edge table scan.
     assert!(rendered.contains("gl_note"));
     assert!(rendered.contains("gl_user"));
-    assert!(rendered.contains("LIMIT 25"));
+    assert!(rendered.contains("LIMIT 26"));
 }
 
 #[test]
@@ -279,19 +302,19 @@ fn package_built_by_pipeline_traversal() {
     assert!(rendered.contains("'BUILT_BY'"));
     assert!(rendered.contains("(e0.source_kind = 'Package')"));
     assert!(rendered.contains("(e0.target_kind = 'Pipeline')"));
-    assert!(rendered.contains("LIMIT 25"));
+    assert!(rendered.contains("LIMIT 26"));
 }
 
 #[test]
 fn basic_search_query() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "columns": ["username"],
-            "filters": { "username": {"op": "eq", "value": "admin"} }
-        },
+            "filters": { "username": {"eq": "admin"} }
+        }],
         "limit": 10
     }"#;
 
@@ -307,7 +330,7 @@ fn basic_search_query() {
         "search should filter deleted rows"
     );
     assert!(rendered.contains("username"));
-    assert!(rendered.contains("LIMIT 10"));
+    assert!(rendered.contains("LIMIT 11"));
     assert!(
         !rendered.contains("JOIN"),
         "search queries should not have joins"
@@ -318,18 +341,18 @@ fn basic_search_query() {
 fn complex_search_query() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "columns": ["username", "state", "created_at"],
             "filters": {
-                "username": {"op": "starts_with", "value": "admin"},
-                "state": {"op": "in", "value": ["active", "blocked"]},
-                "created_at": {"op": "gte", "value": "2024-01-01"}
+                "username": {"starts_with": "admin"},
+                "state": {"in": ["active", "blocked"]},
+                "created_at": {"gte": "2024-01-01"}
             }
-        },
+        }],
         "limit": 50,
-        "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
+        "order_by": "-u.created_at"
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
@@ -343,7 +366,7 @@ fn complex_search_query() {
     assert!(rendered.contains("created_at"));
     assert!(rendered.contains("ORDER BY"));
     assert!(rendered.contains("DESC"));
-    assert!(rendered.contains("LIMIT 50"));
+    assert!(rendered.contains("LIMIT 51"));
     assert!(
         !rendered.contains("JOIN"),
         "search queries should not have joins"
@@ -354,7 +377,7 @@ fn complex_search_query() {
 fn search_with_specific_columns() {
     let json = r#"{
         "query_type": "traversal",
-        "node": { "id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"] },
+        "nodes": [{ "id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"] }],
         "limit": 10
     }"#;
 
@@ -371,7 +394,7 @@ fn search_with_specific_columns() {
 fn search_with_wildcard_columns() {
     let json = r#"{
         "query_type": "traversal",
-        "node": { "id": "u", "entity": "User", "node_ids": [1], "columns": "*" },
+        "nodes": [{ "id": "u", "entity": "User", "node_ids": [1], "columns": "*" }],
         "limit": 10
     }"#;
 
@@ -413,8 +436,8 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
             {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": [{"kind": "node", "node": "u"}],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "limit": 10
     }"#;
 
@@ -489,7 +512,7 @@ fn multi_hop_traversal_generates_union_subquery() {
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 3}],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 3]}],
         "limit": 25
     }"#;
 
@@ -502,14 +525,14 @@ fn multi_hop_traversal_generates_union_subquery() {
 }
 
 #[test]
-fn multi_hop_with_min_hops_filter() {
+fn multi_hop_with_floor_filter() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 2, "max_hops": 3}],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [2, 3]}],
         "limit": 10
     }"#;
 
@@ -527,7 +550,7 @@ fn single_hop_does_not_generate_recursive_cte() {
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "n", "entity": "Note", "columns": ["confidential"]}
         ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "min_hops": 1, "max_hops": 1}],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "hops": [1, 1]}],
         "limit": 25
     }"#;
 
@@ -548,9 +571,9 @@ fn multi_hop_aggregation() {
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
-        "group_by": [{"kind": "node", "node": "u"}],
-        "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "hops": [1, 2]}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "p", "as": "project_count"}],
         "limit": 10
     }"#;
 
@@ -566,7 +589,7 @@ fn multi_hop_aggregation() {
 fn definition_uses_project_id_for_redaction() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "d", "entity": "Definition", "node_ids": [1], "columns": ["name", "project_id"]},
+        "nodes": [{"id": "d", "entity": "Definition", "node_ids": [1], "columns": ["name", "project_id"]}],
         "limit": 10
     }"#;
 
@@ -585,7 +608,7 @@ fn definition_uses_project_id_for_redaction() {
 fn project_still_uses_id_for_redaction() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
         "limit": 10
     }"#;
 
@@ -602,99 +625,77 @@ fn project_still_uses_id_for_redaction() {
 #[test]
 fn cursor_pagination_validation() {
     use compiler::QueryError;
+    use compiler::passes::cursor::{canonical_hash, encode};
 
     let ontology = embedded_ontology();
     let ctx = test_ctx();
 
-    let result = compile(
-        r#"{
+    let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-        "limit": 100,
-        "cursor": {"offset": 0, "page_size": 20}
-    }"#,
-        &ontology,
-        &ctx,
-    );
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
+        "cursor": {"page_size": 20}
+    }"#;
+    let result = compile(json, &ontology, &ctx);
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
-
-    let result = result.unwrap();
-    let rendered = result.base.render();
-    assert!(rendered.contains("LIMIT 100"));
-
+    let rendered = result.unwrap().base.render();
     assert!(
-        result.base.sql.contains("use_query_cache = 1"),
-        "cursor query should enable CH query cache: {}",
-        result.base.sql
+        rendered.contains("LIMIT 21"),
+        "cursor fetches page_size + 1 probe row: {rendered}"
+    );
+    assert!(
+        rendered.contains("_gkg_cursor_0"),
+        "cursor queries select hidden key readback columns: {rendered}"
     );
 
-    let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 10,
-        "cursor": {"offset": 5, "page_size": 10}
-    }"#,
-        &ontology,
-        &ctx,
-    )
-    .unwrap_err();
+    let hash = canonical_hash(&serde_json::from_str(json).unwrap());
+    let paged: serde_json::Value = {
+        let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
+        v["cursor"]["after"] = encode(hash, &[Some("7".into())]).into();
+        v
+    };
+    let result = compile(&paged.to_string(), &ontology, &ctx);
+    assert!(
+        result.is_ok(),
+        "after token from same query should compile: {result:?}"
+    );
+    let rendered = result.unwrap().base.render();
+    assert!(
+        rendered.contains("u.id >"),
+        "after token should lower to a seek predicate: {rendered}"
+    );
+
+    let mut foreign: serde_json::Value = serde_json::from_str(json).unwrap();
+    foreign["cursor"]["after"] = encode(hash ^ 1, &[Some("7".into())]).into();
+    let err = compile(&foreign.to_string(), &ontology, &ctx).unwrap_err();
     assert!(
         matches!(err, QueryError::PaginationError(_)),
-        "offset + page_size > limit should be a pagination error, got: {err}"
+        "token minted for a different query should be a pagination error, got: {err}"
     );
 
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "columns": ["name"]}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
-        "limit": 50,
-        "cursor": {"offset": 10, "page_size": 20}
-    }"#,
-        &ontology,
-        &ctx,
-    );
+    let mut garbled: serde_json::Value = serde_json::from_str(json).unwrap();
+    garbled["cursor"]["after"] = "not-base64!".into();
+    let err = compile(&garbled.to_string(), &ontology, &ctx).unwrap_err();
     assert!(
-        result.is_ok(),
-        "cursor on traversal should compile: {result:?}"
+        matches!(err, QueryError::PaginationError(_)),
+        "malformed token should be a pagination error, got: {err}"
     );
-
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 10,
-        "cursor": {"offset": 5, "page_size": 5}
-    }"#,
-        &ontology,
-        &ctx,
-    );
-    assert!(
-        result.is_ok(),
-        "offset + page_size == limit should be valid"
-    );
-
-    let result = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 30,
-        "cursor": {"offset": 0, "page_size": 30}
-    }"#,
-        &ontology,
-        &ctx,
-    );
-    assert!(result.is_ok(), "page_size == limit should be valid");
 
     let err = compile(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "cursor": {"offset": 0}
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "cursor": {"offset": 0, "page_size": 10}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(err.is_err(), "offset cursors are gone in schema v3");
+
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "cursor": {}
     }"#,
         &ontology,
         &ctx,
@@ -704,41 +705,29 @@ fn cursor_pagination_validation() {
     let err = compile(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "cursor": {"page_size": 10}
-    }"#,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "cursor missing offset should fail");
-
-    let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "cursor": {}
-    }"#,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "empty cursor should fail");
-
-    let err = compile(
-        r#"{
-        "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "limit": 10,
-        "cursor": {"offset": 0, "page_size": 0}
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "cursor": {"page_size": 0}
     }"#,
         &ontology,
         &ctx,
     );
     assert!(err.is_err(), "page_size = 0 should fail");
 
+    let err = compile(
+        r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "cursor": {"page_size": 1001}
+    }"#,
+        &ontology,
+        &ctx,
+    );
+    assert!(err.is_err(), "page_size above 1000 should fail");
+
     let result = compile(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]}
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]
     }"#,
         &ontology,
         &ctx,
@@ -746,10 +735,13 @@ fn cursor_pagination_validation() {
     assert!(result.is_ok(), "no cursor should compile fine");
     let result = result.unwrap();
     let rendered = result.base.render();
-    assert!(rendered.contains("LIMIT 30"), "default limit should be 30");
+    assert!(
+        rendered.contains("LIMIT 31"),
+        "default limit 30 fetches one probe row: {rendered}"
+    );
     assert!(
         !result.base.sql.contains("use_query_cache"),
-        "non-cursor query should not enable query cache: {}",
+        "queries no longer force the query cache: {}",
         result.base.sql
     );
 }
@@ -789,9 +781,9 @@ fn render_in_filter_inlines_array() {
     let rendered = compile(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "filters": {
-            "user_type": {"op": "in", "value": ["project_bot", "service_account"]}
-        }},
+        "nodes": [{"id": "u", "entity": "User", "filters": {
+            "user_type": {"in": ["project_bot", "service_account"]}
+        }}],
         "limit": 10
     }"#,
         &embedded_ontology(),
@@ -813,7 +805,7 @@ fn render_node_ids_inlines_array() {
     let rendered = compile(
         r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [100, 200, 300]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [100, 200, 300]}],
         "limit": 10
     }"#,
         &embedded_ontology(),
@@ -1091,8 +1083,8 @@ fn like_rejects_short_contains_pattern() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "contains", "value": "ab"}}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"username": {"contains": "ab"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1111,8 +1103,8 @@ fn like_rejects_single_char_starts_with() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "starts_with", "value": "a"}}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"username": {"starts_with": "a"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1131,8 +1123,8 @@ fn like_rejects_empty_ends_with() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"username": {"op": "ends_with", "value": ""}}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"username": {"ends_with": ""}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1151,8 +1143,8 @@ fn like_rejects_contains_on_email() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"email": {"op": "contains", "value": "example"}}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": {"contains": "example"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1170,8 +1162,8 @@ fn like_rejects_starts_with_on_email() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"email": {"op": "starts_with", "value": "alice"}}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": {"starts_with": "alice"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1193,8 +1185,8 @@ fn like_equality_on_email_compiles_for_admin() {
         compile(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"email": "alice@example.com"}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": "alice@example.com"}}],
             "limit": 10
         }"#,
             &embedded_ontology(),
@@ -1209,8 +1201,8 @@ fn equality_on_email_rejected_for_non_admin() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
-                     "filters": {"email": "alice@example.com"}},
+            "nodes": [{"id": "u", "entity": "User",
+                     "filters": {"email": "alice@example.com"}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1229,8 +1221,8 @@ fn filterable_allows_traversal_path_starts_with_inside_scope() {
     compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/"}}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"starts_with": "1/100/"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1244,8 +1236,8 @@ fn filterable_allows_traversal_path_root_starts_with_inside_scope() {
     compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1259,8 +1251,8 @@ fn filterable_allows_traversal_path_equality_inside_scope() {
     compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": "1/100/1000/"}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": "1/100/1000/"}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1274,8 +1266,8 @@ fn filterable_rejects_traversal_path_outside_scope() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest",
-                     "filters": {"traversal_path": "2/"}},
+            "nodes": [{"id": "mr", "entity": "MergeRequest",
+                     "filters": {"traversal_path": "2/"}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1293,8 +1285,8 @@ fn filterable_rejects_traversal_path_above_scope() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": "1/"}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": "1/"}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1312,8 +1304,8 @@ fn filterable_rejects_traversal_path_without_trailing_slash() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
+            "nodes": [{"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"starts_with": "1/100"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1331,8 +1323,8 @@ fn filterable_rejects_traversal_path_contains_operator() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "contains", "value": "100"}}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"contains": "100"}}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1350,8 +1342,8 @@ fn filterable_rejects_traversal_path_below_entity_role_floor() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "v", "entity": "Vulnerability",
-                     "filters": {"traversal_path": "1/100/1000/"}},
+            "nodes": [{"id": "v", "entity": "Vulnerability",
+                     "filters": {"traversal_path": "1/100/1000/"}}],
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1371,9 +1363,9 @@ fn filterable_allows_traversal_path_in_columns() {
         compile(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "g", "entity": "Group",
+            "nodes": [{"id": "g", "entity": "Group",
                      "columns": ["name", "traversal_path"],
-                     "node_ids": [100]},
+                     "node_ids": [100]}],
             "limit": 10
         }"#,
             &embedded_ontology(),
@@ -1392,8 +1384,8 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
-                   "filters": {"project_id": {"op": "eq", "value": 278964}}}],
-        "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
+                   "filters": {"project_id": {"eq": 278964}}}],
+        "aggregations": [{"count": "d", "as": "total"}]
     }"#;
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
@@ -1474,8 +1466,8 @@ fn aggregation_count_in_clause_pushes_project_id() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
-                   "filters": {"project_id": {"op": "in", "value": [69095239, 278964, 74646916]}}}],
-        "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
+                   "filters": {"project_id": {"in": [69095239, 278964, 74646916]}}}],
+        "aggregations": [{"count": "d", "as": "total"}]
     }"#;
     let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
@@ -1538,8 +1530,8 @@ fn calls_aggregation_compiles() {
             {"id": "callee", "entity": "Definition"}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "group_by": [{"kind": "node", "node": "callee"}],
-        "aggregations": [{"function": "count", "target": "caller", "alias": "callers"}],
+        "group_by": ["callee"],
+        "aggregations": [{"count": "caller", "as": "callers"}],
         "limit": 1
     }"#;
 

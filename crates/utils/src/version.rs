@@ -4,9 +4,7 @@ use std::sync::OnceLock;
 /// Falls back to `0.0.0-dev` when git metadata is unavailable.
 const BUILD_VERSION: &str = env!("GKG_BUILD_VERSION");
 
-/// Returns the resolved server version.
-///
-/// Priority (highest → lowest):
+/// Resolved server version, highest priority first:
 /// 1. `GKG_VERSION` env var (set at runtime in container deployments)
 /// 2. `GKG_BUILD_VERSION` (injected at compile time by `build.rs`)
 pub fn get() -> &'static str {

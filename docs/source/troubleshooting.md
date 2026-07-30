@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Troubleshoot common errors in Orbit Local and Orbit Remote.
-title: Troubleshoot Orbit
+description: Troubleshoot common errors in GitLab Orbit Local and GitLab Orbit Remote.
+title: Troubleshoot GitLab Orbit
 ---
 
 {{< details >}}
@@ -21,11 +21,11 @@ title: Troubleshoot Orbit
 {{< /history >}}
 
 Use this page to troubleshoot errors you might encounter with
-[Orbit Local](local/_index.md) or [Orbit Remote](remote/_index.md).
+[GitLab Orbit Local](local/_index.md) or [GitLab Orbit Remote](remote/_index.md).
 
-## Orbit Local
+## GitLab Orbit Local
 
-Orbit Local errors occur when running the `orbit` binary directly or through
+GitLab Orbit Local errors occur when running the `orbit` binary directly or through
 `glab orbit local`.
 
 ### `no local graph found`
@@ -37,7 +37,7 @@ Error: no local graph found at ~/.orbit/graph.duckdb. Run `orbit index` first.
 ```
 
 **Cause:** The repository has not been indexed yet, or the `--db` path you
-specified does not exist. On older versions of Orbit Local, this error was
+specified does not exist. On older versions of GitLab Orbit Local, this error was
 reported as `Table 'Definition' does not exist`.
 
 **Resolution:** Index the repository first:
@@ -52,7 +52,7 @@ glab orbit local index /path/to/your/repo
 containing `Could not set lock on file`.
 
 **Cause:** Another `orbit` process is already running and holds the DuckDB
-write lock. Orbit retries automatically with exponential backoff, but fails if
+write lock. GitLab Orbit retries automatically with exponential backoff, but fails if
 the lock is not released within the retry window.
 
 **Resolution:** Wait for the other process to finish, or stop it:
@@ -81,14 +81,14 @@ error: unrecognized subcommand 'mcp'
 ```
 
 **Cause:** The `orbit mcp serve` subcommand is not yet implemented. MCP support
-for Orbit Local is on the roadmap but is not available in the current release.
+for GitLab Orbit Local is on the roadmap but is not available in the current release.
 
 **Resolution:** Use one of the [supported access methods](local/_index.md).
 
-## Orbit Remote
+## GitLab Orbit Remote
 
-Orbit Remote errors occur when running `glab orbit remote` commands.
-Orbit Remote requires GitLab Premium or Ultimate and the `knowledge_graph`
+GitLab Orbit Remote errors occur when running `glab orbit remote` commands.
+GitLab Orbit Remote requires GitLab Premium or Ultimate and the `knowledge_graph`
 feature flag to be enabled on your instance.
 
 ### Exit code 2
@@ -115,7 +115,7 @@ glab auth login
 
 ### `insufficient_scope` on the MCP endpoint
 
-**Symptoms:** Connecting to the Orbit MCP endpoint fails with
+**Symptoms:** Connecting to the GitLab Orbit MCP endpoint fails with
 `insufficient_scope`.
 
 **Cause:** The personal access token or OAuth token does not include the

@@ -20,7 +20,7 @@ Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Cros
 Project Scoped Traversal Returns Its Own Issue And A Cross Namespace Related Issue
     [Tags]    cross-namespace
     ${rel}=    Create Dictionary    id=rel    entity=WorkItem    columns=${{["id", "title"]}}
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${proj}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${wi}=    Create Dictionary    id=wi    entity=WorkItem    columns=${{["id"]}}
@@ -33,30 +33,30 @@ Project Scoped Traversal Returns Its Own Issue And A Cross Namespace Related Iss
 Project Scoped Neighbors Returns Cross Namespace Related Issue
     [Tags]    cross-namespace
     ${center}=    Create Dictionary    id=wi    entity=WorkItem    node_ids=${{[int($XNS_ISSUE_ID_A)]}}
-    ${dir}=    Create Dictionary    node=wi    direction=both
-    ${query}=    Create Dictionary    query_type=neighbors    node=${center}    neighbors=${dir}    limit=${100}
+    ${dir}=    Create Dictionary    direction=both
+    ${query}=    Create Dictionary    query_type=neighbors    nodes=${{[${center}]}}    neighbors=${dir}    limit=${100}
     Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
 
 Multi Hop Neighbors Reach Cross Namespace Issue At Three Hops
     [Documentation]    The neighbors query type is 1-hop by schema, so a 3-hop neighborhood is
-    ...                expressed as a variable-length (max_hops=3) RELATED_TO traversal. issue_c is
+    ...                expressed as a variable-length (hops 1..3) RELATED_TO traversal. issue_c is
     ...                reachable from issue_a only via a 3-hop chain whose last hop crosses into a
     ...                different top-level namespace; the project-A tight prefix must not prune it.
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${a}=    Create Dictionary    id=a    entity=WorkItem
     ${b}=    Create Dictionary    id=b    entity=WorkItem    columns=${{["id"]}}
     ${r1}=    Create Dictionary    type=IN_PROJECT    from=a    to=p
-    ${r2}=    Create Dictionary    type=RELATED_TO    from=a    to=b    max_hops=${3}
+    ${r2}=    Create Dictionary    type=RELATED_TO    from=a    to=b    hops=${{[1, 3]}}
     ${query}=    Create Dictionary    query_type=traversal
     ...    nodes=${{[$p, $a, $b]}}    relationships=${{[$r1, $r2]}}    limit=${100}
     Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_C}
 
 Project Scoped Multi Hop Traversal Reaches Cross Namespace Project
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${wi}=    Create Dictionary    id=wi    entity=WorkItem
@@ -71,7 +71,7 @@ Project Scoped Multi Hop Traversal Reaches Cross Namespace Project
 
 Project Scoped Multi Hop Aggregation Counts Cross Namespace Project
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${wi}=    Create Dictionary    id=wi    entity=WorkItem
@@ -80,7 +80,7 @@ Project Scoped Multi Hop Aggregation Counts Cross Namespace Project
     ${r1}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
     ${r2}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
     ${r3}=    Create Dictionary    type=IN_PROJECT    from=rel    to=p2
-    ${agg}=    Create Dictionary    function=count    target=p2    alias=xns_project_count
+    ${agg}=    Create Dictionary    count=p2    as=xns_project_count
     ${query}=    Create Dictionary    query_type=aggregation
     ...    nodes=${{[$p, $wi, $rel, $p2]}}    relationships=${{[$r1, $r2, $r3]}}    aggregations=${{[$agg]}}
     Wait Until Aggregation At Least    ${query}    xns_project_count    1
@@ -95,7 +95,7 @@ Path Finding Within Scoped Project Returns The Path
 
 Group Scoped Multi Hop Traversal Returns Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_GROUP_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
     ${p}=    Create Dictionary    id=p    entity=Project
@@ -110,7 +110,7 @@ Group Scoped Multi Hop Traversal Returns Cross Namespace Related Issue
 
 Group Scoped Multi Hop Aggregation Counts Cross Namespace Related Issue
     [Tags]    cross-namespace
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_GROUP_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
     ${p}=    Create Dictionary    id=p    entity=Project
@@ -119,7 +119,7 @@ Group Scoped Multi Hop Aggregation Counts Cross Namespace Related Issue
     ${r1}=    Create Dictionary    type=CONTAINS    from=g    to=p
     ${r2}=    Create Dictionary    type=IN_PROJECT    from=wi    to=p
     ${r3}=    Create Dictionary    type=RELATED_TO    from=wi    to=rel
-    ${agg}=    Create Dictionary    function=count    target=rel    alias=related_count
+    ${agg}=    Create Dictionary    count=rel    as=related_count
     ${query}=    Create Dictionary    query_type=aggregation
     ...    nodes=${{[$g, $p, $wi, $rel]}}    relationships=${{[$r1, $r2, $r3]}}    aggregations=${{[$agg]}}
     Wait Until Aggregation At Least    ${query}    related_count    1
@@ -127,7 +127,7 @@ Group Scoped Multi Hop Aggregation Counts Cross Namespace Related Issue
 Project Scoped Traversal Returns Cross Namespace Closed Issue
     [Tags]    cross-namespace
     [Setup]    Seed Cross Project Closing MR
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_PROJECT_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_PROJECT_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${p}=    Create Dictionary    id=p    entity=Project    filters=${filters}
     ${mr}=    Create Dictionary    id=mr    entity=MergeRequest
@@ -141,7 +141,7 @@ Project Scoped Traversal Returns Cross Namespace Closed Issue
 Group Scoped Multi Hop Traversal Returns Cross Namespace Closed Issue
     [Tags]    cross-namespace
     [Setup]    Seed Cross Project Closing MR
-    ${scope}=    Create Dictionary    op=eq    value=${{int($XNS_GROUP_ID_A)}}
+    ${scope}=    Create Dictionary    eq=${{int($XNS_GROUP_ID_A)}}
     ${filters}=    Create Dictionary    id=${scope}
     ${g}=    Create Dictionary    id=g    entity=Group    filters=${filters}
     ${p}=    Create Dictionary    id=p    entity=Project
@@ -174,6 +174,11 @@ Seed Cross Namespace Fixture
     Link Issues    ${project_a["id"]}    ${issue_a["iid"]}    ${project_a["id"]}    ${issue_m1["iid"]}
     Link Issues    ${project_a["id"]}    ${issue_m1["iid"]}    ${project_a["id"]}    ${issue_m2["iid"]}
     Link Issues    ${project_a["id"]}    ${issue_m2["iid"]}    ${project_b["id"]}    ${issue_c["iid"]}
+    # The CLOSES edge (slowest path) indexes while tests 1-7 run; merging
+    # closes issue B, which is safe — tests 1-7 assert ids, never state.
+    ${mr_a}=    Open Closing Merge Request    ${project_a["id"]}
+    ...    ${project_b["path_with_namespace"]}    ${issue_b["iid"]}
+    Set Suite Variable    ${XNS_MR_ID_A}    ${mr_a["id"]}
     Set Suite Variable    ${XNS_GROUP_ID_A}    ${group_a["id"]}
     Set Suite Variable    ${XNS_PROJECT_ID_A}    ${project_a["id"]}
     Set Suite Variable    ${XNS_PROJECT_ID_B}    ${project_b["id"]}
@@ -199,16 +204,9 @@ Seed Cross Namespace Fixture
     ...    WorkItem    ${XNS_ISSUE_ID_C}
 
 Seed Cross Project Closing MR
-    [Documentation]    Idempotent: opens the cross-project closing MR once and waits for the
-    ...                MergeRequest CLOSES WorkItem edge. Shared by the project- and group-scoped
-    ...                closing test cases.
-    ${existing}=    Get Variable Value    ${XNS_MR_ID_A}    ${EMPTY}
-    Return From Keyword If    "${existing}" != "${EMPTY}"
-    ${mr_a}=    Open Closing Merge Request    ${XNS_PROJECT_ID_A}
-    ...    ${XNS_PROJECT_B_FULL_PATH}    ${XNS_ISSUE_B_IID}
-    Set Suite Variable    ${XNS_MR_ID_A}    ${mr_a["id"]}
-    # The CLOSES edge is the slowest path (cache_merge_request_closes_issues! -> CDC ->
-    # namespaced re-index), so give it its own full budget rather than the setup remainder.
+    [Documentation]    The MR itself is opened by Seed Cross Namespace Fixture; this setup only
+    ...                waits for the MergeRequest CLOSES WorkItem edge, which has usually caught
+    ...                up while tests 1-7 ran. Shared by both closing test cases.
     Start Indexing Budget    400
     Wait For Edge Indexed Within Budget    MergeRequest    ${XNS_MR_ID_A}    CLOSES
     ...    WorkItem    ${XNS_ISSUE_ID_B}

@@ -1,7 +1,7 @@
 # Orbit remote repo map reference
 
 `remote_repo_map.py` is the remote counterpart to the local
-[`local_repo_map.py`](local_repo_map.md) helper. It maps source-code structure
+[`glab orbit local repo-map`](local_repo_map.md) command. It maps source-code structure
 for any project indexed in Orbit Remote by shelling out to
 `glab orbit remote query`, so it does not require a local checkout or an Orbit
 Local index.
@@ -23,7 +23,7 @@ Use the remote repo map when you need to:
 - Map types and callables under a path prefix with `api`.
 - Find callers of a method or function with `callers`.
 
-Prefer the local [`local_repo_map.py`](local_repo_map.md) helper when you are already in a
+Prefer the local [`glab orbit local repo-map`](local_repo_map.md) command when you are already in a
 checkout and need branch-local or unmerged code. Prefer paste-ready raw Orbit
 Remote JSON from [`recipes.md`](recipes.md) when the question is a single known
 entity lookup or a cross-domain SDLC query.
@@ -37,16 +37,8 @@ entity lookup or a cross-domain SDLC query.
 
 ## Invocation
 
-From the Orbit skill root (the directory containing `SKILL.md`), the script is
-at:
-
-```text
-./scripts/remote_repo_map.py
-```
-
-Resolve that path relative to the skill root, not the user's current repository.
-When running from another directory, either `cd` to the skill root first or use
-the absolute path to the loaded skill directory.
+The script is at `./scripts/remote_repo_map.py` relative to the Orbit skill
+root.
 
 The default target is `gitlab-org/gitlab` (`project_id = 278964`) on `master`:
 
@@ -74,7 +66,7 @@ python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api cra
 
 Walks the `EXTENDS` graph from a base type down to descendants. Depth is capped
 at 3 because Orbit Remote caps traversal depth server-side. The helper issues a
-single server-side multi-hop traversal (`min_hops`/`max_hops`) regardless of
+single server-side multi-hop traversal (a `hops` range) regardless of
 depth, and prints the definition type, FQN, and `file_path:line` for each
 descendant, ordered by file path. The result set is the same regardless of how
 the depth is reached, so results are not labelled per hop (the Orbit response

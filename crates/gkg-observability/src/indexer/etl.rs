@@ -87,7 +87,7 @@ pub const DESTINATION_ROWS_WRITTEN: MetricSpec = MetricSpec::counter(
 // in the current Prometheus exposure.
 pub const DESTINATION_BYTES_WRITTEN: MetricSpec = MetricSpec::counter(
     "gkg.etl.destination.written",
-    "Total bytes written to ClickHouse per table.",
+    "Total logical bytes written to ClickHouse per table (gkg_utils::arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
     Some("By"),
     &[labels::TABLE],
     DOMAIN,
@@ -96,6 +96,14 @@ pub const DESTINATION_BYTES_WRITTEN: MetricSpec = MetricSpec::counter(
 pub const DESTINATION_WRITE_ERRORS: MetricSpec = MetricSpec::counter(
     "gkg.etl.destination.write.errors",
     "Total failed writes to ClickHouse per table.",
+    None,
+    &[labels::TABLE],
+    DOMAIN,
+);
+
+pub const DESTINATION_UNMETERABLE_BATCHES: MetricSpec = MetricSpec::counter(
+    "gkg.etl.destination.unmeterable.batches",
+    "Batches whose Arrow type had no logical-byte-size rule; counted as 0 bytes and written anyway. Nonzero means the counting rules drifted from a shipped column type.",
     None,
     &[labels::TABLE],
     DOMAIN,
@@ -120,5 +128,6 @@ pub const CATALOG: &[&MetricSpec] = &[
     &DESTINATION_ROWS_WRITTEN,
     &DESTINATION_BYTES_WRITTEN,
     &DESTINATION_WRITE_ERRORS,
+    &DESTINATION_UNMETERABLE_BATCHES,
     &HANDLER_ERRORS,
 ];

@@ -133,7 +133,7 @@ async fn count_opened_mrs_in_project(ctx: &TestContext) {
         r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}, "columns": ["state"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}, "columns": ["state"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -155,7 +155,7 @@ async fn count_failed_pipelines_in_project(ctx: &TestContext) {
         r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "eq", "value": "failed"}}, "columns": ["status"]},
+            {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"eq": "failed"}}, "columns": ["status"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
@@ -178,7 +178,7 @@ async fn traversal_opened_mrs_authored_by_user(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}}
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "limit": 10
@@ -200,8 +200,8 @@ async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "v", "entity": "Vulnerability", "filters": {
-                "state": {"op": "eq", "value": "detected"},
-                "severity": {"op": "eq", "value": "critical"}
+                "state": {"eq": "detected"},
+                "severity": {"eq": "critical"}
             }, "columns": ["state", "severity"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
@@ -230,8 +230,8 @@ async fn work_item_type_filter(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "wi", "entity": "WorkItem", "filters": {
-                "state": {"op": "eq", "value": "opened"},
-                "work_item_type": {"op": "eq", "value": "issue"}
+                "state": {"eq": "opened"},
+                "work_item_type": {"eq": "issue"}
             }, "columns": ["state", "work_item_type"]},
             {"id": "g", "entity": "Group", "node_ids": [10]}
         ],
@@ -257,7 +257,7 @@ async fn single_severity_filter(ctx: &TestContext) {
         r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"op": "eq", "value": "critical"}}, "columns": ["severity"]},
+            {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"eq": "critical"}}, "columns": ["severity"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -280,7 +280,7 @@ async fn merged_mr_count_is_one(ctx: &TestContext) {
         r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "merged"}}, "columns": ["state"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "merged"}}, "columns": ["state"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -302,7 +302,7 @@ async fn no_match_returns_zero(ctx: &TestContext) {
         r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "draft"}}, "columns": ["state"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "draft"}}, "columns": ["state"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],

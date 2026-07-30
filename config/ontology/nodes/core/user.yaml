@@ -7,6 +7,7 @@ description: A GitLab user account
 label: username
 destination_table: gl_user
 default_columns: [id, username, name, state]
+enrichment_props: [state, private_profile, is_admin, is_auditor, is_external, user_type]
 sort_key: [id]
 
 style:
@@ -165,10 +166,15 @@ properties:
       16: duo_code_review_bot
       17: import_user
 
-etl:
-  type: table
-  source: siphon_users
-
+pipelines:
+  - name: User
+    extract:
+      type: clickhouse
+      tables: [siphon_users]
+      order_by: [id]
+      query: generated
+    transform:
+      type: datafusion
 storage:
   primary_key: [id]
   settings:

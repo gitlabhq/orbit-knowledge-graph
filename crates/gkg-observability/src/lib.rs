@@ -41,6 +41,7 @@ pub fn catalog() -> Vec<&'static MetricSpec> {
     v.extend(indexer::sdlc::CATALOG);
     v.extend(indexer::deletion::CATALOG);
     v.extend(indexer::migration::CATALOG);
+    v.extend(indexer::nats::CATALOG);
     v.extend(query::pipeline::CATALOG);
     v.extend(query::engine::CATALOG);
     v.extend(server::content::CATALOG);

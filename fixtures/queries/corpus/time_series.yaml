@@ -22,36 +22,18 @@
           "entity": "Job",
           "filters": {
             "status": "failed",
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-03-01T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "finished_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "month"
-          },
-          "alias": "month"
-        }
-      ],
+      "group_by": [{"key": "j.finished_at", "truncate": "month"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "failure_count"
+          "count": "j",
+          "as": "failure_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "month",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "j_finished_at_month",
       "limit": 12
     }
 
@@ -68,36 +50,18 @@
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "merged_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "quarter"
-          },
-          "alias": "quarter"
-        }
-      ],
+      "group_by": [{"key": "mr.merged_at", "truncate": "quarter"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_count"
+          "count": "mr",
+          "as": "merge_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "quarter",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "mr_merged_at_quarter",
       "limit": 12
     }
 
@@ -113,36 +77,18 @@
           "id": "p",
           "entity": "Pipeline",
           "filters": {
-            "started_at": {
-              "op": "gte",
-              "value": "2024-01-01T00:00:00Z"
-            }
+            "started_at": {"gte": "2024-01-01T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "started_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "year"
-          },
-          "alias": "year"
-        }
-      ],
+      "group_by": [{"key": "p.started_at", "truncate": "year"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "pipeline_count"
+          "count": "p",
+          "as": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "year",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "p_started_at_year",
       "limit": 10
     }
 
@@ -158,36 +104,18 @@
           "id": "j",
           "entity": "Job",
           "filters": {
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-04-15T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-04-15T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "finished_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "week"
-          },
-          "alias": "week"
-        }
-      ],
+      "group_by": [{"key": "j.finished_at", "truncate": "week"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "week",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "j_finished_at_week",
       "limit": 10
     }
 
@@ -204,36 +132,18 @@
           "entity": "Job",
           "filters": {
             "status": "failed",
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-04-25T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-04-25T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "finished_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "day"
-          },
-          "alias": "day"
-        }
-      ],
+      "group_by": [{"key": "j.finished_at", "truncate": "day"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "failure_count"
+          "count": "j",
+          "as": "failure_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "day",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "j_finished_at_day",
       "limit": 30
     }
 
@@ -249,36 +159,18 @@
           "id": "p",
           "entity": "Pipeline",
           "filters": {
-            "started_at": {
-              "op": "gte",
-              "value": "2026-05-10T00:00:00Z"
-            }
+            "started_at": {"gte": "2026-05-10T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "started_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "hour"
-          },
-          "alias": "hour"
-        }
-      ],
+      "group_by": [{"key": "p.started_at", "truncate": "hour"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "pipeline_count"
+          "count": "p",
+          "as": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "hour",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "p_started_at_hour",
       "limit": 50
     }
 
@@ -296,29 +188,14 @@
           "node_ids": "$sample:10"
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "finished_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "minute"
-          },
-          "alias": "minute"
-        }
-      ],
+      "group_by": [{"key": "j.finished_at", "truncate": "minute"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "minute",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "j_finished_at_minute",
       "limit": 50
     }
 
@@ -342,10 +219,7 @@
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         }
       ],
@@ -357,32 +231,16 @@
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "merged_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "month"
-          },
-          "alias": "month"
-        }
+        "p",
+        {"key": "mr.merged_at", "truncate": "month"}
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merge_count"
+          "count": "mr",
+          "as": "merge_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merge_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merge_count",
       "limit": 30
     }
 
@@ -398,41 +256,21 @@
           "id": "j",
           "entity": "Job",
           "filters": {
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-03-01T00:00:00Z"}
           }
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "status"
-        },
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "finished_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "month"
-          },
-          "alias": "month"
-        }
+        "j.status",
+        {"key": "j.finished_at", "truncate": "month"}
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 30
     }
 
@@ -449,36 +287,18 @@
           "entity": "WorkItem",
           "filters": {
             "state": "opened",
-            "created_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "wi",
-          "property": "created_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "month"
-          },
-          "alias": "month"
-        }
-      ],
+      "group_by": [{"key": "wi.created_at", "truncate": "month"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "opened_count"
+          "count": "wi",
+          "as": "opened_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "month",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "wi_created_at_month",
       "limit": 12
     }
 
@@ -494,42 +314,22 @@
           "id": "p",
           "entity": "Pipeline",
           "filters": {
-            "started_at": {
-              "op": "gte",
-              "value": "2026-05-01T00:00:00Z"
-            }
+            "started_at": {"gte": "2026-05-01T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "started_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "day"
-          },
-          "alias": "day"
-        }
-      ],
+      "group_by": [{"key": "p.started_at", "truncate": "day"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "pipeline_count"
+          "count": "p",
+          "as": "pipeline_count"
         },
         {
-          "function": "sum",
-          "target": "p",
-          "property": "duration",
-          "alias": "total_duration_secs"
+          "sum": "p.duration",
+          "as": "total_duration_secs"
         }
       ],
-      "aggregation_sort": {
-        "column": "day",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "p_started_at_day",
       "limit": 30
     }
 
@@ -546,35 +346,18 @@
           "entity": "Job",
           "filters": {
             "status": "failed",
-            "finished_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            }
+            "finished_at": {"gte": "2026-03-01T00:00:00Z"}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "j",
-          "property": "finished_at",
-          "transform": {
-            "kind": "truncate",
-            "unit": "month"
-          }
-        }
-      ],
+      "group_by": [{"key": "j.finished_at", "truncate": "month"}],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "n"
+          "count": "j",
+          "as": "n"
         }
       ],
-      "aggregation_sort": {
-        "column": "finished_at_month",
-        "direction": "ASC"
-      },
+      "aggregation_sort": "j_finished_at_month",
       "limit": 12
     }
 

@@ -24,7 +24,7 @@ const MR_DIFF_FILE_CHAIN: &str = r#"{
     "query_type": "traversal",
     "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-         "filters": {"project_id": {"op": "eq", "value": 1000}}},
+         "filters": {"project_id": {"eq": 1000}}},
         {"id": "diff", "entity": "MergeRequestDiff"},
         {"id": "df", "entity": "MergeRequestDiffFile"}
     ],
@@ -106,7 +106,7 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
             "query_type": "traversal",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-                 "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                 "filters": {"project_id": {"eq": 1000}}},
                 {"id": "wi", "entity": "WorkItem"}
             ],
             "relationships": [{"type": "CLOSES", "from": "mr", "to": "wi"}],
@@ -144,7 +144,7 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
             "query_type": "traversal",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-                 "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                 "filters": {"project_id": {"eq": 1000}}},
                 {"id": "wi", "entity": "WorkItem"}
             ],
             "relationships": [{"type": "CLOSES", "from": "mr", "to": "wi"}],
@@ -212,8 +212,8 @@ pub(super) async fn scope_implied_container_elision_star_counts_authored_mrs(ctx
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "AUTHORED", "from": "u", "to": "mr"}
             ],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "c"}],
             "limit": 10
         }"#,
         &{
@@ -285,8 +285,8 @@ pub(super) async fn scope_implied_container_elision_chain_counts_diff_files(ctx:
                 {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
                 {"type": "HAS_FILE", "from": "d", "to": "f"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "f", "alias": "c"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "f", "as": "c"}],
             "limit": 10
         }"#,
         &{

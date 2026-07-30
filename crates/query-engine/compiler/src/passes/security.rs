@@ -102,11 +102,43 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
 
     apply_security_to_from(&mut q.from, ctx, ontology)?;
 
+    if let Some(where_clause) = &mut q.where_clause {
+        apply_security_to_expr(where_clause, ctx, ontology)?;
+    }
+
     for arm in &mut q.union_all {
         apply_to_query(arm, ctx, ontology)?;
     }
 
     Ok(())
+}
+
+fn apply_security_to_expr(
+    expr: &mut Expr,
+    ctx: &SecurityContext,
+    ontology: &Ontology,
+) -> Result<()> {
+    match expr {
+        Expr::InSelect { query, .. } => apply_to_query(query, ctx, ontology),
+        Expr::BinaryOp { left, right, .. } => {
+            apply_security_to_expr(left, ctx, ontology)?;
+            apply_security_to_expr(right, ctx, ontology)
+        }
+        Expr::UnaryOp { expr, .. }
+        | Expr::Lambda { body: expr, .. }
+        | Expr::InSubquery { expr, .. } => apply_security_to_expr(expr, ctx, ontology),
+        Expr::FuncCall { args, .. } => {
+            for arg in args {
+                apply_security_to_expr(arg, ctx, ontology)?;
+            }
+            Ok(())
+        }
+        Expr::Column { .. }
+        | Expr::Identifier(_)
+        | Expr::Literal(_)
+        | Expr::Param { .. }
+        | Expr::Star => Ok(()),
+    }
 }
 
 fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
@@ -466,6 +498,55 @@ mod tests {
             | Expr::Param { .. }
             | Expr::Star => {}
         }
+    }
+
+    fn find_in_select_query(expr: &Expr) -> Option<&Query> {
+        match expr {
+            Expr::InSelect { query, .. } => Some(query),
+            Expr::BinaryOp { left, right, .. } => {
+                find_in_select_query(left).or_else(|| find_in_select_query(right))
+            }
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn in_select_subquery_in_where_receives_path_filter() {
+        let ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/200/".into()]).unwrap();
+        let ontology = Ontology::new().with_nodes(["Project"]);
+
+        let anchor = Query {
+            select: vec![SelectExpr::col("e0p", "source_id")],
+            from: TableRef::scan(EDGE_TABLE, "e0p"),
+            where_clause: Some(Expr::eq(
+                Expr::col("e0p", "relationship_kind"),
+                Expr::string("IN_PROJECT"),
+            )),
+            ..Default::default()
+        };
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::col("e0", "source_id")],
+            from: TableRef::scan(EDGE_TABLE, "e0"),
+            where_clause: Some(Expr::InSelect {
+                expr: Box::new(Expr::col("e0", "target_id")),
+                query: Box::new(anchor),
+            }),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let anchor = find_in_select_query(q.where_clause.as_ref().unwrap())
+            .expect("InSelect subquery should survive the security pass");
+        let paths = starts_with_paths_for_alias(anchor.where_clause.as_ref().unwrap(), "e0p");
+        assert!(
+            paths.contains(&"1/100/".to_string()) && paths.contains(&"1/200/".to_string()),
+            "anchor subquery must carry the caller's full path set, got {paths:?}"
+        );
     }
 
     // Paths tagged at Developer (30) still qualify because 30 >= the

@@ -20,11 +20,15 @@ pub mod constants;
 mod entities;
 pub mod errors;
 pub mod etl;
+pub mod etl_sql;
 pub mod graph;
 pub mod introspection;
 mod json_schema;
 mod loading;
+pub mod migrations;
+pub mod pipelines;
 pub mod query_dsl;
+pub mod sql_template;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
@@ -34,16 +38,16 @@ pub use constants::{
 pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
-    EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
-    EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
-    NodeEntity, NodeStorage, NodeStyle, PartitionConfig, PartitionStrategy, RedactionConfig,
-    RequiredRole, StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex,
-    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
-    VirtualSource,
+    EdgeColumn, EdgeEntity, EdgeTableStorage, EdgeVariantScope, EnumType, Field, FieldSelectivity,
+    FieldSource, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, PartitionConfig,
+    PartitionStrategy, RedactionConfig, RefreshableMaterializedViewDefinition, RequiredRole,
+    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
+    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
-    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, PathResolution,
-    ReindexSource,
+    ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
+    EdgeMapping, EtlScope, Extract, ExtractQuery, NodeRef, NodeRefKind, PathResolution, Pipeline,
+    ReindexSource, Transform,
 };
 pub use graph::{
     Adjacency, Dir, EdgeFn, EdgeMarks, EdgePred, EdgeTemplate, Hop, Mark, MarkedEdge, NodeMarks,
@@ -112,6 +116,20 @@ pub struct EdgeTableConfig {
     pub storage: EdgeTableStorage,
 }
 
+impl EdgeTableConfig {
+    #[must_use]
+    pub fn has_traversal_path(&self) -> bool {
+        self.storage
+            .columns
+            .iter()
+            .any(|column| column.name == TRAVERSAL_PATH_COLUMN)
+            || self
+                .columns
+                .iter()
+                .any(|column| column.name == TRAVERSAL_PATH_COLUMN)
+    }
+}
+
 /// A lazily-built memoized [`OntologyGraph`] that is transparent to `Clone` and
 /// `Eq`: cloning yields an empty cache (rebuilt on demand), and equality ignores
 /// the cache so it never affects `Ontology` comparison. Lets `Ontology` keep its
@@ -146,8 +164,11 @@ pub struct Ontology {
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
-    /// ETL configs for edges sourced from join tables (keyed by relationship kind).
-    pub(crate) edge_etl_configs: BTreeMap<String, Vec<EdgeSourceEtlConfig>>,
+    pub(crate) edge_pipelines: BTreeMap<String, Vec<Pipeline>>,
+    /// Reindex trigger tables per edge relationship kind, resolved from each
+    /// edge's `indexer` block. Parallels `edge_pipelines`; the pipeline model
+    /// itself carries no reindex information.
+    pub(crate) edge_reindex_sources: BTreeMap<String, Vec<ReindexSource>>,
     pub(crate) etl_settings: EtlSettings,
     pub(crate) internal_column_prefix: String,
     /// Local entity configs keyed by entity name. Each entry lists
@@ -163,6 +184,7 @@ pub struct Ontology {
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
     pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
+    pub(crate) refreshable_materialized_views: Vec<RefreshableMaterializedViewDefinition>,
     pub(crate) statistics: Option<StatisticsConfig>,
     pub(crate) partition: Option<PartitionConfig>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
@@ -177,8 +199,6 @@ impl Default for Ontology {
         Self::new()
     }
 }
-
-use errors::describe_valid_fields;
 
 impl Ontology {
     #[must_use]
@@ -206,7 +226,8 @@ impl Ontology {
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
             edge_descriptions: BTreeMap::new(),
-            edge_etl_configs: BTreeMap::new(),
+            edge_pipelines: BTreeMap::new(),
+            edge_reindex_sources: BTreeMap::new(),
             etl_settings: EtlSettings {
                 watermark: String::new(),
                 deleted: String::new(),
@@ -224,6 +245,7 @@ impl Ontology {
             denormalized_properties: Vec::new(),
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
+            refreshable_materialized_views: Vec::new(),
             statistics: None,
             partition: None,
             traversal_path_lookups: Vec::new(),
@@ -244,6 +266,17 @@ impl Ontology {
                     ..Default::default()
                 },
             );
+        }
+        self
+    }
+
+    #[must_use]
+    pub fn with_partition_count(mut self, node: &str, count: u32) -> Self {
+        if let Some(node) = self.nodes.get_mut(node) {
+            for pipeline in &mut node.pipelines {
+                let Extract::ClickHouse(extract) = &mut pipeline.extract;
+                extract.partition_count = Some(count);
+            }
         }
         self
     }
@@ -638,36 +671,6 @@ impl Ontology {
         self.edges.get(name).map(|v| v.as_slice())
     }
 
-    /// Get allowed target types for a polymorphic edge.
-    ///
-    /// Given a relationship and the node kind that has the FK column,
-    /// returns the valid types on the other end based on edge schema variants.
-    #[must_use]
-    pub fn get_edge_target_types(
-        &self,
-        relationship_kind: &str,
-        node_kind: &str,
-        direction: EdgeDirection,
-    ) -> Vec<String> {
-        let Some(variants) = self.get_edge(relationship_kind) else {
-            return Vec::new();
-        };
-
-        variants
-            .iter()
-            .filter_map(|edge| match direction {
-                EdgeDirection::Outgoing if edge.source_kind == node_kind => {
-                    Some(edge.target_kind.clone())
-                }
-                EdgeDirection::Incoming if edge.target_kind == node_kind => {
-                    Some(edge.source_kind.clone())
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Returns unique (deduplicated) source node types for this relationship.
     pub fn get_edge_source_types(&self, relationship_kind: &str) -> Vec<String> {
         let Some(variants) = self.get_edge(relationship_kind) else {
             return Vec::new();
@@ -681,7 +684,6 @@ impl Ontology {
             .collect()
     }
 
-    /// Returns unique (deduplicated) target node types for this relationship.
     pub fn get_edge_all_target_types(&self, relationship_kind: &str) -> Vec<String> {
         let Some(variants) = self.get_edge(relationship_kind) else {
             return Vec::new();
@@ -795,18 +797,15 @@ impl Ontology {
     pub fn reindex_sources(&self) -> BTreeSet<ReindexSource> {
         let node_sources = self
             .nodes()
-            .filter_map(|node| node.etl.as_ref())
-            .flat_map(|etl| etl.reindex_on().iter().cloned());
+            .flat_map(|node| node.reindex_on.iter().cloned());
+        let edge_sources = self.edge_reindex_sources.values().flatten().cloned();
         let derived_sources = self
             .derived_entities()
-            .flat_map(|derived| derived.etl.reindex_on().iter().cloned());
-        let edge_sources = self
-            .edge_etl_configs()
-            .flat_map(|(_, config)| config.reindex_on.iter().cloned());
+            .flat_map(|derived| derived.reindex_on.iter().cloned());
 
         node_sources
-            .chain(derived_sources)
             .chain(edge_sources)
+            .chain(derived_sources)
             .collect()
     }
 
@@ -882,6 +881,25 @@ impl Ontology {
             .unwrap_or(&self.default_edge_table)
     }
 
+    #[must_use]
+    pub fn relationship_kinds_emitted_by(&self, entity_name: &str) -> BTreeSet<String> {
+        if self.has_edge(entity_name) {
+            return std::iter::once(entity_name.to_string()).collect();
+        }
+        if let Some(node) = self.get_node(entity_name) {
+            return node
+                .pipelines
+                .iter()
+                .flat_map(|pipeline| pipeline.transform.edges())
+                .map(|mapping| mapping.label.clone())
+                .collect();
+        }
+        self.derived_entities()
+            .find(|derived| derived.name == entity_name)
+            .map(|derived| derived.emits.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// Returns `true` when **at least one** variant of `relationship_kind` is
     /// scope-preserving. This is a coarse pre-filter — callers that need
     /// per-variant accuracy must inspect [`EdgeEntity::scope`] directly,
@@ -898,8 +916,10 @@ impl Ontology {
         })
     }
 
-    /// True when `entity` declares a `traversal_path_lookup`, so a query anchored
-    /// on it can be scope-pruned from an `id`/`full_path` filter.
+    /// True when `entity` declares a `traversal_path_lookup`, i.e. its
+    /// `traversal_path` can be resolved from an `id`/`full_path` filter so a
+    /// query anchored on it can be scope-pruned. `Project`, `Group`, and
+    /// `MergeRequest` today.
     #[must_use]
     pub fn is_anchor(&self, entity: &str) -> bool {
         self.traversal_path_lookups
@@ -918,14 +938,7 @@ impl Ontology {
         let Some(node) = self.nodes.get(entity) else {
             return false;
         };
-        if !node.has_traversal_path {
-            return false;
-        }
-        if node
-            .etl
-            .as_ref()
-            .is_some_and(|e| e.scope() == EtlScope::Global)
-        {
+        if !node.has_traversal_path || node.global {
             return false;
         }
         node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
@@ -1167,6 +1180,11 @@ impl Ontology {
     }
 
     #[must_use]
+    pub fn refreshable_materialized_views(&self) -> &[RefreshableMaterializedViewDefinition] {
+        &self.refreshable_materialized_views
+    }
+
+    #[must_use]
     pub fn statistics(&self) -> Option<&StatisticsConfig> {
         self.statistics.as_ref()
     }
@@ -1361,17 +1379,15 @@ impl Ontology {
         self.edge_descriptions.get(name).map(|s| s.as_str())
     }
 
-    /// Get ETL configs for an edge by relationship kind.
-    ///
-    /// Returns `Some` only for edges sourced from join tables.
-    pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&[EdgeSourceEtlConfig]> {
-        self.edge_etl_configs
+    /// Returns `Some` only for edges sourced from standalone pipelines.
+    pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&[Pipeline]> {
+        self.edge_pipelines
             .get(relationship_kind)
             .map(|v| v.as_slice())
     }
 
     pub fn has_edge_etl(&self, relationship_kind: &str) -> bool {
-        self.edge_etl_configs.contains_key(relationship_kind)
+        self.edge_pipelines.contains_key(relationship_kind)
     }
 
     /// Whether this relationship's edge materializes `column` on its
@@ -1382,23 +1398,37 @@ impl Ontology {
     ///
     /// - FK edges (no standalone ETL config) project every column of their
     ///   node, so they always carry it.
-    /// - A standalone edge projects `column` only when the matching endpoint
-    ///   is a fixed `Literal` node type whose `enrich` list includes it;
-    ///   polymorphic (`Column`-typed) endpoints materialize no node columns.
+    /// - A standalone edge projects `column` only when the matching literal
+    ///   endpoint maps its ontology property to an extracted input field.
     pub fn edge_projects_column(
         &self,
         relationship_kind: &str,
+        node_kind: &str,
         direction: DenormDirection,
         column: &str,
     ) -> bool {
-        if let Some(etls) = self.get_edge_etl(relationship_kind) {
-            return etls.iter().any(|etl| {
-                let endpoint = match direction {
-                    DenormDirection::Source => &etl.from,
-                    DenormDirection::Target => &etl.to,
-                };
-                matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
-                    && endpoint.enrich.iter().any(|c| c == column)
+        if let Some(pipelines) = self.get_edge_etl(relationship_kind) {
+            return pipelines.iter().any(|pipeline| {
+                pipeline.transform.edges().iter().any(|mapping| {
+                    let node_ref = match direction {
+                        DenormDirection::Source => &mapping.source,
+                        DenormDirection::Target => &mapping.target,
+                    };
+                    let NodeRefKind::Literal(endpoint_kind) = &node_ref.kind else {
+                        return false;
+                    };
+                    endpoint_kind == node_kind
+                        && node_ref.property_inputs.keys().any(|property_name| {
+                            self.get_node(node_kind)
+                                .and_then(|node| {
+                                    node.fields
+                                        .iter()
+                                        .find(|field| field.name == *property_name)
+                                })
+                                .and_then(|field| field.column_name())
+                                == Some(column)
+                        })
+                })
             });
         }
 
@@ -1420,20 +1450,20 @@ impl Ontology {
                     DenormDirection::Source => &v.source_kind,
                     DenormDirection::Target => &v.target_kind,
                 };
-                self.node_has_column(holder, fk)
+                holder == node_kind && self.node_has_property(holder, fk)
             });
         }
 
         true
     }
 
-    fn node_has_column(&self, node_kind: &str, column: &str) -> bool {
+    fn node_has_property(&self, node_kind: &str, property_name: &str) -> bool {
         self.get_node(node_kind)
-            .is_some_and(|n| n.fields.iter().any(|f| f.column_name() == Some(column)))
+            .is_some_and(|node| node.fields.iter().any(|field| field.name == property_name))
     }
 
-    pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &EdgeSourceEtlConfig)> {
-        self.edge_etl_configs
+    pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &Pipeline)> {
+        self.edge_pipelines
             .iter()
             .flat_map(|(k, configs)| configs.iter().map(move |c| (k.as_str(), c)))
     }
@@ -1482,8 +1512,8 @@ impl Ontology {
         }
 
         Err(OntologyError::Validation(format!(
-            "field \"{field_name}\" does not exist on node type \"{node_name}\". {}",
-            describe_valid_fields(node)
+            "field \"{field_name}\" does not exist on node type \"{node_name}\"{}",
+            crate::errors::describe_valid_fields(node)
         )))
     }
 
@@ -1593,6 +1623,39 @@ mod tests {
         Path::new(env!("ONTOLOGY_DIR")).to_path_buf()
     }
 
+    fn collect_sql_contents(
+        dir: &Path,
+        out: &mut std::collections::HashMap<String, std::path::PathBuf>,
+    ) {
+        for entry in std::fs::read_dir(dir).expect("ontology directory should read") {
+            let path = entry.expect("ontology entry should read").path();
+            if path.is_dir() {
+                // `sql/` holds refreshable-view select templates, not extract pipelines.
+                if path.file_name().and_then(|name| name.to_str()) != Some("sql") {
+                    collect_sql_contents(&path, out);
+                }
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".sql.j2"))
+            {
+                let contents = std::fs::read_to_string(&path).expect("query file should read");
+                out.insert(contents, path);
+            }
+        }
+    }
+
+    struct EmptyReader;
+
+    impl ReadOntologyFile for EmptyReader {
+        fn read(&self, path: &str) -> Result<String, OntologyError> {
+            Err(OntologyError::Io {
+                path: path.to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, path.to_string()),
+            })
+        }
+    }
+
     #[test]
     fn test_load_ontology() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
@@ -1613,6 +1676,114 @@ mod tests {
         let from_dir = Ontology::load_from_dir(fixtures_dir()).expect("should load from dir");
 
         assert_eq!(embedded, from_dir);
+    }
+
+    #[test]
+    fn embedded_and_dir_load_match_and_carry_authored_sql_verbatim() {
+        let embedded = Ontology::load_embedded().expect("should load embedded ontology");
+        let from_dir = Ontology::load_from_dir(fixtures_dir()).expect("should load from dir");
+
+        assert_eq!(embedded, from_dir);
+        // Markers are the indexer's concern now, so authored SQL is carried raw:
+        // at least one authored file's `{{...}}` markers survive load unresolved.
+        let markers_preserved = all_pipelines(&embedded).iter().any(|pipeline| {
+            let Extract::ClickHouse(extract) = &pipeline.extract;
+            matches!(&extract.query, ExtractQuery::Sql(sql)
+                if sql.contains("{{watermark_column}}") || sql.contains("{{deleted_column}}"))
+        });
+        assert!(
+            markers_preserved,
+            "authored SQL should be carried verbatim with its markers intact"
+        );
+    }
+
+    #[test]
+    fn authored_sql_uses_lifecycle_markers_and_aliases() {
+        let embedded = Ontology::load_embedded().expect("should load embedded ontology");
+
+        for pipeline in all_pipelines(&embedded) {
+            let Extract::ClickHouse(extract) = &pipeline.extract;
+            let ExtractQuery::Sql(sql) = &extract.query else {
+                continue;
+            };
+
+            assert!(
+                !sql.contains(siphon_watermark_column()),
+                "{} hardcodes the watermark column {}; use {{{{watermark_column}}}} instead",
+                pipeline.name,
+                siphon_watermark_column()
+            );
+            assert!(
+                !sql.contains(siphon_deleted_column()),
+                "{} hardcodes the deleted column {}; use {{{{deleted_column}}}} instead",
+                pipeline.name,
+                siphon_deleted_column()
+            );
+
+            let version_alias = format!("AS {VERSION_COLUMN}");
+            let deleted_alias = format!("AS {DELETED_COLUMN}");
+            assert!(
+                sql.contains(&version_alias),
+                "{} must select a column `{version_alias}`",
+                pipeline.name
+            );
+            assert!(
+                sql.contains(&deleted_alias),
+                "{} must select a column `{deleted_alias}`",
+                pipeline.name
+            );
+        }
+    }
+
+    /// The ontology is declarative: it carries authored `.sql.j2` verbatim and marks
+    /// everything else `Generated` (no inline SQL). The generated SQL itself is the
+    /// indexer's concern, checked by its golden snapshot — not here.
+    #[test]
+    fn ontology_carries_authored_sql_and_marks_the_rest_generated() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        let mut sql_files = std::collections::HashMap::new();
+        collect_sql_contents(&fixtures_dir(), &mut sql_files);
+
+        for pipeline in all_pipelines(&ontology) {
+            let Extract::ClickHouse(extract) = &pipeline.extract;
+            match &extract.query {
+                ExtractQuery::Sql(sql) => {
+                    assert!(
+                        sql_files.remove(sql).is_some(),
+                        "{} authored SQL does not match any committed .sql.j2 file",
+                        pipeline.name
+                    );
+                }
+                ExtractQuery::Generated { .. } => {}
+            }
+        }
+
+        assert!(
+            sql_files.is_empty(),
+            "committed .sql.j2 files are not loaded by any pipeline: {:?}",
+            sql_files.values().collect::<Vec<_>>()
+        );
+    }
+
+    fn all_pipelines(ontology: &Ontology) -> Vec<&Pipeline> {
+        ontology
+            .nodes
+            .values()
+            .flat_map(|node| node.pipelines.iter())
+            .chain(
+                ontology
+                    .edge_pipelines
+                    .values()
+                    .flat_map(|pipelines| pipelines.iter()),
+            )
+            .chain(
+                ontology
+                    .derived_entities
+                    .values()
+                    .flat_map(|derived| derived.pipelines.iter()),
+            )
+            .collect()
     }
 
     #[test]
@@ -1679,7 +1850,6 @@ mod tests {
             "DETECTED_BY",
             "HAS_IDENTIFIER",
             "OCCURRENCE_OF",
-            "DETECTED_IN",
             "SCANS",
         ] {
             let entries = ontology
@@ -1726,15 +1896,30 @@ mod tests {
         // row (gitlab-org/gitlab#601941). Call edge_projects_column directly so the
         // guard would fail if that fix were reverted.
         assert!(
-            !ontology.edge_projects_column("HAS_DIFF", DenormDirection::Source, "state"),
+            !ontology.edge_projects_column(
+                "HAS_DIFF",
+                "MergeRequest",
+                DenormDirection::Source,
+                "state",
+            ),
             "HAS_DIFF must not project MergeRequest.state onto source_tags"
         );
         assert!(
-            ontology.edge_projects_column("HAS_DIFF", DenormDirection::Target, "state"),
+            ontology.edge_projects_column(
+                "HAS_DIFF",
+                "MergeRequestDiff",
+                DenormDirection::Target,
+                "state",
+            ),
             "HAS_DIFF (diff holds merge_request_id) projects on the target side"
         );
         assert!(
-            ontology.edge_projects_column("IN_PROJECT", DenormDirection::Source, "state"),
+            ontology.edge_projects_column(
+                "IN_PROJECT",
+                "MergeRequest",
+                DenormDirection::Source,
+                "state",
+            ),
             "IN_PROJECT (project_id on the MR) projects MergeRequest.state onto source_tags"
         );
     }
@@ -1852,16 +2037,14 @@ mod tests {
         assert!(err.to_string().contains("unknown node type"));
 
         let err = ontology.validate_field("User", "nonexistent").unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("does not exist"), "got: {msg}");
-        assert!(msg.contains("Valid fields: id, username"), "got: {msg}");
+        assert!(err.to_string().contains("does not exist"));
 
         let err = Ontology::new().validate_field("", "field").unwrap_err();
         assert!(err.to_string().contains("without an entity type"));
     }
 
     #[test]
-    fn validate_field_truncates_long_field_lists() {
+    fn validate_field_lists_long_field_lists_untrimmed() {
         let fields: Vec<(String, DataType)> = (0..20)
             .map(|i| (format!("field_{i}"), DataType::Int))
             .collect();
@@ -1873,9 +2056,12 @@ mod tests {
             .validate_field("Wide", "missing")
             .unwrap_err()
             .to_string();
-        assert!(msg.contains("Valid fields include:"), "got: {msg}");
-        assert!(msg.contains("more"), "got: {msg}");
-        assert!(msg.contains("get_graph_schema"), "got: {msg}");
+        assert!(msg.contains("Valid fields:"), "got: {msg}");
+        for i in 0..20 {
+            assert!(msg.contains(&format!("field_{i}")), "got: {msg}");
+        }
+        assert!(!msg.contains("more"), "got: {msg}");
+        assert!(!msg.contains("get_graph_schema"), "got: {msg}");
         // Reserved "id" must not be duplicated even when a field is also named differently.
         assert_eq!(msg.matches("field_0").count(), 1, "got: {msg}");
     }
@@ -1912,8 +2098,10 @@ mod tests {
             strip_schema_version_prefix("v42_gl_vulnerability"),
             "gl_vulnerability"
         );
+        // No digits after `v` — leave untouched.
         assert_eq!(strip_schema_version_prefix("v_gl_user"), "v_gl_user");
         assert_eq!(strip_schema_version_prefix("version_gl_x"), "version_gl_x");
+        // Missing underscore after digits — leave untouched.
         assert_eq!(strip_schema_version_prefix("v1gl_user"), "v1gl_user");
     }
 
@@ -1954,6 +2142,8 @@ mod tests {
             Some(25)
         );
 
+        // Prefixed ontology, prefixed or unprefixed query — both ends
+        // normalize.
         let prefixed = ontology_with_role("Vulnerability", RequiredRole::SecurityManager)
             .with_schema_version_prefix("v1_");
         assert_eq!(
@@ -1969,8 +2159,11 @@ mod tests {
     #[test]
     fn min_access_level_for_table_is_none_for_unknown_or_unredacted() {
         let ontology = Ontology::new().with_nodes(["Project"]);
+        // Edge tables and CTEs aren't known nodes.
         assert!(ontology.min_access_level_for_table("gl_edge").is_none());
         assert!(ontology.min_access_level_for_table("some_cte").is_none());
+        // Node without a `redaction` block yields None — caller picks the
+        // default role.
         assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
 
@@ -2372,9 +2565,11 @@ properties:
         let entity = node_def
             .into_entity(
                 "TestNode".to_string(),
+                "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
@@ -2410,9 +2605,11 @@ properties:
         let entity = node_def
             .into_entity(
                 "TestNode".to_string(),
+                "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, default_sort_key);
@@ -2632,9 +2829,11 @@ properties:
         let err = node_def
             .into_entity(
                 "TestNode".to_string(),
+                "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
             )
             .unwrap_err();
         assert!(
@@ -2677,9 +2876,11 @@ properties:
         let entity = node_def
             .into_entity(
                 "TestNode".to_string(),
+                "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
             )
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
@@ -2870,6 +3071,7 @@ properties:
         assert!(names.contains(&"branch"));
         assert!(names.contains(&"path"));
         assert!(names.contains(&"name"));
+        // traversal_path is included for hydration traversal-path narrowing.
         assert!(names.contains(&"traversal_path"));
         assert!(names.contains(&"commit_sha"));
     }
@@ -2914,6 +3116,7 @@ properties:
 
     #[test]
     fn local_exclude_properties_validated_against_fields() {
+        // Guards against a typo'd exclude_properties entry referencing a missing field.
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         for entity_name in ontology.local_entity_names() {
             let fields = ontology
@@ -3046,13 +3249,58 @@ properties:
             .find(|d| d.name == "SystemNote")
             .expect("SystemNote derived entity should load from the core domain");
 
-        assert_eq!(derived.transform, "system_notes");
-        assert_eq!(derived.etl.scope(), crate::EtlScope::Namespaced);
-        assert!(
-            matches!(derived.etl, crate::EtlConfig::Query { .. }),
-            "SystemNote extract is a JOIN (query ETL)"
-        );
+        let pipeline = derived
+            .pipelines
+            .first()
+            .expect("SystemNote should declare a pipeline");
+        assert!(matches!(
+            pipeline.transform,
+            crate::Transform::Rust(ref name) if name == "system_notes"
+        ));
+        assert_eq!(pipeline.scope, crate::EtlScope::Namespaced);
+        let crate::Extract::ClickHouse(extract) = &pipeline.extract;
+        assert!(matches!(
+            extract.query,
+            crate::ExtractQuery::Sql(ref sql) if sql.contains("FROM siphon_notes")
+        ));
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_edge_kind_is_itself() {
+        let o = Ontology::load_embedded().unwrap();
+        assert_eq!(
+            o.relationship_kinds_emitted_by("MENTIONS"),
+            std::iter::once("MENTIONS".to_string()).collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_derived_entity_are_its_emits() {
+        let o = Ontology::load_embedded().unwrap();
+        assert!(
+            o.relationship_kinds_emitted_by("SystemNote")
+                .contains("MENTIONS")
+        );
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_node_are_its_edge_mappings() {
+        let o = Ontology::load_embedded().unwrap();
+        let note = o.get_node("Note").expect("Note node must load");
+        let expected: BTreeSet<String> = note
+            .pipelines
+            .iter()
+            .flat_map(|pipeline| pipeline.transform.edges())
+            .map(|mapping| mapping.label.clone())
+            .collect();
+        assert_eq!(o.relationship_kinds_emitted_by("Note"), expected);
+    }
+
+    #[test]
+    fn relationship_kinds_emitted_by_unknown_entity_is_empty() {
+        let o = Ontology::load_embedded().unwrap();
+        assert!(o.relationship_kinds_emitted_by("Ghost").is_empty());
     }
 
     #[test]

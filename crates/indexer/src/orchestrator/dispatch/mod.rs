@@ -7,7 +7,9 @@ pub mod namespace_indexing;
 pub use code_backfill::CodeBackfill;
 pub use namespace_indexing::{NamespaceDispatchRequest, NamespaceIndexingDispatch};
 
+#[derive(Default)]
 pub struct DispatchOutcome {
     pub dispatched: u64,
     pub skipped: u64,
+    pub drained_paths: Vec<String>,
 }

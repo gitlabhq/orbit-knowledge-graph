@@ -40,7 +40,7 @@ pub(super) async fn giant_string_survives_pipeline(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]},
+            "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -60,7 +60,7 @@ pub(super) async fn sql_injection_string_preserved(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]},
+            "nodes": [{"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -133,7 +133,7 @@ pub(super) async fn sip_prefilter_multi_hop_returns_correct_results(ctx: &TestCo
                 {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
                 {"id": "child", "entity": "Group", "columns": ["name"]}
             ],
-            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 1, "max_hops": 2}],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "hops": [1, 2]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -157,8 +157,8 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "open_mr_count"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "open_mr_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -307,8 +307,8 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 20
         }"#,
         &allow_all(),
@@ -330,8 +330,8 @@ pub(super) async fn neighbors_cross_namespace_no_false_positives(ctx: &TestConte
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [101]},
-            "neighbors": {"node": "g", "direction": "both"}
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [101]}],
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
         ctx_101,
@@ -371,7 +371,7 @@ pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]}],
             "limit": 10
         }"#,
         &allow_all(),

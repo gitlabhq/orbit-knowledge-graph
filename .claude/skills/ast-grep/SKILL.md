@@ -1,9 +1,11 @@
 ---
 name: ast-grep
 description: >
-  AST-based code search and rewrite via tree-sitter patterns.
-  Use instead of Grep/Edit for structural matching, batch rewrites,
-  or context-aware queries (e.g. "unwrap inside impl blocks").
+  AST-based code search and rewrite via tree-sitter patterns. Use instead of
+  Grep/Edit when a change spans many sites or must respect code structure:
+  structural matching, multi-file batch rewrites, or context-aware queries
+  (e.g. "unwrap inside impl blocks"). Not for a single-file or single-symbol
+  rename — use Edit for that.
 allowed-tools: Bash(mise exec -- ast-grep *), Read, Glob
 ---
 

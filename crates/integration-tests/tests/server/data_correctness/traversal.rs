@@ -221,7 +221,7 @@ pub(super) async fn traversal_with_order_by(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "order_by": "-u.id",
             "limit": 20
         }"#,
         &allow_all(),
@@ -255,7 +255,7 @@ pub(super) async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext)
                 {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
                 {"id": "child", "entity": "Group", "columns": ["name"]}
             ],
-            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 1, "max_hops": 2}],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "hops": [1, 2]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -314,7 +314,7 @@ pub(super) async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
     resp.assert_edge_exists("User", 5, "Group", 101, "MEMBER_OF");
 }
 
-pub(super) async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
+pub(super) async fn traversal_variable_length_floor_skips_shallow(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
@@ -323,7 +323,7 @@ pub(super) async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestC
                 {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
                 {"id": "child", "entity": "Group", "columns": ["name"]}
             ],
-            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 2, "max_hops": 3}],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "hops": [2, 3]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -362,7 +362,7 @@ pub(super) async fn traversal_variable_length_includes_depth_2_path_to_project(c
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "wi"},
                 {"type": "IN_PROJECT", "from": "wi", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 2}
+                {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 2]}
             ],
             "limit": 20
         }"#,
@@ -402,10 +402,10 @@ pub(super) async fn aggregation_variable_length_counts_all_depths(ctx: &TestCont
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "wi"},
                 {"type": "IN_PROJECT", "from": "wi", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 2}
+                {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 2]}
             ],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "g", "alias": "n"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "g", "as": "n"}],
             "limit": 5
         }"#,
         &allow_all(),
@@ -434,7 +434,7 @@ pub(super) async fn traversal_variable_length_with_redaction_at_depth(ctx: &Test
                 {"id": "parent", "entity": "Group", "columns": ["name"], "node_ids": [100]},
                 {"id": "child", "entity": "Group", "columns": ["name"]}
             ],
-            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "min_hops": 1, "max_hops": 2}],
+            "relationships": [{"type": "CONTAINS", "from": "parent", "to": "child", "hops": [1, 2]}],
             "limit": 10
         }"#,
         &svc,
@@ -503,7 +503,7 @@ pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "order_by": {"node": "mr", "property": "title", "direction": "ASC"},
+            "order_by": "mr.title",
             "limit": 20
         }"#,
         &allow_all(),
@@ -526,7 +526,7 @@ pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+            "order_by": "u.username",
             "limit": 20
         }"#,
         &allow_all(),
@@ -549,7 +549,7 @@ pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "order_by": {"node": "mr", "property": "title", "direction": "DESC"},
+            "order_by": "-mr.title",
             "limit": 20
         }"#,
         &allow_all(),

@@ -1,0 +1,70 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam defaultFontSize 11
+skinparam padding 4
+
+title GitLab Knowledge Graph — Desktop (orbit) Architecture Block Diagram
+
+rectangle "orbit Binary Boundary" as module #E8F4FD {
+
+  rectangle "CLI (orbit)" as cli #B3D9FF {
+    component "index" as cmd_index
+    component "sql" as cmd_sql
+    component "schema" as cmd_schema
+    component "list" as cmd_list
+    component "mcp serve" as cmd_mcp
+  }
+
+  rectangle "Core Engine" as engine #CCE5CC {
+    component "Indexer\n(Rayon parallel)" as indexer
+    component "MCP Server\n(rmcp, stdio)" as mcp
+    component "Workspace\nManager" as wm
+    component "Event Bus\n(Tokio broadcast)" as ebus
+  }
+
+  rectangle "Data Layer" as data #FFE0B2 {
+    component "DuckDB\n(embedded)" as duckdb
+    component "Arrow / Parquet\nStorage" as parquet
+  }
+
+  rectangle "Observability" as obs #E0E0E0 {
+    component "Prometheus\nMetrics" as prom
+    component "OpenTelemetry\nTraces" as otel
+  }
+}
+
+rectangle "External Dependencies" as ext #FFF3E0 {
+  component "parser-core\n(Rust, Git)" as parser
+  component "gitalisk-core\n(Rust, Git)" as gitalisk
+}
+
+rectangle "Consumers" as consumers #F3E5F5 {
+  component "LLM / AI Agent\n(via MCP stdio)" as llm
+  component "CLI User" as cliuser
+}
+
+' Internal flows
+indexer --> duckdb : write graph
+indexer --> parser : parse AST
+indexer --> ebus : progress events
+wm --> gitalisk : git operations
+wm --> duckdb : project state
+mcp --> duckdb : run_sql / schema
+mcp --> indexer : index
+cmd_mcp --> mcp : launch (stdio)
+duckdb --> parquet : read/write
+
+' External flows
+llm --> cmd_mcp : MCP (stdio)
+cliuser --> cli : shell
+cli --> indexer
+cli --> wm
+cli --> duckdb : sql / schema / list
+
+' Observability
+engine -[dotted]-> prom : metrics
+engine -[dotted]-> otel : traces
+
+@enduml

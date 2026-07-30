@@ -6,6 +6,31 @@ use crate::constants::*;
 use crate::passes::plan::{Plan, Strategy};
 use crate::passes::shared::edge_select_columns;
 use crate::passes::shared::edge_select_columns_with_prefix;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+
+/// Deterministic per-row sort suffix: edge id pairs when edges are scanned
+/// (flat/bidirectional chains), node PKs for edge-free shapes (FK elides the
+/// edge tables, so its `e0` aliases are synthesized columns, not scans).
+fn tie_breakers(plan: &Plan, edge_aliases: &[String]) -> Vec<OrderExpr> {
+    if edge_aliases.is_empty() || matches!(plan.strategy, Strategy::Fk(_)) {
+        let mut aliases: Vec<&String> = plan.nodes.keys().collect();
+        aliases.sort();
+        aliases
+            .into_iter()
+            .map(|a| OrderExpr::asc(Expr::col(a, DEFAULT_PRIMARY_KEY)))
+            .collect()
+    } else {
+        edge_aliases
+            .iter()
+            .flat_map(|ea| {
+                [
+                    OrderExpr::asc(Expr::col(ea, SOURCE_ID_COLUMN)),
+                    OrderExpr::asc(Expr::col(ea, TARGET_ID_COLUMN)),
+                ]
+            })
+            .collect()
+    }
+}
 
 pub fn emit_traversal(plan: &Plan) -> Result<Node> {
     if matches!(plan.strategy, Strategy::SingleNode) {
@@ -36,7 +61,7 @@ pub fn emit_traversal(plan: &Plan) -> Result<Node> {
         }
     }
 
-    let order_by = plan
+    let mut order_by = plan
         .order_by
         .as_ref()
         .map(|ob| {
@@ -47,6 +72,9 @@ pub fn emit_traversal(plan: &Plan) -> Result<Node> {
             }]
         })
         .unwrap_or_default();
+    if plan.cursor.is_some() {
+        order_by.extend(tie_breakers(plan, &output.edge_aliases));
+    }
 
     let q = output.into_query(select, vec![], order_by, plan.limit);
     Ok(Node::Query(Box::new(q)))
@@ -55,7 +83,7 @@ pub fn emit_traversal(plan: &Plan) -> Result<Node> {
 fn emit_single_node(plan: &Plan) -> Result<Node> {
     let output = plan.emit_edge_chain()?;
 
-    let order_by = plan
+    let mut order_by = plan
         .order_by
         .as_ref()
         .map(|ob| {
@@ -66,6 +94,9 @@ fn emit_single_node(plan: &Plan) -> Result<Node> {
             }]
         })
         .unwrap_or_default();
+    if plan.cursor.is_some() {
+        order_by.extend(tie_breakers(plan, &output.edge_aliases));
+    }
 
     let q = output.into_query(vec![], vec![], order_by, plan.limit);
     Ok(Node::Query(Box::new(q)))

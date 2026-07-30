@@ -43,6 +43,7 @@ use query_engine::shared::{
 use serde::Deserialize;
 
 const CORPUS_DIR: &str = concat!(env!("FIXTURES_DIR"), "/queries/corpus");
+const NAMED_QUERIES_DIR: &str = env!("NAMED_QUERIES_DIR");
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const DOC_MARKDOWN_DIRS: &[&str] = &[
     "docs/source",
@@ -191,6 +192,24 @@ fn load_corpus() -> Vec<SmokeCase> {
         }
     }
     out
+}
+
+fn load_named_queries() -> Vec<SmokeCase> {
+    let queries =
+        named_queries::NamedQueries::load_from_dir(std::path::Path::new(NAMED_QUERIES_DIR))
+            .unwrap_or_else(|e| panic!("load named queries from {NAMED_QUERIES_DIR}: {e}"));
+
+    let values = named_queries::BindingValues { current_user_id: 1 };
+    queries
+        .iter()
+        .map(|query| SmokeCase {
+            key: format!("named_query::{}", query.name),
+            query: query
+                .render(&values, &query.example_parameters())
+                .unwrap_or_else(|e| panic!("render named query `{}`: {e}", query.name)),
+            expects_error: false,
+        })
+        .collect()
 }
 
 fn load_doc_queries() -> (Vec<SmokeCase>, Vec<String>) {
@@ -434,10 +453,13 @@ async fn corpus_smoke() {
 
     let corpus = load_corpus();
     let corpus_total = corpus.len();
+    let named_queries = load_named_queries();
+    let named_total = named_queries.len();
     let (doc_queries, mut failures) = load_doc_queries();
     let doc_total = doc_queries.len();
-    let total = corpus_total + doc_total;
+    let total = corpus_total + named_total + doc_total;
     let mut smoke_cases = corpus;
+    smoke_cases.extend(named_queries);
     smoke_cases.extend(doc_queries);
 
     for case in smoke_cases {
@@ -471,6 +493,6 @@ async fn corpus_smoke() {
         failures.join("\n  ")
     );
     eprintln!(
-        "corpus_smoke: {corpus_total} corpus queries and {doc_total} docs queries ran clean through the full pipeline"
+        "corpus_smoke: {corpus_total} corpus queries, {named_total} named queries, and {doc_total} docs queries ran clean through the full pipeline"
     );
 }

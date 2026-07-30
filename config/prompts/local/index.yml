@@ -1,0 +1,11 @@
+name: index
+version: 1.0.0
+short: Index a code repository and output graph statistics as JSON
+description: >-
+  Index a code repository and output graph statistics as JSON
+
+
+  Pass a repository path, or a directory containing one or more repos; each
+  repo is indexed into the workspace DuckDB. Indexing is slow (seconds to
+  minutes) — call sparingly. `SELECT * FROM _orbit_manifest` via `run_sql`
+  shows what is already indexed.

@@ -222,8 +222,8 @@ mod tests {
     #[test]
     fn requirements_from_search_with_order_by() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
+                "order_by": "u.id", "limit": 10}"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::OrderBy));
@@ -235,7 +235,7 @@ mod tests {
     fn requirements_from_search_with_filter() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
+                "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -250,8 +250,8 @@ mod tests {
     fn requirements_from_search_with_multiple_filters() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User",
-                         "filters": {"state": "active", "user_type": "human"}},
+                "nodes": [{"id": "u", "entity": "User",
+                         "filters": {"state": "active", "user_type": "human"}}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -269,7 +269,7 @@ mod tests {
     fn requirements_from_search_with_node_ids() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -302,7 +302,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -314,7 +314,7 @@ mod tests {
     fn requirements_from_plain_search_has_node_count() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User"},
+                "nodes": [{"id": "u", "entity": "User"}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -383,8 +383,8 @@ mod tests {
                     {"id": "mr", "entity": "MergeRequest"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-                "group_by": [{"kind": "node", "node": "u"}],
-                "aggregations": [{"function": "count", "target": "mr", "alias": "c"}],
+                "group_by": ["u"],
+                "aggregations": [{"count": "mr", "as": "c"}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -401,8 +401,8 @@ mod tests {
     fn requirements_from_neighbors() {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let reqs = input.requirements();
         assert!(reqs.contains(&Requirement::Neighbors));
@@ -416,8 +416,8 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"column": "c", "direction": "DESC"},
+                "aggregations": [{"count": "u", "as": "c"}],
+                "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn for_query_plain_search_requires_node_count() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}, "limit": 10}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}], "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -438,8 +438,8 @@ mod tests {
     #[test]
     fn for_query_order_satisfied_by_assert_node_order() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
+                "order_by": "u.id", "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -450,7 +450,7 @@ mod tests {
     fn for_query_filter_satisfied_by_assert_filter() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"username": "alice"}},
+                "nodes": [{"id": "u", "entity": "User", "filters": {"username": "alice"}}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -462,8 +462,8 @@ mod tests {
     fn for_query_multi_filter_requires_all_fields() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User",
-                         "filters": {"username": "alice", "state": "active"}},
+                "nodes": [{"id": "u", "entity": "User",
+                         "filters": {"username": "alice", "state": "active"}}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -479,8 +479,8 @@ mod tests {
     fn for_query_multi_filter_panics_on_partial_satisfaction() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User",
-                         "filters": {"username": "alice", "state": "active"}},
+                "nodes": [{"id": "u", "entity": "User",
+                         "filters": {"username": "alice", "state": "active"}}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -492,7 +492,7 @@ mod tests {
     fn for_query_node_ids_satisfied_by_node_ids() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -505,7 +505,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
@@ -628,8 +628,8 @@ mod tests {
     fn for_query_neighbors_satisfied_by_assert_edge_exists() {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -641,8 +641,8 @@ mod tests {
     fn for_query_neighbors_satisfied_by_edges_of_type() {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -655,9 +655,9 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "group_by": [{"kind": "node", "node": "u"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"column": "c", "direction": "DESC"},
+                "group_by": ["u"],
+                "aggregations": [{"count": "u", "as": "c"}],
+                "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_grouped_aggregation_response());
@@ -669,8 +669,8 @@ mod tests {
     fn requirements_from_cursor() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "nodes": [{"id": "u", "entity": "User"}],
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -683,8 +683,8 @@ mod tests {
     fn for_query_cursor_satisfied_by_assert_node_count() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "nodes": [{"id": "u", "entity": "User"}],
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -695,7 +695,7 @@ mod tests {
     fn for_query_node_ids_satisfied_by_assert_node_ids() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -707,8 +707,8 @@ mod tests {
     fn for_query_neighbors_satisfied_by_assert_edge_set() {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -720,8 +720,8 @@ mod tests {
     fn for_query_neighbors_satisfied_by_assert_edge_count() {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_count(3);
@@ -734,7 +734,7 @@ mod tests {
     fn for_query_node_ids_not_satisfied_by_assert_node_count() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -747,7 +747,7 @@ mod tests {
     fn for_query_panics_on_unsatisfied_node_count() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User"},
+                "nodes": [{"id": "u", "entity": "User"}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -758,8 +758,8 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_order() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
+                "order_by": "u.id", "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         drop(view);
@@ -770,7 +770,7 @@ mod tests {
     fn for_query_panics_on_unsatisfied_filter_shows_field() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
+                "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -783,7 +783,7 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
+                "aggregations": [{"count": "u", "as": "c"}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
@@ -811,8 +811,8 @@ mod tests {
     fn for_query_panics_on_unsatisfied_neighbors() {
         let input = parse_test_input(
             r#"{"query_type": "neighbors",
-                "node": {"id": "u", "entity": "User", "node_ids": [1]},
-                "neighbors": {"node": "u", "direction": "outgoing"}}"#,
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "neighbors": {"direction": "outgoing"}}"#,
         );
         let view = ResponseView::for_query(&input, sample_neighbors_response());
         view.assert_node_ids("User", &[1]);
@@ -823,8 +823,8 @@ mod tests {
     fn for_query_panics_on_unsatisfied_cursor() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "nodes": [{"id": "u", "entity": "User"}],
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -860,8 +860,8 @@ mod tests {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"column": "c", "direction": "DESC"},
+                "aggregations": [{"count": "u", "as": "c"}],
+                "aggregation_sort": "-c",
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
@@ -874,7 +874,7 @@ mod tests {
     fn for_query_panics_on_unsatisfied_node_ids() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2]}],
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -885,10 +885,10 @@ mod tests {
     fn for_query_combined_features_requires_all() {
         let input = parse_test_input(
             r#"{"query_type": "traversal",
-                "node": {"id": "u", "entity": "User", "node_ids": [1, 2],
-                         "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}},
-                "order_by": {"node": "u", "property": "id"},
-                "cursor": {"offset": 0, "page_size": 5},
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2],
+                         "filters": {"username": {"in": ["alice", "bob"]}}}],
+                "order_by": "u.id",
+                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -902,8 +902,8 @@ mod tests {
     #[test]
     fn skip_requirement_prevents_panic() {
         let input = parse_test_input(
-            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
-                "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
+            r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}],
+                "order_by": "u.id", "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);

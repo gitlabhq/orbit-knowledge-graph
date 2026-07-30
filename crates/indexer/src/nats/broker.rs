@@ -465,6 +465,7 @@ impl NatsBroker {
             max_deliver,
             durable_name: durable_name.clone(),
             max_ack_pending: max_ack_pending_to_i64(max_ack_pending),
+            inactive_threshold: self.config.consumer_inactive_threshold(),
             ..Default::default()
         };
 

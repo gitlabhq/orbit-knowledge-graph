@@ -42,9 +42,6 @@ log "  chart: $CHART_VERSION"
 yq -i ".gitlab.chart = \"$CHART_VERSION\"" "$VERSIONS"
 
 # --- Pin gitlab-org/gitlab ref to current master HEAD --------------------
-# Siphon table definitions come from db/siphon/tables/*.yml in gitlab-org/
-# gitlab. Pinning to a specific SHA (not "master") makes sync-cdc-tables.sh
-# fetch a stable snapshot that aligns with the pinned images.
 log "Resolving gitlab-org/gitlab master -> commit SHA"
 GITLAB_SHA=$(curl -sSL --fail \
   "https://gitlab.com/api/v4/projects/gitlab-org%2Fgitlab/repository/branches/master" \
@@ -52,6 +49,8 @@ GITLAB_SHA=$(curl -sSL --fail \
 [[ -z "$GITLAB_SHA" ]] && { echo "Failed to resolve gitlab master SHA"; exit 1; }
 log "  gitlab ref: $GITLAB_SHA"
 yq -i ".gitlab.ref = \"$GITLAB_SHA\"" "$VERSIONS"
+
+"$E2E_DIR/scripts/publish-siphon-tables.sh"
 
 # --- Resolve :master manifest digests for CNG Rails images ---------------
 fetch_digest() {

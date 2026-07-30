@@ -1,0 +1,72 @@
+@startuml gkg_simplified
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 11
+skinparam padding 5
+skinparam roundCorner 8
+skinparam shadowing false
+skinparam rectangleBorderThickness 2
+skinparam componentStyle rectangle
+
+title GitLab Knowledge Graph (Orbit)
+
+' ===================================================================
+' MODULE BOUNDARY - everything inside deploys together
+' ===================================================================
+rectangle "**Orbit Module**\n//Deploys as a single Rust binary//" as module #E8F4FD {
+
+  component "**SDLC Indexer**\nRust ETL engine\nSiphon CDC consumer" as sdlc_idx #CCE5CC
+
+  component "**Code Indexer**\nparser-core + OXC\n+ tree-sitter" as code_idx #CCE5CC
+
+  component "**Graph Query Engine**\nJSON DSL -> ClickHouse SQL\n13-phase compiler, 4 query types" as query_eng #CCE5CC
+
+  component "**gRPC Server**\nTonic (+ Axum), JWT auth" as http_srv #CCE5CC
+
+ 
+}
+
+' ===================================================================
+' SYSTEMS OUTSIDE THE MODULE
+' ===================================================================
+actor "**LLM Agents**\nvia DAP" as agents #F3E5F5
+
+database "**PostgreSQL**\nSDLC source of truth" as pg #FFE0B2
+
+queue "**Siphon + NATS JetStream**\nCDC event pipeline" as nats #E8E8E8
+
+rectangle "**GitLab Rails**\n//Monolith//" as rails #FFE0B2
+
+database "**ClickHouse Cloud**\nCode + SDLC data lake" as ch #d09191
+
+
+
+rectangle "**Gitaly**\nSource code repos" as gitaly #FFE0B2
+
+
+
+' ===================================================================
+' CONNECTIONS - labeled with protocol and direction
+' ===================================================================
+
+' Ingestion (into module)
+pg --> nats : CDC (keyset pagination)
+nats -right-> sdlc_idx : NATS JetStream (subscribe)
+gitaly -right-> code_idx : gRPC (streaming archive)
+
+' Data layer (module <-> external)
+sdlc_idx --> ch : TCP native (write)
+code_idx --> ch : TCP native (write)
+query_eng --> ch : TCP native (read, parameterized SQL)
+
+' Rails integration (bidirectional)
+rails --> http_srv : HTTP+JWT via DAP,\ngRPC (9 RPCs)
+query_eng --> rails : gRPC stream (batch redaction,\nAbility.allowed?)
+
+' Internal routing
+http_srv --> query_eng
+
+' Consumer -> monolith -> module
+agents --> rails : HTTP (query_graph,\nget_graph_schema)
+
+
+@enduml

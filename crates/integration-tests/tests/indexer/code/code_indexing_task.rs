@@ -721,7 +721,7 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
     let context = handler_context();
-    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+    let envelope = code_indexing_backfill_envelope(project_id, 11, traversal_path);
 
     let result = handler.handle(context, envelope).await;
     assert!(
@@ -786,6 +786,46 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
     assert!(
         defines_edges.first().is_none_or(|b| b.num_rows() == 0),
         "no DEFINES edges should be written for an empty-archive project"
+    );
+}
+
+#[tokio::test]
+async fn empty_archive_with_commit_sha_nacks_without_checkpoint() {
+    let project_id: i64 = 7;
+    let traversal_path = "1/7/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_empty_archive(project_id, "main");
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    let context = handler_context();
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+
+    let result = handler.handle(context, envelope).await;
+    assert!(
+        result.is_err(),
+        "a push-dispatched task hitting an empty archive must nack for retry, got {:?}",
+        result
+    );
+
+    let checkpoint_rows = clickhouse
+        .query(&format!(
+            "SELECT last_task_id FROM {} FINAL \
+             WHERE traversal_path = '{traversal_path}' AND project_id = {project_id} \
+             AND branch = 'main' AND _deleted = false",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+    assert!(
+        checkpoint_rows.first().is_none_or(|b| b.num_rows() == 0),
+        "no checkpoint may be written when the empty archive races a push"
     );
 }
 
@@ -1022,6 +1062,23 @@ fn code_indexing_task_envelope(
         project_id,
         branch: Some("main".to_string()),
         commit_sha: Some(commit_sha.to_string()),
+        traversal_path: traversal_path.to_string(),
+        dispatch_id: uuid::Uuid::new_v4(),
+        campaign_id: None,
+    })
+    .expect("failed to create envelope")
+}
+
+fn code_indexing_backfill_envelope(
+    project_id: i64,
+    task_id: i64,
+    traversal_path: &str,
+) -> Envelope {
+    Envelope::new(&CodeIndexingTaskRequest {
+        task_id,
+        project_id,
+        branch: Some("main".to_string()),
+        commit_sha: None,
         traversal_path: traversal_path.to_string(),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,

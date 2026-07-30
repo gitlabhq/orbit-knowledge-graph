@@ -7,15 +7,22 @@ variants:
     to_node: { type: WorkItem, id: id }
     description: "Merge request closes work item."
 
-etl:
-  - scope: namespaced
-    source: siphon_merge_requests_closing_issues
-    order_by: [traversal_path, issue_id, id]
-    from:
-      id: merge_request_id
-      type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
-    to:
-      id: issue_id
-      type: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
+indexer:
+  reindex: [siphon_merge_requests_closing_issues]
+pipelines:
+  - name: CLOSES_siphon_merge_requests_closing_issues_WorkItem
+    extract:
+      type: clickhouse
+      tables: [siphon_merge_requests_closing_issues]
+      fields: [merge_request_id, issue_id]
+      order_by: [traversal_path, issue_id, id]
+      query: generated
+      lookups:
+        - { node: MergeRequest, id: merge_request_id }
+        - { node: WorkItem, id: issue_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          to: { field: issue_id, kind: WorkItem, enrich: true }
+          label: CLOSES

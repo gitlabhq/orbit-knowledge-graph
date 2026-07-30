@@ -21,13 +21,19 @@
 //! **Rollback** (`active > SCHEMA_VERSION`, an older binary was deployed):
 //! see [`run_rollback`] for the two cases (tables retained vs. already GC'd).
 
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use arrow::datatypes::UInt64Type;
+use gkg_utils::arrow::ArrowUtils;
+use ontology::migrations::{MigrationLedger, MigrationScope};
 use query_engine::compiler::{
-    DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
+    DictionarySource, emit_create_dictionary, emit_create_materialized_view,
+    emit_create_refreshable_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
-    generate_graph_tables_with_prefix,
+    generate_graph_tables_with_prefix, generate_refreshable_materialized_views,
+    generate_unversioned_graph_tables,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -37,6 +43,11 @@ use super::metrics::MigrationMetrics;
 use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
+use crate::orchestrator::scheduled::code_stale_sweep::CHECKPOINT_KEY_PREFIX as CODE_STALE_SWEEP_CHECKPOINT_KEY_PREFIX;
+use crate::schema::invalidation::find_invalidated_pipelines;
+use crate::schema::invalidation::{
+    TableMigrationAction, classify_tables_for_scope, get_migration_scope_for_table_writers,
+};
 use crate::schema::version::{
     SCHEMA_VERSION, SchemaVersionError, drop_kind_for_engine, list_version_objects,
     mark_version_active, mark_version_retired, read_active_version, read_all_versions,
@@ -53,6 +64,26 @@ const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
 
+// TODO: move to the ontology as the single source for checkpoint table names.
+pub(crate) const CHECKPOINT_TABLE: &str = "checkpoint";
+
+/// Clones the active checkpoint into the new version, dropping dispatch cursors (so the
+/// cold-start sweep re-fires) and the invalidated plans' keys (so they re-index from epoch).
+const SEED_CHECKPOINT_SQL: &str = "\
+INSERT INTO {new_table:Identifier} \
+SELECT * FROM {old_table:Identifier} FINAL \
+WHERE _deleted = false \
+  AND NOT startsWith(key, 'dispatch.') \
+  AND NOT ( \
+    (splitByChar('.', key)[1] = 'ns' AND splitByChar('.', key)[3] IN {ns_plans:Array(String)}) \
+    OR (splitByChar('.', key)[1] = 'global' AND splitByChar('.', key)[2] IN {global_plans:Array(String)}) \
+  )";
+
+const SEED_CODE_CHECKPOINT_SQL: &str = "\
+INSERT INTO {new_table:Identifier} \
+SELECT * FROM {old_table:Identifier} FINAL \
+WHERE _deleted = false AND NOT startsWith(key, {sweep_gate_prefix:String})";
+
 #[derive(Debug, Error)]
 pub enum MigrationError {
     #[error("schema version error: {0}")]
@@ -66,6 +97,9 @@ pub enum MigrationError {
 
     #[error("migration lock held by another pod after {seconds}s; giving up")]
     LockTimeout { seconds: u64 },
+
+    #[error("migration ledger error: {0}")]
+    Ledger(String),
 }
 
 /// Runs the migration check. Must be called at boot, before the task loops
@@ -135,6 +169,147 @@ pub async fn run_if_needed(
             .await
         }
     }
+}
+
+pub async fn prepare_tables_for_migration(
+    graph: &ArrowClickHouseClient,
+    source: &DictionarySource<'_>,
+    ontology: &ontology::Ontology,
+    metrics: &MigrationMetrics,
+    requested_scope: &MigrationScope,
+    active_version: u32,
+) -> Result<(), MigrationError> {
+    let scope = get_migration_scope_for_table_writers(ontology, requested_scope);
+    if &scope != requested_scope {
+        warn!(%requested_scope, %scope, "migration scope widened because a changed table has writers outside the requested scope");
+    }
+    if matches!(scope, MigrationScope::Full) {
+        return create_prefixed_tables(graph, source, ontology, metrics).await;
+    }
+
+    let new_prefix = table_prefix(*SCHEMA_VERSION);
+    let old_prefix = table_prefix(active_version);
+    let actions = classify_tables_for_scope(ontology, &scope);
+
+    let existing_old = get_existing_tables(graph, active_version).await?;
+    let existing_new = get_existing_tables(graph, *SCHEMA_VERSION).await?;
+
+    let tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
+    let mut cloned = 0;
+    let mut rebuilt = 0;
+    let mut seeded = 0;
+    for table in &tables {
+        let base_table_name = table.name.strip_prefix(&new_prefix).unwrap_or(&table.name);
+        let old_name = format!("{old_prefix}{base_table_name}");
+
+        if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Sdlc(_)) {
+            seed_sdlc_checkpoint(graph, ontology, table, &old_prefix, &scope).await?;
+            seeded += 1;
+        } else if base_table_name == CHECKPOINT_TABLE && matches!(scope, MigrationScope::Code) {
+            seed_code_scope_checkpoint(graph, table, &old_prefix).await?;
+            seeded += 1;
+        } else if should_clone(base_table_name, &old_name, &actions, &existing_old) {
+            clone_table(graph, &old_name, &table.name, &existing_new).await?;
+            cloned += 1;
+        } else {
+            rebuild_empty_table(graph, table).await?;
+            rebuilt += 1;
+        }
+    }
+
+    info!(cloned, rebuilt, seeded, prefix = %new_prefix, "clone-based migration tables prepared");
+
+    create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
+    metrics.record("create_tables", "success");
+    Ok(())
+}
+
+fn should_clone(
+    base_table_name: &str,
+    old_name: &str,
+    actions: &BTreeMap<String, TableMigrationAction>,
+    existing_old: &HashSet<String>,
+) -> bool {
+    let action = actions.get(base_table_name);
+    let scope_keeps_data = matches!(action, Some(TableMigrationAction::CloneFromActive));
+    let source_exists = existing_old.contains(old_name);
+    scope_keeps_data && source_exists
+}
+
+async fn rebuild_empty_table(
+    graph: &ArrowClickHouseClient,
+    table: &query_engine::compiler::ast::ddl::CreateTable,
+) -> Result<(), MigrationError> {
+    info!(table = %table.name, "rebuilding table empty");
+    graph
+        .execute(&emit_create_table(table))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.name.clone(),
+            reason: e.to_string(),
+        })
+}
+
+pub async fn create_unversioned_tables(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+) -> Result<(), MigrationError> {
+    for table in generate_unversioned_graph_tables(ontology) {
+        graph
+            .execute(&emit_create_table(&table))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: table.name,
+                reason: error.to_string(),
+            })?;
+    }
+    Ok(())
+}
+
+pub async fn replace_refreshable_views_for_version(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    version: u32,
+) -> Result<(), MigrationError> {
+    for view in generate_refreshable_materialized_views(ontology, version) {
+        graph
+            .execute(&format!("DROP VIEW IF EXISTS {}", view.name))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: view.name.clone(),
+                reason: error.to_string(),
+            })?;
+        graph
+            .execute(&emit_create_refreshable_materialized_view(&view))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: view.name,
+                reason: error.to_string(),
+            })?;
+    }
+    Ok(())
+}
+
+pub async fn drop_refreshable_views_for_version(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    version: u32,
+) -> Result<(), MigrationError> {
+    for (definition, view) in ontology
+        .refreshable_materialized_views()
+        .iter()
+        .zip(generate_refreshable_materialized_views(ontology, version))
+        .filter(|(definition, _)| definition.versioned)
+    {
+        graph
+            .execute(&format!("DROP VIEW IF EXISTS {}", view.name))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: definition.name.clone(),
+                reason: error.to_string(),
+            })?;
+    }
+    Ok(())
 }
 
 /// Rolls back to the embedded `SCHEMA_VERSION` after an older binary is deployed over a newer
@@ -332,7 +507,24 @@ async fn run_migration_locked(
     // exist. Reserved for future dual-write scenarios.
     metrics.record("drain", "success");
 
-    let create_result = create_prefixed_tables(graph, source, ontology, metrics).await;
+    let requested_scope = match MigrationLedger::load_embedded() {
+        Ok(ledger) => ledger.resolve_migration_scope_between(active_version, *SCHEMA_VERSION),
+        Err(e) => {
+            warn!(error = %e, "failed to load migration ledger — releasing lock");
+            let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
+            return Err(MigrationError::Ledger(e));
+        }
+    };
+    info!(version = *SCHEMA_VERSION, %requested_scope, "preparing tables for schema migration");
+    let create_result = prepare_tables_for_migration(
+        graph,
+        source,
+        ontology,
+        metrics,
+        &requested_scope,
+        active_version,
+    )
+    .await;
     if let Err(ref e) = create_result {
         warn!(error = %e, "failed to create new-prefix tables — releasing lock");
         let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
@@ -351,8 +543,6 @@ async fn run_migration_locked(
     }
     metrics.record("mark_migrating", "success");
 
-    // Open the re-index campaign for this migration. The completion checker
-    // clears it on promotion.
     campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
 
     let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
@@ -419,7 +609,113 @@ async fn create_prefixed_tables(
 
     info!(count = tables.len(), prefix = %new_prefix, "new-prefix tables created");
 
-    let dicts = generate_graph_dictionaries_with_prefix(ontology, &new_prefix);
+    create_dictionaries_and_views(graph, source, ontology, &new_prefix).await?;
+    metrics.record("create_tables", "success");
+    Ok(())
+}
+
+async fn seed_sdlc_checkpoint(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    new_table: &query_engine::compiler::ast::ddl::CreateTable,
+    old_prefix: &str,
+    scope: &MigrationScope,
+) -> Result<(), MigrationError> {
+    graph
+        .execute(&emit_create_table(new_table))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })?;
+
+    let pipelines = find_invalidated_pipelines(ontology, scope);
+
+    let old_table = format!("{old_prefix}{CHECKPOINT_TABLE}");
+    info!(from = %old_table, to = %new_table.name, "seeding checkpoint from active version");
+    graph
+        .query(SEED_CHECKPOINT_SQL)
+        .param("new_table", &new_table.name)
+        .param("old_table", &old_table)
+        .param("ns_plans", &pipelines.namespaced)
+        .param("global_plans", &pipelines.global)
+        .execute()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })
+}
+
+async fn seed_code_scope_checkpoint(
+    graph: &ArrowClickHouseClient,
+    new_table: &query_engine::compiler::ast::ddl::CreateTable,
+    old_prefix: &str,
+) -> Result<(), MigrationError> {
+    graph
+        .execute(&emit_create_table(new_table))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })?;
+
+    let old_table = format!("{old_prefix}{CHECKPOINT_TABLE}");
+    info!(from = %old_table, to = %new_table.name, "cloning checkpoint for code migration, dropping code stale-sweep gate");
+    graph
+        .query(SEED_CODE_CHECKPOINT_SQL)
+        .param("new_table", &new_table.name)
+        .param("old_table", &old_table)
+        .param("sweep_gate_prefix", CODE_STALE_SWEEP_CHECKPOINT_KEY_PREFIX)
+        .execute()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_table.name.clone(),
+            reason: e.to_string(),
+        })
+}
+
+/// ClickHouse `CLONE AS` can leave an empty shell after an interrupted attach.
+async fn clone_table(
+    graph: &ArrowClickHouseClient,
+    old_name: &str,
+    new_name: &str,
+    existing_new: &HashSet<String>,
+) -> Result<(), MigrationError> {
+    // Drop an interrupted clone's empty shell, else the CREATE IF NOT EXISTS below skips it.
+    if existing_new.contains(new_name)
+        && count_rows(graph, new_name).await? == 0
+        && count_rows(graph, old_name).await? > 0
+    {
+        warn!(table = %new_name, "re-cloning empty shell left by an interrupted migration");
+        graph
+            .execute(&format!("DROP TABLE IF EXISTS {new_name}"))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: new_name.to_string(),
+                reason: e.to_string(),
+            })?;
+    }
+
+    info!(from = %old_name, to = %new_name, "cloning table from active version");
+    graph
+        .execute(&format!(
+            "CREATE TABLE IF NOT EXISTS {new_name} CLONE AS {old_name}"
+        ))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_name.to_string(),
+            reason: e.to_string(),
+        })
+}
+
+async fn create_dictionaries_and_views(
+    graph: &ArrowClickHouseClient,
+    source: &DictionarySource<'_>,
+    ontology: &ontology::Ontology,
+    new_prefix: &str,
+) -> Result<(), MigrationError> {
+    let dicts = generate_graph_dictionaries_with_prefix(ontology, new_prefix);
     for dict in &dicts {
         info!(dictionary = %dict.name, source = %dict.source_table, "creating dictionary");
         graph
@@ -433,7 +729,7 @@ async fn create_prefixed_tables(
 
     // Materialized views depend on the tables they SELECT FROM, so they
     // must be created after all tables exist.
-    let views = generate_graph_materialized_views_with_prefix(ontology, &new_prefix);
+    let views = generate_graph_materialized_views_with_prefix(ontology, new_prefix);
     for view in &views {
         info!(view = %view.name, "creating materialized view");
         graph
@@ -446,14 +742,39 @@ async fn create_prefixed_tables(
     }
 
     info!(
-        tables = tables.len(),
         dictionaries = dicts.len(),
         views = views.len(),
         prefix = %new_prefix,
-        "new-prefix tables, dictionaries, and materialized views created"
+        "dictionaries and materialized views created"
     );
-    metrics.record("create_tables", "success");
     Ok(())
+}
+
+async fn get_existing_tables(
+    graph: &ArrowClickHouseClient,
+    version: u32,
+) -> Result<HashSet<String>, MigrationError> {
+    Ok(list_version_objects(graph, version)
+        .await?
+        .into_iter()
+        .map(|table| table.name)
+        .collect())
+}
+
+async fn count_rows(graph: &ArrowClickHouseClient, table: &str) -> Result<u64, MigrationError> {
+    let batches = graph
+        .query("SELECT count() AS cnt FROM {table:Identifier}")
+        .param("table", table)
+        .fetch_arrow()
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: table.to_string(),
+            reason: e.to_string(),
+        })?;
+    Ok(batches
+        .first()
+        .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "cnt", 0))
+        .unwrap_or(0))
 }
 
 #[cfg(test)]

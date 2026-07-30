@@ -1,0 +1,26 @@
+# The `projects` pseudo-table writes its traversal-path row with version
+# DEFAULT now(), so the explicitly-dated stale row is always the older one.
+description: A project with a stale traversal-path row indexes once, at its current path
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+    - { id: 200, parent_id: 100, traversal_path: "1/100/200/" }
+  projects:
+    - { id: 1000, namespace_id: 200, traversal_path: "1/100/200/1000/" }
+  project_namespace_traversal_paths:
+    - { id: 1000, traversal_path: "1/100/1000/", version: "2024-01-15 00:00:00" }
+
+expect:
+  nodes:
+    gl_project:
+      rows:
+        - { id: 1000, traversal_path: "1/100/200/1000/" }
+  edges:
+    - kind: CONTAINS
+      from: Group
+      to: Project
+      count: 1
+      rows:
+        - { target_id: 1000, traversal_path: "1/100/200/1000/" }

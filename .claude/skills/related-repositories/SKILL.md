@@ -1,6 +1,10 @@
 ---
 name: related-repositories
-description: List related repositories and their key paths
+description: >
+  Registry of related repositories (Siphon, Rails, and other consumed repos)
+  with their git URLs and local checkout paths. Use when you need to find where
+  a related repo is checked out locally, get its git URL, or clone it if it is
+  missing.
 allowed-tools: Read, Bash(git *)
 ---
 

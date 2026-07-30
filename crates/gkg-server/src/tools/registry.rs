@@ -4,6 +4,7 @@ use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::prompt;
 use super::schema::condensed_query_schema;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,37 +14,36 @@ pub struct ToolDefinition {
     pub parameters: serde_json::Value,
 }
 
-pub(super) const COMMAND_SUMMARIES: [(&str, &str); 4] = [
-    (
-        "query_graph",
-        "Execute permission-aware graph queries over GitLab SDLC and code entities.",
-    ),
-    (
-        "get_graph_schema",
-        "Return graph nodes, edges, and expanded node properties.",
-    ),
-    (
-        "get_query_dsl",
-        "Return the query_graph JSON DSL grammar and version.",
-    ),
-    (
-        "get_response_format",
-        "Return the query_graph response JSON Schema and version.",
-    ),
-];
+pub(super) fn command_summaries() -> [(&'static str, &'static str); 4] {
+    [
+        ("query_graph", prompt("tools/query_graph").summary()),
+        (
+            "get_graph_schema",
+            prompt("tools/get_graph_schema").summary(),
+        ),
+        ("get_query_dsl", prompt("tools/get_query_dsl").summary()),
+        (
+            "get_response_format",
+            prompt("tools/get_response_format").summary(),
+        ),
+    ]
+}
 
 pub(super) fn list_commands_description() -> String {
-    let commands = COMMAND_SUMMARIES
+    let commands = command_summaries()
         .iter()
         .map(|(name, summary)| format!("- {name}: {summary}"))
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!(
-        "List Orbit Knowledge Graph commands with descriptions and input schemas. \
-         Use this before invoke_command to discover available command details.\n\n\
-         Available commands:\n{commands}"
-    )
+    let mut environment = minijinja::Environment::new();
+    environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    environment
+        .render_str(
+            prompt("list_commands").description(),
+            minijinja::context! { commands },
+        )
+        .expect("template placeholders are validated against the prompt file at build time")
 }
 
 pub(super) mod params {
@@ -123,11 +123,7 @@ impl ToolRegistry {
     pub(super) fn query_graph() -> ToolDefinition {
         // Inline TOON kept for back-compat (one release cycle); a follow-up
         // strips it once `get_query_dsl` adoption is verified.
-        let base_description = "Execute graph queries. \
-                                The DSL below is STRUCTURE ONLY — you MUST call \
-                                get_graph_schema (with expand_nodes) to discover valid \
-                                node/property/edge names. Use get_query_dsl for the \
-                                full grammar reference.";
+        let base_description = prompt("tools/query_graph").description();
 
         let description = match condensed_query_schema() {
             Ok(schema) => format!("{}\n\n<toon>\n{}\n</toon>", base_description, schema),
@@ -152,11 +148,7 @@ impl ToolRegistry {
     pub(super) fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
-                          and edges with their source/target types. Pass expand_nodes (or its \
-                          alias entity_types) with specific type names to get their filterable \
-                          properties and types before composing a query_graph call."
-                .into(),
+            description: prompt("tools/get_graph_schema").description().into(),
             parameters: params::get_graph_schema_parameters(),
         }
     }
@@ -179,10 +171,7 @@ impl ToolRegistry {
     fn invoke_command() -> ToolDefinition {
         ToolDefinition {
             name: "invoke_command".into(),
-            description: "Execute an Orbit command. This is a wrapper tool: keep only command_name \
-                          and parameters at the top level, and put downstream command inputs inside \
-                          parameters."
-                .into(),
+            description: prompt("invoke_command").description().into(),
             parameters: json!({
                 "type": "object",
                 "required": ["command_name"],
@@ -214,9 +203,7 @@ impl CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: "Return the query_graph JSON DSL grammar and version. Use this before \
-                          composing query_graph parameters."
-                .into(),
+            description: prompt("tools/get_query_dsl").description().into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -230,7 +217,7 @@ impl CommandRegistry {
     fn get_response_format() -> ToolDefinition {
         ToolDefinition {
             name: "get_response_format".into(),
-            description: "Return the JSON Schema and version for query_graph responses.".into(),
+            description: prompt("tools/get_response_format").description().into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -328,7 +315,7 @@ mod tests {
     fn command_summary_mapping_matches_registered_commands() {
         for command in all_commands() {
             assert!(
-                COMMAND_SUMMARIES
+                command_summaries()
                     .iter()
                     .any(|(name, _summary)| *name == command.name),
                 "{} missing from command summaries",
@@ -344,7 +331,7 @@ mod tests {
             .chain(all_v2_tools())
             .filter(|tool| tool.name == "list_commands")
         {
-            for (name, summary) in COMMAND_SUMMARIES {
+            for (name, summary) in command_summaries() {
                 assert!(
                     tool.description.contains(name),
                     "{} missing command name {name}",

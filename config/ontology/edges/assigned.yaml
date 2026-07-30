@@ -13,26 +13,38 @@ variants:
     scope: prune_to_target
     description: "User is assigned to work item."
 
-etl:
-  - scope: namespaced
-    source: siphon_merge_request_assignees
-    order_by: [traversal_path, merge_request_id, id]
-    from:
-      id: user_id
-      type: User
-      enrich: [state, private_profile, admin, auditor, external, user_type]
-    to:
-      id: merge_request_id
-      type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
-  - scope: namespaced
-    source: siphon_issue_assignees
-    order_by: [traversal_path, issue_id, user_id]
-    from:
-      id: user_id
-      type: User
-      enrich: [state, private_profile, admin, auditor, external, user_type]
-    to:
-      id: issue_id
-      type: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
+indexer:
+  reindex: [siphon_merge_request_assignees, siphon_issue_assignees]
+pipelines:
+  - name: ASSIGNED_siphon_merge_request_assignees_MergeRequest
+    extract:
+      type: clickhouse
+      tables: [siphon_merge_request_assignees]
+      fields: [user_id, merge_request_id]
+      order_by: [traversal_path, merge_request_id, id]
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: MergeRequest, id: merge_request_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          label: ASSIGNED
+  - name: ASSIGNED_siphon_issue_assignees_WorkItem
+    extract:
+      type: clickhouse
+      tables: [siphon_issue_assignees]
+      fields: [user_id, issue_id]
+      order_by: [traversal_path, issue_id, user_id]
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: WorkItem, id: issue_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: issue_id, kind: WorkItem, enrich: true }
+          label: ASSIGNED

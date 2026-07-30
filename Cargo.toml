@@ -22,6 +22,7 @@ members = [
   "crates/gkg-analytics",
   "crates/gkg-billing",
   "crates/gkg-observability",
+  "crates/gkg-prompts",
   "crates/gkg-server-config",
   "crates/gkg-server",
   "crates/ontology",
@@ -32,6 +33,7 @@ members = [
   "crates/xtask",
   "crates/integration-testkit",
   "crates/integration-tests-codegraph",
+  "crates/named-queries",
   "crates/nats-client",
   "crates/utils",
   "crates/integration-tests",
@@ -47,17 +49,17 @@ arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
 cpu-time = "1.0.0"
-cargo-util-schemas = "0.13.0"
+cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
 datafusion = { version = "53.0.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
-comrak = { version = "0.52.0", default-features = false }
+comrak = { version = "0.53.0", default-features = false }
 dirs = "6"
 dunce = "1.0.5"
 async-trait = "0.1.89"
-bytes = "1.11.0"
+bytes = "1.12.1"
 flate2 = "1.1.9"
 chrono = { version = "0.4.43", features = ["serde"] }
 croner = "3.0.1"
@@ -73,7 +75,9 @@ schemars = "1.2.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
+sha2 = "0.11.0"
 smallvec = "1.15.1"
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 stacker = "0.1.23"
 tempfile = "3.24.0"
 
@@ -120,9 +124,9 @@ prettyplease = "0.2.37"
 typify = "0.7.0"
 
 # JS/TS ecosystem (v2 custom pipeline)
-oxc = { git = "https://github.com/oxc-project/oxc", rev = "6d56d57", features = ["semantic", "ast_visit"] }
-oxc_linter = { git = "https://github.com/oxc-project/oxc", rev = "6d56d57" }
-oxc_resolver = "11.21.3"
+oxc = { git = "https://github.com/oxc-project/oxc", rev = "69b2dfc1810e6ad9d5508ae9a20bc773ba5aa18d", features = ["semantic", "ast_visit"] }
+oxc_linter = { git = "https://github.com/oxc-project/oxc", rev = "69b2dfc1810e6ad9d5508ae9a20bc773ba5aa18d" }
+oxc_resolver = "11.24.2"
 
 # Simulator dependencies
 rand = "0.10"
@@ -136,16 +140,16 @@ lance-graph = { version = "0.5.4", default-features = false }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
-ra_ap_hir = "0.0.340"
-ra_ap_cfg = "0.0.340"
-ra_ap_ide = "0.0.340"
-ra_ap_ide_db = "0.0.340"
-ra_ap_intern = "0.0.340"
-ra_ap_load-cargo = "0.0.340"
-ra_ap_paths = "0.0.340"
-ra_ap_project_model = "0.0.340"
-ra_ap_syntax = "0.0.340"
-ra_ap_vfs = "0.0.340"
+ra_ap_hir = "0.0.342"
+ra_ap_cfg = "0.0.342"
+ra_ap_ide = "0.0.342"
+ra_ap_ide_db = "0.0.342"
+ra_ap_intern = "0.0.342"
+ra_ap_load-cargo = "0.0.342"
+ra_ap_paths = "0.0.342"
+ra_ap_project_model = "0.0.342"
+ra_ap_syntax = "0.0.342"
+ra_ap_vfs = "0.0.342"
 sqlparser = { version = "0.62.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"
@@ -160,6 +164,7 @@ tower = "0.5.3"
 triomphe = "0.1.15"
 base64 = "0.22.1"
 moka = { version = "0.12", features = ["future"] }
+minijinja = "2.21.0"
 
 # Server dependencies
 axum = { version = "0.8.8", features = ["macros"] }

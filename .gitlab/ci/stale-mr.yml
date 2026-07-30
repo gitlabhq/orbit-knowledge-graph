@@ -32,6 +32,6 @@ stale-mr-sweep:
   before_script:
     - test -n "${STALE_MR_GITLAB_TOKEN}" || (echo "Missing STALE_MR_GITLAB_TOKEN" && exit 1)
     - apk add --no-cache bash jq coreutils
-    - glab auth login --hostname "$CI_SERVER_HOST" --token "$STALE_MR_GITLAB_TOKEN"
+    - export GITLAB_TOKEN="$STALE_MR_GITLAB_TOKEN"
   script:
     - bash scripts/ci/close-stale-mrs.sh

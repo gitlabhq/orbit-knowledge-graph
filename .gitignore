@@ -28,6 +28,7 @@ evaluation_results*/
 # Dev logs, pid files, and runtime artifacts
 .dev/
 .tmp/
+tmp/
 *.sql.tmp
 
 # Proto gem build output

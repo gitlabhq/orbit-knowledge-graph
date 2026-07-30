@@ -1,14 +1,14 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlScope, NodeEntity, Ontology};
+use chrono::Utc;
+use ontology::{EdgeMapping, NodeRef, NodeRefKind, Ontology};
 use tracing::{info, warn};
 
-use crate::checkpoint::CheckpointStore;
+use crate::checkpoint::{CheckpointStore, NAMESPACE_KEY_PREFIX, namespace_id_from_key};
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
-use crate::durability::WriteDurability;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
@@ -16,27 +16,22 @@ use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ReconciliationSpec {
-    relationship_kind: String,
+struct ReconciliationGroup {
+    emitting_node: String,
+    emitting_node_table: String,
     edge_table: String,
-    owner_node_table: String,
-    /// Graph node-table column holding the current FK value; can differ from the
-    /// edge-map (extract) key, e.g. `closed_by_id` vs `metric_latest_closed_by_id`.
-    owner_fk_column: String,
-    source_kind: String,
-    target_kind: String,
-    /// Edge endpoint holding the owner's id (the join key); the `other` endpoint
-    /// is what must equal the owner's current FK, else the edge is stale.
-    owner_id_column: &'static str,
-    other_id_column: &'static str,
+    emitting_node_id_column: &'static str,
+    emitting_node_kind_column: &'static str,
+    relationship_kinds: Vec<String>,
+    edge_sort_key: String,
 }
 
-/// The watermark cursor advances only on full success; re-tombstoning is a
-/// no-op, so a failed run just widens the next window.
+/// Tombstones edges a node's pipeline stopped emitting. Stateless: each run scans a
+/// fixed lookback rather than resuming from a cursor.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
-    specs: Vec<ReconciliationSpec>,
+    groups: Vec<ReconciliationGroup>,
     metrics: ScheduledTaskMetrics,
     config: StaleEdgeReconciliationConfig,
 }
@@ -49,20 +44,20 @@ impl StaleEdgeReconciliation {
         metrics: ScheduledTaskMetrics,
         config: StaleEdgeReconciliationConfig,
     ) -> Self {
-        let specs = reconciliation_specs(ontology);
-        let kinds: Vec<&str> = specs
+        let groups = group_mutable_edges_by_emitting_node(ontology);
+        let kinds: Vec<&str> = groups
             .iter()
-            .map(|spec| spec.relationship_kind.as_str())
+            .flat_map(|group| group.relationship_kinds.iter().map(String::as_str))
             .collect();
         info!(
-            specs = specs.len(),
+            groups = groups.len(),
             ?kinds,
-            "stale-edge reconciliation specs resolved",
+            "stale-edge reconciliation groups resolved",
         );
         Self {
             graph,
             checkpoint_store,
-            specs,
+            groups,
             metrics,
             config,
         }
@@ -91,42 +86,34 @@ impl ScheduledTask for StaleEdgeReconciliation {
 
 impl StaleEdgeReconciliation {
     async fn reconcile_all(&self) -> Result<(), TaskError> {
-        // Capture before reading so rows written mid-run are caught next time, not lost.
-        let new_watermark = Utc::now();
-        let last_watermark = self
-            .checkpoint_store
-            .load(CHECKPOINT_KEY)
-            .await
-            .map_err(TaskError::new)?
-            .map(|checkpoint| checkpoint.watermark)
-            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
-        let cursor = last_watermark.format(TIMESTAMP_FORMAT).to_string();
+        let pending = self.find_namespaces_with_pending_writes().await?;
+        let cursor = (Utc::now() - self.config.lookback())
+            .format(TIMESTAMP_FORMAT)
+            .to_string();
 
-        let full_scan = last_watermark == DateTime::<Utc>::UNIX_EPOCH;
         let mut failed = 0u64;
-        for spec in &self.specs {
+        for group in &self.groups {
             info!(
-                relationship_kind = spec.relationship_kind,
-                source_kind = spec.source_kind,
-                target_kind = spec.target_kind,
-                owner = spec.owner_node_table,
-                edge_table = spec.edge_table,
+                emitting_node = group.emitting_node,
+                emitting_node_table = group.emitting_node_table,
+                edge_table = group.edge_table,
+                kinds = ?group.relationship_kinds,
                 cursor = cursor,
-                full_scan,
+                pending_namespaces = pending.len(),
                 "reconcile started",
             );
             let statement_start = Instant::now();
-            let result = self.reconcile_one(spec, &cursor).await;
+            let result = self.reconcile_group(group, &cursor, &pending).await;
             let elapsed = statement_start.elapsed();
             match result {
                 Ok(()) => {
-                    self.metrics
-                        .record_query_duration(&spec.relationship_kind, elapsed.as_secs_f64());
+                    self.metrics.record_query_duration(
+                        &group.relationship_kinds.join(","),
+                        elapsed.as_secs_f64(),
+                    );
                     info!(
-                        relationship_kind = spec.relationship_kind,
-                        owner = spec.owner_node_table,
-                        cursor = cursor,
-                        full_scan,
+                        emitting_node = group.emitting_node,
+                        edge_table = group.edge_table,
                         duration_ms = elapsed.as_millis() as u64,
                         outcome = "success",
                         "reconcile completed",
@@ -136,10 +123,8 @@ impl StaleEdgeReconciliation {
                     failed += 1;
                     self.metrics.record_error(self.name(), "reconcile");
                     warn!(
-                        relationship_kind = spec.relationship_kind,
-                        owner = spec.owner_node_table,
-                        cursor = cursor,
-                        full_scan,
+                        emitting_node = group.emitting_node,
+                        edge_table = group.edge_table,
                         duration_ms = elapsed.as_millis() as u64,
                         outcome = "error",
                         %error,
@@ -150,146 +135,180 @@ impl StaleEdgeReconciliation {
         }
 
         if failed > 0 {
-            // Leave the cursor where it was so the next run re-scans this window.
             return Err(TaskError::new(format!(
                 "{failed}/{} reconcile statements failed",
-                self.specs.len()
+                self.groups.len()
             )));
         }
-
-        self.checkpoint_store
-            .save_completed(CHECKPOINT_KEY, &new_watermark, WriteDurability::Durable)
-            .await
-            .map_err(TaskError::new)?;
-
         Ok(())
     }
 
-    async fn reconcile_one(
+    async fn reconcile_group(
         &self,
-        spec: &ReconciliationSpec,
+        group: &ReconciliationGroup,
         cursor: &str,
+        pending_namespaces: &[i64],
     ) -> Result<(), TaskError> {
         self.graph
-            .query(&build_reconcile_sql(spec))
+            .query(&build_tombstone_statement(group, pending_namespaces))
             .param("cursor", cursor)
             .execute()
             .await
             .map_err(TaskError::new)
     }
+
+    /// A set cursor means the run is mid-flight, so its edges may not have landed yet.
+    async fn find_namespaces_with_pending_writes(&self) -> Result<Vec<i64>, TaskError> {
+        let checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(NAMESPACE_KEY_PREFIX)
+            .await
+            .map_err(TaskError::new)?;
+
+        let mut ids: Vec<i64> = checkpoints
+            .iter()
+            .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
+            .filter_map(|(key, _)| namespace_id_from_key(key))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        Ok(ids)
+    }
 }
 
-fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
-    let mut specs = Vec::new();
+fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGroup> {
+    let mut kinds_by_group: BTreeMap<(String, String, &'static str), Vec<String>> = BTreeMap::new();
+    let mut tables_by_emitting_node: BTreeMap<String, String> = BTreeMap::new();
+
     for node in ontology.nodes() {
-        let Some(etl) = &node.etl else { continue };
-        // Global owners lack a traversal_path, so the dual-IN PK prune can't apply;
-        // staleness only affects namespaced entities (MR, WorkItem, Pipeline).
-        if etl.scope() != EtlScope::Namespaced {
+        if node.global {
             continue;
         }
-        for (fk_extract_column, mapping) in etl.edge_mappings() {
-            if let Some(spec) = reconciliation_spec(ontology, node, fk_extract_column, mapping) {
-                specs.push(spec);
+        for pipeline in &node.pipelines {
+            for mapping in pipeline.transform.edges() {
+                if !mapping.mutable {
+                    continue;
+                }
+                let Some(emitting_node_id_column) =
+                    find_emitting_node_id_column(mapping, &node.name)
+                else {
+                    continue;
+                };
+                let edge_table = ontology
+                    .edge_table_for_relationship(&mapping.label)
+                    .to_string();
+                tables_by_emitting_node.insert(
+                    node.name.clone(),
+                    prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
+                );
+                kinds_by_group
+                    .entry((node.name.clone(), edge_table, emitting_node_id_column))
+                    .or_default()
+                    .push(mapping.label.clone());
             }
         }
     }
-    specs
+
+    kinds_by_group
+        .into_iter()
+        .map(
+            |((emitting_node, edge_table, emitting_node_id_column), mut kinds)| {
+                kinds.sort();
+                kinds.dedup();
+                let edge_sort_key = ontology
+                    .edge_table_config(&edge_table)
+                    .map(|config| config.sort_key.join(", "))
+                    .unwrap_or_default();
+                ReconciliationGroup {
+                    emitting_node_table: tables_by_emitting_node[&emitting_node].clone(),
+                    emitting_node,
+                    edge_table: prefixed_table_name(&edge_table, *SCHEMA_VERSION),
+                    emitting_node_id_column,
+                    emitting_node_kind_column: if emitting_node_id_column == "source_id" {
+                        "source_kind"
+                    } else {
+                        "target_kind"
+                    },
+                    relationship_kinds: kinds,
+                    edge_sort_key,
+                }
+            },
+        )
+        .collect()
 }
 
-fn is_scalar_edge(mapping: &EdgeMapping) -> bool {
-    mapping.delimiter.is_none() && mapping.array_field.is_none() && !mapping.array
-}
-
-fn reconciliation_spec(
-    ontology: &Ontology,
-    node: &NodeEntity,
-    fk_extract_column: &str,
-    mapping: &EdgeMapping,
-) -> Option<ReconciliationSpec> {
-    if !mapping.mutable {
-        return None;
-    }
-    if !is_scalar_edge(mapping) {
-        return None;
-    }
-    let EdgeTarget::Literal(other_kind) = &mapping.target else {
-        return None;
+/// `None` when neither side binds the emitting node's `id`, so there is no node row to compare against.
+fn find_emitting_node_id_column(mapping: &EdgeMapping, node_name: &str) -> Option<&'static str> {
+    let binds_emitting_node = |node_ref: &NodeRef| {
+        matches!(&node_ref.kind, NodeRefKind::Literal(kind) if kind == node_name)
+            && node_ref.field == "id"
     };
-    // No stored field for this extract column means the current FK isn't queryable — skip.
-    let owner_fk_column = node
-        .fields
+    if binds_emitting_node(&mapping.source) {
+        Some("source_id")
+    } else if binds_emitting_node(&mapping.target) {
+        Some("target_id")
+    } else {
+        None
+    }
+}
+
+fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
+    let ReconciliationGroup {
+        emitting_node_table,
+        edge_table,
+        emitting_node_id_column,
+        emitting_node_kind_column,
+        emitting_node,
+        relationship_kinds,
+        edge_sort_key,
+    } = group;
+
+    let kinds = relationship_kinds
         .iter()
-        .find(|field| field.column_name() == Some(fk_extract_column))
-        .map(|field| field.name.clone())?;
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    let edge_table = prefixed_table_name(
-        ontology.edge_table_for_relationship(&mapping.relationship_kind),
-        *SCHEMA_VERSION,
-    );
-    let owner_node_table = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
-
-    let (source_kind, target_kind, owner_id_column, other_id_column) = match mapping.direction {
-        EdgeDirection::Outgoing => (
-            node.name.clone(),
-            other_kind.clone(),
-            "source_id",
-            "target_id",
-        ),
-        EdgeDirection::Incoming => (
-            other_kind.clone(),
-            node.name.clone(),
-            "target_id",
-            "source_id",
-        ),
+    let namespace_guard = if excluded_namespaces.is_empty() {
+        String::new()
+    } else {
+        let ids = excluded_namespaces
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" AND toInt64OrZero(extract(traversal_path, '^[0-9]+/([0-9]+)/')) NOT IN ({ids})")
     };
-
-    Some(ReconciliationSpec {
-        relationship_kind: mapping.relationship_kind.clone(),
-        edge_table,
-        owner_node_table,
-        owner_fk_column,
-        source_kind,
-        target_kind,
-        owner_id_column,
-        other_id_column,
-    })
-}
-
-/// `source_kind`/`target_kind` are pinned to concrete node types so a kind
-/// emitted from several FK columns into the same table (e.g. `TRIGGERED` from
-/// both `merge_request_id` and `user_id`) reconciles each variant in isolation.
-fn build_reconcile_sql(spec: &ReconciliationSpec) -> String {
-    let ReconciliationSpec {
-        relationship_kind,
-        edge_table,
-        owner_node_table,
-        owner_fk_column,
-        source_kind,
-        target_kind,
-        owner_id_column,
-        other_id_column,
-    } = spec;
 
     format!(
         "INSERT INTO {edge_table} \
-           (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _deleted) \
-         WITH owner AS ( \
-           SELECT id, traversal_path, {owner_fk_column} AS current_fk \
-           FROM {owner_node_table} FINAL \
-           WHERE _version >= {{cursor:String}} \
+           (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version, _deleted) \
+         WITH emitter AS ( \
+           SELECT id, traversal_path, _version FROM ( \
+             SELECT id, traversal_path, _version, _deleted \
+             FROM {emitting_node_table} \
+             WHERE _version >= {{cursor:String}}{namespace_guard} \
+             ORDER BY traversal_path, id, _version DESC \
+             LIMIT 1 BY traversal_path, id \
+           ) WHERE _deleted = false \
+         ), \
+         edge AS ( \
+           SELECT {edge_sort_key}, _version FROM ( \
+             SELECT {edge_sort_key}, _version, _deleted \
+             FROM {edge_table} \
+             WHERE relationship_kind IN ({kinds}) \
+               AND {emitting_node_kind_column} = '{emitting_node}' \
+               AND traversal_path IN (SELECT traversal_path FROM emitter) \
+               AND {emitting_node_id_column} IN (SELECT id FROM emitter) \
+             ORDER BY {edge_sort_key}, _version DESC \
+             LIMIT 1 BY {edge_sort_key} \
+           ) WHERE _deleted = false \
          ) \
          SELECT edge.traversal_path, edge.relationship_kind, edge.source_id, edge.source_kind, \
-                edge.target_id, edge.target_kind, true \
-         FROM {edge_table} edge \
-         JOIN owner ON owner.id = edge.{owner_id_column} AND owner.traversal_path = edge.traversal_path \
-         WHERE edge.relationship_kind = '{relationship_kind}' \
-           AND edge.source_kind = '{source_kind}' \
-           AND edge.target_kind = '{target_kind}' \
-           AND edge._deleted = false \
-           AND edge.traversal_path IN (SELECT traversal_path FROM owner) \
-           AND edge.{owner_id_column} IN (SELECT id FROM owner) \
-           AND (owner.current_fk IS NULL OR edge.{other_id_column} != owner.current_fk)"
+                edge.target_id, edge.target_kind, emitter._version, true \
+         FROM edge \
+         JOIN emitter ON emitter.id = edge.{emitting_node_id_column} AND emitter.traversal_path = edge.traversal_path \
+         WHERE edge._version < emitter._version"
     )
 }
 
@@ -297,190 +316,192 @@ fn build_reconcile_sql(spec: &ReconciliationSpec) -> String {
 mod tests {
     use super::*;
 
-    fn specs() -> Vec<ReconciliationSpec> {
+    const EDGE_SORT_KEY_FIXTURE: &str =
+        "traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind";
+
+    fn groups() -> Vec<ReconciliationGroup> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        reconciliation_specs(&ontology)
+        group_mutable_edges_by_emitting_node(&ontology)
     }
 
     fn find<'a>(
-        specs: &'a [ReconciliationSpec],
-        kind: &str,
-        owner_table_suffix: &str,
-    ) -> &'a ReconciliationSpec {
-        specs
+        groups: &'a [ReconciliationGroup],
+        emitting_node: &str,
+        edge_table_suffix: &str,
+        endpoint: &str,
+    ) -> &'a ReconciliationGroup {
+        groups
             .iter()
-            .find(|s| {
-                s.relationship_kind == kind && s.owner_node_table.ends_with(owner_table_suffix)
+            .find(|g| {
+                g.emitting_node == emitting_node
+                    && g.edge_table.ends_with(edge_table_suffix)
+                    && g.emitting_node_id_column == endpoint
             })
-            .unwrap_or_else(|| panic!("expected spec {kind} owned by *{owner_table_suffix}"))
+            .unwrap_or_else(|| {
+                panic!("expected group {emitting_node}/*{edge_table_suffix}/{endpoint}")
+            })
     }
 
-    fn mapping(relationship_kind: &str) -> EdgeMapping {
-        EdgeMapping {
-            target: EdgeTarget::Literal("User".to_string()),
-            relationship_kind: relationship_kind.to_string(),
-            direction: EdgeDirection::Incoming,
-            delimiter: None,
-            array_field: None,
-            array: false,
-            mutable: true,
+    fn fixture() -> ReconciliationGroup {
+        ReconciliationGroup {
+            emitting_node: "Pipeline".to_string(),
+            emitting_node_table: "v57_gl_pipeline".to_string(),
+            edge_table: "v57_gl_ci_edge".to_string(),
+            emitting_node_id_column: "target_id",
+            emitting_node_kind_column: "target_kind",
+            relationship_kinds: vec!["TRIGGERED".to_string(), "AUTO_CANCELED_BY".to_string()],
+            edge_sort_key: EDGE_SORT_KEY_FIXTURE.to_string(),
         }
     }
 
-    fn merge_request_node(ontology: &Ontology) -> &NodeEntity {
-        ontology
-            .get_node("MergeRequest")
-            .expect("MergeRequest node")
-    }
-
     #[test]
-    fn outgoing_edge_owner_is_source() {
-        let specs = specs();
-        let diff = find(&specs, "HAS_LATEST_DIFF", "gl_merge_request");
-        assert_eq!(diff.owner_id_column, "source_id");
-        assert_eq!(diff.other_id_column, "target_id");
-        assert_eq!(diff.source_kind, "MergeRequest");
-        assert_eq!(diff.target_kind, "MergeRequestDiff");
-        assert_eq!(diff.owner_fk_column, "latest_merge_request_diff_id");
-    }
-
-    #[test]
-    fn incoming_edge_owner_is_target() {
-        let specs = specs();
-        let edited = find(&specs, "LAST_EDITED_BY", "gl_merge_request");
-        assert_eq!(edited.owner_id_column, "target_id");
-        assert_eq!(edited.other_id_column, "source_id");
-        assert_eq!(edited.source_kind, "User");
-        assert_eq!(edited.target_kind, "MergeRequest");
-    }
-
-    #[test]
-    fn derives_exactly_the_mutable_kinds_from_the_ontology() {
-        let specs = specs();
-        let kinds: std::collections::BTreeSet<&str> =
-            specs.iter().map(|s| s.relationship_kind.as_str()).collect();
-        assert_eq!(
-            kinds,
-            [
-                "HAS_HEAD_PIPELINE",
-                "HAS_LATEST_DIFF",
-                "IN_MILESTONE",
-                "LAST_EDITED_BY",
-                "UPDATED_BY"
-            ]
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>(),
+    fn outgoing_edge_is_emitted_from_source_endpoint() {
+        let groups = groups();
+        let diff = find(&groups, "MergeRequest", "gl_diff_edge", "source_id");
+        assert_eq!(diff.emitting_node_kind_column, "source_kind");
+        assert!(
+            diff.relationship_kinds
+                .contains(&"HAS_LATEST_DIFF".to_string())
         );
     }
 
     #[test]
-    fn immutable_fk_kinds_are_not_marked_mutable() {
-        let specs = specs();
+    fn incoming_edge_is_emitted_from_target_endpoint() {
+        let groups = groups();
+        let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
+        assert_eq!(incoming.emitting_node_kind_column, "target_kind");
+        assert!(
+            incoming
+                .relationship_kinds
+                .contains(&"LAST_EDITED_BY".to_string())
+        );
+    }
+
+    #[test]
+    fn kinds_sharing_emitting_node_and_table_collapse_into_one_group() {
+        let groups = groups();
+        let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
+        assert!(
+            incoming.relationship_kinds.len() > 1,
+            "UPDATED_BY and LAST_EDITED_BY share an emitting node, table and endpoint so they \
+             must batch into one statement: {incoming:?}",
+        );
+    }
+
+    #[test]
+    fn only_mutable_mappings_are_swept() {
+        let groups = groups();
+        let swept: std::collections::BTreeSet<&str> = groups
+            .iter()
+            .flat_map(|g| g.relationship_kinds.iter().map(String::as_str))
+            .collect();
         for immutable in [
             "IN_PROJECT",
             "AUTHORED",
             "HAS_JOB",
             "IN_PIPELINE",
-            "CLOSED",
             "MERGED_AT_COMMIT",
+            "HAS_IDENTIFIER",
         ] {
             assert!(
-                !specs.iter().any(|s| s.relationship_kind == immutable),
+                !swept.contains(immutable),
                 "{immutable} is not marked mutable in the ontology and must not be swept",
             );
         }
     }
 
     #[test]
-    fn non_mutable_edge_is_skipped() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let immutable = EdgeMapping {
-            mutable: false,
-            ..mapping("AUTHORED")
-        };
-        assert!(
-            reconciliation_spec(
-                &ontology,
-                merge_request_node(&ontology),
-                "author_id",
-                &immutable
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn mutable_array_edge_is_skipped() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let array_edge = EdgeMapping {
-            array_field: Some("user_id".to_string()),
-            ..mapping("REVIEWER")
-        };
-        assert!(
-            reconciliation_spec(
-                &ontology,
-                merge_request_node(&ontology),
-                "reviewers",
-                &array_edge
-            )
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn mutable_polymorphic_edge_is_skipped() {
-        let ontology = Ontology::load_embedded().unwrap();
+    fn polymorphic_endpoint_has_no_emitting_node_row_to_compare() {
         let polymorphic = EdgeMapping {
-            target: EdgeTarget::Column {
-                column: "noteable_type".to_string(),
-                type_mapping: Default::default(),
+            source: NodeRef {
+                field: "noteable_id".to_string(),
+                property_inputs: Default::default(),
+                enrich: false,
+                kind: NodeRefKind::Derived {
+                    column: "noteable_type".to_string(),
+                    mapping: Default::default(),
+                },
             },
-            ..mapping("HAS_NOTE")
+            target: NodeRef {
+                field: "user_id".to_string(),
+                kind: NodeRefKind::Literal("User".to_string()),
+                property_inputs: Default::default(),
+                enrich: false,
+            },
+            label: "HAS_NOTE".to_string(),
+            array_field: None,
+            mutable: true,
         };
-        assert!(
-            reconciliation_spec(
-                &ontology,
-                merge_request_node(&ontology),
-                "noteable_id",
-                &polymorphic
-            )
-            .is_none()
+        assert_eq!(
+            find_emitting_node_id_column(&polymorphic, "MergeRequest"),
+            None
         );
     }
 
     #[test]
-    fn every_spec_targets_a_versioned_table() {
+    fn every_group_targets_versioned_tables() {
         let prefix = format!("v{}_", *SCHEMA_VERSION);
-        for spec in specs() {
-            assert!(spec.edge_table.starts_with(&prefix), "{spec:?}");
-            assert!(spec.owner_node_table.starts_with(&prefix), "{spec:?}");
+        for group in groups() {
+            assert!(group.edge_table.starts_with(&prefix), "{group:?}");
+            assert!(group.emitting_node_table.starts_with(&prefix), "{group:?}");
         }
     }
 
     #[test]
-    fn sql_pins_kinds_and_compares_other_endpoint() {
-        let spec = ReconciliationSpec {
-            relationship_kind: "TRIGGERED".to_string(),
-            edge_table: "v57_gl_ci_edge".to_string(),
-            owner_node_table: "v57_gl_pipeline".to_string(),
-            owner_fk_column: "merge_request_id".to_string(),
-            source_kind: "MergeRequest".to_string(),
-            target_kind: "Pipeline".to_string(),
-            owner_id_column: "target_id",
-            other_id_column: "source_id",
-        };
-        let sql = build_reconcile_sql(&spec);
+    fn sql_pins_emitting_node_kind_and_batches_every_relationship_kind() {
+        let sql = build_tombstone_statement(&fixture(), &[]);
 
         assert!(sql.contains("INSERT INTO v57_gl_ci_edge"), "{sql}");
-        assert!(sql.contains("v57_gl_pipeline FINAL"), "{sql}");
+        assert!(sql.contains("FROM v57_gl_pipeline "), "{sql}");
         assert!(sql.contains("_version >= {cursor:String}"), "{sql}");
-
-        assert!(sql.contains("relationship_kind = 'TRIGGERED'"), "{sql}");
-        assert!(sql.contains("source_kind = 'MergeRequest'"), "{sql}");
+        assert!(
+            sql.contains("relationship_kind IN ('TRIGGERED', 'AUTO_CANCELED_BY')"),
+            "{sql}"
+        );
         assert!(sql.contains("target_kind = 'Pipeline'"), "{sql}");
+        assert!(!sql.contains("source_kind = "), "{sql}");
+    }
 
-        assert!(sql.contains("source_id != "), "{sql}");
-        assert!(!sql.contains("target_id != "), "{sql}");
-        assert!(sql.contains("IS NULL OR"), "{sql}");
+    #[test]
+    fn staleness_compares_versions_and_stamps_from_the_emitting_node() {
+        let sql = build_tombstone_statement(&fixture(), &[]);
+
+        assert!(sql.contains("edge._version < emitter._version"), "{sql}");
+        assert!(sql.contains("target_kind, _version, _deleted)"), "{sql}");
+        assert!(sql.contains("emitter._version, true"), "{sql}");
+        assert!(!sql.contains("now64"), "{sql}");
+    }
+
+    #[test]
+    fn both_sides_dedup_without_final_and_filter_deleted_after() {
+        let sql = build_tombstone_statement(&fixture(), &[]);
+
+        assert!(!sql.contains("FINAL"), "{sql}");
+        assert_eq!(sql.matches("LIMIT 1 BY").count(), 2, "{sql}");
+
+        // A `_deleted` filter inside either dedup would drop a tombstoned newest
+        // row and let a superseded one win, which is how valid edges get retired.
+        for dedup in [
+            "LIMIT 1 BY traversal_path, id",
+            "LIMIT 1 BY traversal_path, relationship_kind",
+        ] {
+            let at = sql
+                .find(dedup)
+                .unwrap_or_else(|| panic!("{dedup} missing: {sql}"));
+            let filter = sql[at..].find("_deleted = false").map(|i| i + at);
+            assert!(
+                filter.is_some(),
+                "{dedup} has no trailing _deleted filter: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn namespaces_with_pending_writes_are_excluded_from_the_scan() {
+        let sql = build_tombstone_statement(&fixture(), &[7, 42]);
+        assert!(sql.contains("NOT IN (7, 42)"), "{sql}");
+
+        let clean = build_tombstone_statement(&fixture(), &[]);
+        assert!(!clean.contains("NOT IN ("), "{clean}");
     }
 }

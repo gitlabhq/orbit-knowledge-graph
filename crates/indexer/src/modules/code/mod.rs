@@ -21,6 +21,7 @@ use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
 use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
+use gkg_server_config::{IndexerModule, SubscriptionConfig};
 use metrics::CodeMetrics;
 use repository::RepositoryResolver;
 
@@ -33,12 +34,25 @@ pub use repository::{
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
+const CODE_CONCURRENCY_GROUP: &str = IndexerModule::Code.concurrency_group();
+
+pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
+    SubscriptionConfig {
+        concurrency_group: Some(CODE_CONCURRENCY_GROUP.to_string()),
+        max_attempts: Some(5),
+        retry_interval_secs: Some(60),
+        dead_letter_on_exhaustion: Some(true),
+        max_ack_pending: None,
+    }
+}
+
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
+    resources: &gkg_server_config::ContainerResources,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -86,7 +100,8 @@ pub async fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-    let pipeline_config = code_indexing_task_config.pipeline.clone();
+    let mut pipeline_config = code_indexing_task_config.pipeline.clone();
+    pipeline_config.resolve_runtime_defaults(resources);
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
         writer,
@@ -98,10 +113,9 @@ pub async fn register_handlers(
         pipeline_config,
     ));
 
-    let mut subscription = CodeIndexingTaskRequest::subscription();
-    if let Some(topic_config) = config.engine.topics.get(CODE_INDEXING_TASK_TOPIC) {
-        subscription = subscription.with_config(topic_config);
-    }
+    let policy = code_indexing_task_topic_policy()
+        .with_optional_override(config.engine.topics.get(CODE_INDEXING_TASK_TOPIC));
+    let mut subscription = CodeIndexingTaskRequest::subscription().with_config(&policy);
     if let Some(max_inflight) = pipeline.max_inflight() {
         subscription = subscription.with_max_inflight(max_inflight);
     }
@@ -126,7 +140,37 @@ fn job_timeout_outlives_ack_wait(job_timeout_secs: u64, ack_wait_secs: u64) -> b
 
 #[cfg(test)]
 mod tests {
-    use super::job_timeout_outlives_ack_wait;
+    use super::{code_indexing_task_topic_policy, job_timeout_outlives_ack_wait};
+    use gkg_server_config::SubscriptionConfig;
+
+    #[test]
+    fn declared_policy_retries_and_dead_letters() {
+        let policy = code_indexing_task_topic_policy();
+        assert_eq!(policy.max_attempts, Some(5));
+        assert_eq!(policy.retry_interval_secs, Some(60));
+        assert_eq!(policy.dead_letter_on_exhaustion, Some(true));
+        assert_eq!(policy.concurrency_group.as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn sparse_override_changes_only_named_field() {
+        let resolved =
+            code_indexing_task_topic_policy().with_optional_override(Some(&SubscriptionConfig {
+                max_attempts: Some(2),
+                ..Default::default()
+            }));
+        assert_eq!(resolved.max_attempts, Some(2));
+        assert_eq!(resolved.retry_interval_secs, Some(60));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+        assert_eq!(resolved.concurrency_group.as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn absent_override_keeps_declared_policy() {
+        let resolved = code_indexing_task_topic_policy().with_optional_override(None);
+        assert_eq!(resolved.max_attempts, Some(5));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+    }
 
     #[test]
     fn job_timeout_must_sit_below_ack_wait() {

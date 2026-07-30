@@ -16,20 +16,14 @@ q1_defines_traversal_file_ends_with_rb:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": ".rb"
-            }
+            "path": {"ends_with": ".rb"}
           }
         },
         {
           "id": "d",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "starts_with",
-              "value": "process"
-            }
+            "name": {"starts_with": "process"}
           }
         }
       ],
@@ -55,10 +49,7 @@ q2_datetime_range_filter_on_mr:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-03-01T00:00:00Z"
-            },
+            "merged_at": {"gte": "2026-03-01T00:00:00Z"},
             "state": "merged"
           }
         },
@@ -75,11 +66,7 @@ q2_datetime_range_filter_on_mr:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "merged_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.merged_at",
       "limit": 20
     }
 
@@ -90,13 +77,12 @@ q3_bidirectional_neighbors_on_project:
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "p",
         "entity": "Project",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
-        "node": "p",
         "direction": "both",
         "rel_types": [
           "CONTAINS",
@@ -143,23 +129,14 @@ q4_3_node_agg_mr_count_per_author:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "u"
-        }
-      ],
+      "group_by": ["u"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 20
     }
 
@@ -188,17 +165,11 @@ q5_source_side_mr_count:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
       "limit": 10
@@ -244,11 +215,7 @@ q6_user_mrs_in_project_traversal:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "merged_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.merged_at",
       "limit": 10
     }
 
@@ -294,10 +261,7 @@ q8_token_match_on_mr_title:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "title": {
-              "op": "token_match",
-              "value": "security"
-            }
+            "title": {"token_match": "security"}
           }
         },
         {
@@ -313,11 +277,7 @@ q8_token_match_on_mr_title:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.updated_at",
       "limit": 15
     }
 
@@ -333,10 +293,7 @@ q9_contains_on_mr_description:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "description": {
-              "op": "contains",
-              "value": "performance regression"
-            }
+            "description": {"contains": "performance regression"}
           }
         },
         {
@@ -352,11 +309,7 @@ q9_contains_on_mr_description:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.created_at",
       "limit": 10
     }
 
@@ -385,8 +338,7 @@ q10_multi_hop_group_contains:
           "type": "CONTAINS",
           "from": "g",
           "to": "p",
-          "min_hops": 1,
-          "max_hops": 3
+          "hops": [1, 3]
         }
       ],
       "limit": 20
@@ -485,23 +437,14 @@ q12_failed_pipelines_per_project_in_group:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "fail_count"
+          "count": "pipe",
+          "as": "fail_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "fail_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-fail_count",
       "limit": 10
     }
 
@@ -517,10 +460,7 @@ q13_all_tokens_on_workitem_title:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "title": {
-              "op": "all_tokens",
-              "value": "memory leak"
-            }
+            "title": {"all_tokens": "memory leak"}
           }
         },
         {
@@ -538,11 +478,7 @@ q13_all_tokens_on_workitem_title:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "wi",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-wi.updated_at",
       "limit": 10
     }
 
@@ -583,29 +519,18 @@ q14_multi_agg_avg_diff_size_count:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "u"
-        }
-      ],
+      "group_by": ["u"],
       "aggregations": [
         {
-          "function": "avg",
-          "target": "mr",
-          "property": "diff_size",
-          "alias": "avg_diff"
+          "avg": "mr.diff_size",
+          "as": "avg_diff"
         },
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 15
     }
 
@@ -617,13 +542,12 @@ q15_neighbors_many_rel_types:
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "u",
         "entity": "User",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
-        "node": "u",
         "direction": "both",
         "rel_types": [
           "AUTHORED",
@@ -675,23 +599,14 @@ q16_reviewer_count_per_mr:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "mr"
-        }
-      ],
+      "group_by": ["mr"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "u",
-          "alias": "reviewer_count"
+          "count": "u",
+          "as": "reviewer_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "reviewer_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-reviewer_count",
       "limit": 10
     }
 
@@ -737,10 +652,7 @@ q18_wide_datetime_pipeline_agg:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "created_at": {
-              "op": "gte",
-              "value": "2025-01-01T00:00:00Z"
-            },
+            "created_at": {"gte": "2025-01-01T00:00:00Z"},
             "status": "failed"
           }
         },
@@ -757,17 +669,11 @@ q18_wide_datetime_pipeline_agg:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "fail_count"
+          "count": "pipe",
+          "as": "fail_count"
         }
       ],
       "limit": 10
@@ -785,10 +691,7 @@ q19_code_defines_by_node_id:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": ".rb"
-            }
+            "path": {"ends_with": ".rb"}
           }
         },
         {
@@ -831,17 +734,11 @@ q20_vulnerability_count_in_project:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vuln_count"
+          "count": "v",
+          "as": "vuln_count"
         }
       ],
       "limit": 10
@@ -859,10 +756,7 @@ q21_calls_aggregation:
           "id": "d1",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "starts_with",
-              "value": "create"
-            }
+            "name": {"starts_with": "create"}
           }
         },
         {
@@ -877,23 +771,14 @@ q21_calls_aggregation:
           "to": "d2"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "d1"
-        }
-      ],
+      "group_by": ["d1"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "d2",
-          "alias": "call_count"
+          "count": "d2",
+          "as": "call_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "call_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-call_count",
       "limit": 10
     }
 
@@ -909,10 +794,7 @@ q22_imports_traversal:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": "controller.rb"
-            }
+            "path": {"ends_with": "controller.rb"}
           }
         },
         {
@@ -983,10 +865,7 @@ q24_job_pipeline_project_agg:
           "filters": {
             "status": "failed",
             "failure_reason": "script_failure",
-            "created_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         },
         {
@@ -1011,23 +890,14 @@ q24_job_pipeline_project_agg:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "pipe"
-        }
-      ],
+      "group_by": ["pipe"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "fail_count"
+          "count": "j",
+          "as": "fail_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "fail_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-fail_count",
       "limit": 10
     }
 
@@ -1044,10 +914,7 @@ q25_mr_diff_project_traversal:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-04-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-04-01T00:00:00Z"}
           }
         },
         {
@@ -1072,11 +939,7 @@ q25_mr_diff_project_traversal:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "merged_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.merged_at",
       "limit": 10
     }
 
@@ -1092,10 +955,7 @@ q26_calls_with_token_match:
           "id": "d1",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "token_match",
-              "value": "initialize"
-            }
+            "name": {"token_match": "initialize"}
           }
         },
         {
@@ -1138,21 +998,14 @@ q28_multi_hop_contains_agg:
           "type": "CONTAINS",
           "from": "g",
           "to": "p",
-          "min_hops": 1,
-          "max_hops": 3
+          "hops": [1, 3]
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "g"
-        }
-      ],
+      "group_by": ["g"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "p",
-          "alias": "project_count"
+          "count": "p",
+          "as": "project_count"
         }
       ],
       "limit": 10
@@ -1178,10 +1031,7 @@ q29_workitem_with_label_filter:
           "id": "l",
           "entity": "Label",
           "filters": {
-            "title": {
-              "op": "contains",
-              "value": "bug"
-            }
+            "title": {"contains": "bug"}
           }
         },
         {
@@ -1246,11 +1096,7 @@ q30_pipeline_job_ci_chain:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "pipe",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-pipe.created_at",
       "limit": 10
     }
 
@@ -1266,10 +1112,7 @@ q31_on_branch_code_edge:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "ends_with",
-              "value": ".rb"
-            }
+            "path": {"ends_with": ".rb"}
           }
         },
         {
@@ -1302,10 +1145,7 @@ q32_extends_traversal:
           "id": "d1",
           "entity": "Definition",
           "filters": {
-            "name": {
-              "op": "token_match",
-              "value": "BaseService"
-            }
+            "name": {"token_match": "BaseService"}
           }
         },
         {
@@ -1335,13 +1175,7 @@ q33_vulnerability_occurrence_chain:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed"]}
           }
         },
         {
@@ -1381,10 +1215,7 @@ q34_any_tokens_on_mr_description:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "description": {
-              "op": "any_tokens",
-              "value": "timeout regression slowdown"
-            }
+            "description": {"any_tokens": "timeout regression slowdown"}
           }
         },
         {
@@ -1402,11 +1233,7 @@ q34_any_tokens_on_mr_description:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.updated_at",
       "limit": 10
     }
 
@@ -1449,23 +1276,14 @@ q35_group_project_mr_agg:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "open_mrs"
+          "count": "mr",
+          "as": "open_mrs"
         }
       ],
-      "aggregation_sort": {
-        "column": "open_mrs",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-open_mrs",
       "limit": 10
     }
 
@@ -1505,23 +1323,14 @@ a1_note_count_per_project_in_group:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "n",
-          "alias": "note_count"
+          "count": "n",
+          "as": "note_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "note_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-note_count",
       "limit": 10
     }
 
@@ -1562,23 +1371,14 @@ a2_stage_count_per_pipeline:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "pipe"
-        }
-      ],
+      "group_by": ["pipe"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "stage_count"
+          "count": "s",
+          "as": "stage_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "stage_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-stage_count",
       "limit": 10
     }
 
@@ -1609,17 +1409,11 @@ a3_user_membership_count:
           "to": "g"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "g"
-        }
-      ],
+      "group_by": ["g"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "u",
-          "alias": "member_count"
+          "count": "u",
+          "as": "member_count"
         }
       ],
       "limit": 10
@@ -1653,11 +1447,7 @@ b1_incoming_reviewer_for_user:
           "to": "mr"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "updated_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.updated_at",
       "limit": 10
     }
 
@@ -1668,13 +1458,12 @@ b2_bidirectional_neighbors_group:
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "g",
         "entity": "Group",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
-        "node": "g",
         "direction": "both"
       },
       "limit": 20
@@ -1694,10 +1483,7 @@ c1_triple_filter_mr:
           "filters": {
             "state": "opened",
             "draft": true,
-            "created_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         },
         {
@@ -1761,10 +1547,7 @@ c3_mr_source_branch_contains:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "source_branch": {
-              "op": "contains",
-              "value": "fix"
-            }
+            "source_branch": {"contains": "fix"}
           }
         },
         {
@@ -1780,11 +1563,7 @@ c3_mr_source_branch_contains:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "mr",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-mr.created_at",
       "limit": 10
     }
 
@@ -1800,10 +1579,7 @@ c4_workitem_multi_text_filter:
           "id": "wi",
           "entity": "WorkItem",
           "filters": {
-            "title": {
-              "op": "any_tokens",
-              "value": "security vulnerability CVE exploit"
-            },
+            "title": {"any_tokens": "security vulnerability CVE exploit"},
             "state": "opened",
             "work_item_type": "issue"
           }
@@ -1905,10 +1681,7 @@ d2_group_project_mr_user_authors:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-04-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-04-01T00:00:00Z"}
           }
         },
         {
@@ -2044,10 +1817,7 @@ e1_avg_count_pipeline_duration:
           "entity": "Pipeline",
           "filters": {
             "status": "success",
-            "created_at": {
-              "op": "gte",
-              "value": "2026-04-01T00:00:00Z"
-            }
+            "created_at": {"gte": "2026-04-01T00:00:00Z"}
           }
         },
         {
@@ -2063,23 +1833,15 @@ e1_avg_count_pipeline_duration:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "avg",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "avg_dur"
+          "avg": "pipe.duration",
+          "as": "avg_dur"
         },
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipe_count"
+          "count": "pipe",
+          "as": "pipe_count"
         }
       ],
       "limit": 5
@@ -2102,10 +1864,7 @@ e2_sum_lines_per_user:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2026-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2026-01-01T00:00:00Z"}
           }
         },
         {
@@ -2126,30 +1885,18 @@ e2_sum_lines_per_user:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "u"
-        }
-      ],
+      "group_by": ["u"],
       "aggregations": [
         {
-          "function": "sum",
-          "target": "mr",
-          "property": "added_lines",
-          "alias": "total_added"
+          "sum": "mr.added_lines",
+          "as": "total_added"
         },
         {
-          "function": "sum",
-          "target": "mr",
-          "property": "removed_lines",
-          "alias": "total_removed"
+          "sum": "mr.removed_lines",
+          "as": "total_removed"
         }
       ],
-      "aggregation_sort": {
-        "column": "total_added",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-total_added",
       "limit": 10
     }
 
@@ -2220,23 +1967,14 @@ f2_milestone_mr_count:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "m"
-        }
-      ],
+      "group_by": ["m"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -2252,10 +1990,7 @@ g1_3_hop_code_chain_file_def_def:
           "id": "f",
           "entity": "File",
           "filters": {
-            "path": {
-              "op": "eq",
-              "value": "app/models/user.rb"
-            }
+            "path": {"eq": "app/models/user.rb"}
           }
         },
         {
@@ -2294,10 +2029,7 @@ g2_directory_file_count:
           "id": "dir",
           "entity": "Directory",
           "filters": {
-            "path": {
-              "op": "starts_with",
-              "value": "app/"
-            }
+            "path": {"starts_with": "app/"}
           }
         },
         {
@@ -2312,23 +2044,14 @@ g2_directory_file_count:
           "to": "f"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "dir"
-        }
-      ],
+      "group_by": ["dir"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "f",
-          "alias": "file_count"
+          "count": "f",
+          "as": "file_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "file_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-file_count",
       "limit": 10
     }
 
@@ -2431,11 +2154,7 @@ h3_pipeline_child_of_pipeline:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "parent",
-        "property": "created_at",
-        "direction": "DESC"
-      },
+      "order_by": "-parent.created_at",
       "limit": 10
     }
 
@@ -2513,11 +2232,7 @@ h5_deployment_environment:
           "to": "p"
         }
       ],
-      "order_by": {
-        "node": "dep",
-        "property": "id",
-        "direction": "DESC"
-      },
+      "order_by": "-dep.id",
       "limit": 10
     }
 
@@ -2626,23 +2341,14 @@ i1_job_count_by_failure:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "j"
-        }
-      ],
+      "group_by": ["j"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "fail_count"
+          "count": "j",
+          "as": "fail_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "fail_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-fail_count",
       "limit": 20
     }
 
@@ -2659,10 +2365,7 @@ i2_mr_count_by_target_branch:
           "entity": "MergeRequest",
           "filters": {
             "state": "merged",
-            "merged_at": {
-              "op": "gte",
-              "value": "2025-01-01T00:00:00Z"
-            }
+            "merged_at": {"gte": "2025-01-01T00:00:00Z"}
           }
         },
         {
@@ -2678,23 +2381,14 @@ i2_mr_count_by_target_branch:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "mr"
-        }
-      ],
+      "group_by": ["mr"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 20
     }
 
@@ -2723,23 +2417,14 @@ i3_pipeline_count_by_source:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "pipe"
-        }
-      ],
+      "group_by": ["pipe"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipe_count"
+          "count": "pipe",
+          "as": "pipe_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipe_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipe_count",
       "limit": 20
     }
 
@@ -2777,23 +2462,14 @@ i4_vulnoccurrence_per_vulnerability:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "v"
-        }
-      ],
+      "group_by": ["v"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "occ",
-          "alias": "occ_count"
+          "count": "occ",
+          "as": "occ_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "occ_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-occ_count",
       "limit": 10
     }
 
@@ -2833,23 +2509,14 @@ i5_note_count_per_mr:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "mr"
-        }
-      ],
+      "group_by": ["mr"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "n",
-          "alias": "note_count"
+          "count": "n",
+          "as": "note_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "note_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-note_count",
       "limit": 10
     }
 
@@ -2890,23 +2557,14 @@ i6_label_usage_workitem_per_label:
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "l"
-        }
-      ],
+      "group_by": ["l"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "wi",
-          "alias": "wi_count"
+          "count": "wi",
+          "as": "wi_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "wi_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-wi_count",
       "limit": 10
     }
 
@@ -2922,36 +2580,18 @@ i7_vulnerability_count_by_severity:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed",
-                "resolved",
-                "dismissed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed", "resolved", "dismissed"]}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["v.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vuln_count"
+          "count": "v",
+          "as": "vuln_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vuln_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vuln_count",
       "limit": 20
     }
 
@@ -2971,24 +2611,14 @@ i8_security_scan_count_by_scan_type:
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type"
-        }
-      ],
+      "group_by": ["s.scan_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -3004,43 +2634,21 @@ i9_pipeline_count_by_status_and_source:
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status",
-          "alias": "pipeline_status"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "source",
-          "alias": "pipeline_source"
-        }
+        "pipe.status",
+        "pipe.source"
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipe_count"
+          "count": "pipe",
+          "as": "pipe_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipe_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipe_count",
       "limit": 30
     }
 
@@ -3056,48 +2664,25 @@ i10_merge_request_state_draft_matrix:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state",
-          "alias": "mr_state"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "draft",
-          "alias": "draft"
-        }
+        "mr.state",
+        "mr.draft"
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         },
         {
-          "function": "avg",
-          "target": "mr",
-          "property": "diff_size",
-          "alias": "avg_diff_size"
+          "avg": "mr.diff_size",
+          "as": "avg_diff_size"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 30
     }
 
@@ -3113,14 +2698,7 @@ i11_project_visibility_and_mr_state:
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {
@@ -3139,30 +2717,16 @@ i11_project_visibility_and_mr_state:
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "p",
-          "property": "visibility_level",
-          "alias": "project_visibility"
-        },
-        {
-          "kind": "property",
-          "node": "mr",
-          "property": "state",
-          "alias": "mr_state"
-        }
+        "p.visibility_level",
+        "mr.state"
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 30
     }
 
@@ -3178,13 +2742,7 @@ i12_project_and_vulnerability_severity:
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed"]}
           }
         },
         {
@@ -3204,29 +2762,16 @@ i12_project_and_vulnerability_severity:
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity",
-          "alias": "severity"
-        }
+        "p",
+        "v.severity"
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vuln_count"
+          "count": "v",
+          "as": "vuln_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vuln_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vuln_count",
       "limit": 20
     }
 

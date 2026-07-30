@@ -49,8 +49,7 @@ The JSON query schema supports four query types through a single unified structu
 | Field | Type | Description |
 |-------|------|-------------|
 | `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `neighbors` |
-| `nodes` | `array` | Node selectors to match (required for multi-node traversal, aggregation, path_finding) |
-| `node` | `object` | Single node selector (required for `neighbors`, allowed for single-entity `traversal`) |
+| `nodes` | `array` | Node selectors to match. Always required; single-node queries use a 1-element array |
 
 ### Optional Fields
 
@@ -62,14 +61,14 @@ The JSON query schema supports four query types through a single unified structu
 | `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
 | `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
 | `limit` | `integer` | Max results (1-1000, default: 30) |
-| `order_by` | `object` | Result ordering specification |
-| `aggregation_sort` | `object` | Ordering for aggregation outputs |
-| `cursor` | `object` | Agent-driven pagination cursor `{ offset, page_size }`. Slices the authorized (post-redaction) result set. |
+| `order_by` | `string` | Result ordering: `"node.property"` (asc) or `"-node.property"` (desc). |
+| `aggregation_sort` | `string` | Aggregation row ordering: `"column"` (asc) or `"-column"` (desc), referencing an output column alias. |
+| `cursor` | `object` | Keyset pagination cursor `{ page_size, after? }`. `after` is the previous response's `pagination.next_cursor`. |
 | `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
 
 ## Node Selectors
 
-Each node selector specifies which graph nodes to match. For `neighbors` queries and single-entity `traversal` lookups, use the `node` field (singular). For multi-node `traversal`, `aggregation`, and `path_finding` queries, use the `nodes` array. You cannot specify both.
+Each node selector specifies which graph nodes to match. All query types declare selectors in the `nodes` array; `neighbors` queries and single-entity `traversal` lookups use a 1-element array.
 
 ```json
 {
@@ -103,28 +102,31 @@ Filters support both simple equality and advanced operators.
 {"filters": {"username": "admin", "state": "active"}}
 ```
 
-**Advanced operators:**
+**Operator objects** (multiple keys AND-combine, e.g. for ranges):
 
 ```json
 {
   "filters": {
-    "created_at": {"op": "gte", "value": "2024-01-01"},
-    "state": {"op": "in", "value": ["active", "blocked"]},
-    "username": {"op": "contains", "value": "admin"}
+    "created_at": {"gte": "2024-01-01", "lt": "2025-01-01"},
+    "state": {"in": ["active", "blocked"]},
+    "username": {"contains": "admin"}
   }
 }
 ```
 
 | Operator | Description | Example |
 |----------|-------------|---------|
-| `eq` | Equality | `{"op": "eq", "value": "admin"}` |
-| `gt`, `lt`, `gte`, `lte` | Comparison | `{"op": "gte", "value": 100}` |
-| `in` | Membership | `{"op": "in", "value": ["a", "b"]}` |
-| `contains` | Substring match | `{"op": "contains", "value": "test"}` |
-| `starts_with` | Prefix match | `{"op": "starts_with", "value": "gl_"}` |
-| `ends_with` | Suffix match | `{"op": "ends_with", "value": "_bot"}` |
-| `is_null` | Null check | `{"op": "is_null"}` |
-| `is_not_null` | Not null check | `{"op": "is_not_null"}` |
+| `eq` | Equality | `{"eq": "admin"}` |
+| `gt`, `lt`, `gte`, `lte` | Comparison | `{"gte": 100}` |
+| `in` | Membership | `{"in": ["a", "b"]}` |
+| `contains` | Substring match | `{"contains": "test"}` |
+| `starts_with` | Prefix match | `{"starts_with": "gl_"}` |
+| `ends_with` | Suffix match | `{"ends_with": "_bot"}` |
+| `is_null` | Null check (boolean; `false` negates) | `{"is_null": true}` |
+| `is_not_null` | Not null check (boolean; `false` negates) | `{"is_not_null": true}` |
+
+Repeating an operator on one property takes an array of operator objects:
+`{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
 ## Relationship Selectors
 
@@ -136,7 +138,7 @@ Relationships connect nodes in the query:
   "from": "u",
   "to": "mr",
   "direction": "outgoing",
-  "max_hops": 1
+  "hops": [1, 1]
 }
 ```
 
@@ -146,8 +148,7 @@ Relationships connect nodes in the query:
 | `from` | `string` | Source node variable ID. |
 | `to` | `string` | Target node variable ID. |
 | `direction` | `string` | `outgoing` (default), `incoming`, or `both`. |
-| `min_hops` | `integer` | Minimum hops (0-3, default: 1). |
-| `max_hops` | `integer` | Maximum hops (1-3, default: 1). |
+| `hops` | `array` | Inclusive `[min, max]` hop range; `[2, 2]` means exactly 2. Bounds 1-3, default `[1, 1]`. |
 | `filters` | `object` | Filters on relationship properties. |
 
 ## Query Types
@@ -167,7 +168,7 @@ Match nodes and relationships, return matching entities.
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
   "limit": 25,
-  "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"}
+  "order_by": "-mr.merged_at"
 }
 ```
 
@@ -175,9 +176,13 @@ Match nodes and relationships, return matching entities.
 
 Group and aggregate results.
 
+Each aggregation is an object with a single function key (`count`, `sum`,
+`avg`, `min`, `max`) whose value is a `"node"` or `"node.property"` reference,
+plus an optional `as` output column name. Without `as`, the column name derives
+as `<function>_<node>[_<property>]`.
+
 Use top-level `group_by` to group aggregation rows. It applies to every
-aggregation in the query. A node group uses
-`{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}`.
+aggregation in the query. A node group is the node ID string (`"u"`).
 
 ```json orbit-query
 {
@@ -189,25 +194,25 @@ aggregation in the query. A node group uses
   "relationships": [
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
-  "group_by": [{"kind": "node", "node": "u"}],
+  "group_by": ["u"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "mr_count"}
+    { "count": "mr", "as": "mr_count" }
   ],
   "limit": 10,
-  "aggregation_sort": {"column": "mr_count", "direction": "DESC"}
+  "aggregation_sort": "-mr_count"
 }
 ```
 
-Use top-level `group_by` entries with `kind: "property"` to group by scalar
-properties, such as dashboard buckets. Property groups use
-`{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}`.
+Property groups are `"node.property"` strings (`"mr.state"`), such as
+dashboard buckets. Date properties can be bucketed with the object form
+`{"key": "mr.created_at", "truncate": "month", "as": "<optional-name>"}`.
 They must reference ClickHouse-backed, filterable properties allowed for the
 caller. Virtual fields and unfilterable fields are rejected during validation.
 
-`group_by` supports up to four keys and can mix node and property groups. If
-`alias` is omitted, node groups use the node ID. Property groups use the property
-name when unique, or `<node>_<property>` when needed to avoid ambiguity.
-Duplicate group or aggregate output names are rejected.
+`group_by` supports up to four keys and can mix node and property groups.
+Node groups name their column after the node ID; property groups use
+`<node>_<property>` (plus `_<unit>` when truncated), overridable with the
+object form's `as`. Duplicate group or aggregate output names are rejected.
 
 ```json orbit-query
 {
@@ -215,14 +220,12 @@ Duplicate group or aggregate output names are rejected.
   "nodes": [
     {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
   ],
-  "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-  ],
+  "group_by": ["v.severity"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+    { "count": "v", "as": "vulnerability_count" }
   ],
   "limit": 10,
-  "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"}
+  "aggregation_sort": "-vulnerability_count"
 }
 ```
 
@@ -268,38 +271,35 @@ Find paths between nodes using recursive CTEs.
 | Path Type | Description |
 |-----------|-------------|
 | `shortest` | Find the single shortest path |
-| `all_shortest` | Find all paths of minimum length |
-| `any` | Find any valid path |
 
 ### Single-entity Traversal (lookup)
 
-Match a single entity type with optional filters — a `traversal` query with one node and no relationships. Use the `node` field (singular) instead of `nodes`.
+Match a single entity type with optional filters — a `traversal` query with one node and no relationships.
 
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "u",
     "entity": "User",
     "columns": ["username", "email"],
     "filters": {
-      "username": {"op": "starts_with", "value": "admin"}
+      "username": {"starts_with": "admin"}
     }
-  },
+  }],
   "limit": 10
 }
 ```
 
 ### Neighbors Queries
 
-Find all nodes connected to a given node. Neighbors queries use the `node` field (singular) and require a `neighbors` configuration.
+Find all nodes connected to a given node. Neighbors queries take exactly one node selector and require a `neighbors` configuration.
 
 ```json orbit-query
 {
   "query_type": "neighbors",
-  "node": {"id": "u", "entity": "User", "node_ids": [100]},
+  "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
   "neighbors": {
-    "node": "u",
     "direction": "both",
     "rel_types": ["AUTHORED", "MEMBER_OF"]
   },
@@ -309,7 +309,6 @@ Find all nodes connected to a given node. Neighbors queries use the `node` field
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `node` | `string` | Node variable ID to find neighbors for (required). |
 | `direction` | `string` | `outgoing`, `incoming`, or `both` (default: `both`). |
 | `rel_types` | `array` | Relationship types to traverse. If omitted, all types are considered. |
 
@@ -471,15 +470,14 @@ If a value is not in the allow-list, we reject the request with a validation err
 
 **Constraint enforcement:**
 
-Each relationship step has a hard-coded `max_hops` cap, and the schema enforces the same bounds:
+Each relationship step has a hard-coded hop cap, and the schema enforces the same bounds:
 
-- `max_hops` limited to 3 to prevent resource exhaustion
+- `hops` upper bound limited to 3 to prevent resource exhaustion
 - `limit` capped at 1000 results (default: 30)
 - Path `max_depth` limited to 3
 - `node_ids` capped at 500 per node selector
 - `IN` filter values capped at 100 per filter
-- `cursor.offset` capped at 999, `cursor.page_size` capped at 100
-- `cursor.offset + cursor.page_size` must not exceed `limit`
+- `cursor.page_size` capped at 1000
 
 > **Note:** These limits will be tuned as we collect usage data.
 

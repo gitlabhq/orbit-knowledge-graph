@@ -18,7 +18,7 @@ View the [Intermediate Query Language](./intermediary_llm_query_language.md) des
 
 ### Unified Response Schema
 
-All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value, `group_columns` describing grouping keys, and tabular `rows` carrying group values plus metric values. When the query includes a `cursor`, the response includes a `pagination` object with `has_more` and `total_rows`.
+All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value, `group_columns` describing grouping keys, and tabular `rows` carrying group values plus metric values. Every response includes a `pagination` object with `has_more`, `truncated`, and (for cursor queries with more pages) `next_cursor`.
 
 - **ADR**: [ADR 004 — Unified Response Schema](../decisions/004_unified_response_schema.md)
 
@@ -31,6 +31,17 @@ Orbit agents discover graph capabilities through a command catalog instead of re
 The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
 
 Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version lives in `config/QUERY_DSL_VERSION` and is tied to the `graph_query` schema `$id` major version; the query response format version lives in `config/RAW_OUTPUT_FORMAT_VERSION`.
+
+### Named Queries
+
+Named queries are server-defined query templates for preset consumers (the Orbit dashboard) so clients invoke a stable name instead of authoring a Query DSL string that can drift from the server's grammar and ontology. Templates live as YAML under `config/named_queries/`, validated against `config/schemas/named_query.schema.json` and compiled against the ontology by `gkg-server`'s build script, so a template that no longer matches the DSL or ontology fails the build.
+
+At runtime the same files are embedded into the binary (via the `named-queries` crate). A client executes one by sending `ExecuteQuery` with `query_type = QUERY_TYPE_NAMED` and, in the `query` field, a JSON envelope `{"name": ..., "parameters": {...}}` (`parameters` may be omitted for templates that declare none). The server renders two placeholder kinds and runs the result through the standard pipeline, so quota, security context, redaction, and response formatting behave exactly as for client-authored queries:
+
+- `{ "$binding": ... }` — identity values resolved from trusted request context (currently only `current_user_id`, taken from the caller's JWT claims). Never client-supplied.
+- `{ "$param": ... }` — selection values supplied by the client (e.g. the entity and ids of a node clicked in the graph explorer), validated against a JSON Schema each template declares per parameter. Authorization never depends on these: the compiler security pass and redaction filter results regardless of which ids the client asks for. Each parameter also declares an `example` value used to compile the template at build time.
+
+Unknown names, missing/unknown parameters, and schema violations are rejected with client-safe errors that list the valid options. Clients discover the catalog through the `ListNamedQueries` RPC (surfaced as `GET /api/v4/orbit/templates`), which returns each query's name, description, and DSL rendered for the caller: bindings resolved from the JWT claims and parameters filled with their declared examples, so the returned DSL is executable as-is and can populate a query editor. Templates keep query structure (entities, relationships, columns, aggregation shape) server-side — parameters carry only values, so the drift-by-construction guarantee is preserved.
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 

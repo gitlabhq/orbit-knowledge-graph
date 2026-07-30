@@ -15,6 +15,21 @@ pub struct QueryRequest {
     pub query_type: i32,
 }
 
+pub async fn send_invalid_request_error(
+    tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
+    message: String,
+) {
+    warn!(error = %message, "Rejecting invalid query request");
+    let _ = tx
+        .send(Ok(ExecuteQueryMessage {
+            content: Some(execute_query_message::Content::Error(ExecuteQueryError {
+                code: "invalid_request".to_string(),
+                message,
+            })),
+        }))
+        .await;
+}
+
 pub async fn receive_query_request(
     stream: &mut Streaming<ExecuteQueryMessage>,
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
@@ -121,14 +136,14 @@ fn classify_execution_error(msg: &str) -> String {
             // MEMORY_LIMIT_EXCEEDED
             "Query used too much memory. This usually means the query is \
              scanning too much data. Try: add a project_id filter, use \
-             node_ids to pin specific entities, or reduce max_hops/max_depth."
+             node_ids to pin specific entities, or reduce hops/max_depth."
                 .to_string()
         }
         Some(159) | Some(160) => {
             // TIMEOUT_EXCEEDED / TOO_SLOW
             "Query timed out. The query is likely scanning a large portion \
              of the graph. Try: add selective filters (project_id, state), \
-             reduce max_hops/max_depth, specify rel_types, or use node_ids \
+             reduce hops/max_depth, specify rel_types, or use node_ids \
              to pin high-cardinality entities like Definition or File."
                 .to_string()
         }

@@ -90,8 +90,8 @@ pub fn is_top_level(path: &str) -> bool {
 
 /// Result of [`split_top_level`].
 pub struct TopLevelSplit {
-    /// Distinct count of top-level namespaces.
-    pub count: u64,
+    /// Distinct IDs of top-level namespaces.
+    pub ids: Vec<i64>,
     /// Traversal paths of the top-level namespaces.
     pub paths: Vec<String>,
     /// `(id, path)` rows dropped for not being top-level.
@@ -112,8 +112,10 @@ pub fn split_top_level(ids: Vec<i64>, paths: Vec<String>) -> TopLevelSplit {
             skipped.push((id, path));
         }
     }
+    let mut ids = kept_ids.into_iter().collect::<Vec<_>>();
+    ids.sort_unstable();
     TopLevelSplit {
-        count: kept_ids.len() as u64,
+        ids,
         paths: kept_paths,
         skipped,
     }
@@ -296,7 +298,7 @@ mod tests {
             "1/300/".to_string(),
         ];
         let split = split_top_level(ids, paths);
-        assert_eq!(split.count, 2);
+        assert_eq!(split.ids, vec![1, 4]);
         assert_eq!(
             split.paths,
             vec!["1/100/".to_string(), "1/300/".to_string()]

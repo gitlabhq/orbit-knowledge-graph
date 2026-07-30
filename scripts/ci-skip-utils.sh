@@ -4,7 +4,7 @@
 # Usage (source from a check script):
 #   BASE_REF="${1:-origin/main}"
 #   source "$(dirname "$0")/ci-skip-utils.sh"
-#   if ci_skip_requested "schema-version-check"; then
+#   if ci_skip_requested "migration-ledger-check"; then
 #       echo "skipping"; exit 0
 #   fi
 #

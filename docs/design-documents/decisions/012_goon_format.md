@@ -63,7 +63,6 @@ Fields:
 | `group_by` | aggregation with `group_by` | Comma-separated descriptors: `name(kind)` or `name(kind:detail)`. Kind is `node` (detail is the entity type, e.g. `severity(node:Vulnerability)`) or `property` (detail is the underlying ontology property when the alias differs, e.g. `severity_bucket(property:severity)`). |
 | `aggregations` | aggregation with metrics | Comma-separated descriptors: `name(function)`, `name(function:target)`, or `name(function:target.property)`. The richest form names both the node alias and the property being aggregated, so `latest_update(max:v.updated_at)` is unambiguous. |
 | `has_more` | when cursor paginated and there are more rows | `true`. |
-| `total_rows` | when cursor paginated | Authorized row count before cursor slicing. |
 
 ### `@nodes`
 

@@ -66,8 +66,7 @@ pub struct GraphResponse {
 pub struct ColumnDescriptor {
     pub name: String,
     pub function: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<String>,
+    pub target: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub property: Option<String>,
 }
@@ -88,7 +87,10 @@ pub struct GroupColumnDescriptor {
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct PaginationResponse {
     pub has_more: bool,
-    pub total_rows: usize,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "testutils", serde(default))]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -214,7 +216,8 @@ impl GraphFormatter {
 
         let pagination = output.pagination.as_ref().map(|p| PaginationResponse {
             has_more: p.has_more,
-            total_rows: p.total_rows,
+            truncated: p.truncated,
+            next_cursor: p.next_cursor.clone(),
         });
 
         GraphResponse {
@@ -322,13 +325,7 @@ impl GraphFormatter {
     }
 
     fn agg_col_names(aggs: &[compiler::input::InputAggregationMetric]) -> Vec<String> {
-        aggs.iter()
-            .map(|agg| {
-                agg.alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.to_string())
-            })
-            .collect()
+        aggs.iter().map(|agg| agg.output_name()).collect()
     }
 
     fn build_column_descriptors(
@@ -336,13 +333,10 @@ impl GraphFormatter {
     ) -> Vec<ColumnDescriptor> {
         aggs.iter()
             .map(|agg| ColumnDescriptor {
-                name: agg
-                    .alias
-                    .clone()
-                    .unwrap_or_else(|| agg.function.to_string()),
-                function: agg.function.to_string(),
-                target: agg.target.clone(),
-                property: agg.property.clone(),
+                name: agg.output_name(),
+                function: agg.expr.function().to_string(),
+                target: agg.expr.node().to_string(),
+                property: agg.expr.property().map(str::to_owned),
             })
             .collect()
     }
@@ -672,7 +666,7 @@ mod tests {
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "traversal",
-                    "node": {"id": "p", "entity": "Project"},
+                    "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
                 }))
                 .unwrap(),
@@ -686,7 +680,7 @@ mod tests {
 
     fn make_property_grouped_aggregation_output() -> PipelineOutput {
         let schema = Arc::new(Schema::new(vec![
-            Field::new("severity", DataType::Utf8, false),
+            Field::new("v_severity", DataType::Utf8, false),
             Field::new("vulnerability_count", DataType::Int64, false),
         ]));
         let batch = RecordBatch::try_new(
@@ -719,11 +713,10 @@ mod tests {
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "aggregation",
                     "nodes": [{"id": "v", "entity": "Vulnerability"}],
-                    "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+                    "group_by": ["v.severity"],
                     "aggregations": [{
-                        "function": "count",
-                        "target": "v",
-                        "alias": "vulnerability_count"
+                        "count": "v",
+                        "as": "vulnerability_count"
                     }],
                     "limit": 10
                 }))
@@ -767,7 +760,7 @@ mod tests {
         assert_eq!(
             group_columns,
             vec![GroupColumnDescriptor {
-                name: "severity".into(),
+                name: "v_severity".into(),
                 kind: "property".into(),
                 node: "v".into(),
                 property: Some("severity".into()),
@@ -782,7 +775,7 @@ mod tests {
         let rows = response.rows.expect("property grouped rows");
         assert_eq!(rows.len(), 2);
         assert_eq!(
-            rows[0].get("severity").and_then(Value::as_str),
+            rows[0].get("v_severity").and_then(Value::as_str),
             Some("critical")
         );
         assert_eq!(
@@ -880,7 +873,7 @@ mod tests {
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "traversal",
-                    "node": {"id": "p", "entity": "Project"},
+                    "nodes": [{"id": "p", "entity": "Project"}],
                     "limit": 10
                 }))
                 .unwrap(),

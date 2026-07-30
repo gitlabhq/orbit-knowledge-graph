@@ -166,11 +166,11 @@ Execute a Knowledge Graph query.
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "mr",
       "entity": "MergeRequest",
       "filters": { "state": "merged" }
-    },
+    }],
     "limit": 10
   },
   "query_type": "json",
@@ -371,7 +371,7 @@ Query body:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+  "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
   "limit": 5
 }
 ```
@@ -453,6 +453,8 @@ Unchanged — pure passthrough from `grpc_client.list_tools`.
 ### New proto definition
 
 The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code — see the authoritative definition in [`gkg.proto`](../../../crates/gkg-server/proto/gkg.proto).
+
+> Historical sketch: the shipped proto carries no PaginationInfo message; pagination metadata lives in the formatted JSON/GOON body.
 
 ```protobuf
 syntax = "proto3";

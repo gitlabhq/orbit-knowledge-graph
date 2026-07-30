@@ -58,7 +58,7 @@ pub(super) async fn path_finding_filtered_start_endpoint_reaches_project(ctx: &T
         r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+                {"id": "start", "entity": "User", "filters": {"username": {"eq": "alice"}}},
                 {"id": "end", "entity": "Project", "node_ids": [1004]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
@@ -397,8 +397,8 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
         r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "compile"}}},
-                {"id": "end", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "run_query"}}}
+                {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
+                {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["CALLS"]},

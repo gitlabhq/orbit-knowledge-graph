@@ -17,15 +17,22 @@ variants:
     to_node: { type: WorkItem, id: id }
     description: "Work item is related to another work item."
 
-etl:
-  - scope: namespaced
-    source: siphon_issue_links
-    order_by: [traversal_path, source_id, id]
-    from:
-      id: source_id
-      type: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
-    to:
-      id: target_id
-      type: WorkItem
-      enrich: [state_id, work_item_type_id, confidential]
+indexer:
+  reindex: [siphon_issue_links]
+pipelines:
+  - name: RELATED_TO_siphon_issue_links_WorkItem
+    extract:
+      type: clickhouse
+      tables: [siphon_issue_links]
+      fields: [source_id, target_id]
+      order_by: [traversal_path, source_id, id]
+      query: generated
+      lookups:
+        - { node: WorkItem, id: source_id }
+        - { node: WorkItem, id: target_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: source_id, kind: WorkItem, enrich: true }
+          to: { field: target_id, kind: WorkItem, enrich: true }
+          label: RELATED_TO

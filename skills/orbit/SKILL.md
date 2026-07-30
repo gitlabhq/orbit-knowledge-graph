@@ -1,7 +1,7 @@
 ---
 name: orbit
-description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`); prefer Orbit when the question spans relationships, cross-entity joins, or multi-entity aggregation.
-version: 0.14.5
+description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`).
+version: 0.22.0
 license: MIT
 metadata:
   audience: developers
@@ -30,12 +30,11 @@ authoritative usage references. For entity properties, prefer the recipes in
 they already encode the columns and filters known to work.
 
 If you must introspect, call `glab orbit remote schema <Entity…>` with explicit
-entity names to get their per-entity column/property lists (the unscoped form is
-~17 KB and omits per-entity properties; scoping adds them, so output is similar
-or slightly larger), or `glab orbit remote dsl` for the full DSL JSON Schema.
-Call schema at most once per session; schemas don't change mid-session. Note that
-per-node `outgoing_edges`/`incoming_edges` are arrays of **strings** (edge type
-names), not objects — use `--jq` accordingly (e.g.
+entity names — always pass the entity names you need rather than the unscoped
+form, which returns ~17 KB+ of output. Call schema at most once per session;
+schemas don't change mid-session. Use `glab orbit remote dsl` for the full DSL
+JSON Schema. Note that per-node `outgoing_edges`/`incoming_edges` are arrays
+of **strings** (edge type names), not objects — use `--jq` accordingly (e.g.
 `schema Project --jq '.nodes[] | select(.name=="Project") | .properties'`).
 
 Each `glab orbit remote query` has fixed per-call overhead. Prefer one
@@ -59,14 +58,14 @@ Put the request body in `/tmp/q.json`:
     "query_type": "traversal",
     "nodes": [
       {"id": "p",  "entity": "Project",
-       "filters": {"id": {"op": "eq", "value": 278964}}},
+       "filters": {"id": {"eq": 278964}}},
       {"id": "mr", "entity": "MergeRequest",
        "columns": ["iid", "title", "state"]}
     ],
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "order_by": "-mr.created_at",
     "limit": 5
   }
 }
@@ -78,17 +77,20 @@ glab orbit remote query /tmp/q.json
 
 `filters` is an **object keyed by property name** — not an array. Use either
 shorthand equality (`{"state": "opened"}`) or the operator form
-(`{"iid": {"op": "eq", "value": 1216}}`). Operators: `eq`, `gt`, `lt`, `gte`,
-`lte`, `in`, `contains`, `starts_with`, `ends_with`, `is_null`, `is_not_null`.
+(`{"iid": {"eq": 1216}}`). Operators: `eq`, `gt`, `lt`, `gte`,
+`lte`, `in`, `contains`, `starts_with`, `ends_with`, `is_null`, `is_not_null`,
+plus text-token operators (`token_match`, `all_tokens`, `any_tokens`) for
+text-indexed properties — see [`query_language.md`](references/query_language.md).
 
-`query_type` dictates the top-level shape: `neighbors` and single-node
-`traversal` use `node` (singular); multi-node `traversal`, `aggregation`, and
-`path_finding` use `nodes` (array) plus `relationships`.
+All queries declare node selectors in the `nodes` array — a 1-element array
+for `neighbors` and single-node `traversal`; multi-node `traversal`,
+`aggregation`, and `path_finding` add `relationships`.
 
-- For multi-hop **traversal** edges, set `relationships[].max_hops` (and
-  optionally `min_hops`). Default 1, max 3.
+- For multi-hop **traversal** edges, set `relationships[].hops` to an
+  inclusive `[min, max]` pair (`"hops": [1, 3]`; `[2, 2]` for exactly 2).
+  Omitted means `[1, 1]`. Max 3.
 - For **path_finding** queries, set `path.max_depth` inside the required
-  `path` sub-object. Max 3. `max_hops` does not apply to `path_finding`.
+  `path` sub-object. Max 3. `hops` does not apply to `path_finding`.
   When endpoints use filters, include `path.rel_types` to bound fan-out;
   path_finding follows edges only in their schema direction (see
   [recipe pitfall](references/recipes.md#path_finding--shortest-path-between-nodes)).
@@ -97,7 +99,7 @@ shorthand equality (`{"state": "opened"}`) or the operator form
 
 Read [`references/recipes.md`](references/recipes.md) before constructing a
 query — the same question often has one canonical paste-ready shape and several
-wrong-looking-correct ones. Three traps recur:
+wrong-looking-correct ones. Four traps recur:
 
 - **"Pipelines for a merge request" requires `Pipeline.source =
   "merge_request_event"`.** Both `Pipeline.merge_request_id` and the
@@ -116,6 +118,11 @@ wrong-looking-correct ones. Three traps recur:
   touched this file" needs `HAS_DIFF` (all snapshots) — `HAS_LATEST_DIFF` here
   can substantially undercount long-lived files. See
   [recipe](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
+- **GitLab issues, epics, tasks, and incidents are the `WorkItem` entity, not
+  `Issue`.** Modern GitLab unifies these under work items, and Orbit follows the
+  same model: there is no `Issue` node, so `entity: "Issue"` is rejected. Query
+  `WorkItem` for any of them (see
+  [recipe](references/recipes.md#work-items-in-a-project)).
 
 ## Iteration budget
 
@@ -138,11 +145,12 @@ lacks. Full guidance and worked examples:
 
 ## Repository map helpers
 
-For code-structure orientation before planning a change, use a bundled repo-map
-helper (script paths are relative to this skill root, not the user's current
-repo): the **local** helper for an uncommitted/branch-local checkout, the
-**remote** helper for a project already indexed in Orbit Remote. See the
-repository-map rows in [References](#references) below.
+For code-structure orientation before planning a change, use a repo-map helper:
+the native **local** command `glab orbit local repo-map` for an
+uncommitted/branch-local checkout, or the bundled **remote** helper script (path
+relative to this skill root, not the user's current repo) for a project already
+indexed in Orbit Remote. See the repository-map rows in
+[References](#references) below.
 
 ## Local CLI (glab orbit local)
 
@@ -161,7 +169,7 @@ pass-through args: [`references/local_cli.md`](references/local_cli.md).
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
 | Reporting results & coverage caveats | [`references/reporting.md`](references/reporting.md) |
-| Local repository map helper | [`references/local_repo_map.md`](references/local_repo_map.md) |
+| Local repository map command (`glab orbit local repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
 | CLI exit codes (1-5), errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | Local CLI flags, config keys & pass-through args | [`references/local_cli.md`](references/local_cli.md) |

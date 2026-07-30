@@ -2,12 +2,12 @@
 """remote_repo_map.py — remote repo map backed by glab orbit remote.
 
 Usage:
-    remote_repo_map.py extends   NAME         [--project-id ID] [--branch B] [--depth N]
-    remote_repo_map.py ancestors NAME         [--project-id ID] [--branch B] [--depth N] [--filter-prefix P]
-    remote_repo_map.py includes  BASE PREFIX  [--project-id ID] [--branch B] [--depth N]
-    remote_repo_map.py class     NAME         [--project-id ID] [--branch B]
-    remote_repo_map.py api       PATH_PREFIX  [--project-id ID] [--branch B]
-    remote_repo_map.py callers   NAME         [--project-id ID] [--branch B]
+    remote_repo_map.py [--project-id ID] [--branch B] extends   NAME         [--depth N]
+    remote_repo_map.py [--project-id ID] [--branch B] ancestors NAME         [--depth N] [--filter-prefix P]
+    remote_repo_map.py [--project-id ID] [--branch B] includes  BASE PREFIX  [--depth N]
+    remote_repo_map.py [--project-id ID] [--branch B] class     NAME
+    remote_repo_map.py [--project-id ID] [--branch B] api       PATH_PREFIX
+    remote_repo_map.py [--project-id ID] [--branch B] callers   NAME
 
 Defaults to gitlab-org/gitlab (project 278964, branch master).
 Requires glab >= v1.94.0 authenticated against gitlab.com.
@@ -41,10 +41,10 @@ MEMBER_KINDS = TYPE_KINDS + CALLABLE_KINDS + ["Field", "Attribute", "Property"]
 # ── Query helpers ─────────────────────────────────────────────────────────────
 
 def _query(body: dict) -> dict:
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump(body, f)
-        tmp = f.name
+    fd, tmp = tempfile.mkstemp(suffix=".json")
     try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(body, f)
         cp = subprocess.run(
             ["glab", "orbit", "remote", "query", "--format", "raw", tmp],
             capture_output=True, text=True,
@@ -84,8 +84,8 @@ def _edges(result: dict) -> list[dict]:
 
 def _base_filters(project_id: int, branch: str) -> dict:
     return {
-        "project_id": {"op": "eq", "value": project_id},
-        "branch":     {"op": "eq", "value": branch},
+        "project_id": {"eq": project_id},
+        "branch":     {"eq": branch},
     }
 
 
@@ -146,14 +146,31 @@ def _resolve_name(name: str) -> tuple[str, str]:
     """
     if "::" not in name:
         return ("name", name)
-    # Namespaced: use fqn filter for precise matching
     return ("fqn", name)
+
+
+def _parse_callers_fqn(raw: str) -> tuple[str, str | None]:
+    """Parse a callers subcommand name into (method_name, orbit_fqn | None).
+
+    Accepts bare method names, `ClassName#method`, or `Ns::Class::method`.
+    The `#` separator is normalized to `::` to match Orbit's FQN format.
+    When `orbit_fqn` is not None the caller should filter by both `name` and
+    `fqn` for an exact match; otherwise a bare `name` filter is used.
+    """
+    if "#" in raw:
+        method_name = raw.rsplit("#", 1)[1]
+        orbit_fqn = raw.replace("#", "::")
+        return (method_name, orbit_fqn)
+    if raw.count("::") >= 2:
+        method_name = raw.rsplit("::", 1)[1]
+        return (method_name, raw)
+    return (raw, None)
 
 
 def cmd_extends(args: argparse.Namespace) -> None:
     """Find all descendants of a class/module via EXTENDS — single server-side multi-hop traversal.
 
-    Uses min_hops/max_hops on the RelationshipSelector to collapse the old
+    Uses a hops range on the RelationshipSelector to collapse the old
     N×M frontier loop (one query per frontier node per hop) into a single
     server-side traversal.  For a class with 16 direct subclasses at depth=2
     the old approach required 16+256=272 sequential API calls (~2.5 min);
@@ -172,7 +189,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
         "nodes": [
             {
                 "id": "base", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), filter_key: {"op": "eq", "value": filter_val}},
+                "filters": {**_base_filters(pid, branch), filter_key: {"eq": filter_val}},
                 "columns": ["fqn", "name"],
             },
             {
@@ -182,7 +199,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
             },
         ],
         "relationships": [
-            {"type": "EXTENDS", "from": "child", "to": "base", "min_hops": 1, "max_hops": depth}
+            {"type": "EXTENDS", "from": "child", "to": "base", "hops": [1, depth]}
         ],
         # Max server-side cap. Multi-hop fan-out on wide trees can exceed a few
         # hundred nodes; a low limit truncates the result non-deterministically
@@ -220,7 +237,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
     (e.g. 'Issue' matches app/models/issue.rb AND qa/resource/issue.rb).
     Pass --filter-prefix app/models/concerns to list only included concerns.
 
-    Uses min_hops/max_hops on the RelationshipSelector to issue a single
+    Uses a hops range on the RelationshipSelector to issue a single
     query instead of the old N×M frontier loop.
     """
     pid    = args.project_id
@@ -234,7 +251,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
         "nodes": [
             {
                 "id": "child", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), "fqn": {"op": "eq", "value": args.name}},
+                "filters": {**_base_filters(pid, branch), "fqn": {"eq": args.name}},
                 "columns": ["fqn", "name"],
             },
             {
@@ -244,7 +261,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
             },
         ],
         "relationships": [
-            {"type": "EXTENDS", "from": "child", "to": "ancestor", "min_hops": 1, "max_hops": depth}
+            {"type": "EXTENDS", "from": "child", "to": "ancestor", "hops": [1, depth]}
         ],
         # See cmd_extends: request the full cap so multi-hop ancestor chains are
         # not truncated non-deterministically.
@@ -289,7 +306,10 @@ def cmd_includes(args: argparse.Namespace) -> None:
     """
     pid    = args.project_id
     branch = args.branch
-    depth  = max(1, min(getattr(args, "depth", 1), 3))
+    raw_depth = getattr(args, "depth", 1)
+    depth  = max(1, min(raw_depth, 3))
+    if raw_depth != depth:
+        print(f"(depth clamped to {depth}; server limit is 3)", file=sys.stderr)
 
     norm_prefix = args.prefix.rstrip("/") + "/"
     base_key, base_val = _resolve_name(args.base)
@@ -307,7 +327,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
         "nodes": [
             {
                 "id": "base", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), base_key: {"op": "eq", "value": base_val}},
+                "filters": {**_base_filters(pid, branch), base_key: {"eq": base_val}},
                 "columns": ["id", "fqn", "name"],
             },
             {
@@ -318,7 +338,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
         ],
         "relationships": [
             {"type": "EXTENDS", "from": "descendant", "to": "base",
-             "min_hops": 1, "max_hops": depth}
+             "hops": [1, depth]}
         ],
         "limit": 1000,
     }}
@@ -343,13 +363,13 @@ def cmd_includes(args: argparse.Namespace) -> None:
             {
                 "id": "descendant", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "node_ids": [int(d) for d in desc_ids],
+                "node_ids": list(desc_ids),
                 "columns": ["id", "fqn", "name"],
             },
             {
                 "id": "concern", "entity": "Definition",
                 "filters": {**_base_filters(pid, branch),
-                            "file_path": {"op": "starts_with", "value": norm_prefix}},
+                            "file_path": {"starts_with": norm_prefix}},
                 "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
@@ -357,7 +377,7 @@ def cmd_includes(args: argparse.Namespace) -> None:
         # descendant mixes in itself, not transitively.
         "relationships": [
             {"type": "EXTENDS", "from": "descendant", "to": "concern",
-             "min_hops": 1, "max_hops": 1}
+             "hops": [1, 1]}
         ],
         "limit": 1000,
     }}
@@ -411,13 +431,13 @@ def cmd_class(args: argparse.Namespace) -> None:
     # Step 1: look up the class itself (traversal only returns member nodes, not the parent)
     lookup = _query({"query": {
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "d", "entity": "Definition",
             "filters": {**_base_filters(pid, branch),
-                        filter_key: {"op": "eq", "value": filter_val},
-                        "definition_type": {"op": "in", "value": TYPE_KINDS}},
+                        filter_key: {"eq": filter_val},
+                        "definition_type": {"in": TYPE_KINDS}},
             "columns": ["id", "fqn", "file_path", "start_line", "definition_type"],
-        },
+        }],
         "limit": 5,
     }})
     parents = _nodes(lookup, "Definition")
@@ -437,7 +457,7 @@ def cmd_class(args: argparse.Namespace) -> None:
             {
                 "id": "parent", "entity": "Definition",
                 "filters": {**_base_filters(pid, branch),
-                             filter_key: {"op": "eq", "value": filter_val}},
+                             filter_key: {"eq": filter_val}},
                 "columns": ["id", "fqn"],
             },
             {
@@ -445,7 +465,7 @@ def cmd_class(args: argparse.Namespace) -> None:
                 # content column omitted — triggers content_resolution_error on large classes
                 "filters": {
                     **_base_filters(pid, branch),
-                    "definition_type": {"op": "in", "value": MEMBER_KINDS},
+                    "definition_type": {"in": MEMBER_KINDS},
                 },
                 "columns": ["id", "name", "fqn", "definition_type", "file_path", "start_line"],
             },
@@ -478,15 +498,15 @@ def cmd_api(args: argparse.Namespace) -> None:
 
     body = {"query": {
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "d", "entity": "Definition",
             "filters": {
                 **_base_filters(pid, branch),
-                "file_path":       {"op": "starts_with", "value": prefix + "/"},
-                "definition_type": {"op": "in", "value": TYPE_KINDS + CALLABLE_KINDS},
+                "file_path":       {"starts_with": prefix + "/"},
+                "definition_type": {"in": TYPE_KINDS + CALLABLE_KINDS},
             },
             "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
-        },
+        }],
         "limit": 100,
     }}
     result = _query(body)
@@ -524,30 +544,18 @@ def cmd_callers(args: argparse.Namespace) -> None:
     pid    = args.project_id
     branch = args.branch
 
-    # Parse optional class qualifier: "MergeRequests::RefreshService#execute"
-    # Orbit FQN uses '::' for all separators — normalize '#' to '::'.
     raw = args.name
-    orbit_fqn: str | None = None
-    if "#" in raw:
-        # "ClassName#method" → Orbit stores as "ClassName::method"
-        method_name = raw.rsplit("#", 1)[1]
-        orbit_fqn = raw.replace("#", "::")
-    elif raw.count("::") >= 2:
-        # "Ns::ClassName::method" — last component is the method name
-        method_name = raw.rsplit("::", 1)[1]
-        orbit_fqn = raw
-    else:
-        method_name = raw
+    method_name, orbit_fqn = _parse_callers_fqn(raw)
 
     if orbit_fqn:
         # Exact FQN match: most precise — returns only the intended target
         target_filters: dict = {
             **_base_filters(pid, branch),
-            "name": {"op": "eq", "value": method_name},
-            "fqn":  {"op": "eq",  "value": orbit_fqn},
+            "name": {"eq": method_name},
+            "fqn":  {"eq": orbit_fqn},
         }
     else:
-        target_filters = {**_base_filters(pid, branch), "name": {"op": "eq", "value": method_name}}
+        target_filters = {**_base_filters(pid, branch), "name": {"eq": method_name}}
 
     body = {"query": {
         "query_type": "traversal",

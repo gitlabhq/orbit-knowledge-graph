@@ -105,14 +105,10 @@ pub(super) async fn run_query_with_security(
         .expect("pipeline should succeed");
 
     let mut query_result = hydration_output.query_result;
-    let pagination = compiled.input.cursor.map(|cursor| {
-        let total_rows = query_result.authorized_count();
-        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-        query_engine::shared::PaginationMeta {
-            has_more,
-            total_rows,
-        }
-    });
+    let pagination = Some(query_engine::shared::paginate(
+        &mut query_result,
+        &compiled.input,
+    ));
 
     let pipeline_output = query_engine::shared::PipelineOutput {
         row_count: query_result.authorized_count(),

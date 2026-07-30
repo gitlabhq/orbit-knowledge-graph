@@ -3,7 +3,6 @@ use std::sync::Arc;
 use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::checkpoint::{CheckpointStore, ClickHouseCheckpointStore};
 use indexer::modules::code::config::CodeTableNames;
-use indexer::orchestrator::dispatch::DispatchOutcome;
 use indexer::orchestrator::scheduled::CodeStaleSweep;
 use integration_testkit::{TestContext, t};
 
@@ -11,7 +10,7 @@ const WATERMARK: &str = "2026-01-02 00:00:00.000000";
 const PRE_WATERMARK: &str = "2026-01-01 00:00:00.000000";
 
 #[tokio::test]
-async fn drained_backfill_sweeps_unclaimed_rows_once() {
+async fn drained_namespace_sweeps_unclaimed_rows_once() {
     let project_id: i64 = 40;
     let traversal_path = "1/40/";
     let branch = "main";
@@ -65,34 +64,19 @@ async fn drained_backfill_sweeps_unclaimed_rows_once() {
         ))
         .await;
 
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
-    let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-        clickhouse.config.build_client(),
-    )));
-    let sweep = CodeStaleSweep::new(
-        clickhouse.config.build_client(),
-        &table_names,
-        store.clone(),
-    );
+    let (sweep, store) = build_sweep(&clickhouse);
 
     sweep
-        .run_after_drain(&DispatchOutcome {
-            dispatched: 3,
-            skipped: 0,
-        })
+        .run_for_drained(&[])
         .await
-        .expect("pending backfill must not sweep");
+        .expect("no drained namespaces must not sweep");
     assert!(
         file_is_active(&clickhouse, project_id, 111).await,
-        "sweep must not run while the backfill still dispatches work"
+        "sweep must not touch a namespace the backfill has not drained"
     );
 
-    let drained = DispatchOutcome {
-        dispatched: 0,
-        skipped: 0,
-    };
-    sweep.run_after_drain(&drained).await.expect("sweep failed");
+    let drained = vec![traversal_path.to_string()];
+    sweep.run_for_drained(&drained).await.expect("sweep failed");
 
     assert!(!file_is_active(&clickhouse, project_id, 111).await);
     assert!(file_is_active(&clickhouse, project_id, 222).await);
@@ -100,11 +84,11 @@ async fn drained_backfill_sweeps_unclaimed_rows_once() {
     assert_eq!(active_edge_count(&clickhouse, "gl_code_edge", 111).await, 0);
     assert!(
         store
-            .load("maintenance.code_stale_sweep")
+            .load(&format!("maintenance.code_stale_sweep.{traversal_path}"))
             .await
             .expect("load marker")
             .is_some(),
-        "the sweep must record its maintenance checkpoint"
+        "the sweep must record its per-namespace maintenance checkpoint"
     );
 
     insert_file(
@@ -117,13 +101,130 @@ async fn drained_backfill_sweeps_unclaimed_rows_once() {
     )
     .await;
     sweep
-        .run_after_drain(&drained)
+        .run_for_drained(&drained)
         .await
         .expect("marked sweep must be a no-op");
     assert!(
         file_is_active(&clickhouse, project_id, 333).await,
-        "a completed sweep must not run again for the same schema version"
+        "a swept namespace must not sweep again for the same schema version"
     );
+}
+
+#[tokio::test]
+async fn sweep_scopes_to_the_drained_namespace() {
+    let clickhouse = TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    for (path, project_id) in [("1/40/", 40i64), ("1/41/", 41i64)] {
+        clickhouse
+            .execute(&format!(
+                "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) \
+                 VALUES ('{path}', {project_id}, 'main', 1, '{WATERMARK}')",
+                t("code_indexing_checkpoint")
+            ))
+            .await;
+        insert_file(
+            &clickhouse,
+            path,
+            project_id,
+            "main",
+            project_id + 100,
+            PRE_WATERMARK,
+        )
+        .await;
+    }
+
+    let (sweep, _) = build_sweep(&clickhouse);
+    sweep
+        .run_for_drained(&["1/40/".to_string()])
+        .await
+        .expect("sweep failed");
+
+    assert!(
+        !file_is_active(&clickhouse, 40, 140).await,
+        "the drained namespace must be swept"
+    );
+    assert!(
+        file_is_active(&clickhouse, 41, 141).await,
+        "an undrained namespace must keep its rows even when a sibling sweeps"
+    );
+}
+
+#[tokio::test]
+async fn sweep_writes_no_tombstones_for_superseded_rows() {
+    let traversal_path = "1/40/";
+    let project_id: i64 = 40;
+
+    let clickhouse = TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    clickhouse
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) \
+             VALUES ('{traversal_path}', {project_id}, 'main', 1, '{WATERMARK}')",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+    insert_file(
+        &clickhouse,
+        traversal_path,
+        project_id,
+        "main",
+        444,
+        PRE_WATERMARK,
+    )
+    .await;
+    insert_file(
+        &clickhouse,
+        traversal_path,
+        project_id,
+        "main",
+        444,
+        WATERMARK,
+    )
+    .await;
+
+    let (sweep, _) = build_sweep(&clickhouse);
+    sweep
+        .run_for_drained(&[traversal_path.to_string()])
+        .await
+        .expect("sweep failed");
+
+    assert!(file_is_active(&clickhouse, project_id, 444).await);
+    let rows = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} WHERE id = 444 AND _deleted = true",
+            t("gl_file")
+        ))
+        .await;
+    assert_eq!(
+        rows.first().map_or(0, |b| b.num_rows()),
+        0,
+        "a key with a live row at the watermark needs no tombstone; a raw-parts \
+         scan would have written a no-op one per superseded row"
+    );
+}
+
+fn build_sweep(clickhouse: &TestContext) -> (CodeStaleSweep, Arc<ClickHouseCheckpointStore>) {
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
+    let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
+        clickhouse.config.build_client(),
+    )));
+    (
+        CodeStaleSweep::new(
+            clickhouse.config.build_client(),
+            &table_names,
+            store.clone(),
+        ),
+        store,
+    )
 }
 
 async fn insert_file(

@@ -1,0 +1,31 @@
+@startuml gkg_deploy_selfmanaged
+!include gkg_common.puml
+
+title Deployment: Self-Managed
+
+' ===================================================================
+' SELF-MANAGED-SPECIFIC: customer-provisioned ClickHouse
+' ===================================================================
+database "**ClickHouse**\nCode + SDLC data lake\n(customer-provisioned)" as ch #d09191
+
+' Data layer connections
+sdlc_idx --> ch : TCP native (write)
+code_idx --> ch : TCP native (write)
+query_eng --> ch : TCP native (read, parameterized SQL)
+
+note bottom of module
+  **ClickHouse:** Customer-provisioned and operated.
+  Standard ClickHouse TCP/HTTP protocol.
+
+  **Billing:** Per-seat add-on license.
+
+  **Headwind:** Orbit is a non-Omnibus service.
+  No established path for shipping new standalone
+  services to Self-Managed. Oak initiative or
+  equivalent needed.
+
+  **Independent release:** Download new binary,
+  restart. No monolith coordination.
+end note
+
+@enduml

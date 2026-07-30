@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 mod dashboards;
 mod ddl;
 mod metrics_catalog;
+mod migration_ledger;
 mod query_docs;
 mod schema;
 mod synth;
@@ -70,6 +71,11 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Manage the schema-migration ledger (config/schema-migrations.yaml).
+    MigrationLedger {
+        #[command(subcommand)]
+        command: MigrationLedgerCommand,
+    },
     /// Regenerate the auto-derived tables in the query language reference doc
     /// from the ontology (currently the text-indexed properties table).
     QueryDocs {
@@ -81,6 +87,39 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum MigrationLedgerCommand {
+    /// Recompute fingerprints, derive the scope, and append or amend an entry.
+    Bump {
+        /// Widen the derived scope: `*`, `sdlc`, or `code`.
+        #[arg(long)]
+        scope: Option<String>,
+        /// Comma-separated SDLC entities (with `--scope sdlc`) to widen the entry.
+        #[arg(long)]
+        entities: Option<String>,
+        /// Note recorded on the entry.
+        #[arg(long)]
+        note: Option<String>,
+        /// Ref whose SCHEMA_VERSION decides bump-vs-amend (default origin/main).
+        #[arg(long)]
+        base: Option<String>,
+        /// Force amend when the base ref is unavailable.
+        #[arg(long)]
+        amend: bool,
+        /// Force a new bump when the base ref is unavailable.
+        #[arg(long)]
+        new: bool,
+    },
+    /// Verify the committed snapshot and ledger match the working ontology.
+    Check {
+        /// Enforce the under-declaration guard against this base ref.
+        #[arg(long)]
+        base: Option<String>,
+    },
+    /// Snapshot auxiliary tables and refreshable views without changing SCHEMA_VERSION.
+    Snapshot,
 }
 
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
@@ -194,6 +233,18 @@ async fn main() -> Result<()> {
             }
         },
         Command::Schema { output } => schema::run(output),
+        Command::MigrationLedger { command } => match command {
+            MigrationLedgerCommand::Bump {
+                scope,
+                entities,
+                note,
+                base,
+                amend,
+                new,
+            } => migration_ledger::bump(scope, entities, note, base, amend, new),
+            MigrationLedgerCommand::Check { base } => migration_ledger::check(base),
+            MigrationLedgerCommand::Snapshot => migration_ledger::snapshot(),
+        },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),

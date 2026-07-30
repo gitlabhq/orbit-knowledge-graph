@@ -15,7 +15,7 @@ Neighbors Query Includes The Adjacent Issue
     [Documentation]    The project's neighbors must include the issue that is IN_PROJECT it.
     [Tags]    query-shapes
     ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}, "neighbors": {"node": "p", "direction": "both"}}
+    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"direction": "both"}}
     Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}
 
 Path Finding Connects The Issue To The Project
@@ -33,7 +33,7 @@ GOON Format Encodes The Neighbors Result
     ...                than failing on an upstream version gap.
     [Tags]    query-shapes
     ${query}=    Evaluate
-    ...    {"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}, "neighbors": {"node": "p", "direction": "both"}}
+    ...    {"query_type": "neighbors", "nodes": [{"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "neighbors": {"direction": "both"}}
     ${resp}=    Orbit Query LLM    ${query}
     IF    not $resp.text
         Log    GOON/llm body empty on the pinned GitLab+Workhorse stack; skipping content check.
@@ -43,6 +43,19 @@ GOON Format Encodes The Neighbors Result
     Should Contain    ${resp.text}    @header    GOON body is not GOON-formatted
     Should Contain    ${resp.text}    query_type:neighbors    GOON header missing query_type
     Should Contain    ${resp.text}    ${SHAPE_PROJECT_NAME}    GOON body missing the seeded project name
+
+Truncated Date Group Key Serializes As An ISO Date String
+    [Documentation]    A month-truncated group key must arrive as an ISO date string, not the
+    ...                epoch-day integer ClickHouse's Arrow output uses for Date columns on some
+    ...                server versions.
+    [Tags]    query-shapes
+    ${query}=    Evaluate
+    ...    {"query_type": "aggregation", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}], "group_by": [{"key": "w.created_at", "truncate": "month"}], "aggregations": [{"count": "w", "as": "n"}], "limit": 5}
+    ${resp}=    Orbit Query    ${query}
+    ${month}=    Aggregation Value    ${resp}    w_created_at_month
+    ${month}=    Convert To String    ${month}
+    Should Match Regexp    ${month}    ^\\d{4}-\\d{2}-\\d{2}$
+    ...    truncated month key is not an ISO date string: ${month}
 
 
 *** Keywords ***

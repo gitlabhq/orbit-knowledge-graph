@@ -10,7 +10,6 @@ use petgraph::visit::EdgeRef;
 use super::pred::{EdgeFn, EdgePred, any, triple};
 use super::subgraph::{EdgeMarks, MarkedEdge, Subgraph};
 use super::{EdgeMeta, OntologyGraph};
-use crate::etl::EdgeDirection;
 
 type MarkFn = std::rc::Rc<dyn Fn(&Hop<'_>, &mut EdgeMarks)>;
 
@@ -37,15 +36,6 @@ impl Dir {
             Self::Outgoing => &[Direction::Outgoing],
             Self::Incoming => &[Direction::Incoming],
             Self::Both => &[Direction::Outgoing, Direction::Incoming],
-        }
-    }
-}
-
-impl From<EdgeDirection> for Dir {
-    fn from(d: EdgeDirection) -> Self {
-        match d {
-            EdgeDirection::Outgoing => Self::Outgoing,
-            EdgeDirection::Incoming => Self::Incoming,
         }
     }
 }

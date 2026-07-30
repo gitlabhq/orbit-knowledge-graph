@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use the Orbit query language to search and traverse the knowledge graph.
-title: Orbit query language
+description: Use the GitLab Orbit query language to search and traverse the knowledge graph.
+title: GitLab Orbit query language
 ---
 
 {{< details >}}
@@ -26,7 +26,7 @@ title: Orbit query language
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Use the Orbit query language when you need GitLab data as a graph instead of a
+Use the GitLab Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.
 
@@ -39,12 +39,12 @@ query object in a top-level `query` field:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "mr",
       "entity": "MergeRequest",
       "node_ids": [12345],
       "columns": ["iid", "title", "state"]
-    },
+    }],
     "limit": 1
   },
   "response_format": "raw"
@@ -61,23 +61,20 @@ the envelope.
 
 ## Query shape
 
-Every query has a `query_type` and either `node` or `nodes`.
+Every query has a `query_type` and a `nodes` array of node selectors.
 
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345],
     "columns": ["iid", "title", "state"]
-  },
+  }],
   "limit": 1
 }
 ```
-
-Use `node` for one node selector. Use `nodes` for an array of selectors. You
-cannot use both in the same query.
 
 ## Query types
 
@@ -96,18 +93,26 @@ query type.
 | Field | Type | Description |
 |-------|------|-------------|
 | `query_type` | `string` | One of `traversal`, `aggregation`, `path_finding`, or `neighbors`. |
-| `node` | `object` | One node selector. Required for single-node `traversal` and `neighbors`. |
-| `nodes` | `array` | Multiple node selectors. Required for multi-node `traversal`, `aggregation`, and `path_finding`. Maximum 5. |
+| `nodes` | `array` | Node selectors. Always required; single-node queries (`neighbors`, search-shape `traversal`) use a 1-element array. Maximum 5. |
 | `relationships` | `array` | Relationship selectors for traversal or aggregation. Maximum 5. |
 | `aggregations` | `array` | Aggregation definitions. Required for `aggregation`. Maximum 10. |
 | `group_by` | `array` | Group keys for aggregation rows. Maximum 4. |
 | `path` | `object` | Path finding configuration. Required for `path_finding`. |
 | `neighbors` | `object` | Neighbor lookup configuration. Required for `neighbors`. |
-| `limit` | `integer` | Maximum rows to return. Default 30. Maximum 1000. |
-| `cursor` | `object` | Offset pagination over authorized results. |
-| `order_by` | `object` | Sort rows by a node property. |
-| `aggregation_sort` | `object` | Sort aggregation rows by output column. |
+| `limit` | `integer` | Maximum rows to return when no `cursor` is set. Default 30. Maximum 1000. Check `pagination.truncated` in the response: when true, more matching rows exist. |
+| `cursor` | `object` | Keyset pagination: `{"page_size": N}` for the first page, then `{"page_size": N, "after": "<pagination.next_cursor>"}` until `next_cursor` is absent. Reaches every row regardless of dataset size. The token is bound to the exact query that issued it. |
+| `order_by` | `string` | Sort rows by a node property: `"node.property"` (asc) or `"-node.property"` (desc). |
+| `aggregation_sort` | `string` | Sort aggregation rows by output column (aggregation or group-key alias): `"column"` (asc) or `"-column"` (desc). |
 | `options` | `object` | Presentation and debug options. |
+
+Pagination reads live data at request time; there is no snapshot. Each page
+independently resolves the latest version of every row and filters out
+soft-deleted rows, so version churn and tombstone cleanup between pages do not
+skip or duplicate results. Rows inserted after the cursor position in sort
+order appear on later pages; rows inserted or reordered behind it are not
+revisited. Rows whose sort key is NULL sort last and paginate like any other
+row. A row whose sort key changes between pages can appear twice or not
+at all, the same as any keyset pagination without a snapshot.
 
 ## Node selectors
 
@@ -117,7 +122,7 @@ A node selector names one entity type in the ontology.
 |-------|------|-------------|
 | `id` | `string` | Local alias for the node. Relationships, aggregations, path, and neighbors refer to this alias. |
 | `entity` | `string` | Ontology node type, such as `Project`, `User`, `MergeRequest`, `File`, or `Definition`. |
-| `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, Orbit returns the entity's default columns. |
+| `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, GitLab Orbit returns the entity's default columns. |
 | `filters` | `object` | Property filters. |
 | `node_ids` | `array` | Exact IDs to match. Accepts integers or digit strings. Maximum 500. |
 | `id_range` | `object` | Inclusive ID range with `start` and `end`. |
@@ -145,8 +150,7 @@ Relationships connect node selectors by alias.
 | `from` | `string` | Alias of the start node selector. |
 | `to` | `string` | Alias of the end node selector. |
 | `direction` | `string` | `outgoing`, `incoming`, or `both`. Default `outgoing`. |
-| `min_hops` | `integer` | Minimum hops. Default 1. Maximum 3. |
-| `max_hops` | `integer` | Maximum hops. Default 1. Maximum 3. |
+| `hops` | `array` | Inclusive `[min, max]` hop range (`[1, 3]`; `[2, 2]` for exactly 2). Default `[1, 1]`. Maximum 3. |
 | `filters` | `object` | Relationship property filters. Maximum 5 filters. |
 
 For example, merge requests point to projects with `IN_PROJECT`, and users point
@@ -164,16 +168,20 @@ Filters can use simple equality:
 }
 ```
 
-Or they can use an operator:
+Or they can use an operator object. Multiple operator keys on the same
+property are AND-combined, which is how you express ranges:
 
 ```json
 {
   "filters": {
-    "created_at": {"op": "gte", "value": "2026-01-01"},
-    "state": {"op": "in", "value": ["opened", "merged"]}
+    "created_at": {"gte": "2026-01-01", "lt": "2026-02-01"},
+    "state": {"in": ["opened", "merged"]}
   }
 }
 ```
+
+To repeat an operator on the same property, use an array of operator
+objects: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
 | Operator | Use |
 |----------|-----|
@@ -183,8 +191,8 @@ Or they can use an operator:
 | `contains` | String contains a substring. |
 | `starts_with` | String starts with a prefix. |
 | `ends_with` | String ends with a suffix. |
-| `is_null` | Value is null. Do not provide `value`. |
-| `is_not_null` | Value is not null. Do not provide `value`. |
+| `is_null` | Null check. Takes a boolean: `false` matches non-null. |
+| `is_not_null` | Not-null check. Takes a boolean: `false` matches null. |
 | `token_match` | Text index contains one token. |
 | `all_tokens` | Text index contains all tokens. |
 | `any_tokens` | Text index contains any token. |
@@ -233,7 +241,7 @@ Using these operators on other properties falls back to a full string scan, whic
 ## Columns and virtual columns
 
 Most columns come from indexed graph tables in ClickHouse. Some columns are
-virtual: Orbit fetches them from another service after the graph query returns.
+virtual: GitLab Orbit fetches them from another service after the graph query returns.
 
 Request virtual columns explicitly in `columns`. The `dynamic_columns` option
 used by `path_finding` and `neighbors` excludes virtual columns because they
@@ -257,12 +265,12 @@ Fetch one merge request with its full diff:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345],
     "columns": ["iid", "title", "state", "diff"]
-  },
+  }],
   "limit": 1
 }
 ```
@@ -319,14 +327,14 @@ Fetch source file content:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "file",
     "entity": "File",
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
-  },
+  }],
   "limit": 5
 }
 ```
@@ -339,14 +347,14 @@ for a broader search:
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "d",
     "entity": "Definition",
     "filters": {
-      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+      "fqn": {"eq": "Gitlab::Auth::authenticate"}
     },
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"]
-  },
+  }],
   "limit": 5
 }
 ```
@@ -384,16 +392,16 @@ Find every pipeline that ran for one merge request. Always filter
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "p",
     "entity": "Pipeline",
     "filters": {
-      "merge_request_id": {"op": "eq", "value": 482908721},
-      "source": {"op": "eq", "value": "merge_request_event"}
+      "merge_request_id": {"eq": 482908721},
+      "source": {"eq": "merge_request_event"}
     },
     "columns": ["id", "status", "source", "sha", "ref", "created_at"]
-  },
-  "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+  }],
+  "order_by": "-p.created_at",
   "limit": 100
 }
 ```
@@ -418,24 +426,21 @@ for pipeline history.
 
 ## Aggregation
 
-Aggregation queries use `aggregations`.
+Aggregation queries use `aggregations`. Each aggregation is an object with a
+single function key whose value is what to aggregate, plus an optional `as`
+output column name: `{"avg": "mr.merge_duration", "as": "avg_dur"}`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `function` | `string` | `count`, `sum`, `avg`, `min`, or `max`. |
-| `target` | `string` | Node alias to aggregate. |
-| `property` | `string` | Property to aggregate. Required for `sum`, `avg`, `min`, and `max`. |
-| `alias` | `string` | Name of the output column. |
+| Function key | Value | Supported property types |
+|--------------|-------|--------------------------|
+| `count` | `"node"` (count matching rows) or `"node.property"` (count non-null values) | Any |
+| `sum` | `"node.property"` | Numeric only |
+| `avg` | `"node.property"` | Numeric only |
+| `min` | `"node.property"` | Numeric, string, boolean, `Date`, or `DateTime` |
+| `max` | `"node.property"` | Numeric, string, boolean, `Date`, or `DateTime` |
 
-Property type support depends on the function:
-
-| Function | Requires `property` | Supported property types |
-|----------|---------------------|--------------------------|
-| `count` | No | N/A |
-| `sum` | Yes | Numeric only |
-| `avg` | Yes | Numeric only |
-| `min` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
-| `max` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+Without `as`, the output column name is derived as `<function>_<node>`
+(`count_mr`) or `<function>_<node>_<property>` (`avg_mr_merge_duration`).
+Reference these names in `aggregation_sort`.
 
 `sum` and `avg` reject `DateTime` properties with a validation error. To
 aggregate over dates, use `min` or `max`.
@@ -447,13 +452,24 @@ Group keys support these shapes:
 
 | Group key | Shape | Result value |
 |-----------|-------|--------------|
-| Node | `{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}` | A nested entity object in each row. |
-| Property | `{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}` | A scalar bucket value in each row. |
+| Node | `"<node-id>"` (e.g. `"p"`) | A nested entity object in each row. |
+| Property | `"<node-id>.<property>"` (e.g. `"mr.state"`) | A scalar bucket value in each row. |
+| Truncated date | `{"key": "<node-id>.<property>", "truncate": "<unit>"}` | The property truncated to the start of the unit. |
 
-If you omit `alias`, node groups use the node ID as the output key. Property
-groups use the property name when it is unique in the `group_by` list, or
-`<node>_<property>` when needed to avoid ambiguity. Duplicate group or aggregate
-output names are rejected.
+Output column names are derived: node keys use the node ID (`p`), property
+keys use `<node>_<property>` (`mr_state`), and truncated keys append the unit
+(`mr_created_at_month`). Reference these names in `aggregation_sort`.
+Duplicate group or aggregate output names are rejected.
+
+Use the derived names. Only when a consumer requires a specific column name,
+rename with the object form's optional `as`: `{"key": "mr.state", "as":
+"state"}`, or with truncation `{"key": "mr.created_at", "truncate": "month",
+"as": "month"}`.
+
+Truncation units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and
+`year`, and apply only to `Date`/`DateTime` properties. `minute` and `hour`
+require `node_ids` or a filter on the truncated property to bound bucket
+cardinality.
 
 Property groups must reference a real ClickHouse-backed, filterable property
 that the caller is allowed to use. Virtual fields and unfilterable fields are
@@ -479,11 +495,11 @@ Count merged merge requests per project:
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "project"}
   ],
-  "group_by": [{"kind": "node", "node": "project"}],
+  "group_by": ["project"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "merged_mrs"}
+    { "count": "mr", "as": "merged_mrs" }
   ],
-  "aggregation_sort": {"column": "merged_mrs", "direction": "DESC"},
+  "aggregation_sort": "-merged_mrs",
   "limit": 10
 }
 ```
@@ -500,13 +516,11 @@ Count detected vulnerabilities by severity:
       "filters": {"state": "detected"}
     }
   ],
-  "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-  ],
+  "group_by": ["v.severity"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+    { "count": "v", "as": "vulnerability_count" }
   ],
-  "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"},
+  "aggregation_sort": "-vulnerability_count",
   "limit": 10
 }
 ```
@@ -524,7 +538,7 @@ Path finding queries use `path`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `string` | `shortest`, `all_shortest`, or `any`. |
+| `type` | `string` | `shortest`. |
 | `from` | `string` | Alias of the start node selector. |
 | `to` | `string` | Alias of the end node selector. |
 | `max_depth` | `integer` | Maximum path length. Maximum 3. |
@@ -554,19 +568,18 @@ span of 500 or less. If either endpoint uses filters or `id_range`, provide
 
 ## Neighbors
 
-Neighbor queries use one `node` selector and a `neighbors` object. The center
+Neighbor queries use a 1-element `nodes` array and a `neighbors` object. The center
 node must be bounded by `node_ids`, filters, or a narrow `id_range`.
 
 ```json orbit-query
 {
   "query_type": "neighbors",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345]
-  },
+  }],
   "neighbors": {
-    "node": "mr",
     "direction": "both",
     "rel_types": ["AUTHORED", "IN_PROJECT", "HAS_DIFF"]
   },
@@ -583,7 +596,7 @@ Virtual columns still require an explicit request in a traversal query.
 
 ## Validation limits
 
-Orbit rejects broad or ambiguous queries before compiling SQL.
+GitLab Orbit rejects broad or ambiguous queries before compiling SQL.
 
 | Limit | Value |
 |-------|-------|
@@ -611,10 +624,3 @@ a filter, provide IDs, or use a narrow `id_range`.
 |--------|-------------|
 | `dynamic_columns` | For `path_finding` and `neighbors` hydration. Use `default` for each entity's default columns, or `"*"` for all non-restricted ClickHouse-backed columns. Default `default`. |
 | `include_debug_sql` | Include compiled ClickHouse SQL in response metadata when the caller is allowed to see it. |
-| `skip_dedup` | Skip the ReplacingMergeTree deduplication pass for traversal, neighbors, and path finding queries. Not allowed for aggregation. |
-| `materialize_ctes` | Mark reused CTEs as materialized. |
-| `use_semi_join` | Rewrite eligible `IN` subqueries into semi joins. |
-| `auth_scope_cascade` | Force auth-scoped cascade seeding. |
-| `cascade_distinct` | Emit `SELECT DISTINCT` in cascade and hop frontier CTEs. |
-
-Most callers should leave performance options unset.

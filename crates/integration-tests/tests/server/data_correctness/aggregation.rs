@@ -10,8 +10,8 @@ pub(super) async fn aggregation_count_returns_correct_values(ctx: &TestContext) 
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -36,8 +36,8 @@ pub(super) async fn aggregation_wildcard_user_to_mr_counts_inferred_edges(ctx: &
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "*", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_edge_count"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "mr_edge_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -62,8 +62,8 @@ pub(super) async fn aggregation_count_group_contains_projects(ctx: &TestContext)
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -88,9 +88,9 @@ pub(super) async fn aggregation_sort_orders_by_aggregate_value(ctx: &TestContext
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
-            "aggregation_sort": {"column": "member_count", "direction": "DESC"},
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
+            "aggregation_sort": "-member_count",
             "limit": 10
         }"#,
         &allow_all(),
@@ -110,14 +110,12 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
-                {"id": "n", "entity": "Note", "filters": {"created_at": {"op": "gte", "value": "2024-01-01T00:00:00Z"}}}
+                {"id": "n", "entity": "Note", "filters": {"created_at": {"gte": "2024-01-01T00:00:00Z"}}}
             ],
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
-            "group_by": [
-                {"kind": "property", "node": "n", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
-            ],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
-            "aggregation_sort": {"column": "bucket", "direction": "ASC"},
+            "group_by": [{"key": "n.created_at", "truncate": "month"}],
+            "aggregations": [{"count": "n", "as": "note_count"}],
+            "aggregation_sort": "n_created_at_month",
             "limit": 20
         }"#,
         &allow_all(),
@@ -136,7 +134,7 @@ pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestConte
         .iter()
         .map(|row| {
             let bucket = row
-                .get("bucket")
+                .get("n_created_at_month")
                 .map(|v| match v {
                     serde_json::Value::String(s) => s.clone(),
                     other => other.to_string(),
@@ -180,8 +178,8 @@ pub(super) async fn aggregation_sum_produces_correct_totals(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id", "alias": "id_sum"}],
+            "group_by": ["g"],
+            "aggregations": [{"sum": "u.id", "as": "id_sum"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -207,8 +205,8 @@ pub(super) async fn aggregation_redaction_excludes_unauthorized_from_counts(ctx:
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &svc,
@@ -232,8 +230,8 @@ pub(super) async fn aggregation_avg_produces_correct_values(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "avg", "target": "u", "property": "id", "alias": "avg_id"}],
+            "group_by": ["g"],
+            "aggregations": [{"avg": "u.id", "as": "avg_id"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -258,10 +256,10 @@ pub(super) async fn aggregation_min_max_produce_correct_values(ctx: &TestContext
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
+                {"min": "u.id", "as": "min_id"},
+                {"max": "u.id", "as": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -290,8 +288,8 @@ pub(super) async fn aggregation_min_on_string_column(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "min", "target": "u", "property": "username", "alias": "first_username"}],
+            "group_by": ["g"],
+            "aggregations": [{"min": "u.username", "as": "first_username"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -316,11 +314,11 @@ pub(super) async fn aggregation_multiple_functions_in_one_query(ctx: &TestContex
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [
-                {"function": "count", "target": "u", "alias": "cnt"},
-                {"function": "avg", "target": "u", "property": "id", "alias": "avg_id"},
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"}
+                {"count": "u", "as": "cnt"},
+                {"avg": "u.id", "as": "avg_id"},
+                {"min": "u.id", "as": "min_id"}
             ],
             "limit": 10
         }"#,
@@ -353,8 +351,8 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -380,8 +378,8 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -407,8 +405,8 @@ pub(super) async fn aggregation_path_multiple_groups(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -436,8 +434,8 @@ pub(super) async fn aggregation_sum_with_restricted_path(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id", "alias": "id_sum"}],
+            "group_by": ["g"],
+            "aggregations": [{"sum": "u.id", "as": "id_sum"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -465,8 +463,8 @@ pub(super) async fn aggregation_nested_path_includes_child_projects(ctx: &TestCo
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "p", "as": "project_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -490,7 +488,7 @@ pub(super) async fn aggregation_no_group_by_with_filtered_other_node(ctx: &TestC
                 {"id": "u", "entity": "User", "node_ids": [1]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
+            "aggregations": [{"count": "mr", "as": "total_mrs"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -516,7 +514,7 @@ pub(super) async fn aggregation_no_group_by_preserves_relationship_kind(ctx: &Te
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "total_authored"}],
+            "aggregations": [{"count": "mr", "as": "total_authored"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -539,8 +537,8 @@ pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -570,9 +568,9 @@ pub(super) async fn aggregation_group_by_non_default_redaction_id_column(ctx: &T
                 {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
             ],
             "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
-            "group_by": [{"kind": "node", "node": "d"}],
+            "group_by": ["d"],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "mr_count"}
+                {"count": "mr", "as": "mr_count"}
             ],
             "limit": 10
         }"#,
@@ -606,8 +604,8 @@ pub(super) async fn aggregation_three_node_with_cascade_intermediate(ctx: &TestC
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "HAS_NOTE", "from": "mr", "to": "n"}
             ],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -646,8 +644,8 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -678,8 +676,8 @@ pub(super) async fn aggregation_no_alias_defaults_to_function_name(ctx: &TestCon
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr"}],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -702,8 +700,8 @@ pub(super) async fn aggregation_no_alias_sum_defaults_to_function_name(ctx: &Tes
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "sum", "target": "u", "property": "id"}],
+            "group_by": ["g"],
+            "aggregations": [{"sum": "u.id", "as": "sum"}],
             "limit": 10
         }"#,
         &allow_all(),

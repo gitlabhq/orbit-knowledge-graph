@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Connect Claude Code, Codex, or any MCP-compatible AI agent to Orbit using the two MCP tools query_graph and get_graph_schema.
+description: Connect Claude Code, Codex, or any MCP-compatible AI agent to GitLab Orbit using the two MCP tools list_commands and invoke_command.
 title: Connect via MCP
 ---
 
@@ -26,13 +26,13 @@ title: Connect via MCP
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit exposes two MCP tools that let any MCP-compatible AI agent query your GitLab
-knowledge graph. Use this with Claude Code, OpenAI Codex, or any other tool that
-supports the Model Context Protocol.
+GitLab Orbit exposes two MCP tools that let any MCP-compatible AI agent discover and
+invoke GitLab Orbit commands against your GitLab knowledge graph. Use this with
+Claude Code, OpenAI Codex, or any other tool that supports the Model Context Protocol.
 
 ## Prerequisites
 
-- Orbit is [enabled on your group](../getting-started.md).
+- GitLab Orbit is [enabled on your group](../getting-started.md).
 - You're authenticated to GitLab. Run `glab auth login` (uses OAuth by default;
   personal access tokens with `read_api` scope also work).
 - Your auth has access to the groups you want to query.
@@ -44,21 +44,30 @@ supports the Model Context Protocol.
 
 | Tool | Description |
 |------|-------------|
-| `query_graph` | Execute a graph query using the Orbit query DSL. Returns typed results. |
+| `list_commands` | List the available GitLab Orbit commands with descriptions and input schemas. |
+| `invoke_command` | Invoke a command by name with parameters. Returns typed results. |
+
+Commands available through `invoke_command`:
+
+| Command | Description |
+|---------|-------------|
+| `query_graph` | Execute a graph query using the GitLab Orbit query DSL. |
 | `get_graph_schema` | Fetch the current schema: all node types, their properties, and relationship types. |
+| `get_query_dsl` | Return the `query_graph` JSON DSL grammar and version. |
+| `get_response_format` | Return the `query_graph` response JSON Schema and version. |
 
 ## Connect your MCP client
 
 Configure your MCP client to point at `https://gitlab.com/api/v4/orbit/mcp`.
 
-**Claude Code** supports the Orbit endpoint over the built-in HTTP transport.
+**Claude Code** supports the GitLab Orbit endpoint over the built-in HTTP transport.
 Register it with one command:
 
 ```shell
 claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 ```
 
-The first `query_graph` or `get_graph_schema` call opens your browser to
+The first `list_commands` or `invoke_command` call opens your browser to
 authenticate with GitLab. No JSON config edit required.
 
 > [!note]
@@ -68,7 +77,7 @@ authenticate with GitLab. No JSON config edit required.
 > `claude mcp add --transport http` command shown above instead.
 
 Some clients only support local stdio MCP servers. For those,
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the Orbit endpoint
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the GitLab Orbit endpoint
 as a local command.
 
 **Cursor, Codex, and other JSON-config clients** — add to your agent's MCP config:
@@ -102,7 +111,7 @@ as a local command.
 > in a single array. Using a separate `args` field or omitting `type` causes a
 > `ConfigInvalidError`.
 
-**Gemini CLI** — supports the Orbit endpoint over native HTTP transport. Add to
+**Gemini CLI** — supports the GitLab Orbit endpoint over native HTTP transport. Add to
 `~/.gemini/settings.json`:
 
 ```json
@@ -159,51 +168,57 @@ paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI,
 Antigravity.
 
 > [!note]
-> A planned `glab orbit setup` subcommand will install the Orbit skill and
+> A planned `glab orbit setup` subcommand will install the GitLab Orbit skill and
 > write this MCP config in one step. Until it ships, configure your MCP client
 > manually as shown above.
 
-You can also [install the Orbit skill manually](../../ai_coding_agents.md)
+You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
 today to give the agent query recipes, DSL guidance, and troubleshooting.
 
 ### Test it
 
 In your AI agent, ask:
 
-> "Use Orbit to list the 5 most recently updated projects in my group."
+> "Use GitLab Orbit to list the 5 most recently updated projects in my group."
 
 You should get typed results back with project names and paths. If you do, you're
 connected. If not, run `glab auth status` to confirm you're authenticated, and
-check that Orbit is enabled on at least one of your groups.
+check that GitLab Orbit is enabled on at least one of your groups.
 
 ## Billing
 
-Queries through MCP consume GitLab Credits. Each query call to `query_graph`
-uses credits from your GitLab subscription. `get_graph_schema` calls are free.
+Queries through MCP consume GitLab Credits. Each `invoke_command` call that runs
+`query_graph` uses credits from your GitLab subscription. `list_commands` and the
+`get_graph_schema`, `get_query_dsl`, and `get_response_format` commands are free.
 
 ## Using the tools
 
-Once connected, instruct your AI agent to use the Orbit tools directly:
+Once connected, instruct your AI agent to use the GitLab Orbit tools directly:
 
-Discover the schema:
-> "Use `get_graph_schema` to show me what node types Orbit indexes."
+Discover the commands and schema:
+> "Use `list_commands` to show me what GitLab Orbit commands are available, then run
+> the `get_graph_schema` command to show me what node types GitLab Orbit indexes."
 
 Run a query:
-> "Use `query_graph` to find the 10 projects with the most open merge requests in
-> your group."
+> "Use the `query_graph` command to find the 10 projects with the most open merge
+> requests in your group."
 
 Blast radius analysis:
-> "Use Orbit to find all files in this project that import `AuthService` directly
+> "Use GitLab Orbit to find all files in this project that import `AuthService` directly
 > or transitively."
 
 Onboarding:
-> "Use Orbit to map the key services in this group, their languages, and which
+> "Use GitLab Orbit to map the key services in this group, their languages, and which
 > projects they depend on."
 
-The agent composes the JSON query DSL and calls `query_graph` on your behalf.
-You can also pass raw JSON queries directly if you want precise control over results.
+The agent composes the JSON query DSL and invokes the `query_graph` command on your
+behalf. You can also pass raw JSON queries directly if you want precise control over
+results.
 
-## Example: manual query_graph call
+## Example: manual invoke_command call for query_graph
+
+Pass the query below as `invoke_command` with
+`{"command_name": "query_graph", "parameters": {"query": ...}}`:
 
 ```json orbit-query
 {
@@ -215,11 +230,11 @@ You can also pass raw JSON queries directly if you want precise control over res
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
-  "group_by": [{"kind": "node", "node": "p"}],
+  "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "open_mrs"}
+    { "count": "mr", "as": "open_mrs" }
   ],
-  "aggregation_sort": {"column": "open_mrs", "direction": "DESC"},
+  "aggregation_sort": "-open_mrs",
   "limit": 10
 }
 ```
@@ -228,7 +243,7 @@ You can also pass raw JSON queries directly if you want precise control over res
 
 ### "Failed to connect" in Claude Code
 
-Claude Code has built-in HTTP MCP support. If you registered Orbit with
+Claude Code has built-in HTTP MCP support. If you registered GitLab Orbit with
 `npx mcp-remote` instead of `--transport http`, the `mcp-remote` wrapper
 creates a local stdio process that conflicts with the native transport.
 
@@ -241,7 +256,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 
 ### "Needs authentication" on first use
 
-This is expected. The first `query_graph` or `get_graph_schema` call opens
+This is expected. The first `list_commands` or `invoke_command` call opens
 your browser to complete OAuth with GitLab. If the browser flow does not
 trigger, verify your session:
 
@@ -258,7 +273,7 @@ glab auth login
 ### Query errors after connecting
 
 For query-time errors (validation failures, empty results, rate limits), see the
-[Orbit skill documentation](../../ai_coding_agents.md), which includes DSL
+[GitLab Orbit skill documentation](../../ai_coding_agents.md), which includes DSL
 guidance, query recipes, and exit-code diagnostics. Install the skill for
 inline guidance:
 

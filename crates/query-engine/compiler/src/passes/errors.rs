@@ -53,10 +53,9 @@ fn extract_enum_options<'a>(
 fn format_group_by_hint(instance: &str, path: &str) -> String {
     format!(
         "{instance} is not a valid group_by entry at {path}. \
-         Each group_by entry must be an object with a \"kind\" field. \
-         Expected shapes: by property \
-         [{{\"kind\": \"property\", \"node\": \"<node-id>\", \"property\": \"<property>\"}}], \
-         or by node [{{\"kind\": \"node\", \"node\": \"<node-id>\"}}]",
+         Expected shapes: \"<node-id>\" (group by node), \
+         \"<node-id>.<property>\" (group by property), or \
+         {{\"key\": \"<node-id>.<property>\", \"truncate\"?: \"<unit>\", \"as\"?: \"<name>\"}}",
     )
 }
 
@@ -111,7 +110,7 @@ fn format_candidates(options: &[serde_json::Value]) -> String {
         .filter(|c| seen.insert(c.clone()))
         .collect();
 
-    format_candidate_list("values", &unique, None)
+    format_candidate_list("values", &unique)
 }
 
 /// Uses the structured segment iterator rather than matching the `Display`
@@ -134,7 +133,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn enum_candidates_are_capped_and_deduplicated() {
+    fn enum_candidates_are_deduplicated_and_untrimmed() {
         let options: Vec<serde_json::Value> = ["id", "id", "iid", "title"]
             .iter()
             .map(|s| serde_json::Value::String((*s).to_string()))
@@ -146,9 +145,11 @@ mod tests {
             .map(|i| serde_json::Value::String(format!("c{i}")))
             .collect();
         let rendered = format_candidates(&many);
-        assert!(rendered.contains("Valid values include:"), "{rendered}");
-        assert!(rendered.contains("and 15 more"), "{rendered}");
-        assert!(rendered.contains("get_graph_schema"), "{rendered}");
+        for i in 0..25 {
+            assert!(rendered.contains(&format!("c{i}")), "{rendered}");
+        }
+        assert!(!rendered.contains("more"), "{rendered}");
+        assert!(!rendered.contains("get_graph_schema"), "{rendered}");
     }
 
     #[test]

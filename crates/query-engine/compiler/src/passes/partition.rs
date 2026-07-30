@@ -9,7 +9,6 @@ use ontology::{Ontology, PartitionConfig, PartitionStrategy};
 use serde_json::Value;
 
 use crate::ast::{Expr, Node, Op, Query, TableRef};
-use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::Result;
 use crate::passes::security::collect_aliased_tables;
 use crate::types::SecurityContext;
@@ -157,7 +156,6 @@ fn bucket_count(strategy: &PartitionStrategy) -> usize {
     }
 }
 
-/// Per alias, the distinct pinning prefixes from its `startsWith` filters.
 fn pinning_prefixes_by_alias(
     expr: &Expr,
     strategy: &PartitionStrategy,
@@ -187,7 +185,7 @@ fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(Str
                     ..
                 },
             ) = (&args[0], &args[1])
-                && column == TRAVERSAL_PATH_COLUMN
+                && column.as_str() == strategy.column()
                 && prefix_pins_partition(strategy, prefix)
             {
                 out.push((table.clone(), prefix.clone()));
@@ -210,13 +208,11 @@ fn collect_pinning(expr: &Expr, strategy: &PartitionStrategy, out: &mut Vec<(Str
     }
 }
 
-/// `alias._partition_id = bucket` for one bucket, else `IN tuple(bucket…)`.
-fn partition_id_predicate(alias: &str, mut buckets: Vec<Expr>) -> Expr {
+fn partition_id_predicate(alias: &str, buckets: Vec<Expr>) -> Expr {
     let col = Expr::col(alias, PARTITION_ID_COLUMN);
-    if buckets.len() == 1 {
-        Expr::eq(col, buckets.pop().expect("len checked"))
-    } else {
-        Expr::binary(Op::In, col, Expr::func("tuple", buckets))
+    match <[Expr; 1]>::try_from(buckets) {
+        Ok([bucket]) => Expr::eq(col, bucket),
+        Err(buckets) => Expr::binary(Op::In, col, Expr::func("tuple", buckets)),
     }
 }
 
@@ -228,8 +224,7 @@ fn bucket_id(strategy: &PartitionStrategy, prefix: &str) -> Expr {
     )
 }
 
-/// Lowers a strategy to its partition expression over `input`; shared with the
-/// DDL `PARTITION BY` so the two stay identical.
+/// Shared with the DDL `PARTITION BY` so query pruning and storage stay identical.
 pub fn partition_expr(strategy: &PartitionStrategy, input: Expr) -> Expr {
     match strategy {
         PartitionStrategy::HashBucket { buckets, .. } => Expr::func(
@@ -267,6 +262,7 @@ fn prefix_pins_partition(strategy: &PartitionStrategy, prefix: &str) -> bool {
 mod tests {
     use super::*;
     use crate::ast::{JoinType, SelectExpr, TableRef};
+    use crate::constants::TRAVERSAL_PATH_COLUMN;
 
     /// Org-only scope: no far-node fallback, so tests isolate pinning behavior.
     fn org_ctx() -> SecurityContext {

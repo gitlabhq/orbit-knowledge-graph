@@ -13,14 +13,21 @@ variants:
     fk_column: primary_identifier_id
     description: "Vulnerability occurrence has primary identifier."
 
-etl:
-  - scope: namespaced
-    source: siphon_vulnerability_occurrence_identifiers
-    order_by: [traversal_path, id]
-    from:
-      id: occurrence_id
-      type: VulnerabilityOccurrence
-      enrich: [severity, report_type, detection_method]
-    to:
-      id: identifier_id
-      type: VulnerabilityIdentifier
+indexer:
+  reindex: [siphon_vulnerability_occurrence_identifiers]
+pipelines:
+  - name: HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers_VulnerabilityIdentifier
+    extract:
+      type: clickhouse
+      tables: [siphon_vulnerability_occurrence_identifiers]
+      fields: [occurrence_id, identifier_id]
+      order_by: [traversal_path, id]
+      query: generated
+      lookups:
+        - { node: VulnerabilityOccurrence, id: occurrence_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: occurrence_id, kind: VulnerabilityOccurrence, enrich: true }
+          to: { field: identifier_id, kind: VulnerabilityIdentifier }
+          label: HAS_IDENTIFIER

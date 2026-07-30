@@ -17,6 +17,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
 use executor::enrich_output;
+use formatters::{GoonFormatter, GraphFormatter, ResultFormatter};
 use gkg_server::pipeline::PathResolver;
 use gkg_server_config::{PathResolverConfig, ProfilingConfig};
 use output::{ProfilerOutput, build_output};
@@ -97,6 +98,11 @@ struct Cli {
     /// e.g. `g=1/9970/`); mirrors the server PathResolutionStage the profiler skips.
     #[arg(long = "scope-prefix")]
     scope_prefixes: Vec<String>,
+
+    /// Include the formatted response agents receive (`goon` = llm format,
+    /// `json` = raw graph) as a `response` field in the profiler output.
+    #[arg(long, value_enum)]
+    emit_response: Option<ResponseFormat>,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -104,6 +110,12 @@ enum CompileShow {
     Base,
     Hydration,
     Both,
+}
+
+#[derive(Clone, clap::ValueEnum)]
+enum ResponseFormat {
+    Goon,
+    Json,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -119,6 +131,7 @@ struct RunContext<'a> {
     profiling_config: &'a ProfilingConfig,
     org_id: i64,
     traversal_paths: &'a [String],
+    emit_response: Option<ResponseFormat>,
 }
 
 async fn run_single(
@@ -137,6 +150,11 @@ async fn run_single(
 
     enrich_output(ctx.client, &mut output, ctx.profiling_config).await;
 
+    let response = ctx.emit_response.as_ref().map(|fmt| match fmt {
+        ResponseFormat::Goon => GoonFormatter.format(&output),
+        ResponseFormat::Json => GraphFormatter.format(&output),
+    });
+
     Ok(build_output(
         query_json,
         ctx.org_id,
@@ -144,6 +162,7 @@ async fn run_single(
         &output,
         instance_health,
         &correlation_id,
+        response,
     ))
 }
 
@@ -453,6 +472,7 @@ async fn main() -> Result<()> {
         profiling_config: &profiling_config,
         org_id,
         traversal_paths: &cli.traversal_paths,
+        emit_response: cli.emit_response.clone(),
     };
 
     if is_single_query {

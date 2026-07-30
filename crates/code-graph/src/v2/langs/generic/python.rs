@@ -364,21 +364,49 @@ impl HasRules for PythonRules {
     }
 }
 
+enum RootMatch {
+    Unique(String),
+    Ambiguous,
+}
+
 struct PythonImportRewriter {
     importable_paths: rustc_hash::FxHashSet<String>,
+    package_paths: rustc_hash::FxHashSet<String>,
+    root_stripped_paths: rustc_hash::FxHashMap<String, RootMatch>,
 }
 
 impl PythonImportRewriter {
     fn from_paths<'a>(paths: impl IntoIterator<Item = &'a str>, sep: &str) -> Self {
         let mut importable_paths = rustc_hash::FxHashSet::default();
-        for module in paths
-            .into_iter()
-            .filter_map(|path| python_module_from_path(path, sep))
-        {
+        let mut package_paths = rustc_hash::FxHashSet::default();
+        for path in paths {
+            let Some(module) = python_module_from_path(path, sep) else {
+                continue;
+            };
+            if is_package_init(path) {
+                package_paths.insert(module.clone());
+            }
             insert_importable_path_prefixes(&module, sep, &mut importable_paths);
         }
 
-        Self { importable_paths }
+        let mut root_stripped_paths = rustc_hash::FxHashMap::default();
+        for full in &importable_paths {
+            if let Some((root, stripped)) = full.split_once(sep) {
+                if package_paths.contains(root) {
+                    continue;
+                }
+                root_stripped_paths
+                    .entry(stripped.to_string())
+                    .and_modify(|m| *m = RootMatch::Ambiguous)
+                    .or_insert_with(|| RootMatch::Unique(full.clone()));
+            }
+        }
+
+        Self {
+            importable_paths,
+            package_paths,
+            root_stripped_paths,
+        }
     }
 
     fn resolve_source_root(&self, raw_path: &str, module_scope: &str, sep: &str) -> Option<String> {
@@ -392,6 +420,14 @@ impl PythonImportRewriter {
         let mut candidate = String::with_capacity(module_scope.len() + sep.len() + raw_path.len());
         let mut resolved = None;
         for (source_root_end, _) in module_scope.match_indices(sep) {
+            // A regular package is imported through its own name, so neither it
+            // nor anything under it can be a sys.path root; break covers both.
+            if self
+                .package_paths
+                .contains(&module_scope[..source_root_end])
+            {
+                break;
+            }
             candidate.clear();
             candidate.push_str(&module_scope[..source_root_end]);
             candidate.push_str(sep);
@@ -403,7 +439,19 @@ impl PythonImportRewriter {
                 resolved = Some(candidate.clone());
             }
         }
-        resolved
+        if resolved.is_some() {
+            return resolved;
+        }
+
+        // Try each non-package top-level directory as the sys.path root, but
+        // never capture a path that already resolves as written.
+        if self.importable_paths.contains(raw_path) {
+            return None;
+        }
+        match self.root_stripped_paths.get(raw_path) {
+            Some(RootMatch::Unique(path)) => Some(path.clone()),
+            _ => None,
+        }
     }
 
     fn rewrite(
@@ -850,6 +898,186 @@ mod tests {
                 "src.alpha.other.reporting"
             ),
             ("common.scoring".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_resolves_imports_from_outside_the_source_root() {
+        let transformer = PythonImportRewriter::from_paths(
+            [
+                "src/scoring.py",
+                "src/package/module.py",
+                "tests/test_scoring.py",
+            ],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "scoring",
+                Some("score_review"),
+                "tests.test_scoring"
+            ),
+            ("src.scoring".to_string(), None)
+        );
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "Import",
+                "scoring",
+                None,
+                "tests.test_scoring"
+            ),
+            ("src.scoring".to_string(), Some("scoring".to_string()))
+        );
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "package",
+                Some("module"),
+                "tests.test_scoring"
+            ),
+            ("src.package".to_string(), None)
+        );
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "scoring",
+                Some("score_review"),
+                "conftest"
+            ),
+            ("src.scoring".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_rejects_ambiguous_cross_root_matches() {
+        let transformer = PythonImportRewriter::from_paths(
+            ["src/util.py", "lib/util.py", "tests/test_util.py"],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "util",
+                Some("helper"),
+                "tests.test_util"
+            ),
+            ("util".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_keeps_paths_already_importable_as_written() {
+        let transformer = PythonImportRewriter::from_paths(
+            ["scoring.py", "src/scoring.py", "tests/test_scoring.py"],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "scoring",
+                Some("score_review"),
+                "tests.test_scoring"
+            ),
+            ("scoring".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_does_not_strip_top_level_regular_packages() {
+        // pkg/json.py is only importable as pkg.json, so bare `import json`
+        // must stay external even though the stripped path matches uniquely.
+        let transformer = PythonImportRewriter::from_paths(
+            ["pkg/__init__.py", "pkg/json.py", "tests/test_json.py"],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "json",
+                Some("dumps"),
+                "tests.test_json"
+            ),
+            ("json".to_string(), None)
+        );
+        assert_eq!(
+            transform_import(&transformer, "Import", "json", None, "tests.test_json"),
+            ("json".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_ancestor_pass_skips_package_prefixes() {
+        // From inside the package, stdlib `json` must not bind the sibling
+        // pkg/json.py through the ancestor prefix `pkg`.
+        let transformer = PythonImportRewriter::from_paths(
+            ["pkg/__init__.py", "pkg/json.py", "pkg/service.py"],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "json",
+                Some("dumps"),
+                "pkg.service"
+            ),
+            ("json".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_skips_prefixes_nested_inside_packages() {
+        // alpha/beta sits inside package alpha, so it is no root; otherwise
+        // dropping the package candidate turns ambiguity into a wrong rewrite.
+        let transformer = PythonImportRewriter::from_paths(
+            [
+                "alpha/__init__.py",
+                "alpha/common/scoring.py",
+                "alpha/beta/common/scoring.py",
+                "alpha/beta/reporting.py",
+            ],
+            ".",
+        );
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "common.scoring",
+                Some("score_review"),
+                "alpha.beta.reporting"
+            ),
+            ("common.scoring".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn import_transformer_binds_unique_cross_root_matches() {
+        let transformer =
+            PythonImportRewriter::from_paths(["vendor/sdk/client.py", "tests/test_client.py"], ".");
+
+        assert_eq!(
+            transform_import(
+                &transformer,
+                "FromImport",
+                "sdk.client",
+                Some("Client"),
+                "tests.test_client"
+            ),
+            ("vendor.sdk.client".to_string(), None)
         );
     }
 

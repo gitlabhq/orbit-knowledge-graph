@@ -8,16 +8,23 @@ use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tracing::info;
+
+use crate::resources::{
+    ContainerResources, DEFAULT_MAX_CONCURRENT_WORKERS, derive_code_indexing_slots,
+};
 
 // ── Base config types ────────────────────────────────────────────────
 
-/// Per-subscription message processing policy (retry, concurrency, DLQ).
+/// Sparse per-subscription policy override (retry, concurrency, DLQ).
 ///
-/// Lives under `engine.topics.<name>` in YAML. Applied to the `Subscription`
-/// at handler registration time, so all handlers sharing a subscription
-/// share the same processing policy.
-///
-/// Retries are opt-in: a subscription with no retry config will ack on failure.
+/// The correct default policy for each topic is declared in Rust by the indexer
+/// module that owns the topic (see `crates/indexer/src/modules/*`). A
+/// `engine.topics.<name>` entry in YAML is a *field-wise override* layered on top
+/// of that declared default via [`SubscriptionConfig::with_optional_override`]: only the
+/// fields the entry sets change; every unset field keeps the module default. Each
+/// field is therefore `Option`, so "unset" is distinguishable from an explicit
+/// value (notably `dead_letter_on_exhaustion: false`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SubscriptionConfig {
@@ -30,8 +37,6 @@ pub struct SubscriptionConfig {
     ///
     /// `max_attempts: 1` means the message is processed once with no retries.
     /// `max_attempts: 5` means 1 initial attempt + 4 retries.
-    ///
-    /// When absent, failures are acked immediately (retries are opt-in).
     #[serde(default)]
     pub max_attempts: Option<u32>,
 
@@ -42,7 +47,7 @@ pub struct SubscriptionConfig {
 
     /// Route exhausted retries to the dead letter queue.
     #[serde(default)]
-    pub dead_letter_on_exhaustion: bool,
+    pub dead_letter_on_exhaustion: Option<bool>,
 
     /// Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.
     /// When absent, the NATS server default applies (currently 1000).
@@ -54,6 +59,28 @@ impl SubscriptionConfig {
     /// Returns the retry interval as a [`Duration`], if configured.
     pub fn retry_interval(&self) -> Option<Duration> {
         self.retry_interval_secs.map(Duration::from_secs)
+    }
+
+    /// Field-wise merge: fields `overlay` sets win, unset fields keep `self`'s value.
+    pub fn with_optional_override(
+        &self,
+        overlay: Option<&SubscriptionConfig>,
+    ) -> SubscriptionConfig {
+        let Some(overlay) = overlay else {
+            return self.clone();
+        };
+        SubscriptionConfig {
+            concurrency_group: overlay
+                .concurrency_group
+                .clone()
+                .or_else(|| self.concurrency_group.clone()),
+            max_attempts: overlay.max_attempts.or(self.max_attempts),
+            retry_interval_secs: overlay.retry_interval_secs.or(self.retry_interval_secs),
+            dead_letter_on_exhaustion: overlay
+                .dead_letter_on_exhaustion
+                .or(self.dead_letter_on_exhaustion),
+            max_ack_pending: overlay.max_ack_pending.or(self.max_ack_pending),
+        }
     }
 }
 
@@ -130,10 +157,6 @@ fn default_datalake_batch_size() -> u64 {
     500_000
 }
 
-fn default_stream_block_size() -> u64 {
-    65_536
-}
-
 fn default_system_notes_resolve_lookup_batch_size() -> usize {
     1_000
 }
@@ -179,25 +202,14 @@ impl Default for DatalakeRetryConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EntityHandlerConfig {
-    #[serde(default = "default_datalake_batch_size")]
-    pub datalake_batch_size: u64,
+    /// Rows per SDLC datalake page (also the ClickHouse `max_block_size`). Unset =
+    /// derived from the container memory limit (prod's 32 GiB sdlc pool anchors
+    /// the tuned 500k page), floored at 100k.
+    #[serde(default)]
+    pub datalake_batch_size: Option<u64>,
 
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
-
-    #[serde(default)]
-    pub partition_overrides: HashMap<String, u32>,
-
-    /// Skip partitioning a scope smaller than this; the probe isn't worth it.
-    #[serde(default = "default_partition_min_rows")]
-    pub partition_min_rows: u64,
-
-    /// Rows per block streamed from the datalake (`max_block_size`). Larger blocks
-    /// amortize per-batch write round-trips (more throughput) at the cost of peak
-    /// memory per in-flight block.
-    #[serde(default = "default_stream_block_size")]
-    #[schemars(range(min = 1))]
-    pub stream_block_size: u64,
 
     /// Maximum number of items bound into each SystemNote resolver lookup.
     #[serde(default = "default_system_notes_resolve_lookup_batch_size")]
@@ -208,23 +220,36 @@ pub struct EntityHandlerConfig {
 impl Default for EntityHandlerConfig {
     fn default() -> Self {
         Self {
-            datalake_batch_size: default_datalake_batch_size(),
+            datalake_batch_size: None,
             batch_size_overrides: HashMap::new(),
-            partition_overrides: HashMap::new(),
-            partition_min_rows: default_partition_min_rows(),
-            stream_block_size: default_stream_block_size(),
             system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
             ),
         }
     }
 }
 
-fn default_fetch_concurrency() -> usize {
-    10
+impl EntityHandlerConfig {
+    pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
+        if self.datalake_batch_size.is_some() {
+            return;
+        }
+        let batch = resources.derive_datalake_batch_size();
+        self.datalake_batch_size = Some(batch);
+        info!(
+            memory_limit_bytes = resources.memory_limit_bytes,
+            value = batch,
+            "derived engine.handlers.entity_handler.datalake_batch_size"
+        );
+    }
+
+    pub fn datalake_batch_size(&self) -> u64 {
+        self.datalake_batch_size
+            .unwrap_or_else(default_datalake_batch_size)
+    }
 }
 
-fn default_partition_min_rows() -> u64 {
-    50_000_000
+fn default_fetch_concurrency() -> usize {
+    10
 }
 
 fn default_code_indexing_max_file_size_bytes() -> u64 {
@@ -291,14 +316,6 @@ fn default_code_indexing_small_repo_max_files() -> usize {
     650
 }
 
-fn default_code_indexing_small_indexing_slots() -> usize {
-    6
-}
-
-fn default_code_indexing_big_indexing_slots() -> usize {
-    2
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -360,12 +377,12 @@ pub struct CodeIndexingPipelineConfig {
     /// Parsable source-file count (`Decision::Parse`) at or below which a repository runs on the small lane. Defaults to 650.
     #[serde(default = "default_code_indexing_small_repo_max_files")]
     pub small_repo_max_files: usize,
-    /// Concurrent indexing slots for small repositories. Defaults to 6.
-    #[serde(default = "default_code_indexing_small_indexing_slots")]
-    pub small_indexing_slots: usize,
-    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.
-    #[serde(default = "default_code_indexing_big_indexing_slots")]
-    pub big_indexing_slots: usize,
+    /// Concurrent indexing slots for small repositories. Unset = derived from the container CPU count, capped by its memory limit.
+    #[serde(default)]
+    pub small_indexing_slots: Option<usize>,
+    /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count, capped by its memory limit.
+    #[serde(default)]
+    pub big_indexing_slots: Option<usize>,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -390,13 +407,47 @@ impl Default for CodeIndexingPipelineConfig {
             write_max_flush_age_secs: default_code_indexing_write_max_flush_age_secs(),
             write_max_concurrent: default_code_indexing_write_max_concurrent(),
             small_repo_max_files: default_code_indexing_small_repo_max_files(),
-            small_indexing_slots: default_code_indexing_small_indexing_slots(),
-            big_indexing_slots: default_code_indexing_big_indexing_slots(),
+            small_indexing_slots: None,
+            big_indexing_slots: None,
         }
     }
 }
 
 impl CodeIndexingPipelineConfig {
+    pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
+        if self.small_indexing_slots.is_some() && self.big_indexing_slots.is_some() {
+            return;
+        }
+
+        let slots = derive_code_indexing_slots(resources.derive_worker_budget());
+        if self.small_indexing_slots.is_none() {
+            self.small_indexing_slots = Some(slots.small_indexing_slots);
+            info!(
+                available_parallelism = resources.available_parallelism,
+                memory_limit_bytes = resources.memory_limit_bytes,
+                value = slots.small_indexing_slots,
+                "derived code-indexing pipeline.small_indexing_slots"
+            );
+        }
+        if self.big_indexing_slots.is_none() {
+            self.big_indexing_slots = Some(slots.big_indexing_slots);
+            info!(
+                available_parallelism = resources.available_parallelism,
+                memory_limit_bytes = resources.memory_limit_bytes,
+                value = slots.big_indexing_slots,
+                "derived code-indexing pipeline.big_indexing_slots"
+            );
+        }
+    }
+
+    pub fn small_indexing_slots(&self) -> usize {
+        self.small_indexing_slots.unwrap_or(0)
+    }
+
+    pub fn big_indexing_slots(&self) -> usize {
+        self.big_indexing_slots.unwrap_or(0)
+    }
+
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
@@ -433,10 +484,20 @@ pub struct HandlersConfiguration {
 
 // ── Dispatcher / scheduler config types ──────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GlobalDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+}
+
+impl Default for GlobalDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */1 * * * *".into()),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -491,10 +552,20 @@ impl Default for SiphonRouterConfig {
 }
 
 /// Cadence for the coverage-driven code-backfill sweep.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+}
+
+impl Default for CodeBackfillSweepConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */1 * * * *".into()),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -539,21 +610,30 @@ impl Default for MigrationCompletionConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                cron: Some("0 */5 * * * *".into()),
+                cron: Some("0 */1 * * * *".into()),
             },
         }
     }
 }
 
-/// Tombstones stale FK-derived "latest"/single-value edges whose endpoint no
-/// longer matches the owner node's current FK column. ReplacingMergeTree keys
-/// the edge on its (mutable) `target_id`, so an FK change orphans the old edge
-/// instead of replacing it; this sweep reconciles them off the indexing path.
+/// Tombstones edges a node's pipeline stopped emitting, off the indexing path.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+    #[serde(default = "default_stale_edge_lookback_secs")]
+    pub lookback_secs: u64,
+}
+
+fn default_stale_edge_lookback_secs() -> u64 {
+    60 * 60
+}
+
+impl StaleEdgeReconciliationConfig {
+    pub fn lookback(&self) -> chrono::TimeDelta {
+        chrono::TimeDelta::seconds(self.lookback_secs as i64)
+    }
 }
 
 impl Default for StaleEdgeReconciliationConfig {
@@ -562,6 +642,7 @@ impl Default for StaleEdgeReconciliationConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 */30 * * * *".into()),
             },
+            lookback_secs: default_stale_edge_lookback_secs(),
         }
     }
 }
@@ -613,31 +694,35 @@ impl IndexerModule {
     pub fn all() -> Vec<IndexerModule> {
         vec![Self::Sdlc, Self::Code, Self::NamespaceDeletion]
     }
+
+    /// Name of the concurrency group this module's handlers subscribe under.
+    /// Single source for group names so derived caps can't drift from subscription groups.
+    pub const fn concurrency_group(self) -> &'static str {
+        match self {
+            Self::Sdlc | Self::NamespaceDeletion => "sdlc",
+            Self::Code => "code",
+        }
+    }
 }
 
-/// ETL engine configuration.
-///
-/// # Defaults
-///
-/// - `max_concurrent_workers`: 16
-/// - `concurrency_groups`: empty
-/// - `topics`: empty (no retry/DLQ by default)
-/// - `handlers`: defaults for all handlers
-/// - `modules`: all variants of [`IndexerModule`] (universal indexer)
+/// ETL engine configuration. Scale fields left unset derive from the
+/// container's resources at startup; an explicit value always wins.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
-    /// Maximum concurrent message handlers across all modules. Defaults to 16.
-    #[serde(default = "EngineConfiguration::default_max_concurrent_workers")]
-    pub max_concurrent_workers: usize,
+    /// Maximum concurrent message handlers across all modules. Unset = derived
+    /// from the container CPU count, capped by its memory limit.
+    #[serde(default)]
+    pub max_concurrent_workers: Option<usize>,
 
-    /// Named concurrency groups with their limits.
-    /// Subscriptions reference these by name via `SubscriptionConfig::concurrency_group`.
+    /// Named concurrency groups with their limits. Empty = derived from the
+    /// enabled `modules` and the worker cap.
     #[serde(default)]
     pub concurrency_groups: HashMap<String, usize>,
 
-    /// Per-subscription message processing policy (retry, concurrency, DLQ).
-    /// Keyed by a human-readable label matching topic name constants.
+    /// Sparse per-subscription policy overrides, keyed by topic name. Each entry
+    /// is layered field-wise over the module-declared default for that topic;
+    /// omit a topic to use its declared default unchanged.
     #[serde(default)]
     pub topics: HashMap<String, SubscriptionConfig>,
 
@@ -649,9 +734,7 @@ pub struct EngineConfiguration {
     #[serde(default)]
     pub datalake_retry: DatalakeRetryConfig,
 
-    /// Modules whose handlers this indexer process should register. Defaults to all
-    /// modules for backward compatibility (universal indexer). Set to a subset to
-    /// run a specialised pool, e.g. `[code]` for a code-only Deployment.
+    /// Modules whose handlers this process registers. Unset = all modules.
     #[serde(default = "IndexerModule::all")]
     pub modules: Vec<IndexerModule>,
 }
@@ -659,7 +742,7 @@ pub struct EngineConfiguration {
 impl Default for EngineConfiguration {
     fn default() -> Self {
         EngineConfiguration {
-            max_concurrent_workers: Self::default_max_concurrent_workers(),
+            max_concurrent_workers: None,
             concurrency_groups: HashMap::new(),
             topics: HashMap::new(),
             handlers: HandlersConfiguration::default(),
@@ -670,8 +753,9 @@ impl Default for EngineConfiguration {
 }
 
 impl EngineConfiguration {
-    fn default_max_concurrent_workers() -> usize {
-        16
+    pub fn max_concurrent_workers(&self) -> usize {
+        self.max_concurrent_workers
+            .unwrap_or(DEFAULT_MAX_CONCURRENT_WORKERS)
     }
 
     /// Returns whether `module` is enabled in this configuration.
@@ -685,9 +769,6 @@ impl EngineConfiguration {
             return Err(EngineConfigError::NoModulesEnabled);
         }
         let entity_handler = &self.handlers.entity_handler;
-        if entity_handler.stream_block_size == 0 {
-            return Err(EngineConfigError::ZeroStreamBlockSize);
-        }
         if entity_handler.system_notes_resolve_lookup_batch_size == 0 {
             return Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize);
         }
@@ -702,9 +783,6 @@ pub enum EngineConfigError {
          leave it unset to register all modules (universal indexer)"
     )]
     NoModulesEnabled,
-
-    #[error("engine.handlers.entity_handler.stream_block_size must be at least 1")]
-    ZeroStreamBlockSize,
 
     #[error(
         "engine.handlers.entity_handler.system_notes_resolve_lookup_batch_size must be at least 1"
@@ -723,6 +801,90 @@ pub struct ScheduleConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn declared_policy_fixture() -> SubscriptionConfig {
+        SubscriptionConfig {
+            concurrency_group: Some("code".into()),
+            max_attempts: Some(5),
+            retry_interval_secs: Some(60),
+            dead_letter_on_exhaustion: Some(true),
+            max_ack_pending: None,
+        }
+    }
+
+    #[test]
+    fn overlay_replaces_only_fields_the_override_sets() {
+        let resolved =
+            declared_policy_fixture().with_optional_override(Some(&SubscriptionConfig {
+                max_attempts: Some(2),
+                ..Default::default()
+            }));
+        assert_eq!(resolved.max_attempts, Some(2));
+        assert_eq!(resolved.retry_interval_secs, Some(60));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+        assert_eq!(resolved.concurrency_group.as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn overlay_can_turn_dead_letter_off() {
+        let resolved =
+            declared_policy_fixture().with_optional_override(Some(&SubscriptionConfig {
+                dead_letter_on_exhaustion: Some(false),
+                ..Default::default()
+            }));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(false));
+    }
+
+    #[test]
+    fn with_optional_override_none_returns_declared_policy() {
+        let resolved = declared_policy_fixture().with_optional_override(None);
+        assert_eq!(resolved.max_attempts, Some(5));
+        assert_eq!(resolved.dead_letter_on_exhaustion, Some(true));
+    }
+
+    #[test]
+    fn schedule_tasks_default_to_declared_crons() {
+        let tasks = ScheduledTasksConfiguration::default();
+        assert_eq!(tasks.global.schedule.cron.as_deref(), Some("0 */1 * * * *"));
+        assert_eq!(
+            tasks.namespace.schedule.cron.as_deref(),
+            Some("*/30 * * * * *")
+        );
+        assert_eq!(tasks.namespace.sweep_interval_secs, 3600);
+        assert_eq!(
+            tasks.code_backfill.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+        assert_eq!(
+            tasks.table_cleanup.schedule.cron.as_deref(),
+            Some("0 0 3 * * *")
+        );
+        assert_eq!(
+            tasks.namespace_deletion.schedule.cron.as_deref(),
+            Some("0 0 3 * * *")
+        );
+        assert_eq!(
+            tasks.migration_completion.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+        assert_eq!(
+            tasks.stale_edge_reconciliation.schedule.cron.as_deref(),
+            Some("0 */30 * * * *")
+        );
+    }
+
+    #[test]
+    fn empty_schedule_yaml_yields_default_crons() {
+        let cfg: ScheduleConfig = serde_yaml::from_str("tasks: {}\n").expect("valid yaml");
+        assert_eq!(
+            cfg.tasks.global.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+        assert_eq!(
+            cfg.tasks.migration_completion.schedule.cron.as_deref(),
+            Some("0 */1 * * * *")
+        );
+    }
 
     #[test]
     fn job_timeout_is_some_by_default_and_disabled_at_zero() {
@@ -789,28 +951,16 @@ modules: [sdlc, namespace_deletion]
     }
 
     #[test]
-    fn entity_handler_streaming_knobs_default_to_pre_tunable_constants() {
+    fn system_notes_lookup_batch_size_defaults_to_pre_tunable_constant() {
         let cfg = EntityHandlerConfig::default();
-        assert_eq!(cfg.stream_block_size, 65_536);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 1_000);
     }
 
     #[test]
-    fn entity_handler_streaming_knobs_override_from_yaml() {
-        let yaml = "stream_block_size: 262144\nsystem_notes_resolve_lookup_batch_size: 2048\n";
+    fn system_notes_lookup_batch_size_overrides_from_yaml() {
+        let yaml = "system_notes_resolve_lookup_batch_size: 2048\n";
         let cfg: EntityHandlerConfig = serde_yaml::from_str(yaml).expect("valid yaml");
-        assert_eq!(cfg.stream_block_size, 262_144);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
-    }
-
-    #[test]
-    fn zero_stream_block_size_fails_validation() {
-        let mut cfg = EngineConfiguration::default();
-        cfg.handlers.entity_handler.stream_block_size = 0;
-        assert!(matches!(
-            cfg.validate(),
-            Err(EngineConfigError::ZeroStreamBlockSize)
-        ));
     }
 
     #[test]

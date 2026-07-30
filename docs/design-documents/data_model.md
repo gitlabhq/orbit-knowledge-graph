@@ -56,6 +56,7 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `SecurityScan`        | Represents a security scan run.                                                                         | `id`, `scan_type`, `status`, `latest`                                         |
 | `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence (`Vulnerabilities::Finding` in Rails).              | `id`, `uuid`, `report_type`, `severity`, `location`                           |
 | `Package` | Represents a package published to the package registry (npm, Maven, PyPI, NuGet, and other formats). | `id`, `name`, `version`, `package_type`, `status`, `project_id` |
+| `PackageFile` | Represents a file stored for a package in the package registry (the artifact itself, for example a .whl or .jar). | `id`, `file_name`, `size`, `file_sha256`, `status`, `project_id` |
 | `ContainerRepository` | Represents a container image repository in a project's container registry. | `id`, `name`, `status`, `project_id` |
 | `Dependency` | Represents a dependency declared by a package (npm, Maven, NuGet, Composer, and other formats). | `id`, `name`, `version_pattern`, `project_id` |
 | `VulnerabilityScanner` | Represents the scanner that produced vulnerability data.                                               | `id`, `external_id`, `name`, `vendor`                                         |
@@ -82,7 +83,6 @@ graph TD
     MergeRequest -- HAS_NOTE --> Note
     MergeRequest -- HAS_LABEL --> Label
 
-    MergeRequest -- TARGETS --> Branch
     MergeRequest -- CLOSES --> WorkItem
     MergeRequest -- TRIGGERED --> Pipeline
     User -- TRIGGERED --> Job
@@ -97,6 +97,10 @@ graph TD
     Package -- IN_PROJECT --> Project
     Package -- BUILT_BY --> Pipeline
     Package -- DECLARES_DEPENDENCY --> Dependency
+    Package -- HAS_VULNERABILITY --> Vulnerability
+    Package -- HAS_PACKAGE_FILE --> PackageFile
+    PackageFile -- IN_PROJECT --> Project
+    PackageFile -- BUILT_BY --> Pipeline
     ContainerRepository -- IN_PROJECT --> Project
     Dependency -- IN_PROJECT --> Project
 ```
@@ -106,12 +110,13 @@ graph TD
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`, `User`, `Project`, `WorkItem` | `Group`, `Project`, `Branch`, `WorkItem` | A group contains a subgroup or project; a user namespace contains a project; a project contains a branch; a work item contains a child work item. |
-| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
-| `BUILT_BY`                          | `Package`      | `Pipeline`     | A package was built by a CI/CD pipeline (sourced from the `packages_build_infos` join table).           |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `PackageFile`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
+| `BUILT_BY`                          | `Package`, `PackageFile` | `Pipeline` | A package or package file was built by a CI/CD pipeline (sourced from the `packages_build_infos` and `packages_package_file_build_infos` join tables). |
+| `HAS_PACKAGE_FILE`                  | `Package`      | `PackageFile`  | A package contains a package file (FK on the package file).                                             |
 | `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
+| `HAS_VULNERABILITY`                 | `Package`      | `Vulnerability`| A registry package is affected by a vulnerability, matched to its SBOM component occurrence by name/version (sourced from the `sbom_occurrences_vulnerabilities` join and `sbom_occurrences`/`sbom_component_versions`). |
 | `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
 | `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
-| `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `MergeRequest` | `Pipeline`     | A merge request triggered a pipeline.                                                                   |
 | `TRIGGERED`                         | `User`         | `Pipeline`, `Job` | A user triggered a pipeline or job directly.                                                       |
@@ -143,7 +148,6 @@ graph TD
 | `LAST_EDITED_BY`                    | `User`         | `MergeRequest` | User who most recently edited the merge request's content (title/description).                         |
 | `HAS_FINDING`                       | `SecurityScan`, `Vulnerability` | `Finding`, `VulnerabilityOccurrence` | A security scan produced findings, or a vulnerability points at its canonical occurrence. |
 | `HAS_IDENTIFIER`                    | `Vulnerability`, `Finding`, `VulnerabilityOccurrence` | `VulnerabilityIdentifier` | An entity is associated with vulnerability identifiers.              |
-| `DETECTED_IN`                       | `Finding` | `Pipeline` | A finding was first or most recently detected in a pipeline. |
 | `DETECTED_BY`                       | `Finding`, `VulnerabilityOccurrence` | `VulnerabilityScanner` | Security data is associated with a scanner.                              |
 | `OCCURRENCE_OF`                     | `VulnerabilityOccurrence` | `Vulnerability` | A vulnerability occurrence is linked to a vulnerability. |
 | `DEPLOYED_BY`                       | `User`         | `Deployment`   | User who triggered the deployment.                                                                      |
@@ -157,7 +161,6 @@ graph TD
 | `FIXES`                             | `MergeRequest` | `Vulnerability`| A merge request fixes a vulnerability.                                                                  |
 | `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | A work item is related to or blocks another work item (edge property `link_type`: `relates_to`, `blocks`). |
 | `MERGED_AT_COMMIT`                  | `MergeRequest` | `Commit`       | The commit a merge request was merged at. Write-once FK (immutable). |
-| `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
 | `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
 | `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
 

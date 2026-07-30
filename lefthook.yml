@@ -49,14 +49,12 @@ pre-commit:
     - name: skill-version-bump
       run: bash ./scripts/check-skill-version-bump.sh
       glob: "skills/**/*"
+    - name: prompt-version-bump
+      run: bash ./scripts/check-prompt-version-bump.sh
+      glob: "config/prompts/**/*.yml"
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
-    - name: schema-version-check
-      run: bash ./scripts/check-schema-version.sh
-      glob:
-        - "config/graph.sql"
-        - "config/ontology/**/*.yaml"
     - name: response-schema-version-check
       run: bash ./scripts/check-response-schema-version.sh
       glob:

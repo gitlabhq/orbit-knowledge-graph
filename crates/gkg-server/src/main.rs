@@ -150,7 +150,11 @@ async fn run_webserver(
         config.jwt_clock_skew_secs,
     )?);
 
-    let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
+    let cluster_health = ClusterHealthChecker::new(
+        config.health_check_url.clone(),
+        Some(config.graph.build_client()),
+    )
+    .into_arc();
 
     let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
         anyhow::anyhow!(

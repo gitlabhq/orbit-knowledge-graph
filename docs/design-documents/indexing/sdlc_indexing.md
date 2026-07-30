@@ -193,6 +193,15 @@ The scheduler publishes indexing requests to parameterized subjects (e.g. `sdlc.
 
 This replaces the previous KV-lock-based deduplication with a simpler, infrastructure-level guarantee.
 
+**NATS entity versioning and release GC**
+
+To support blue-green deployments, every gkg-owned NATS entity name carries a version segment, resolved in one place (`crates/indexer/src/nats/versioning.rs`):
+
+- JetStream streams and their subjects are keyed by release (e.g. `GKG_INDEXER_V0-84-1` capturing `v0-84-1.sdlc. ...`), so two releases run side by side with independent work queues and dead-letter streams.
+- KV buckets (`indexing_locks`, `orbit_indexing_progress`) are keyed by graph schema version (e.g. `indexing_locks_v77`), so same-schema releases share locks and progress while different-schema releases are isolated. Retired schema versions' buckets are deleted by the migration-completion GC.
+
+Retired releases' streams are collected at startup without any coordination registry: a live release's dispatcher publishes to its work queue every minute, so stream activity doubles as liveness. At dispatcher startup, other releases' managed streams whose creation time, last publish, and attached-consumer count have all been quiet for longer than `nats.release_gc_idle_threshold_secs` are deleted. Versioned durable consumers (both subscribe-path and Siphon dispatch) carry `nats.consumer_inactive_threshold_secs`, so a dead release's consumers reap themselves instead of holding the consumer-count veto forever.
+
 **Completing an indexing job**
 
 When the handler acks the message, WorkQueue retention automatically removes it from the stream. The handler then updates the database to reflect the date of the last indexing alongside relevant metadata.
@@ -227,29 +236,54 @@ WHERE id = '{namespace_id}';
 
 If the worker fails unexpectedly, the unacked message is redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle re-creates the request. This leverages eventual consistency which is acceptable since the system does not aim for real-time consistency.
 
+The term-ack path assumes the worker is alive to term the message. When a worker crashes or is killed after the final delivery attempt, JetStream gives up on the message without ever receiving an ack, nack, or term. Because GKG's versioned streams use `discard_new_per_subject` (one message per subject), that abandoned message permanently blocks its subject: the sweep and backfill dispatchers keep re-publishing the same request, but the stream discards every new copy. The `MaxDeliveriesReconciler` (an orchestrator trigger) closes this gap. It queue-subscribes to JetStream's `MAX_DELIVERIES` advisory across all replicas, and on each advisory for a GKG-managed stream it deletes the exhausted message, unblocking the subject so the next dispatch cycle can re-deliver the request. It ignores advisories for foreign streams (e.g. Siphon) and treats an already-deleted message as a no-op, so duplicate advisories and concurrent replicas are safe.
+
 ##### ETL
 
 **Ontology-driven plan building**
 
-ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/ontology/edges/`. Each node entity with an `etl` config becomes a `Plan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
+ETL plans come from ontology pipelines declared on nodes, edges, and derived entities. A pipeline has `name`, `extract`, and `transform` sections; the loader turns each one into the in-memory `Pipeline { extract, transform }` model before the indexer lowers it into a runnable `Plan`. Node pipelines emit node rows plus FK-derived edges from their `transform.edges` list. Edge pipelines emit standalone edges. Derived-entity pipelines emit no node rows and must name a Rust transform.
 
-A standalone edge ETL may set an optional `where:` predicate that is pushed into the extraction SQL (ANDed with the watermark/deleted/not-null filters), so a single shared source table can back multiple edge kinds without a dedicated table or a Rust transform. For example, `REOPENED` is two ETLs over `siphon_resource_state_events` filtered to `state = 5` (the Rails `reopened` issuable state) — one targeting `MergeRequest` via `merge_request_id`, one targeting `WorkItem` via `issue_id`.
+Each `extract` declares a `type` (currently only `clickhouse`, a required field so a future non-ClickHouse source has a seam), its source `tables`, keyset `order_by`, `query`, an optional `filter` (a `_batch` WHERE predicate such as `state = 5` for `REOPENED`), optional base `fields`, and optional `lookups`. Generated extracts declare exactly one base table; authored SQL may declare every table it reads.
+
+Generated node projections come from their database-backed properties, while generated standalone edges publish their base `RecordBatch` fields through `extract.fields`. A point lookup names the source node and batch ID column, while its table resolves from the node's pipeline. Nodes may declare `enrichment_props`; omitting lookup `fields` expands source columns and stable aliases from that node contract. Explicit lookup `fields` remain available for non-contract mappings. Two forms of `query`:
+
+- `query: generated` — the indexer builds the SQL from the pipeline declaration. The shape follows from what is being extracted:
+  - a node or edge without `extract.lookups` becomes a single-table projection (requires one source table); standalone-edge columns come from `extract.fields`, while node columns come from property source metadata;
+  - a declaration with `extract.lookups` becomes a `_batch` CTE over its base table plus one internal `_eN` CTE per point lookup. Each lookup uses `argMax` against the source node's base datalake table, is keyed by `id IN (SELECT DISTINCT <batch ID column> FROM _batch)`, and emits stable output field aliases declared explicitly or expanded from `enrichment_props`. The internal `_eN` names are not part of the `RecordBatch` contract.
+- a `.sql.j2` MiniJinja template next to the YAML — the seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) whose extracts own multi-table joins, materialized arrays, or hex/SHA decoding that are not mechanically derivable, and the SystemNote derived entity. Derived-entity pipelines are always authored SQL: their rows are neither node properties nor edge endpoints, so there is nothing to generate a projection from.
+
+For the `.sql.j2` form the indexer renders `{{watermark_column}}` / `{{deleted_column}}` through MiniJinja at plan build (a generated `filter` may use them too), and fills `{{filters}}` / `{{batch_size}}` at runtime. All ontology SQL templates render through `ontology::sql_template` (strict-undefined MiniJinja). The first table in `extract.tables` is the partition-probe base table; for generated extracts it is the only entry.
+
+The Arrow `RecordBatch` schema is the runtime contract between extraction and transformation.
+DataFusion registers each extracted batch with its own schema, so planning does not duplicate a
+partial Arrow schema. A `ClickHouseExtractDeclaration` owns source columns, lookup joins, and query
+configuration, while the owned `TransformDeclaration` contains only transform planning inputs.
+Literal edge endpoints map ontology properties to input fields through explicit `properties` maps
+or `enrich: true`, which expands independently from the referenced node's `enrichment_props`.
+DataFusion reads those fields from `source_data` when it builds denormalized edge tags. Extraction
+publishes fields but does not identify endpoint direction or graph properties. Each compiler accepts
+only its owned declaration; the plan builder assembles their outputs. Extract and transform meet only
+through the resulting `RecordBatch` field names. When a stage references the same node kind more than
+once, it derives distinct field namespaces from each reference's ID field.
 
 **Pipeline: extract, transform, write**
 
 Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct. The loop works like this:
 
 1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
-2. Build a parameterized extraction query against the datalake, filtered by watermark range and (for namespaced entities) traversal path.
+2. Start from the pipeline's resolved extraction SQL template and build a parameterized datalake query, adding the current watermark window and (for namespaced entities) traversal path.
 3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
 4. Read each page out of the datalake in full, buffering its Arrow blocks in memory.
    ClickHouse encodes Arrow `String` columns with 32-bit offsets, so an output block whose text column (e.g. a dense page of `description`/`note` text) exceeds ~2 GiB fails the read with error code 1002. `max_block_size` bounds the rows per output block, so a small enough block keeps every column under the cap.
    The happy path pays nothing for this; on a 1002 overflow the extract retry (`Pipeline::extract_batch`) drops `max_block_size` straight to the floor block size and re-reads the page — idempotent from the page's start cursor (point 7) — so no single block can exceed the cap.
-5. Transform the whole page in-memory with DataFusion SQL (a row-wise projection: mapping source columns to graph columns, resolving FK edges, applying type discriminators), grouping the output rows by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
-6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. `engine.handlers.entity_handler.stream_block_size` (rows per wire block on the read side) is tunable per deployment.
+5. Transform each extracted block with the plan's transform. `datafusion` performs row-wise SQL projections for node rows and edge mappings; a registered Rust transform such as `system_notes` can perform custom parsing or lookups. Output rows are grouped by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
+6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. Read-side wire blocks use the ClickHouse server default `max_block_size`; only the 1002 overflow retry (point 4) overrides it per attempt.
    Data-page write durability differs by mode (see **Write durability** below); both modes async-batch to coalesce the many small per-page inserts into fewer parts.
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
 8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
+
+Paging counts *output* rows (points 3 and 8), so extracts must emit at least one output row per driver row: a join that drops driver rows silently truncates the window (#1064) — use `LEFT JOIN` and drop unmatched rows in the transform.
 
 ```sql
 --- Example extraction query with keyset pagination
@@ -361,7 +395,23 @@ ALTER TABLE database_b.<table_name> DROP COLUMN <column_name>;
 
 For changes to a table that are not backward compatible or may cause downtime, the system uses a prefix-based multi-step migration process handled by the dispatcher.
 
-The dispatcher creates new-prefix tables (e.g. `v59_gl_issue`) with the updated schema. The previous-prefix tables remain available to serve queries. The namespace sweep task re-indexes every enabled namespace into the new-prefix tables. Once `MigrationCompletionChecker` confirms all namespaces are re-indexed, the new version is promoted to `active`, the old version is retired, and dead-version GC drops the obsolete tables.
+The dispatcher prepares a new set of prefixed tables, such as `v59_gl_issue`, while the previous
+version keeps serving queries. For a table-local SDLC change, it clones unaffected tables and
+rebuilds only the affected table. It also copies checkpoints for unchanged pipelines, so the
+namespace sweep reruns only the work required by the migration.
+
+Shared tables need a stricter rule. If the requested scope touches a table that has writers outside
+that scope, the dispatcher performs a full rebuild instead. Without that widening, a changed edge
+identity could leave the old row beside the corrected row in a `ReplacingMergeTree` table. A code
+migration is exempt for `gl_edge`: it clones the table intact and relies on the code stale sweep to
+tombstone its own rows as each namespace's re-index drains, so it re-indexes only code without re-pulling SDLC.
+It also clones the SDLC checkpoint intact (keeping the `dispatch.*` cursors so SDLC does not
+re-sweep) but drops the per-namespace `maintenance.code_stale_sweep.*` gates so each namespace
+re-sweeps against the clone.
+
+`MigrationCompletionChecker` promotes the new version only after every currently enabled top-level
+namespace ID has completed all required namespaced pipelines and every required global pipeline is
+complete. A checkpoint from a namespace that has since been disabled does not satisfy the gate.
 
 **Initial schema creation**
 
@@ -369,7 +419,9 @@ The initial schema creation is handled by the dispatcher at boot. When no active
 
 **Schema updates**
 
-Schema updates are handled by the dispatcher at boot via `schema::migration::run_if_needed()`, which creates new-prefix tables and marks the new version as `migrating`. The indexer then backfills the data to the new schema on the next indexing job for each namespace.
+Schema updates are handled by the dispatcher at boot via `schema::migration::run_if_needed()`. It
+prepares the new-prefix tables, marks the new version as `migrating`, and opens a migration campaign.
+Indexers then fill the rebuilt tables through the normal global and namespace sweep paths.
 
 **Schema update coordination**
 

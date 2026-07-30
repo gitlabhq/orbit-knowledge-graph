@@ -275,7 +275,7 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
         .query(sql)
         .with_setting("max_memory_usage", "0")
         .with_setting("preferred_block_size_bytes", "0")
-        .fetch_arrow_streamed(8_000)
+        .fetch_arrow_streamed(Some(8_000))
         .await
         .expect("query opens");
     let mut overflowed = false;
@@ -298,7 +298,7 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
         .query(sql)
         .with_setting("max_memory_usage", "0")
         .with_setting("preferred_block_size_bytes", "1000000")
-        .fetch_arrow_streamed(8_000)
+        .fetch_arrow_streamed(Some(8_000))
         .await
         .expect("query opens");
     let mut rows = 0u64;

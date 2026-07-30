@@ -1,16 +1,20 @@
 //! The orchestrator drives indexing: it owns the clock, decides what to index,
 //! reacts to Siphon CDC, and dispatches work requests for the indexer to execute.
 //!
-//! Two trigger models share one trigger-agnostic [`dispatch`] layer:
+//! Trigger models share one trigger-agnostic [`dispatch`] layer:
 //!
 //! - [`scheduled`] — cron-driven periodic tasks ([`scheduled::Scheduled`]),
 //!   including the coverage-driven code-backfill sweep.
 //! - [`siphon`] — a continuous, reactive CDC consumer ([`siphon::Siphon`]).
+//! - [`max_deliveries`] — a continuous, reactive JetStream advisory consumer
+//!   ([`max_deliveries::MaxDeliveriesReconciler`]) that frees permanently
+//!   stuck messages once NATS itself gives up on redelivery.
 //!
 //! Each implements [`Trigger`]; [`launch`] runs them concurrently until one
 //! errors or all complete.
 
 pub mod dispatch;
+pub mod max_deliveries;
 pub mod scheduled;
 pub mod siphon;
 

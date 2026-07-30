@@ -23,7 +23,7 @@
 //!
 //! let json = r#"{
 //!     "query_type": "traversal",
-//!     "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+//!     "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
 //!     "limit": 10
 //! }"#;
 //!
@@ -37,6 +37,8 @@ pub mod constants;
 pub mod error;
 pub mod input;
 pub mod metrics;
+pub(crate) mod schema_limits;
+mod schema_templates;
 pub mod scope;
 pub mod types;
 
@@ -65,6 +67,7 @@ pub use passes::codegen::{
     clickhouse::emit_simple_query,
     codegen,
     ddl::clickhouse::emit_create_materialized_view,
+    ddl::clickhouse::emit_create_refreshable_materialized_view,
     ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
     ddl::duckdb::emit_create_table as emit_duckdb_create_table,
     ddl::duckdb::generate_local_ddl,
@@ -75,6 +78,9 @@ pub use passes::codegen::{
     ddl::generate_graph_tables,
     ddl::generate_graph_tables_with_prefix,
     ddl::generate_local_tables,
+    ddl::generate_refreshable_materialized_views,
+    ddl::generate_unversioned_graph_tables,
+    ddl::{auxiliary_schema_fingerprints, ddl_fingerprints},
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::hydrate::{
@@ -215,7 +221,7 @@ mod tests {
     #[test]
     fn allowlist_rejected_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let query = r#"{"query_type":"traversal","node":{"id":"x","entity":"NotARealEntity","columns":["id"]},"limit":1}"#;
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"x","entity":"NotARealEntity","columns":["id"]}],"limit":1}"#;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
@@ -234,8 +240,8 @@ mod tests {
         use std::sync::atomic::Ordering;
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 1
         }"#;
         let ctx =
@@ -263,8 +269,8 @@ mod tests {
     fn traversal_path_shape_rejection_is_validate_pass_error() {
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": 1}}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"starts_with": 1}}}],
             "limit": 1
         }"#;
         let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
@@ -292,7 +298,7 @@ mod tests {
     fn compile_with_prefixed_ontology_produces_prefixed_sql() {
         let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
 
-        let query = r#"{"query_type":"traversal","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]}],"limit":1}"#;
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
@@ -329,8 +335,8 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "mr", "as": "total_mrs"}],
             "limit": 10
         }"#;
 
@@ -355,11 +361,10 @@ mod tests {
                 {"id": "f", "entity": "File"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "f",
-                "alias": "files"
+                "count": "f",
+                "as": "files"
             }],
             "limit": 10
         }"#;
@@ -389,15 +394,14 @@ mod tests {
             "nodes": [
                 {"id": "p", "entity": "Project"},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "opened"}
+                    "state": {"eq": "opened"}
                 }}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "open_mrs"
+                "count": "mr",
+                "as": "open_mrs"
             }],
             "limit": 10
         }"#;
@@ -421,13 +425,13 @@ mod tests {
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
                 {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
             ],
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "project"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#;
 
@@ -489,13 +493,13 @@ mod tests {
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
                 {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
             ],
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "project"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#;
 
@@ -520,7 +524,7 @@ mod tests {
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#;
 
@@ -561,7 +565,7 @@ mod tests {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "root"}}},
+                {"id": "start", "entity": "User", "filters": {"username": {"eq": "root"}}},
                 {"id": "end", "entity": "Project", "node_ids": [100]}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
@@ -611,8 +615,8 @@ mod tests {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
-                {"id": "start", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "compile"}}},
-                {"id": "end", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "run_query"}}}
+                {"id": "start", "entity": "Definition", "filters": {"name": {"eq": "compile"}}},
+                {"id": "end", "entity": "Definition", "filters": {"name": {"eq": "run_query"}}}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["CALLS"]},
@@ -707,8 +711,7 @@ mod tests {
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "cursor": {"offset": 0, "page_size": 10},
-            "limit": 10
+            "cursor": {"page_size": 10}
         }"#;
 
         let sql = compile_sql(query);
@@ -777,8 +780,8 @@ mod tests {
     fn wildcard_neighbors_infers_relationship_kinds_from_center_entity() {
         let query = r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing"},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {"direction": "outgoing"},
             "limit": 10
         }"#;
 
@@ -798,10 +801,9 @@ mod tests {
     fn cursor_neighbors_both_orders_by_projected_columns() {
         let query = r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]},
-            "neighbors": {"node": "mr", "direction": "both"},
-            "limit": 100,
-            "cursor": {"offset": 0, "page_size": 20}
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]}],
+            "neighbors": {"direction": "both"},
+            "cursor": {"page_size": 20}
         }"#;
 
         let sql = compile_sql(query);
@@ -909,7 +911,7 @@ mod tests {
             "nodes": [
                 {"id": "p", "entity": "Project"},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
+                    "state": {"eq": "merged"}
                 }},
                 {"id": "u", "entity": "User"}
             ],
@@ -917,11 +919,10 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "AUTHORED", "from": "u", "to": "mr"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "merged_mrs"
+                "count": "mr",
+                "as": "merged_mrs"
             }],
             "limit": 5
         }"#;
@@ -960,11 +961,10 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "user_mrs"
+                "count": "mr",
+                "as": "user_mrs"
             }],
             "limit": 5
         }"#;
@@ -993,8 +993,7 @@ mod tests {
                 "type": "MEMBER_OF",
                 "from": "u",
                 "to": "p",
-                "min_hops": 1,
-                "max_hops": 3
+                "hops": [1, 3]
             }],
             "limit": 25
         }"#;
@@ -1027,8 +1026,7 @@ mod tests {
                 "type": "MEMBER_OF",
                 "from": "u",
                 "to": "p",
-                "min_hops": 1,
-                "max_hops": 2
+                "hops": [1, 2]
             }],
             "limit": 25
         }"#;
@@ -1057,11 +1055,10 @@ mod tests {
                 "type": "CONTAINS",
                 "from": "p",
                 "to": "f",
-                "min_hops": 1,
-                "max_hops": 2
+                "hops": [1, 2]
             }],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "f"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "f", "as": "count"}],
             "limit": 10
         }"#;
 
@@ -1097,10 +1094,10 @@ mod tests {
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 3}
+                {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 3]}
             ],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "n"}],
             "limit": 3
         }"#;
 
@@ -1140,7 +1137,7 @@ mod tests {
 
     #[test]
     fn denorm_eq_filter_pushes_to_edge_tags() {
-        let sql = denorm_traversal_sql(r#""state": {"op": "eq", "value": "merged"}"#);
+        let sql = denorm_traversal_sql(r#""state": {"eq": "merged"}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
@@ -1153,7 +1150,7 @@ mod tests {
 
     #[test]
     fn denorm_in_list_filter_uses_has_any() {
-        let sql = denorm_traversal_sql(r#""state": {"op": "in", "value": ["merged", "opened"]}"#);
+        let sql = denorm_traversal_sql(r#""state": {"in": ["merged", "opened"]}"#);
         assert!(
             sql.contains("hasAny(e0.target_tags"),
             "IN-list denorm filter must use hasAny, got:\n{sql}"
@@ -1166,7 +1163,7 @@ mod tests {
 
     #[test]
     fn denorm_in_list_single_value_uses_has() {
-        let sql = denorm_traversal_sql(r#""state": {"op": "in", "value": ["merged"]}"#);
+        let sql = denorm_traversal_sql(r#""state": {"in": ["merged"]}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "single-value IN-list must use has, got:\n{sql}"
@@ -1175,9 +1172,8 @@ mod tests {
 
     #[test]
     fn denorm_partial_filters_joins_for_non_denorm() {
-        let sql = denorm_traversal_sql(
-            r#""state": {"op": "eq", "value": "merged"}, "source_branch": {"op": "eq", "value": "main"}"#,
-        );
+        let sql =
+            denorm_traversal_sql(r#""state": {"eq": "merged"}, "source_branch": {"eq": "main"}"#);
         assert!(
             sql.contains("INNER JOIN"),
             "partial denorm must JOIN node table for non-denormalized filters, got:\n{sql}"
@@ -1194,7 +1190,7 @@ mod tests {
 
     #[test]
     fn denorm_boolean_filter_renders_value_token() {
-        let sql = denorm_traversal_sql(r#""draft": {"op": "eq", "value": true}"#);
+        let sql = denorm_traversal_sql(r#""draft": {"eq": true}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'draft:true')"),
             "boolean denorm filter must render its value token, got:\n{sql}"
@@ -1210,15 +1206,15 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"op": "eq", "value": "Community contribution"}}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
+                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "cl"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}]
+            "aggregations": [{"count": "mr", "as": "c"}]
         }"#;
         let sql = compile_sql(query);
         assert!(
@@ -1236,13 +1232,13 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"op": "eq", "value": "Community contribution"}}}
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
+                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}}
             ],
             "relationships": [
                 {"type": "HAS_LABEL", "from": "mr", "to": "cl"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}]
+            "aggregations": [{"count": "mr", "as": "c"}]
         }"#;
         let sql = compile_sql(query);
         assert!(
@@ -1262,7 +1258,7 @@ mod tests {
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3],
-                 "filters": {"state": {"op": "eq", "value": "merged"}}}
+                 "filters": {"state": {"eq": "merged"}}}
             ],
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10
@@ -1287,15 +1283,14 @@ mod tests {
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
+                    "state": {"eq": "merged"}
                 }}
             ],
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
+            "group_by": ["u"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "n"
+                "count": "mr",
+                "as": "n"
             }],
             "limit": 10
         }"#;
@@ -1325,12 +1320,10 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "wi", "to": "p"},
                 {"type": "CLOSED", "from": "u", "to": "wi"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "u",
-                "property": "id",
-                "alias": "closers_count"
+                "count": "u.id",
+                "as": "closers_count"
             }],
             "limit": 20
         }"#;
@@ -1353,16 +1346,15 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "v", "entity": "Vulnerability", "filters": {
-                    "state": {"op": "eq", "value": "detected"}
+                    "state": {"eq": "detected"}
                 }},
                 {"id": "proj", "entity": "Project", "node_ids": [1]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
-            "group_by": [{"kind": "node", "node": "proj"}],
+            "group_by": ["proj"],
             "aggregations": [{
-                "function": "count",
-                "target": "v",
-                "alias": "n"
+                "count": "v",
+                "as": "n"
             }],
             "limit": 10
         }"#;
@@ -1382,11 +1374,10 @@ mod tests {
             "nodes": [
                 {"id": "p", "entity": "Project", "node_ids": [1]}
             ],
-            "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}],
+            "group_by": ["p.visibility_level"],
             "aggregations": [{
-                "function": "count",
-                "target": "p",
-                "alias": "project_count"
+                "count": "p",
+                "as": "project_count"
             }],
             "limit": 10
         }"#;
@@ -1394,7 +1385,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("p.visibility_level AS visibility_level"),
+            sql.contains("p.visibility_level AS p_visibility_level"),
             "property group key must be selected as a scalar column, got:\n{sql}"
         );
         assert!(
@@ -1416,11 +1407,10 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [1]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+            "group_by": ["v.severity"],
             "aggregations": [{
-                "function": "count",
-                "target": "v",
-                "alias": "vulnerability_count"
+                "count": "v",
+                "as": "vulnerability_count"
             }],
             "limit": 10
         }"#;
@@ -1432,7 +1422,7 @@ mod tests {
             "role-gated grouped entity must remain in FROM for SecurityPass, got:\n{sql}"
         );
         assert!(
-            sql.contains("v.severity AS severity") && sql.contains("GROUP BY v.severity"),
+            sql.contains("v.severity AS v_severity") && sql.contains("GROUP BY v.severity"),
             "security property grouping must use the protected node alias, got:\n{sql}"
         );
     }
@@ -1444,7 +1434,7 @@ mod tests {
                 "traversal",
                 r#"{
                     "query_type": "traversal",
-                    "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
                     "limit": 10
                 }"#,
             ),
@@ -1457,8 +1447,8 @@ mod tests {
                         {"id": "p", "entity": "Project"}
                     ],
                     "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-                    "group_by": [{"kind": "node", "node": "p"}],
-                    "aggregations": [{"function": "count", "target": "mr", "alias": "merged_mrs"}],
+                    "group_by": ["p"],
+                    "aggregations": [{"count": "mr", "as": "merged_mrs"}],
                     "limit": 10
                 }"#,
             ),
@@ -1479,8 +1469,8 @@ mod tests {
                 "neighbors",
                 r#"{
                     "query_type": "neighbors",
-                    "node": {"id": "mr", "entity": "MergeRequest", "filters": {"title": {"op": "contains", "value": "fix"}}},
-                    "neighbors": {"node": "mr", "direction": "both"},
+                    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"title": {"contains": "fix"}}}],
+                    "neighbors": {"direction": "both"},
                     "limit": 10
                 }"#,
             ),
@@ -1550,8 +1540,8 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "j"}],
-            "aggregations": [{"function": "count", "target": "j", "alias": "fail_count"}],
+            "group_by": ["j"],
+            "aggregations": [{"count": "j", "as": "fail_count"}],
             "limit": 20
         }"#;
 
@@ -1572,13 +1562,13 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "j1", "entity": "Job", "filters": {"status": "canceled"}},
-                {"id": "j2", "entity": "Job"},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
+                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
+                {"id": "p2", "entity": "Pipeline"},
+                {"id": "proj", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "j1", "to": "j2"},
-                {"type": "IN_PROJECT", "from": "j1", "to": "p"}
+                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
+                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
             ],
             "limit": 10
         }"#;
@@ -1587,27 +1577,27 @@ mod tests {
 
         assert!(
             sql.contains(
-                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"
+                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 WHERE"
             ),
             "unfiltered joined target should be narrowed by a candidate scan, got:\n{sql}"
         );
         assert!(
             !sql.contains(
-                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"
+                "_narrow_p2 AS (SELECT p1.auto_canceled_by_id AS id FROM gl_pipeline AS p1 FINAL"
             ),
             "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
         );
         assert!(
-            !sql.contains("_candidate_j1"),
+            !sql.contains("_candidate_p1"),
             "center candidate CTE should not be emitted when it only repeats center filters, got:\n{sql}"
         );
         assert!(
-            !sql.contains("j1.id IN (SELECT id FROM _candidate_j1)"),
+            !sql.contains("p1.id IN (SELECT id FROM _candidate_p1)"),
             "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j1")
-                && sql.contains("AS j1 INNER JOIN (SELECT * FROM gl_job AS j2"),
+            sql.contains("FROM (SELECT * FROM gl_pipeline AS p1")
+                && sql.contains("AS p1 INNER JOIN (SELECT * FROM gl_pipeline AS p2"),
             "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
         );
     }
@@ -1621,8 +1611,8 @@ mod tests {
                 {"id": "proj", "entity": "Project"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
-            "group_by": [{"kind": "node", "node": "proj"}],
-            "aggregations": [{"function": "count", "target": "j", "alias": "failed_jobs"}],
+            "group_by": ["proj"],
+            "aggregations": [{"count": "j", "as": "failed_jobs"}],
             "limit": 200
         }"#;
 
@@ -1648,13 +1638,13 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "j1", "entity": "Job", "filters": {"status": "canceled"}},
-                {"id": "j2", "entity": "Job"},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
+                {"id": "p1", "entity": "Pipeline", "filters": {"status": "canceled"}},
+                {"id": "p2", "entity": "Pipeline"},
+                {"id": "proj", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [
-                {"type": "AUTO_CANCELED_BY", "from": "j1", "to": "j2"},
-                {"type": "IN_PROJECT", "from": "j1", "to": "p"}
+                {"type": "AUTO_CANCELED_BY", "from": "p1", "to": "p2"},
+                {"type": "IN_PROJECT", "from": "p1", "to": "proj"}
             ],
             "limit": 10
         }"#;
@@ -1662,7 +1652,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("_narrow_j2"),
+            sql.contains("_narrow_p2"),
             "traversal FK-center join must keep its narrowing CTE, got:\n{sql}"
         );
     }
@@ -1682,8 +1672,8 @@ mod tests {
                 {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
                 {"type": "HAS_FILE", "from": "d", "to": "f"}
             ],
-            "aggregations": [{"function": "count", "target": "f", "alias": "appearances"}],
-            "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+            "aggregations": [{"count": "f", "as": "appearances"}],
+            "group_by": ["f.old_path"],
             "limit": 60
         }"#;
 
@@ -1705,7 +1695,7 @@ mod tests {
 
     fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
         let query = format!(
-            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":[{{"kind":"node","node":"{group}"}}],"aggregations":[{{"function":"count","target":"{agg}","alias":"c"}}],"limit":20}}"#
+            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"count":"{agg}","as":"c"}}],"limit":20}}"#
         );
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
@@ -1715,7 +1705,7 @@ mod tests {
 
     #[test]
     fn scoped_query_pushes_down_partition_predicate() {
-        let query = r#"{"query_type":"traversal","node":{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"op":"eq","value":"opened"}}},"limit":20}"#;
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"m","entity":"MergeRequest","columns":["id"],"filters":{"state":{"eq":"opened"}}}],"limit":20}"#;
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_scope_prefixes([("m".to_string(), "1/9970/".to_string())].into());
@@ -1781,8 +1771,8 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "n", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "limit": 10
         }"#;
 
@@ -1813,8 +1803,8 @@ mod tests {
                 {"type": "CONTAINS", "from": "g", "to": "p"},
                 {"type": "AUTHORED", "from": "u", "to": "n"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "n", "as": "note_count"}],
             "limit": 10
         }"#;
 
@@ -1831,8 +1821,8 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "f", "entity": "File", "filters": {"path": {"op": "ends_with", "value": ".rb"}}},
-                {"id": "d", "entity": "Definition", "filters": {"name": {"op": "starts_with", "value": "process"}}}
+                {"id": "f", "entity": "File", "filters": {"path": {"ends_with": ".rb"}}},
+                {"id": "d", "entity": "Definition", "filters": {"name": {"starts_with": "process"}}}
             ],
             "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
             "limit": 20
@@ -1927,7 +1917,7 @@ mod tests {
     fn single_ref_cte_is_not_materialized() {
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
             "limit": 10
         }"#;
 
@@ -1950,7 +1940,7 @@ mod tests {
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [116]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
+                    "state": {"eq": "merged"}
                 }},
                 {"id": "p", "entity": "Project"}
             ],
@@ -1958,11 +1948,10 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "user_mrs"
+                "count": "mr",
+                "as": "user_mrs"
             }],
             "limit": 5
         }"#;
@@ -1985,15 +1974,15 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest",
+            "nodes": [{"id": "mr", "entity": "MergeRequest",
                      "node_ids": [1],
                      "filters": {
                          "created_at": [
-                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
-                             {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                             {"gte": "2026-04-01T00:00:00Z"},
+                             {"lt": "2026-05-01T00:00:00Z"}
                          ]
                      },
-                     "columns": ["id", "created_at"]},
+                     "columns": ["id", "created_at"]}],
             "limit": 10
         }"#;
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
@@ -2011,10 +2000,10 @@ mod tests {
         let compiled = compile(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "f", "entity": "File",
+                "nodes": [{"id": "f", "entity": "File",
                          "node_ids": [1],
-                         "filters": {"content": {"op": "eq", "value": "x"}},
-                         "columns": ["path", "content"]},
+                         "filters": {"content": {"eq": "x"}},
+                         "columns": ["path", "content"]}],
                 "limit": 5
             }"#,
             &ontology,
@@ -2044,9 +2033,9 @@ mod tests {
         let err = compile(
             r#"{
                 "query_type": "traversal",
-                "node": {"id": "f", "entity": "File",
+                "nodes": [{"id": "f", "entity": "File",
                          "node_ids": [1],
-                         "filters": {"content": {"op": "gt", "value": "x"}}},
+                         "filters": {"content": {"gt": "x"}}}],
                 "limit": 5
             }"#,
             &ontology,

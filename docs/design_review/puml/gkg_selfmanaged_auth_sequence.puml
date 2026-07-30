@@ -1,0 +1,90 @@
+@startuml gkg_selfmanaged_auth_sequence
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 11
+skinparam padding 5
+skinparam roundCorner 8
+skinparam shadowing false
+skinparam sequenceArrowThickness 2
+skinparam sequenceMessageAlign center
+
+title Hybrid Self-Managed: Auth Flow\n(Cloud-hosted GKG ↔ On-Prem Monolith)
+
+box "Customer On-Premises" #FFF3E0
+  actor "User /\nLLM Agent" as user
+  participant "GitLab Rails\n(Self-Managed)" as rails
+  participant "Gitaly" as gitaly
+end box
+
+box "GitLab Cloud Infrastructure" #E8F4FD
+  participant "DAP\n(Data Access Proxy)" as dap
+  participant "Orbit\n(Graph Query Engine)" as orbit
+  database "ClickHouse\nCloud" as ch
+end box
+
+== Query Request ==
+
+user -> rails : Graph query request
+rails -> dap : HTTP + JWT\n(identity, scopes,\nallowed traversal paths)
+dap -> orbit : Forwarded request\n(validated JWT)
+
+== Authorization (in-process, from JWT) ==
+
+orbit -> orbit : Read allowed traversal paths\nfrom JWT (Claims.group_traversal_ids)
+note right #FFCCCC
+  **Challenge 1: Network connectivity**
+  The JWT is minted on-prem by the customer's
+  Rails; the cross-boundary hop that remains is
+  the row-level redaction callback (below), which
+  Orbit makes back to on-prem Rails. Requires a
+  stable, low-latency path across the customer
+  firewall — a secure tunnel (VPN, Private Link,
+  or reverse proxy).
+end note
+orbit -> orbit : Inject traversal_path\nfilter into SQL
+
+== Query Execution ==
+
+orbit -> ch : Parameterized SQL query
+ch --> orbit : Result set
+
+orbit --> dap : Query response
+dap --> rails : Response
+rails --> user : Graph data
+
+== Batch Redaction (row-level) ==
+
+orbit -> rails : RedactionRequired (gRPC stream)\n//resource_type + abilities ("read")//\n//Crosses the network boundary//
+note right #FFCCCC
+  **Challenge 2: Latency**
+  This cross-boundary redaction round-trip to
+  on-prem Rails adds 10-100ms+ per batch and,
+  under load, can dominate query time.
+
+  **Challenge 3: Redaction at scale**
+  Every result set may require a round-trip to
+  on-prem Rails for row-level permission filtering.
+  Batching helps but doesn't eliminate the call.
+end note
+
+rails --> orbit : Authorized resource set
+orbit --> dap : Final filtered response
+dap --> rails : Response
+rails --> user : Redacted graph data
+
+== Key Risks ==
+
+note over user, ch #FFE0E0
+  **Summary of cross-boundary auth challenges:**
+
+  1. **Firewall / network policy** — customer must allow the cloud → on-prem
+     redaction callback (gRPC stream) to reach their Rails instance.
+  2. **Latency budget** — every redaction round-trip crosses the network;
+     large result sets amplify this and can spike P99.
+  3. **Availability coupling** — if the on-prem monolith is unreachable,
+     Orbit cannot redact results (fail-open is not acceptable).
+  4. **Security posture** — exposing an auth endpoint externally increases
+     attack surface; mutual TLS or equivalent is required.
+end note
+
+@enduml

@@ -68,6 +68,7 @@ use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDel
 use nats::{KvBucketConfig, NatsBroker};
 use orchestrator::Trigger;
 use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
+use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
     CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
     NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
@@ -76,13 +77,18 @@ use orchestrator::scheduled::{
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 pub async fn run(
     config: &IndexerConfig,
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
+    let resources = gkg_server_config::ContainerResources::detect();
+    let mut config = config.clone();
+    config.engine.resolve_runtime_defaults(&resources);
+    let config = &config;
+
     config.schema.validate()?;
     config.engine.validate()?;
 
@@ -175,6 +181,7 @@ pub async fn run(
             &ontology,
             writer.clone(),
             analytics.clone(),
+            modules::sdlc::PARTITION_MIN_ROWS,
         )
         .await?;
     } else {
@@ -189,6 +196,7 @@ pub async fn run(
             &ontology,
             writer.clone(),
             analytics.clone(),
+            &resources,
         )
         .await?;
     } else {
@@ -254,6 +262,16 @@ pub async fn run_dispatcher(
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
     let services = orchestrator::scheduled::connect(&config.nats).await?;
+
+    if let Err(error) = nats::versioning::gc_idle_release_streams(
+        &services.nats_client,
+        config.nats.release_gc_idle_threshold(),
+    )
+    .await
+    {
+        warn!(%error, "release GC failed, will retry next startup");
+    }
+
     let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
@@ -298,6 +316,28 @@ pub async fn run_dispatcher(
     )
     .await?;
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    match schema::version::read_active_version(&graph).await {
+        Ok(Some(active_version)) if active_version == *schema::version::SCHEMA_VERSION => {
+            if let Err(error) = schema::migration::create_unversioned_tables(&graph, ontology).await
+            {
+                warn!(%error, "failed to create unversioned ontology tables at startup");
+            }
+            if let Err(error) = schema::migration::replace_refreshable_views_for_version(
+                &graph,
+                ontology,
+                active_version,
+            )
+            .await
+            {
+                warn!(%error, "failed to replace refreshable ontology views at startup");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => {
+            warn!(%error, "failed to read active version for auxiliary tables and refreshable views")
+        }
+    }
 
     let deletion_graph = Arc::new(config.graph.build_client());
     let deletion_datalake = Arc::new(config.datalake.build_client());
@@ -399,7 +439,12 @@ pub async fn run_dispatcher(
         campaign.clone(),
         routes,
     );
-    let triggers: Vec<Box<dyn Trigger>> = vec![Box::new(scheduled), Box::new(siphon)];
+    let max_deliveries_reconciler = MaxDeliveriesReconciler::new(services.nats_client.clone());
+    let triggers: Vec<Box<dyn Trigger>> = vec![
+        Box::new(scheduled),
+        Box::new(siphon),
+        Box::new(max_deliveries_reconciler),
+    ];
 
     let health_abort = health_task.abort_handle();
     tokio::select! {

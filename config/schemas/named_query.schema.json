@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NamedQuery",
+  "description": "A server-defined graph query in config/named_queries/. The query DSL may reference server-side bindings via {$binding: <name>} placeholders and client-supplied parameters via {$param: <name>} placeholders, rendered server-side and compiled by the query compiler. Each file's name field must match its file stem.",
+  "type": "object",
+  "required": ["name", "description", "query"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Stable identifier clients invoke. Must match the YAML file stem."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "One-sentence, introspection-facing summary of what the query returns."
+    },
+    "default": {
+      "type": "boolean",
+      "description": "When true, this query leads the catalog returned by ListNamedQueries so clients can preselect it. At most one query may set this."
+    },
+    "bindings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["current_user_id"]
+      },
+      "description": "Server-side values substituted at render time via {$binding: <name>}. Never client-supplied."
+    },
+    "parameters": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["schema", "example"],
+        "additionalProperties": false,
+        "properties": {
+          "schema": {
+            "type": "object",
+            "description": "JSON Schema the client-supplied value must satisfy at render time."
+          },
+          "example": {
+            "description": "Representative value substituted for build-time compilation against the ontology. Must satisfy schema."
+          }
+        }
+      },
+      "description": "Client-supplied values substituted at render time via {$param: <name>}, validated against each parameter's JSON Schema."
+    },
+    "query": {
+      "type": "object",
+      "required": ["query_type"],
+      "description": "Graph query DSL object. {$binding: <name>} placeholders are replaced whole-value at render time."
+    }
+  }
+}

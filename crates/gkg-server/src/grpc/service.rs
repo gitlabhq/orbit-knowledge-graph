@@ -17,14 +17,17 @@ use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
-use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
+use crate::pipeline::{
+    QueryPipelineService, receive_query_request, send_invalid_request_error, send_query_error,
+};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
     GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
     InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
-    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
+    ListAgentCommandsResponse, ListNamedQueriesRequest, ListNamedQueriesResponse, ListToolsRequest,
+    ListToolsResponse, NamedQueryDefinition, QueryMetadata, QueryType, ResponseFormat,
     ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
     SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
     get_graph_schema_response, get_query_dsl_response, get_response_format_response,
@@ -61,6 +64,7 @@ pub struct KnowledgeGraphServiceImpl {
     validator: Arc<JwtValidator>,
     ontology: Arc<Ontology>,
     tool_service: ToolService,
+    named_queries: Arc<named_queries::NamedQueries>,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
@@ -82,10 +86,15 @@ impl KnowledgeGraphServiceImpl {
         let pipeline =
             QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), analytics_config);
         let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
+        let named_queries = Arc::new(
+            named_queries::NamedQueries::load_embedded()
+                .expect("embedded named queries are validated by the build script"),
+        );
         Self {
             validator,
             ontology,
             tool_service,
+            named_queries,
             pipeline,
             cluster_health,
             graph_status,
@@ -292,6 +301,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
+        let named_queries = Arc::clone(&self.named_queries);
         let stream_timeout = self.stream_timeout_secs;
         let span = tracing::Span::current();
 
@@ -302,7 +312,27 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     None => return,
                 };
 
-                info!(query_len = req.query.len(), "Executing query");
+                let resolved = match QueryType::try_from(req.query_type) {
+                    Ok(QueryType::Json) => Ok(req.query),
+                    Ok(QueryType::Named) => {
+                        let values = named_queries::BindingValues {
+                            current_user_id: claims.user_id,
+                        };
+                        named_queries
+                            .render_request(&req.query, &values)
+                            .map_err(|e| e.to_string())
+                    }
+                    Err(_) => Err(format!("Unknown query_type: {}", req.query_type)),
+                };
+                let query_json = match resolved {
+                    Ok(query) => query,
+                    Err(message) => {
+                        send_invalid_request_error(&tx, message).await;
+                        return;
+                    }
+                };
+
+                info!(query_len = query_json.len(), "Executing query");
 
                 let use_llm_format = req.format == ResponseFormat::Llm as i32;
 
@@ -311,7 +341,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     .run_query(
                         claims,
                         coding_agent,
-                        &req.query,
+                        &query_json,
                         tx.clone(),
                         stream,
                         timeout,
@@ -482,6 +512,27 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         };
 
         Ok(Response::new(response))
+    }
+
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
+    async fn list_named_queries(
+        &self,
+        request: Request<ListNamedQueriesRequest>,
+    ) -> Result<Response<ListNamedQueriesResponse>, Status> {
+        let ctx = extract_request_context(&request, &self.validator)?;
+        ctx.record_in_current_span();
+
+        let values = named_queries::BindingValues {
+            current_user_id: ctx.claims.user_id,
+        };
+        let queries = named_query_definitions(&self.named_queries, &values)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        info!(count = queries.len(), "Listing named queries");
+        Ok(Response::new(ListNamedQueriesResponse { queries }))
     }
 
     #[instrument(
@@ -672,6 +723,29 @@ impl KnowledgeGraphServiceImpl {
     }
 }
 
+fn named_query_definitions(
+    named_queries: &named_queries::NamedQueries,
+    values: &named_queries::BindingValues,
+) -> Result<Vec<NamedQueryDefinition>, named_queries::NamedQueryError> {
+    let mut queries: Vec<_> = named_queries
+        .iter()
+        .filter(|query| query.example_parameters().is_empty())
+        .collect();
+    queries.sort_by_key(|query| !query.default);
+
+    queries
+        .into_iter()
+        .map(|query| {
+            let raw_query = query.render(values, &query.example_parameters())?;
+            Ok(NamedQueryDefinition {
+                name: query.name.clone(),
+                description: query.description.clone(),
+                raw_query,
+            })
+        })
+        .collect()
+}
+
 fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(), Status> {
     if claims.admin {
         return Ok(());
@@ -727,10 +801,15 @@ mod tests {
     }
 
     fn authed_request<T>(message: T) -> Request<T> {
+        authed_request_for_user(message, 1)
+    }
+
+    fn authed_request_for_user<T>(message: T, user_id: u64) -> Request<T> {
         let now = chrono::Utc::now().timestamp();
         let claims = Claims {
             iat: now,
             exp: now + 3600,
+            user_id,
             ..test_claims()
         };
         let token = encode(
@@ -1119,6 +1198,65 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn list_named_queries_returns_rendered_catalog() {
+        let service = test_service();
+        let response = service
+            .list_named_queries(authed_request(ListNamedQueriesRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!response.queries.is_empty());
+        for query in &response.queries {
+            assert!(!query.name.is_empty());
+            assert!(!query.description.is_empty());
+            let dsl: serde_json::Value = serde_json::from_str(&query.raw_query)
+                .unwrap_or_else(|e| panic!("`{}` DSL must be valid JSON: {e}", query.name));
+            assert!(dsl.is_object(), "`{}` DSL must be an object", query.name);
+            assert!(
+                !query.raw_query.contains("$binding") && !query.raw_query.contains("$param"),
+                "`{}` DSL must have all placeholders resolved: {}",
+                query.name,
+                query.raw_query
+            );
+        }
+
+        let names: Vec<_> = response.queries.iter().map(|q| q.name.as_str()).collect();
+        assert!(
+            !names.contains(&"expand_neighbors"),
+            "parameter-driven queries must be excluded from the catalog, got {names:?}"
+        );
+        assert_eq!(
+            names.first(),
+            Some(&"my_neighbors"),
+            "the default query must lead the catalog, got {names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_named_queries_substitutes_caller_user_id() {
+        let user_id = 424_242;
+
+        let service = test_service();
+        let response = service
+            .list_named_queries(authed_request_for_user(ListNamedQueriesRequest {}, user_id))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let my_neighbors = response
+            .queries
+            .iter()
+            .find(|q| q.name == "my_neighbors")
+            .expect("my_neighbors is an embedded named query");
+        assert!(
+            my_neighbors.raw_query.contains("424242"),
+            "my_neighbors DSL should contain the caller's user_id: {}",
+            my_neighbors.raw_query
+        );
+    }
+
     fn test_claims() -> Claims {
         Claims {
             sub: "u:1".into(),
@@ -1236,7 +1374,7 @@ mod tests {
     #[test]
     fn test_response_format_helpers_return_canonical_values() {
         let schema = ToolService::build_response_format_schema();
-        assert!(schema.contains("GKG unified query response"));
+        assert!(schema.contains("Orbit unified query response"));
 
         let version = ToolService::build_response_format_version();
         assert!(

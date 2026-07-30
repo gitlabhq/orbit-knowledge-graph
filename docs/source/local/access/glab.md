@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup.
-title: Use Orbit Local with the GitLab CLI (`glab`)
+description: Install, index, and query GitLab Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup.
+title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 ---
 
 {{< details >}}
@@ -24,7 +24,7 @@ title: Use Orbit Local with the GitLab CLI (`glab`)
 > [!disclaimer]
 
 The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to install,
-run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors
+run, and integrate GitLab Orbit Local with your AI agent. `glab orbit local` mirrors
 `glab orbit remote`, so the same patterns work whether you query the GitLab
 instance or your local machine.
 
@@ -36,7 +36,7 @@ Two top-level commands:
 - `glab orbit local`: wraps the managed `orbit` binary to index and query the
   local graph.
 - `glab orbit setup`: guided onboarding that verifies access, installs the
-  Orbit skill, and installs the local binary.
+  GitLab Orbit skill, and installs the local binary.
 
 ## Prerequisites
 
@@ -63,8 +63,8 @@ glab orbit local help
 
 ## Set up your AI agent
 
-`glab orbit setup` runs a guided onboarding: it verifies that Orbit is
-reachable, installs the Orbit skill so AI coding agents can discover it, and
+`glab orbit setup` runs a guided onboarding: it verifies that GitLab Orbit is
+reachable, installs the GitLab Orbit skill so AI coding agents can discover it, and
 installs the local `orbit` binary.
 
 ```shell
@@ -83,7 +83,7 @@ glab orbit setup
 The skill drives the `orbit` binary directly. To connect an MCP client to the
 local graph instead, see [Connect via MCP](mcp.md).
 
-You can also [install the Orbit skill manually](../../ai_coding_agents.md)
+You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
 with `glab skills install --global orbit`.
 
 ## Index a repository
@@ -145,4 +145,4 @@ with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing
 
-Orbit Local does not consume GitLab Credits. All processing is local.
+GitLab Orbit Local does not consume GitLab Credits. All processing is local.

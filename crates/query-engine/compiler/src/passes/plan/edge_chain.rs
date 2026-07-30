@@ -207,9 +207,9 @@ pub fn plan(input: &mut Input) -> Plan {
         nodes,
         hops,
         strategy,
-        limit: input.limit,
+        limit: input.fetch_limit(),
         order_by: input.order_by.clone(),
-        cursor: input.cursor,
+        cursor: input.cursor.clone(),
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
         denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
@@ -269,8 +269,8 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 from_node: rel.from.clone(),
                 to_node: rel.to.clone(),
                 direction: rel.direction,
-                min_hops: rel.min_hops,
-                max_hops: rel.max_hops,
+                min_hops: rel.hops.min,
+                max_hops: rel.hops.max,
                 fk,
                 scope_preserving: rel.scope_preserving,
                 filters: rel
@@ -347,7 +347,7 @@ fn is_pure_scope_anchor(
         .aggregation
         .metrics
         .iter()
-        .any(|m| m.target.as_deref() == Some(alias));
+        .any(|m| m.expr.node() == alias);
     let is_order_target = input.order_by.as_ref().is_some_and(|ob| ob.node == alias);
 
     !in_group_by && !is_agg_target && !is_order_target
@@ -587,9 +587,9 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input, hops: &[Hop]) -> Hyd
         .iter()
         .any(|group| matches!(group, crate::input::InputGroupByKey::Property { node, .. } if node == alias));
     let is_agg_property_target = input.aggregation.metrics.iter().any(|a| {
-        a.target.as_deref() == Some(alias.as_str())
-            && a.property.is_some()
-            && !matches!(a.function, AggFunction::Count)
+        a.expr.node() == alias.as_str()
+            && a.expr.property().is_some()
+            && !matches!(a.expr.function(), AggFunction::Count)
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
 
@@ -844,8 +844,8 @@ fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
         }
 
         for agg in &input.aggregation.metrics {
-            if agg.target.as_deref() == Some(alias.as_str())
-                && let Some(ref prop) = agg.property
+            if agg.expr.node() == alias.as_str()
+                && let Some(prop) = agg.expr.property()
             {
                 push(prop);
             }

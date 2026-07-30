@@ -15,14 +15,17 @@ spec:
         args:
         - |
           set -e
-          apt-get update -qq && apt-get install -qq -y --no-install-recommends \
-            git ca-certificates >/dev/null
           mkdir -p /fixtures
           tar xzf /fixtures-archive/fixtures.tar.gz -C /fixtures
-          pip install --quiet --disable-pip-version-check --root-user-action=ignore \
-            robotframework=={{ .Values.robotframework.version }} \
-            robotframework-requests=={{ .Values.robotframework.requestsVersion }} \
-            robotframework-pabot=={{ .Values.robotframework.pabotVersion }}
+          if ! command -v pabot >/dev/null 2>&1; then
+            # Local-run fallback; CI uses the prebaked e2e-robot image.
+            apt-get update -qq && apt-get install -qq -y --no-install-recommends \
+              git ca-certificates >/dev/null
+            pip install --quiet --disable-pip-version-check --root-user-action=ignore \
+              robotframework=={{ .Values.robotframework.version }} \
+              robotframework-requests=={{ .Values.robotframework.requestsVersion }} \
+              robotframework-pabot=={{ .Values.robotframework.pabotVersion }}
+          fi
           set +e
           pabot --processes {{ .Values.robotframework.processes }} --pabotlib \
             --ordering /tests/ordering.txt \

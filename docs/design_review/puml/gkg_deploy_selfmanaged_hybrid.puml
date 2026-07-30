@@ -1,0 +1,92 @@
+@startuml gkg_deploy_selfmanaged_hybrid
+
+title Deployment: Self-Managed (Hybrid --- Cloud-hosted GKG)
+
+' ===================================================================
+' HYBRID SELF-MANAGED: Orbit runs in GitLab shared cloud infra,
+' customer monolith remains on-prem
+' ===================================================================
+
+
+actor "3P Agent\nUsers" as 3p_agents
+actor "DAP User" as dap_user
+' --- Cloud boundary (shared GitLab infra) ---
+rectangle "**GitLab Cloud Infrastructure**\n//Shared multi-tenant//" as cloud #E8F4FD {
+
+  rectangle "**Orbit Module**" as module_cloud #D6EAF8 {
+    component "**SDLC Indexer**\nRust ETL engine\nSiphon CDC consumer" as sdlc_idx_h #CCE5CC
+    component "**Code Indexer**\nparser-core + OXC\n+ tree-sitter" as code_idx_h #CCE5CC
+    component "**Graph Query Engine**\nJSON DSL -> ClickHouse SQL" as query_eng_h #CCE5CC
+    component "**HTTP / gRPC**\nAxum 0.8, JWT auth" as http_srv_h #CCE5CC    
+    component "Embedded GATE" as gate
+
+    note as gate_note 
+      Using embedded GATE,
+      GKG can redact search results with 
+      high speed and no rails callback.
+    end note
+
+    gate_note .. gate
+  }
+  
+  rectangle "**Data Insights Extraction" as data_extraction {
+    queue "**Siphon + NATS JetStream**\nCDC event pipeline" as nats_h #E8E8E8
+  }
+  rectangle "GATE Service" as gate_service {
+    component "GATE Endpoint" as gate_endpoint
+  }
+
+  
+}
+
+database "**ClickHouse Cloud**\nCode + SDLC data lake" as ch #d09191
+
+' --- Customer on-prem boundary ---
+rectangle "**Customer On-Premises**" as onprem #FFF3E0 {
+  rectangle "**GitLab Rails**\n//Self-Managed Monolith//" as rails_h #FFE0B2
+  rectangle "**Gitaly**\nSource code repos" as gitaly_h #FFE0B2
+  database "**PostgreSQL**\nSDLC source of truth" as pg_h #FFE0B2
+  
+}
+' ===================================================================
+' CONNECTIONS
+' ===================================================================
+
+' Ingestion --- crosses network boundary
+pg_h --> nats_h : CDC 
+nats_h --> sdlc_idx_h 
+gitaly_h --> code_idx_h : gRPC streaming archive\n(crosses network boundary)
+
+' Data writes
+sdlc_idx_h --> ch
+code_idx_h --> ch
+query_eng_h <-- ch 
+
+' Auth --- the critical callback
+query_eng_h <--> gate : (Ability.allowed?)
+
+' Rails integration
+rails_h --> http_srv_h : HTTP+JWT via DAP
+
+' Internal routing
+http_srv_h <--> query_eng_h
+http_srv_h <--> gate_endpoint: Federated Auth
+rails_h .. gate_service: Participating\nin Federated\nAuth
+
+dap_user <--> rails_h: Any DAP\nuse
+3p_agents <--> http_srv_h
+
+note as cloud_note
+  **Key difference from fully self-managed:**
+  Siphon, NATS, & Orbit run in GitLab shared cloud infra.
+  Clickhouse is cloud (today) optionally GitLab hosted later.
+  Customer only operates Rails, Gitaly, PostgreSQL on-prem.
+
+  **GKG Billing:** Credit-based (same as SaaS).
+end note
+
+cloud_note .. cloud
+
+
+
+@enduml

@@ -7,6 +7,7 @@ edition = "2024"
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../../gkg-server-config" }
 gkg-utils = { path = "../../utils" }
+base64 = { workspace = true }
 ontology = { path = "../../ontology" }
 compiler-pipeline-macros = { path = "../compiler-pipeline-macros" }
 opentelemetry = { workspace = true }
@@ -16,6 +17,9 @@ serde_json = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true }
+
+[build-dependencies]
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

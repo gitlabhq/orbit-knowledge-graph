@@ -33,10 +33,7 @@ impl NamespaceIndexingDispatch {
         watermark: DateTime<Utc>,
         campaign_id: Option<String>,
     ) -> Result<DispatchOutcome, TaskError> {
-        let mut outcome = DispatchOutcome {
-            dispatched: 0,
-            skipped: 0,
-        };
+        let mut outcome = DispatchOutcome::default();
 
         for namespace in namespaces {
             let traversal_path = &namespace.traversal_path;

@@ -285,6 +285,18 @@ settings:
         - {name: target_kind, type: string}
         - {name: traversal_path, type: string}
   auxiliary_tables:
+    - name: namespace_storage_snapshot
+      versioned: false
+      include_system_columns: false
+      engine: ReplacingMergeTree
+      columns:
+        - {name: snapshot_date, type: date}
+        - {name: schema_version, type: int64}
+        - {name: logical_table, type: string}
+        - {name: top_level_namespace, type: string}
+        - {name: compressed_bytes, type: int64}
+      order_by: [logical_table, top_level_namespace, snapshot_date]
+      ttl: snapshot_date + INTERVAL 400 DAY
     - name: checkpoint
       columns:
         - {name: key, type: string, codec: ["zstd(1)"]}
@@ -324,6 +336,12 @@ settings:
         - {name: traversal_path, type: string}
       layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
+  refreshable_materialized_views:
+    - name: namespace_storage_snapshot_refresh
+      versioned: true
+      append_to: namespace_storage_snapshot
+      refresh: EVERY 1 DAY OFFSET 2 HOUR
+      select_file: sql/namespace_storage_snapshot.sql.j2
   gc_preserve_patterns: []
   etl:
     default_watermark: _siphon_watermark
@@ -383,6 +401,7 @@ domains:
     description: "Entities related to packages published to the package registry."
     nodes:
       Package: nodes/packages/package.yaml
+      PackageFile: nodes/packages/package_file.yaml
       Dependency: nodes/packages/dependency.yaml
   container_registry:
     description: "Entities related to container image repositories in the container registry."
@@ -396,6 +415,7 @@ edges:
   OWNER: edges/owner.yaml
   AUTHORED: edges/authored.yaml
   IN_PROJECT: edges/in_project.yaml
+  HAS_PACKAGE_FILE: edges/has_package_file.yaml
   REVIEWER: edges/reviewer.yaml
   ASSIGNED: edges/assigned.yaml
   MERGED: edges/merged.yaml
@@ -408,7 +428,6 @@ edges:
   HAS_FINDING: edges/has_finding.yaml
   DETECTED_BY: edges/detected_by.yaml
   HAS_IDENTIFIER: edges/has_identifier.yaml
-  DETECTED_IN: edges/detected_in.yaml
   RESOLVED_BY: edges/resolved_by.yaml
   CONFIRMED_BY: edges/confirmed_by.yaml
   DISMISSED_BY: edges/dismissed_by.yaml
@@ -423,8 +442,6 @@ edges:
   IMPORTS: edges/imports.yaml
   CALLS: edges/calls.yaml
   EXTENDS: edges/extends.yaml
-  TARGETS: edges/targets.yaml
-  FROM_BRANCH: edges/from_branch.yaml
   ON_BRANCH: edges/on_branch.yaml
   OCCURRENCE_OF: edges/occurrence.yaml
   SCANS: edges/scans.yaml
@@ -449,3 +466,4 @@ edges:
   REOPENED: edges/reopened.yaml
   MERGED_AT_COMMIT: edges/merged_at_commit.yaml
   DECLARES_DEPENDENCY: edges/declares_dependency.yaml
+  HAS_VULNERABILITY: edges/has_vulnerability.yaml

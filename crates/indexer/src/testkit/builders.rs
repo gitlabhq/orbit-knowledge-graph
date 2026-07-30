@@ -16,7 +16,7 @@ pub fn create_test_indexer_config(clickhouse_config: &ClickHouseConfiguration) -
         engine: EngineConfiguration {
             handlers: HandlersConfiguration {
                 entity_handler: EntityHandlerConfig {
-                    datalake_batch_size: 1,
+                    datalake_batch_size: Some(1),
                     ..EntityHandlerConfig::default()
                 },
                 ..HandlersConfiguration::default()
@@ -55,7 +55,7 @@ impl TestEngineBuilder {
     }
 
     pub fn with_max_workers(mut self, max: usize) -> Self {
-        self.configuration.max_concurrent_workers = max;
+        self.configuration.max_concurrent_workers = Some(max);
         self
     }
 

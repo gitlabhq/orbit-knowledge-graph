@@ -18,9 +18,8 @@ keys, and explicit `SETTINGS` entries that need to be emitted into the generated
 
 This file covers ClickHouse DDL versioning only. The query **response format** is
 versioned separately as a semver in `config/RAW_OUTPUT_FORMAT_VERSION` and
-enforced by `scripts/check-response-schema-version.sh` alongside
-`scripts/check-schema-version.sh`. See [ADR 004](decisions/004_unified_response_schema.md)
-for the response format contract.
+enforced by `scripts/check-response-schema-version.sh`. See
+[ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
 ### `config/SCHEMA_VERSION`
 
@@ -45,11 +44,14 @@ ClickHouse, not just table structure:
   stores these as string values, so old rows remain with the old name while the compiler emits
   the new name. Without a bump, affected edges are silently missing from query results.
 - **ETL mapping changes**: column renames, enum value changes, FK rewiring. The ETL pipeline
-  is fully ontology-driven (`PlanInput` is built from `&Ontology`), so these are always
+  is fully ontology-driven (`plan::build_plans` walks `&Ontology`), so these are always
   ontology YAML changes and the CI check catches them automatically.
 
 Changes that do **not** require a bump: ontology description updates, comments, formatting,
 documentation-only fields, or query-side-only changes (new filter operators, new query types).
+Runtime-only pipeline knobs are also version-neutral: `extract.partition_count` (initial-load
+parallelism) is stripped from the source fingerprint (`remove_runtime_extract_fields`), since it
+changes neither the stored data nor the DDL.
 
 ### `gkg_schema_version` control table
 
@@ -57,6 +59,19 @@ The Indexer and DispatchIndexing modes create this table on startup if it does n
 the Webserver only reads from it (it runs as a read-only ClickHouse user). On a fresh install,
 the Indexer also creates all graph tables from the ontology DDL generator and records the
 embedded version as active:
+
+The ontology may also declare auxiliary schema that does not invalidate indexed graph data:
+unversioned auxiliary tables and refreshable materialized views. The dispatcher creates
+unversioned tables and replaces refreshable views at startup only when the database active version
+matches the embedded version. During migration completion, it creates the incoming auxiliary tables
+and refreshable views before promotion and drops outgoing version-prefixed refreshable views afterward.
+
+`namespace_storage_snapshot` is an unversioned daily history table populated by the versioned
+`namespace_storage_snapshot_refresh` view. Its ontology-relative MiniJinja SQL template uses the
+`.sql.j2` suffix and renders a ClickHouse `SELECT` from the schema version and ontology-derived
+graph table metadata. The query attributes compressed bytes to the first two `traversal_path`
+segments and groups global tables under the existing `0/` sentinel. Replacing the view does not
+remove previously collected snapshot rows.
 
 ```sql
 CREATE TABLE IF NOT EXISTS gkg_schema_version (
@@ -116,14 +131,23 @@ is injected top-down from the embedded version and flows through without further
 
 A background task (`SchemaWatcher`) polls `gkg_schema_version` every
 `schema.version_poll_interval_secs` seconds (default `5`) and classifies the result against the
-binary's embedded version:
+binary's embedded version. It reads the `active` status first and, only when that does not match
+the binary, also reads the `migrating` status:
 
-| Database active version vs. binary | State | `/ready` response | Action |
+| Database vs. binary | State | `/ready` response | Action |
 |---|---|---|---|
-| missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
-| `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
-| `==` binary | `Ready` | existing checks (`200` if all healthy) | serve traffic |
-| `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
+| active missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
+| active `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
+| active `==` binary | `Ready` | existing checks (`200` if all healthy) | serve traffic |
+| active `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
+| migrating `==` binary (active `<` binary) | `Migrating` | `503` with `schema_migrating`, `status:"migrating"` | keep polling |
+
+`Migrating` means the dispatcher has created this binary's table-set and marked it `migrating`, but
+has not yet promoted it to `active`. The pod correctly stays out of Kubernetes rotation (still
+`503`), but the distinct `status:"migrating"` label and `schema_migrating` component distinguish an
+in-progress migration from a genuinely broken deployment. `Outdated` always wins over `Migrating`:
+an active version above the binary triggers the safety shutdown even if a below-active `migrating`
+row matches, consistent with the downgrade guard (issue #957).
 
 `/live` is never gated on the watcher — Kubernetes keeps the pod alive while it waits for the
 indexer to promote the matching version. When the binary detects a newer active version than it
@@ -135,13 +159,18 @@ serving the wrong schema.
 Transient ClickHouse errors during a poll keep the previous state — the watcher does not
 flap to `Pending` on a single failed read.
 
+The unready webserver pods also make the cluster-health sidecar report Unhealthy for the whole
+migration window. `ClusterHealthChecker` reads the same `migrating` row to report that aggregate
+as `Migrating` (with a `schema_migration` component) instead of Unhealthy, gated on ClickHouse
+being healthy. See [`health_check.md`](health_check.md#migration-awareness).
+
 Implemented in `crates/gkg-server/src/schema_watcher.rs`.
 
 #### Observability
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready` \| `outdated`) | Value `1` for the active state, `0` otherwise |
+| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready` \| `outdated` \| `migrating`) | Value `1` for the active state, `0` otherwise |
 
 ### Configuration
 
@@ -165,14 +194,39 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-A CI job (`schema-version-check`, lint stage, MR-only) fails if `config/graph.sql`
-or `config/ontology/` changes without a corresponding bump to `config/SCHEMA_VERSION`.
-The same check runs as a lefthook pre-commit hook for immediate local feedback.
+The migration ledger is the versioned-schema gate. `gkg-server`'s build script fails if versioned
+ontology sources, generated versioned DDL, or auxiliary schema drift from the committed
+fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`), or if the ledger is malformed.
+Versioned drift requires `mise schema:bump`. Auxiliary-schema drift requires `mise schema:snapshot`
+and does not advance `SCHEMA_VERSION` or re-index graph data. The snapshot command refuses to
+record versioned drift. The CI job `migration-ledger-check` additionally requires versioned
+snapshot changes to bump `config/SCHEMA_VERSION` to exactly base + 1 and add a covering
+`config/schema-migrations.yaml` entry.
 Local (DuckDB) DDL is generated from the ontology at runtime, so `config/ontology/`
 changes automatically affect both ClickHouse and DuckDB schemas.
 
-Non-schema ontology changes (descriptions, comments) can bypass the check by adding
-`[skip schema-version-check]` to the MR description.
+Because the snapshot hashes the canonicalized ontology, comment- and formatting-only
+edits do not require a bump. A genuinely non-invalidating change can bypass the CI base-diff
+guard with `[skip migration-ledger-check]` in the MR description; build-time fingerprint drift
+still fails.
+
+### Ledger scopes
+
+Each entry's `scope:` declares how much of the graph the version invalidates:
+
+- `*` — full rebuild (the fail-safe default for anything unmapped).
+- `sdlc` — SDLC-sourced tables; an optional `entities:` list narrows it to a subset.
+- `code` — the code-graph tables and their edge table.
+- `none` — re-index **nothing**. The source text changed but the produced output is certified
+  byte-identical (for example an output-neutral refactor of how extract SQL is declared). The
+  migration clones every table unchanged and advances `SCHEMA_VERSION` without re-indexing.
+
+`none` is the certified escape hatch for output-neutral source changes: it deliberately
+under-declares the fingerprint diff and so bypasses the under-declaration guard that otherwise
+forces a re-index. Because that guard exists to prevent a promoted-but-incomplete re-index (a
+past data-loss cause), a `none` entry **must** carry a non-empty `note:` certifying why the change
+is output-neutral, and `mise schema:bump --scope none` refuses to run without `--note`. The scope
+is never auto-derived; an author must ask for it explicitly.
 
 ## Zero-downtime migration orchestrator
 
@@ -196,23 +250,38 @@ back, not a mistake to refuse. Indexers do not run DDL; they gate on the version
 3. **Drain** — A no-op: the dispatcher runs no engine, so no in-flight NATS messages exist.
    Reserved for future dual-write scenarios.
 
-4. **Create new-prefix tables** — Generate DDL from the ontology via
-   `generate_graph_tables_with_prefix()` and execute `CREATE TABLE IF NOT EXISTS vN_<table>`
-   for each graph table. The table list is derived from the ontology: node tables, edge tables,
-   and auxiliary tables (`checkpoint`, `code_indexing_checkpoint`,
-   `namespace_deletion_schedule`). Control tables (`gkg_schema_version`) are not prefixed.
+4. **Prepare new-prefix tables** — Read the requested scope from
+   `config/schema-migrations.yaml`, then compare it with the writers of each affected table. A
+   table-local SDLC change rebuilds that table and clones unaffected tables from the active
+   version. If an affected table also has writers outside the requested scope, the migration
+   widens to a full rebuild. This prevents a shared edge table from keeping an old row when the
+   corrected row has a different sort-key identity. A code migration is the exception for `gl_edge`:
+   it clones the table intact and relies on the code stale sweep to tombstone its own rows as each
+   namespace's re-index drains, so a code bump re-indexes only code without re-pulling SDLC. The
+   clone-vs-rebuild decision, the ledger-union scope resolution, and the plan-scoped promotion
+   gate are recorded in [ADR 017](decisions/017_clone_based_non_blocking_migrations.md).
+
+   A selective SDLC migration copies completed checkpoints for unchanged pipelines into the new
+   checkpoint table. It leaves out the pipelines that must run again and drops dispatch cursors so
+   the sweep starts a fresh pass. A code migration instead clones the checkpoint intact (keeping the
+   `dispatch.*` cursors so SDLC does not re-sweep) and drops only the per-namespace
+   `maintenance.code_stale_sweep.*` gates so each namespace re-sweeps against the clone. Control tables such as `gkg_schema_version` are never
+   prefixed or cloned.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
-   This signals indexers that the new-prefix tables exist. The Webserver cutover (tracked in
-   issue #441) switches reads to the new table-set.
+   This signals indexers that the new-prefix tables exist. A newly deployed webserver whose
+   embedded version matches this `migrating` row reports readiness state `Migrating`
+   (`503` with `status:"migrating"`), distinguishing the migration window from a broken deployment
+   (see "Webserver readiness gate" above). The Webserver read cutover (tracked in issue #441)
+   switches reads to the new table-set.
 
 6. **Release lock** — Allow other pods to proceed.
 
 The namespace sweep task periodically re-dispatches every enabled namespace regardless of recent
-Siphon changes. Because new-prefix per-namespace checkpoints are empty, each re-dispatched namespace
-backfills from the beginning of the Siphon window into the new-prefix tables; no explicit trigger is
-needed. (The change-detection dispatcher alone would miss namespaces with no recent source changes,
-since its checkpoint is global, not per-prefix.)
+Siphon changes. A full rebuild starts with an empty checkpoint table. A selective migration keeps
+checkpoints for unchanged pipelines and removes only the pipelines that need to run again. In both
+cases, missing checkpoints make the required pipelines backfill from the beginning of their Siphon
+window.
 
 On a dispatcher boot with no namespace-change checkpoint, the change-detection dispatcher
 dispatches every enabled namespace once and records a checkpoint; later ticks query Siphon changes
@@ -255,7 +324,7 @@ time:
 | `modules/code/config.rs` | All code-module node and edge tables (`gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, edge table) |
 | `modules/namespace_deletion/store.rs` | `checkpoint`, `code_indexing_checkpoint`, `namespace_deletion_schedule` |
 | `modules/namespace_deletion/lower.rs` | All ontology node and edge tables |
-| `modules/sdlc/plan/input.rs` | All SDLC node destination tables and per-relationship edge tables (resolved from ontology) |
+| `modules/sdlc/plan/build.rs` | All SDLC node destination tables and per-relationship edge tables (resolved from ontology) |
 
 Datalake tables (`siphon_*`) are never prefixed — only graph tables are.
 
@@ -279,18 +348,14 @@ Implemented in `crates/indexer/src/migration_completion.rs`.
 
 ### Completion criteria
 
-The checker compares checkpoint state in the new-prefix tables against the set of enabled
-namespaces from the datalake. Both SDLC and code indexing must be complete:
+The checker reads the IDs of currently enabled top-level namespaces from the datalake. An SDLC
+namespace counts as complete only when that exact ID has completed checkpoints for every required
+namespaced pipeline. A checkpoint left by a namespace that has since been disabled does not count.
+Every required global pipeline must also have a completed checkpoint.
 
-1. **SDLC namespaces** — count distinct namespace IDs with checkpoint entries (keys matching
-   `ns.<id>.*`) in the `vN_checkpoint` table, compared against the count of enabled namespaces
-   in `siphon_knowledge_graph_enabled_namespaces`.
-2. **Code indexing namespaces** — count distinct namespace IDs (extracted from the
-   `traversal_path` column) in `vN_code_indexing_checkpoint`, compared against the same enabled
-   namespace count.
-
-When all enabled namespaces have checkpoint entries in both new-prefix tables, the migration is
-considered complete.
+Code indexing coverage is reported for operators but does not block promotion. Code indexing can
+take much longer than SDLC indexing because it downloads and processes repository archives, and a
+single project failure must not hold a schema migration open indefinitely.
 
 #### Known trade-off: checkpoint-based validation
 

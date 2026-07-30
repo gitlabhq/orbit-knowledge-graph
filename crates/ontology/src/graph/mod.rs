@@ -272,7 +272,7 @@ impl OntologyGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EdgeEntity, etl::EdgeDirection};
+    use crate::EdgeEntity;
 
     fn edge(kind: &str, source: &str, target: &str) -> EdgeEntity {
         EdgeEntity {
@@ -309,11 +309,11 @@ mod tests {
     fn neighbors_are_directional() {
         let g = graph_of(&[("R", "A", "B"), ("R", "B", "C")]);
         assert_eq!(
-            g.neighbors("B", EdgeDirection::Outgoing).adjacencies()[0].neighbor_kind,
+            g.neighbors("B", Dir::Outgoing).adjacencies()[0].neighbor_kind,
             "C"
         );
         assert_eq!(
-            g.neighbors("B", EdgeDirection::Incoming).adjacencies()[0].neighbor_kind,
+            g.neighbors("B", Dir::Incoming).adjacencies()[0].neighbor_kind,
             "A"
         );
     }
@@ -385,7 +385,7 @@ mod tests {
         let none = HashSet::new();
         assert!(g.kinds_connecting("File", "Project", &none).is_empty());
         assert!(
-            g.neighbors("File", EdgeDirection::Outgoing)
+            g.neighbors("File", Dir::Outgoing)
                 .adjacencies()
                 .iter()
                 .all(|a| !a.relationship_kind.starts_with("__fk_"))
@@ -566,8 +566,8 @@ mod tests {
     fn then_chains_neighbors_of_neighbors() {
         let g = graph_of(&[("R", "A", "B"), ("S", "B", "C")]);
         let two = g
-            .neighbors("A", EdgeDirection::Outgoing)
-            .then(|n| g.neighbors(n, EdgeDirection::Outgoing));
+            .neighbors("A", Dir::Outgoing)
+            .then(|n| g.neighbors(n, Dir::Outgoing));
         assert_eq!(two.node_kinds("A"), set(&["B", "C"]));
     }
 

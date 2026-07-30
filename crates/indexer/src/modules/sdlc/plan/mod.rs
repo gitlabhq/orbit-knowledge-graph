@@ -1,13 +1,18 @@
-pub(crate) mod input;
-pub(crate) mod lower;
+pub(in crate::modules::sdlc) mod build;
+pub(in crate::modules::sdlc) mod extract;
+mod transform;
 
-use std::collections::HashSet;
+pub(in crate::modules::sdlc) use build::{Sizing, build_plans};
+pub(in crate::modules::sdlc) use extract::ExtractTemplate;
+pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec, Transformation};
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use gkg_utils::arrow::ArrowUtils;
+use ontology::EtlScope;
+use ontology::sql_template;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;
@@ -80,8 +85,7 @@ pub(in crate::modules::sdlc) trait Filter {
     }
 }
 
-// `None` is a filter that contributes nothing. Lets call sites stay chainable:
-// `prepared.with(maybe_path.map(|p| TraversalPathFilter { path: p }))`.
+// A `None` filter contributes nothing, keeping optional filters chainable at call sites.
 impl<F: Filter> Filter for Option<F> {
     fn condition(&self) -> String {
         self.as_ref().map(|f| f.condition()).unwrap_or_default()
@@ -146,9 +150,7 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
-/// Half-open partition window `[lower, upper)` over the leading sort-key prefix.
-/// A bare `id` range (the 2nd sort key) rescans the namespace on every page;
-/// bounding the full prefix prunes by the primary index instead.
+/// Half-open `[lower, upper)` window over the sort-key prefix; a bare `id` range rescans the namespace each page.
 pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
     pub columns: &'a [String],
     pub lower: Option<&'a [String]>,
@@ -190,9 +192,7 @@ impl KeyComparison {
     }
 }
 
-/// Compares the sort-key prefix against a tuple of values as a flat OR-of-ANDs:
-/// `(c0 > v0) OR (c0 = v0 AND c1 > v1) OR …`. ClickHouse prunes granules for
-/// this shape; a packed `(c0, c1) > (v0, v1)` tuple forces a full scan.
+/// OR-of-ANDs `(c0 > v0) OR (c0 = v0 AND c1 > v1) …` — ClickHouse prunes this; a packed tuple compare full-scans.
 fn sort_key_prefix_compare(
     columns: &[String],
     values: &[String],
@@ -231,45 +231,18 @@ impl Filter for CursorFilter<'_> {
     }
 }
 
-// `extract_template` carries `{{filters}}` (dynamic WHERE conditions) and
-// `{{batch_size}}` markers that `PreparedQuery::to_sql` substitutes.
+// `{{filters}}`/`{{batch_size}}` markers are substituted by `PreparedQuery::to_sql`.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
     pub target: String,
-    pub extract_template: String,
+    pub scope: EtlScope,
+    pub extract_template: ExtractTemplate,
     pub watermark_column: String,
     pub deleted_column: String,
     pub sort_key: Vec<String>,
     pub batch_size: u64,
     pub transform: TransformSpec,
-}
-
-/// How an extracted block becomes graph rows. `DataFusion` carries the
-/// declarative SQL projections the built-in transform runs; `Rust` names a
-/// Rust-implemented transform resolved from the registry (e.g. `system_notes`),
-/// which owns its own outputs and ignores SQL projections entirely.
-#[derive(Debug, Clone)]
-pub(in crate::modules::sdlc) enum TransformSpec {
-    DataFusion(Vec<Transformation>),
-    Rust(String),
-}
-
-impl Plan {
-    #[cfg(test)]
-    pub(in crate::modules::sdlc) fn transformations(&self) -> &[Transformation] {
-        match &self.transform {
-            TransformSpec::DataFusion(transforms) => transforms,
-            TransformSpec::Rust(_) => &[],
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(in crate::modules::sdlc) struct Transformation {
-    pub sql: String,
-    pub destination_table: String,
-    pub dict_encode_columns: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -283,7 +256,7 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
 impl Plan {
     pub fn prepare(&self) -> PreparedQuery {
         PreparedQuery {
-            template: self.extract_template.clone(),
+            template: self.extract_template.as_str().to_string(),
             filters: Vec::new(),
             params: serde_json::Map::new(),
             batch_size: self.batch_size,
@@ -304,7 +277,7 @@ impl PreparedQuery {
         self
     }
 
-    pub fn to_sql(&self) -> String {
+    pub fn to_sql(&self) -> Result<String, HandlerError> {
         let filters_sql = if self.filters.is_empty() {
             String::new()
         } else {
@@ -316,9 +289,14 @@ impl PreparedQuery {
                 .join(" AND ");
             format!("AND {joined}")
         };
-        self.template
-            .replace("{{filters}}", &filters_sql)
-            .replace("{{batch_size}}", &self.batch_size.to_string())
+        sql_template::render(
+            &self.template,
+            sql_template::context! {
+                filters => filters_sql,
+                batch_size => self.batch_size,
+            },
+        )
+        .map_err(|e| HandlerError::Processing(format!("rendering extract SQL: {e}")))
     }
 
     pub fn params(&self) -> Value {
@@ -348,21 +326,6 @@ pub(in crate::modules::sdlc) struct Plans {
     pub namespaced: Vec<Plan>,
 }
 
-pub(in crate::modules::sdlc) fn build_plans(
-    ontology: &ontology::Ontology,
-    global_batch_size: u64,
-    namespaced_batch_size: u64,
-    batch_size_overrides: &std::collections::HashMap<String, u64>,
-) -> Plans {
-    lower::lower(
-        input::from_ontology(ontology),
-        ontology,
-        global_batch_size,
-        namespaced_batch_size,
-        batch_size_overrides,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,14 +339,16 @@ mod tests {
         Plan {
             name: "Test".to_string(),
             target: "Test".to_string(),
-            extract_template: format!(
+            scope: EtlScope::Namespaced,
+            extract_template: ExtractTemplate::new(format!(
                 "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{{{filters}}}} \
                  ORDER BY {sort_key_sql} \
                  LIMIT {{{{batch_size}}}}"
-            ),
+            ))
+            .expect("valid template"),
             watermark_column: "_siphon_watermark".to_string(),
             deleted_column: "_siphon_deleted".to_string(),
             sort_key,
@@ -532,7 +497,7 @@ mod tests {
     #[test]
     fn first_page_sql_replaces_template_markers() {
         let plan = test_plan(vec!["traversal_path", "id"], 1000);
-        let sql = plan.prepare().to_sql();
+        let sql = plan.prepare().to_sql().expect("renders extract SQL");
         assert!(sql.contains("ORDER BY traversal_path, id"), "sql: {sql}");
         assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
         assert!(!sql.contains("{{filters}}"), "sql: {sql}");
@@ -548,7 +513,7 @@ mod tests {
             last: Utc::now(),
             current: Utc::now(),
         });
-        let sql = prepared.to_sql();
+        let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(
             sql.contains("_siphon_watermark > {last_watermark:String}"),
             "sql: {sql}"
@@ -571,14 +536,19 @@ mod tests {
             .with(Some(DeletedFilter {
                 column: &plan.deleted_column,
             }))
-            .to_sql();
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(sql.contains("_siphon_deleted = false"), "sql: {sql}");
     }
 
     #[test]
     fn deleted_filter_omitted_on_incremental() {
         let plan = test_plan(vec!["id"], 1000);
-        let sql = plan.prepare().with(None::<DeletedFilter>).to_sql();
+        let sql = plan
+            .prepare()
+            .with(None::<DeletedFilter>)
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(!sql.contains("_siphon_deleted = false"), "sql: {sql}");
     }
 
@@ -586,7 +556,7 @@ mod tests {
     fn traversal_path_filter_adds_starts_with_and_param() {
         let plan = test_plan(vec!["id"], 1000);
         let prepared = plan.prepare().with(TraversalPathFilter { path: "1/2/" });
-        let sql = prepared.to_sql();
+        let sql = prepared.to_sql().expect("renders extract SQL");
         assert!(
             sql.contains("startsWith(traversal_path, {traversal_path:String})"),
             "sql: {sql}"
@@ -609,7 +579,8 @@ mod tests {
                 sort_key: &sort_key,
                 values: &values,
             })
-            .to_sql();
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
         assert!(
             sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
@@ -628,7 +599,8 @@ mod tests {
                 current: Utc::now(),
             })
             .with(TraversalPathFilter { path: "1/2/" })
-            .to_sql();
+            .to_sql()
+            .expect("renders extract SQL");
         assert!(sql.contains(" AND ("), "sql: {sql}");
         assert!(sql.contains("startsWith(traversal_path,"), "sql: {sql}");
         assert!(sql.contains("_siphon_watermark >"), "sql: {sql}");

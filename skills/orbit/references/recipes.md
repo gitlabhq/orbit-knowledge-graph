@@ -29,12 +29,12 @@ Query the `Project` entity by `full_path` and read back its `id`:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "columns": ["id", "full_path"],
-      "filters": {"full_path": {"op": "eq", "value": "gitlab-org/orbit/knowledge-graph"}}
-    },
+      "filters": {"full_path": {"eq": "gitlab-org/orbit/knowledge-graph"}}
+    }],
     "limit": 1
   }
 }
@@ -51,8 +51,8 @@ Requires both `iid` and `project_id` filters (IID is only unique within a projec
     "query_type": "traversal",
     "nodes": [
       {"id": "mr", "entity": "MergeRequest", "columns": "*",
-       "filters": {"iid": {"op": "eq", "value": 1216},
-                   "project_id": {"op": "eq", "value": 77960826}}},
+       "filters": {"iid": {"eq": 1216},
+                   "project_id": {"eq": 77960826}}},
       {"id": "author", "entity": "User", "columns": ["username"]}
     ],
     "relationships": [
@@ -71,14 +71,14 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
       "columns": ["full_path", "name", "visibility_level"],
       "filters": {
-        "full_path": {"op": "contains", "value": "gitlab-org/cli"}
+        "full_path": {"contains": "gitlab-org/cli"}
       }
-    },
+    }],
     "limit": 5
   }
 }
@@ -107,15 +107,15 @@ project-scoped `iid`); look it up first with the
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p", "entity": "Pipeline",
       "filters": {
-        "merge_request_id": {"op": "eq", "value": 482908721},
-        "source": {"op": "eq", "value": "merge_request_event"}
+        "merge_request_id": {"eq": 482908721},
+        "source": {"eq": "merge_request_event"}
       },
       "columns": ["id", "status", "source", "sha", "ref", "created_at"]
-    },
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    }],
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -128,16 +128,16 @@ pipelines for this MR":
 {
   "query": {
     "query_type": "traversal",
-    "node": {
+    "nodes": [{
       "id": "p", "entity": "Pipeline",
       "filters": {
-        "merge_request_id": {"op": "eq", "value": 482908721},
-        "source": {"op": "eq", "value": "merge_request_event"},
-        "status": {"op": "eq", "value": "failed"}
+        "merge_request_id": {"eq": 482908721},
+        "source": {"eq": "merge_request_event"},
+        "status": {"eq": "failed"}
       },
       "columns": ["id", "status", "sha", "ref", "failure_reason", "duration", "created_at"]
-    },
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    }],
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -154,13 +154,13 @@ underlying join shape and inflate the count):
     "nodes": [
       {"id": "p", "entity": "Pipeline",
        "filters": {
-         "merge_request_id": {"op": "eq", "value": 482908721},
-         "source": {"op": "eq", "value": "merge_request_event"}
+         "merge_request_id": {"eq": 482908721},
+         "source": {"eq": "merge_request_event"}
        }}
     ],
-    "group_by": [{"kind": "property", "node": "p", "property": "status", "alias": "status"}],
-    "aggregations": [{"function": "count", "target": "p", "alias": "pipeline_count"}],
-    "aggregation_sort": {"column": "pipeline_count", "direction": "DESC"},
+    "group_by": ["p.status"],
+    "aggregations": [{ "count": "p", "as": "pipeline_count" }],
+    "aggregation_sort": "-pipeline_count",
     "limit": 20
   }
 }
@@ -176,14 +176,14 @@ Pipeline node:
     "query_type": "traversal",
     "nodes": [
       {"id": "mr", "entity": "MergeRequest",
-       "filters": {"iid": {"op": "eq", "value": 235291},
-                   "project_id": {"op": "eq", "value": 278964}}},
+       "filters": {"iid": {"eq": 235291},
+                   "project_id": {"eq": 278964}}},
       {"id": "p",  "entity": "Pipeline",
-       "filters": {"source": {"op": "eq", "value": "merge_request_event"}},
+       "filters": {"source": {"eq": "merge_request_event"}},
        "columns": ["id", "status", "sha", "created_at"]}
     ],
     "relationships": [{"type": "TRIGGERED", "from": "mr", "to": "p"}],
-    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "order_by": "-p.created_at",
     "limit": 100
   }
 }
@@ -217,7 +217,7 @@ history — see the canonical field descriptions on
        "columns": ["iid", "title", "state", "project_id"]},
       {"id": "diff", "entity": "MergeRequestDiff"},
       {"id": "f",    "entity": "MergeRequestDiffFile",
-       "filters": {"old_path": {"op": "eq", "value": "app/services/base_service.rb"}}}
+       "filters": {"old_path": {"eq": "app/services/base_service.rb"}}}
     ],
     "relationships": [
       {"type": "HAS_DIFF", "from": "mr",   "to": "diff"},
@@ -251,13 +251,13 @@ class is namespaced:
     "query_type": "traversal",
     "nodes": [
       {"id": "parent", "entity": "Definition",
-       "filters": {"fqn": {"op": "eq", "value": "ApplicationRecord"}}},
+       "filters": {"fqn": {"eq": "ApplicationRecord"}}},
       {"id": "child",  "entity": "Definition",
        "columns": ["name", "fqn", "file_path"]}
     ],
     "relationships": [
       {"type": "EXTENDS", "from": "child", "to": "parent",
-       "max_hops": 3}
+       "hops": [1, 3]}
     ],
     "limit": 1000
   }
@@ -287,25 +287,54 @@ one relationship:
 
 ## `order_by` — sort traversal results
 
-Add `order_by` to any traversal. Fields are `node` (the node `id`), `property`,
-and `direction` (`ASC` or `DESC`):
+Add `order_by` to any traversal. It is a string, `"node.property"` for ascending
+or `"-node.property"` (leading `-`) for descending, where `node` is the node `id`:
 
 ```json orbit-query
 {
   "query": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u",  "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+      {"id": "u",  "entity": "User", "filters": {"username": {"eq": "alice"}}},
       {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state", "created_at"]}
     ],
     "relationships": [
       {"type": "AUTHORED", "from": "u", "to": "mr"}
     ],
-    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "order_by": "-mr.created_at",
     "limit": 10
   }
 }
 ```
+
+## Work items in a project
+
+GitLab issues, epics, tasks, and incidents are all the `WorkItem` entity — there
+is no `Issue` node. List the work items in a project via the `IN_PROJECT`
+(WorkItem → Project) edge. Filter `state` (`opened`/`closed`) or `work_item_type`
+(`issue`, `epic`, `task`, `incident`) as needed:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p",  "entity": "Project", "filters": {"id": {"eq": 278964}}},
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"},
+       "columns": ["iid", "title", "state", "work_item_type", "created_at"]}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "wi", "to": "p"}
+    ],
+    "order_by": "-wi.created_at",
+    "limit": 50
+  }
+}
+```
+
+Swap the `IN_PROJECT` edge for `AUTHORED` (User → WorkItem) to list one user's
+work items, or feed the same nodes into an `aggregation` to count them — see the
+[group-and-count recipe](#aggregation--group-and-count).
 
 ## `neighbors` — nodes directly connected to a starting node
 
@@ -315,12 +344,12 @@ Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
 {
   "query": {
     "query_type": "neighbors",
-    "node": {
+    "nodes": [{
       "id": "p",
       "entity": "Project",
-      "filters": {"full_path": {"op": "eq", "value": "gitlab-org/cli"}}
-    },
-    "neighbors": {"node": "p", "direction": "outgoing"},
+      "filters": {"full_path": {"eq": "gitlab-org/cli"}}
+    }],
+    "neighbors": {"direction": "outgoing"},
     "limit": 20
   }
 }
@@ -341,11 +370,11 @@ Count open merge requests per project, highest first:
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
-    "group_by": [{"kind": "node", "node": "p"}],
+    "group_by": ["p"],
     "aggregations": [
-      {"function": "count", "target": "mr", "alias": "open_mrs"}
+      { "count": "mr", "as": "open_mrs" }
     ],
-    "aggregation_sort": {"column": "open_mrs", "direction": "DESC"},
+    "aggregation_sort": "-open_mrs",
     "limit": 10
   }
 }
@@ -360,13 +389,11 @@ Count detected vulnerabilities by severity:
     "nodes": [
       {"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}}
     ],
-    "group_by": [
-      {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-    ],
+    "group_by": ["v.severity"],
     "aggregations": [
-      {"function": "count", "target": "v", "alias": "vuln_count"}
+      { "count": "v", "as": "vuln_count" }
     ],
-    "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+    "aggregation_sort": "-vuln_count",
     "limit": 10
   }
 }
@@ -389,8 +416,8 @@ causes a server-side validation error.
   "query": {
     "query_type": "path_finding",
     "nodes": [
-      {"id": "from", "entity": "Group",   "filters": {"id": {"op": "eq", "value": 9970}}},
-      {"id": "to",   "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+      {"id": "from", "entity": "Group",   "filters": {"id": {"eq": 9970}}},
+      {"id": "to",   "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
     ],
     "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 2, "rel_types": ["CONTAINS"]}
   }
@@ -399,11 +426,11 @@ causes a server-side validation error.
 
 ## Filter operators
 
-The `filters` object supports simple equality (`{"state": "opened"}`) or a
-structured `PropertyFilter`:
+The `filters` object supports simple equality (`{"state": "opened"}`) or an
+operator object whose keys AND-combine:
 
 ```json
-{"filters": {"<property>": {"op": "<operator>", "value": <value>}}}
+{"filters": {"<property>": {"<operator>": <value>, "<operator>": <value>}}}
 ```
 
 | Operator                                   | Value type                   | Notes                             |
@@ -411,28 +438,60 @@ structured `PropertyFilter`:
 | `eq`, `gt`, `lt`, `gte`, `lte`             | string / number / boolean    | comparison                        |
 | `in`                                       | array (1–100 items)          | membership                        |
 | `contains`, `starts_with`, `ends_with`     | string (≤ 1024 chars)        | string ops                        |
-| `is_null`, `is_not_null`                   | *(omit `value`)*             | null checks                       |
+| `is_null`, `is_not_null`                   | boolean                      | `false` means the negation        |
+| `token_match`, `all_tokens`, `any_tokens`  | string                       | text-indexed properties only — see [`query_language.md`](query_language.md) |
 
-## Pagination
+To repeat an operator on one property, use an array of operator objects:
+`{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
 
-Add a `cursor`. `offset + page_size` must not exceed `limit`. `page_size` max 100.
+### Text-token search
+
+Use `all_tokens` to find entities whose text-indexed property contains every
+specified token. Tokens are matched against the pre-built text index, so
+only properties listed in the text-indexed properties table in
+[`query_language.md`](query_language.md) support these operators.
 
 ```json orbit-query
 {
   "query": {
     "query_type": "traversal",
-    "node": {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
-    },
-    "limit": 200,
-    "cursor": {"offset": 0, "page_size": 50}
+    "nodes": [{
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": {
+        "project_id": {"eq": 278964},
+        "title": {"all_tokens": "database migration"}
+      },
+      "columns": ["iid", "title", "state"]
+    }],
+    "order_by": "-mr.created_at",
+    "limit": 10
   }
 }
 ```
 
-Increment `offset` by `page_size` for subsequent pages.
+## Pagination
+
+Add a `cursor` with a `page_size` (max 1000). The first page needs no token.
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [{
+      "id": "p",
+      "entity": "Project",
+      "filters": {"full_path": {"starts_with": "gitlab-org/"}}
+    }],
+    "cursor": {"page_size": 50}
+  }
+}
+```
+
+Pass `pagination.next_cursor` from each response as `cursor.after` on the next
+request until `next_cursor` is absent. The token is bound to the exact query
+that issued it. Every response carries `pagination.truncated`; when true, the
+result window is incomplete and any aggregate computed over it is too.
 
 ## More examples
 

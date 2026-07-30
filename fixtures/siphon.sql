@@ -1521,6 +1521,50 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
+-- Siphon source table for package files (PackageFile node)
+CREATE TABLE IF NOT EXISTS siphon_packages_package_files
+(
+    `id` Int64,
+    `package_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `size` Nullable(Int64),
+    `file_name` String,
+    `file_sha256` Nullable(String),
+    `status` Int16 DEFAULT 0,
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Siphon source table for package file build infos (join table: package file -> pipeline)
+CREATE TABLE IF NOT EXISTS siphon_packages_package_file_build_infos
+(
+    `id` Int64,
+    `package_file_id` Int64,
+    `pipeline_id` Nullable(Int64),
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
 -- Siphon source tables for container repositories
 CREATE TABLE IF NOT EXISTS siphon_container_repositories
 (
@@ -1538,6 +1582,97 @@ CREATE TABLE IF NOT EXISTS siphon_container_repositories
     `status_updated_at` Nullable(DateTime64(6, 'UTC')),
     `failed_deletion_count` Int64 DEFAULT 0,
     `next_delete_attempt_at` Nullable(DateTime64(6, 'UTC')),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS siphon_sbom_component_versions
+(
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `component_id` Int64,
+    `version` String,
+    `source_package_name` String,
+    `organization_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+CREATE TABLE IF NOT EXISTS siphon_sbom_occurrences
+(
+    `id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `component_version_id` Nullable(Int64),
+    `project_id` Int64,
+    `pipeline_id` Nullable(Int64),
+    `source_id` Nullable(Int64),
+    `commit_sha` String,
+    `component_id` Int64,
+    `uuid` UUID,
+    `package_manager` Nullable(String),
+    `component_name` Nullable(String),
+    `input_file_path` Nullable(String),
+    `licenses` Nullable(String) DEFAULT '[]',
+    `highest_severity` Nullable(Int16),
+    `vulnerability_count` Int64 DEFAULT 0,
+    `source_package_id` Nullable(Int64),
+    `archived` Bool DEFAULT FALSE,
+    `traversal_ids` Array(Int64) DEFAULT [],
+    `ancestors` String DEFAULT '[]',
+    `reachability` Nullable(Int16) DEFAULT 0,
+    `partition_id` Nullable(Int64) DEFAULT 1,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);
+
+-- Reconciliation companion mirrored from the monolith's ClickHouse schema. The
+-- HAS_VULNERABILITY extract uses it to resolve occurrence traversal_paths by id.
+CREATE TABLE IF NOT EXISTS siphon_sbom_occurrences_pg_pkey_ordered
+(
+    `id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (id, traversal_path)
+ORDER BY (id, traversal_path);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS siphon_sbom_occurrences_pg_pkey_ordered_mv
+TO siphon_sbom_occurrences_pg_pkey_ordered
+AS SELECT id, traversal_path, _siphon_replicated_at, _siphon_deleted
+FROM siphon_sbom_occurrences;
+
+CREATE TABLE IF NOT EXISTS siphon_sbom_occurrences_vulnerabilities
+(
+    `id` Int64,
+    `sbom_occurrence_id` Int64,
+    `vulnerability_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `project_id` Nullable(Int64),
+    `vulnerability_occurrence_id` Nullable(Int64),
+    `sbom_occurrence_ref_id` Nullable(Int64),
     `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,

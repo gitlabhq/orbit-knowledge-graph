@@ -66,6 +66,8 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub materialized_views: Vec<MaterializedViewYaml>,
     #[serde(default)]
+    pub refreshable_materialized_views: Vec<RefreshableMaterializedViewYaml>,
+    #[serde(default)]
     pub auxiliary_dictionaries: Vec<AuxiliaryDictionaryYaml>,
     #[serde(default)]
     pub gc_preserve_patterns: Vec<String>,
@@ -85,6 +87,15 @@ pub(super) struct MaterializedViewYaml {
     pub order_by: Vec<String>,
     #[serde(default)]
     pub populate: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct RefreshableMaterializedViewYaml {
+    pub name: String,
+    pub versioned: bool,
+    pub append_to: String,
+    pub refresh: String,
+    pub select_file: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -146,6 +157,8 @@ pub(super) struct DenormalizationEntryYaml {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct AuxiliaryTableYaml {
     pub name: String,
+    #[serde(default = "default_true")]
+    pub versioned: bool,
     pub columns: Vec<AuxiliaryColumnYaml>,
     pub order_by: Vec<String>,
     #[serde(default)]
@@ -154,6 +167,16 @@ pub(super) struct AuxiliaryTableYaml {
     pub version_type: Option<String>,
     #[serde(default)]
     pub projections: Vec<StorageProjectionYaml>,
+    #[serde(default = "default_true")]
+    pub include_system_columns: bool,
+    #[serde(default)]
+    pub engine: Option<String>,
+    #[serde(default)]
+    pub ttl: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]

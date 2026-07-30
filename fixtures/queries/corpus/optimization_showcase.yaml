@@ -100,13 +100,12 @@
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "mr",
         "entity": "MergeRequest",
         "node_ids": "$sample:3"
-      },
+      }],
       "neighbors": {
-        "node": "mr",
         "direction": "both"
       },
       "limit": 100
@@ -119,13 +118,12 @@
   query: |
     {
       "query_type": "neighbors",
-      "node": {
+      "nodes": [{
         "id": "p",
         "entity": "Project",
         "node_ids": "$sample"
-      },
+      }],
       "neighbors": {
-        "node": "p",
         "direction": "incoming",
         "rel_types": [
           "IN_PROJECT"
@@ -228,23 +226,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merged_mr_count"
+          "count": "mr",
+          "as": "merged_mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merged_mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merged_mr_count",
       "limit": 20
     }
 
@@ -278,24 +267,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "sum",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "total_pipeline_seconds"
+          "sum": "pipe.duration",
+          "as": "total_pipeline_seconds"
         }
       ],
-      "aggregation_sort": {
-        "column": "total_pipeline_seconds",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-total_pipeline_seconds",
       "limit": 15
     }
 
@@ -330,23 +309,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merged_mr_count"
+          "count": "mr",
+          "as": "merged_mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merged_mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merged_mr_count",
       "limit": 10
     }
 
@@ -438,14 +408,7 @@
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
@@ -502,14 +465,7 @@
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         },
         {
@@ -527,23 +483,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "mr_count"
+          "count": "mr",
+          "as": "mr_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "mr_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-mr_count",
       "limit": 20
     }
 
@@ -559,15 +506,7 @@
           "id": "j",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         },
         {
@@ -585,23 +524,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "job_count"
+          "count": "j",
+          "as": "job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-job_count",
       "limit": 20
     }
 
@@ -612,7 +542,7 @@
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "pipe",
         "entity": "Pipeline",
         "filters": {
@@ -623,7 +553,7 @@
           "status",
           "ref"
         ]
-      },
+      }],
       "limit": 50
     }
 
@@ -643,14 +573,7 @@
           "id": "mr",
           "entity": "MergeRequest",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "opened",
-                "closed",
-                "merged"
-              ]
-            }
+            "state": {"in": ["opened", "closed", "merged"]}
           }
         }
       ],
@@ -676,15 +599,7 @@
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         },
         {
@@ -702,23 +617,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 20
     }
 
@@ -831,23 +737,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "mr",
-          "alias": "merged_non_draft_count"
+          "count": "mr",
+          "as": "merged_non_draft_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "merged_non_draft_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-merged_non_draft_count",
       "limit": 20
     }
 
@@ -920,23 +817,14 @@
           "to": "p"
         }
       ],
-      "group_by": [
-        {
-          "kind": "node",
-          "node": "p"
-        }
-      ],
+      "group_by": ["p"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "j",
-          "alias": "failed_job_count"
+          "count": "j",
+          "as": "failed_job_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "failed_job_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-failed_job_count",
       "limit": 20
     }
 
@@ -952,15 +840,7 @@
           "id": "j",
           "entity": "Job",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         },
         {
@@ -985,7 +865,7 @@
   query: |
     {
       "query_type": "traversal",
-      "node": {
+      "nodes": [{
         "id": "mr",
         "entity": "MergeRequest",
         "columns": [
@@ -994,16 +874,9 @@
           "state"
         ],
         "filters": {
-          "state": {
-            "op": "in",
-            "value": [
-              "opened",
-              "closed",
-              "merged"
-            ]
-          }
+          "state": {"in": ["opened", "closed", "merged"]}
         }
-      },
+      }],
       "limit": 100
     }
 
@@ -1019,36 +892,18 @@
           "id": "v",
           "entity": "Vulnerability",
           "filters": {
-            "state": {
-              "op": "in",
-              "value": [
-                "detected",
-                "confirmed",
-                "resolved",
-                "dismissed"
-              ]
-            }
+            "state": {"in": ["detected", "confirmed", "resolved", "dismissed"]}
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "v",
-          "property": "severity"
-        }
-      ],
+      "group_by": ["v.severity"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "v",
-          "alias": "vulnerability_count"
+          "count": "v",
+          "as": "vulnerability_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "vulnerability_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-vulnerability_count",
       "limit": 20
     }
 
@@ -1068,24 +923,14 @@
           }
         }
       ],
-      "group_by": [
-        {
-          "kind": "property",
-          "node": "s",
-          "property": "scan_type"
-        }
-      ],
+      "group_by": ["s.scan_type"],
       "aggregations": [
         {
-          "function": "count",
-          "target": "s",
-          "alias": "scan_count"
+          "count": "s",
+          "as": "scan_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "scan_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-scan_count",
       "limit": 20
     }
 
@@ -1101,43 +946,21 @@
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed",
-                "running",
-                "pending"
-              ]
-            }
+            "status": {"in": ["success", "failed", "running", "pending"]}
           }
         }
       ],
       "group_by": [
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status",
-          "alias": "status"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "source",
-          "alias": "source"
-        }
+        "pipe.status",
+        "pipe.source"
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
 
@@ -1153,13 +976,7 @@
           "id": "pipe",
           "entity": "Pipeline",
           "filters": {
-            "status": {
-              "op": "in",
-              "value": [
-                "success",
-                "failed"
-              ]
-            }
+            "status": {"in": ["success", "failed"]}
           }
         },
         {
@@ -1179,35 +996,20 @@
         }
       ],
       "group_by": [
-        {
-          "kind": "node",
-          "node": "p",
-          "alias": "project"
-        },
-        {
-          "kind": "property",
-          "node": "pipe",
-          "property": "status",
-          "alias": "pipeline_status"
-        }
+        "p",
+        "pipe.status"
       ],
       "aggregations": [
         {
-          "function": "count",
-          "target": "pipe",
-          "alias": "pipeline_count"
+          "count": "pipe",
+          "as": "pipeline_count"
         },
         {
-          "function": "avg",
-          "target": "pipe",
-          "property": "duration",
-          "alias": "avg_duration"
+          "avg": "pipe.duration",
+          "as": "avg_duration"
         }
       ],
-      "aggregation_sort": {
-        "column": "pipeline_count",
-        "direction": "DESC"
-      },
+      "aggregation_sort": "-pipeline_count",
       "limit": 30
     }
 

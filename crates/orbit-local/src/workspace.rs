@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result};
 use duckdb_client::DuckDbClient;
@@ -60,11 +61,24 @@ impl Workspace {
 }
 
 /// Resolve the DuckDB path for a command: an explicit `--db` override wins,
-/// otherwise the default workspace's `graph.duckdb`.
+/// otherwise the default workspace's `graph.duckdb`. The result is absolute so
+/// that a later `set_current_dir` (e.g. `repo-map` anchoring at the repo root)
+/// cannot change which file a relative `--db` or `ORBIT_DATA_DIR` points at.
 pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
-    match db {
-        Some(p) => Ok(p),
-        None => Ok(Workspace::open_default()?.db_path()),
+    let path = match db {
+        Some(p) => p,
+        None => Workspace::open_default()?.db_path(),
+    };
+    absolutize(path)
+}
+
+fn absolutize(path: PathBuf) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()
+            .context("failed to read current directory")?
+            .join(path))
     }
 }
 
@@ -143,6 +157,38 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     })
 }
 
+/// Resolve the working-tree root of the repo containing `path`.
+///
+/// `orbit index` walks and stores file paths relative to this root, so a
+/// `repo-map` invocation pointed at a subdirectory must anchor here too;
+/// otherwise `read_text` globs (resolved against CWD) miss the repo-root-relative
+/// paths the graph holds and `api`/`class` silently degrade. This is the git
+/// working-tree root (`git rev-parse --show-toplevel`), not
+/// [`GitInfo::parent_repo_path`], which for a worktree points at the origin
+/// repo instead of this checkout's own root.
+pub fn git_toplevel(path: &Path) -> Result<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(path)
+        .output()
+        .with_context(|| format!("failed to run git in {}", path.display()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "git rev-parse --show-toplevel failed in {}: {}",
+            path.display(),
+            stderr.trim()
+        );
+    }
+
+    let top = String::from_utf8(output.stdout)
+        .context("git output is not valid UTF-8")?
+        .trim()
+        .to_string();
+    dunce::canonicalize(&top).with_context(|| format!("failed to canonicalize {top}"))
+}
+
 /// Mask clears the sign bit so the result is always a positive i64.
 pub fn project_id_from_path(path: &str) -> i64 {
     use std::hash::{Hash, Hasher};
@@ -170,7 +216,6 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
 
     fn init_repo(path: &Path) {
         std::fs::create_dir_all(path).unwrap();
@@ -239,5 +284,17 @@ mod tests {
             repos.len(),
             repos
         );
+    }
+
+    #[test]
+    fn git_toplevel_climbs_from_a_subdirectory() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        let subdir = repo.join("src/deep");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let top = git_toplevel(&subdir).unwrap();
+        assert_eq!(top, dunce::canonicalize(&repo).unwrap());
     }
 }

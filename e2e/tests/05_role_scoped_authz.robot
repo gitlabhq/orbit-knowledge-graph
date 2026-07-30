@@ -229,33 +229,33 @@ Query Vulnerability Counts As Victim
     ${project_ids}=    Evaluate
     ...    [int($REPORTER_PROJECT_ID), int($SECURITY_PROJECT_ID), int($DEVELOPER_PROJECT_ID), int($MAINTAINER_PROJECT_ID), int($NESTED_REPORTER_PROJECT_ID), int($NESTED_DEVELOPER_PROJECT_ID)]
     ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": $project_ids}, {"id": "v", "entity": "Vulnerability"}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}], "group_by": [{"kind": "node", "node": "p"}], "limit": 20}
+    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": $project_ids}, {"id": "v", "entity": "Vulnerability"}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"count": "v", "as": "vuln_count"}], "group_by": ["p"], "limit": 20}
     ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
 
 Query Vulnerability Counts For Project As Victim
     [Arguments]    ${project_id}    ${vulnerability_filters}=${None}
     ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [int($project_id)]}, {"id": "v", "entity": "Vulnerability", "filters": $vulnerability_filters or {}}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}], "group_by": [{"kind": "node", "node": "p"}], "limit": 10}
+    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [int($project_id)]}, {"id": "v", "entity": "Vulnerability", "filters": $vulnerability_filters or {}}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"count": "v", "as": "vuln_count"}], "group_by": ["p"], "limit": 10}
     ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
 
 Reporter Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${REPORTER_VULNERABILITY_CREATED_AT}
     ${filters}=    Evaluate
-    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($REPORTER_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($REPORTER_VULNERABILITY_ID)}}, {"title": $REPORTER_VULNERABILITY_TITLE}, {"created_at": {"op": "lte", "value": $created_at}}]
+    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($REPORTER_VULNERABILITY_ID)}, {"id": {"lte": int($REPORTER_VULNERABILITY_ID)}}, {"title": $REPORTER_VULNERABILITY_TITLE}, {"created_at": {"lte": $created_at}}]
     RETURN    ${filters}
 
 Nested Reporter Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${NESTED_REPORTER_VULNERABILITY_CREATED_AT}
     ${filters}=    Evaluate
-    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($NESTED_REPORTER_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($NESTED_REPORTER_VULNERABILITY_ID)}}, {"title": $NESTED_REPORTER_VULNERABILITY_TITLE}, {"created_at": {"op": "lte", "value": $created_at}}]
+    ...    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($NESTED_REPORTER_VULNERABILITY_ID)}, {"id": {"lte": int($NESTED_REPORTER_VULNERABILITY_ID)}}, {"title": $NESTED_REPORTER_VULNERABILITY_TITLE}, {"created_at": {"lte": $created_at}}]
     RETURN    ${filters}
 
 Security Manager Vulnerability Oracle Filters
     ${created_at}=    Normalize ClickHouse Timestamp    ${SECURITY_VULNERABILITY_CREATED_AT}
     ${filters}=    Evaluate
-    ...    [None, {"severity": "high"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($SECURITY_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($SECURITY_VULNERABILITY_ID)}}, {"title": $SECURITY_VULNERABILITY_TITLE}, {"created_at": {"op": "gte", "value": $created_at}}]
+    ...    [None, {"severity": "high"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($SECURITY_VULNERABILITY_ID)}, {"id": {"lte": int($SECURITY_VULNERABILITY_ID)}}, {"title": $SECURITY_VULNERABILITY_TITLE}, {"created_at": {"gte": $created_at}}]
     RETURN    ${filters}
 
 Normalize ClickHouse Timestamp
@@ -286,7 +286,7 @@ Direct Vulnerability Search
     ${id}=    Convert To Integer    ${vulnerability_id}
     ${filters}=    Create Dictionary    id=${id}
     ${query}=    Create Dictionary    query_type=traversal
-    ...    node=${{{"id": "v", "entity": "Vulnerability", "filters": $filters}}}
+    ...    nodes=${{[{"id": "v", "entity": "Vulnerability", "filters": $filters}]}}
     ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
 

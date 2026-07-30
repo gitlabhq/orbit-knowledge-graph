@@ -2104,7 +2104,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Webserver readiness gate state; 1 indicates the active state per `state` label.",
+         "description": "Webserver readiness gate state (pending|ready|outdated|migrating); 1 indicates the active state per `state` label.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -5539,7 +5539,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Webserver readiness gate state; 1 indicates the active state per `state` label.",
+               "description": "Webserver readiness gate state (pending|ready|outdated|migrating); 1 indicates the active state per `state` label.",
                "fieldConfig": {
                   "defaults": {
                      "custom": {

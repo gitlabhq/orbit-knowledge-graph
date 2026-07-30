@@ -1,21 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v2",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v12",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
-  "required": ["query_type"],
+  "required": ["query_type", "nodes"],
   "properties": {
     "query_type": {
       "$ref": "#/$defs/QueryType"
     },
-    "node": {
-      "$ref": "#/$defs/NodeSelector",
-      "description": "Single node selector"
-    },
     "nodes": {
       "type": "array",
-      "description": "Array of nodes for traversal, aggregation, path_finding queries",
+      "description": "Node selectors for the query. Single-node queries use a 1-element array.",
       "minItems": 1,
       "maxItems": 5,
       "items": {
@@ -33,7 +29,7 @@
     },
     "aggregations": {
       "type": "array",
-      "description": "Aggregation functions to apply. Required when query_type is 'aggregation'.",
+      "description": "Aggregations to compute. Required when query_type is 'aggregation'.",
       "default": [],
       "maxItems": 10,
       "items": {
@@ -42,7 +38,7 @@
     },
     "group_by": {
       "type": "array",
-      "description": "Aggregation group keys. kind=node returns a node object; kind=property returns a scalar value.",
+      "description": "Aggregation group keys.",
       "default": [],
       "maxItems": 4,
       "items": {
@@ -66,35 +62,35 @@
     },
     "cursor": {
       "type": "object",
-      "description": "Agent-driven pagination cursor. Slices the authorized result set (after redaction) by offset and page_size.",
-      "required": ["offset", "page_size"],
+      "description": "Keyset pagination. First page: omit 'after'; stop when the response has no next_cursor. NULL sort keys sort last.",
+      "required": ["page_size"],
       "properties": {
-        "offset": {
-          "type": "integer",
-          "description": "0-based offset into the authorized (post-redaction) result set.",
-          "minimum": 0,
-          "maximum": 999
-        },
         "page_size": {
           "type": "integer",
-          "description": "Number of rows to return from the offset position. offset + page_size must not exceed limit.",
+          "description": "Max rows per page; a page may return fewer after redaction.",
           "minimum": 1,
-          "maximum": 100
+          "maximum": 1000
+        },
+        "after": {
+          "type": "string",
+          "description": "pagination.next_cursor from the prior response. Changing the query invalidates it."
         }
       },
       "additionalProperties": false
     },
     "order_by": {
-      "$ref": "#/$defs/OrderBy",
-      "description": "Result ordering specification"
+      "type": "string",
+      "pattern": "^(?<descending>-)?(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63})$",
+      "description": "Result ordering as \"node.property\" (ascending) or \"-node.property\" (descending)."
     },
     "aggregation_sort": {
-      "$ref": "#/$defs/AggregationSort",
-      "description": "Ordering for aggregation outputs"
+      "type": "string",
+      "pattern": "^(?<descending>-)?(?<column>[a-zA-Z_][a-zA-Z0-9_]{0,63})$",
+      "description": "Aggregation row ordering as an output column name (aggregation alias or group-key column): \"column\" (ascending) or \"-column\" (descending)."
     },
     "options": {
       "$ref": "#/$defs/QueryOptions",
-      "description": "Consumer-level preferences that affect result presentation, not query semantics."
+      "description": "Presentation options."
     }
   },
   "additionalProperties": false,
@@ -106,33 +102,13 @@
         }
       },
       "then": {
-        "required": ["node"],
-        "not": {
-          "required": ["nodes"]
-        }
-      },
-      "else": {
-        "oneOf": [
-          {
-            "required": ["nodes"],
-            "not": { "required": ["node"] }
-          },
-          {
-            "required": ["node"],
-            "not": { "required": ["nodes"] },
-            "description": "Single-node traversal: 1 node, 0 relationships"
-          }
-        ]
-      }
-    },
-    {
-      "if": {
+        "required": ["neighbors"],
         "properties": {
-          "query_type": { "const": "neighbors" }
+          "nodes": {
+            "maxItems": 1,
+            "description": "Neighbors queries take exactly 1 node: the center"
+          }
         }
-      },
-      "then": {
-        "required": ["neighbors"]
       }
     },
     {
@@ -208,7 +184,7 @@
         }
       },
       "then": {
-        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal requires only a node.",
+        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal requires exactly 1 node and no relationships.",
         "oneOf": [
           {
             "required": ["relationships"],
@@ -224,8 +200,12 @@
             }
           },
           {
-            "required": ["node"],
             "not": { "required": ["relationships"] },
+            "properties": {
+              "nodes": {
+                "maxItems": 1
+              }
+            },
             "description": "Single-node traversal (table scan)"
           }
         ]
@@ -304,19 +284,19 @@
       "properties": {
         "id": {
           "$ref": "#/$defs/Identifier",
-          "description": "Variable identifier for this node (e.g., 'i', 'mr', 'user'). Used to reference this node in relationships and aggregations."
+          "description": "Variable id referenced by relationships and aggregations (e.g. 'mr')."
         },
         "entity": {
           "$ref": "#/$defs/EntityType",
-          "description": "Entity type (e.g., User, Project, MergeRequest). Determines which table to query."
+          "description": "Entity type (e.g. User, Project, MergeRequest)."
         },
         "columns": {
           "$ref": "#/$defs/ColumnSelection",
-          "description": "Columns to return for this node. Use '*' for all columns, or specify an array of column names. If omitted, the node's default_columns from the ontology are returned. Mandatory columns (id, type) are always included for redaction."
+          "description": "'*' for all columns, an array of names, or omitted for the ontology default_columns. id and type are always included."
         },
         "filters": {
           "type": "object",
-          "description": "Property filters. Keys are property names, values are Filter objects or arrays of PropertyFilter objects (AND-combined, for ranges). Limited to prevent query complexity explosion.",
+          "description": "Property filters keyed by property name.",
           "propertyNames": {
             "$ref": "#/$defs/Identifier"
           },
@@ -390,36 +370,68 @@
       },
       "additionalProperties": false
     },
-    "Filter": {
-      "description": "Property filter - supports both simple equality and advanced operators",
+    "FilterEntry": {
+      "description": "A bare value is an equality match; otherwise one or more operator objects (array only to repeat an operator).",
       "oneOf": [
         {
           "$ref": "#/$defs/FilterValue",
-          "description": "Simple equality filter (backward compatible)"
+          "description": "Equality match"
         },
         {
-          "$ref": "#/$defs/PropertyFilter",
-          "description": "Advanced operator-based filter"
-        }
-      ]
-    },
-    "FilterEntry": {
-      "description": "One or more filters on a single property. Use an array to express ranges (e.g., date windows). Array entries are AND-combined.",
-      "oneOf": [
-        {
-          "$ref": "#/$defs/Filter",
-          "description": "Single filter (backward compatible)"
+          "$ref": "#/$defs/OperatorFilter"
         },
         {
           "type": "array",
-          "description": "Multiple filters AND-combined on the same property. Each element must use an explicit operator.",
           "items": {
-            "$ref": "#/$defs/PropertyFilter"
+            "$ref": "#/$defs/OperatorFilter"
           },
           "minItems": 1,
           "maxItems": 10
         }
       ]
+    },
+    "OperatorFilter": {
+      "type": "object",
+      "description": "Operator-keyed filter; multiple keys AND-combine, e.g. {\"gte\": a, \"lt\": b}.",
+      "minProperties": 1,
+      "properties": {
+        "eq": { "$ref": "#/$defs/FilterValue" },
+        "gt": { "$ref": "#/$defs/FilterValue" },
+        "lt": { "$ref": "#/$defs/FilterValue" },
+        "gte": { "$ref": "#/$defs/FilterValue" },
+        "lte": { "$ref": "#/$defs/FilterValue" },
+        "in": {
+          "type": "array",
+          "description": "Set membership.",
+          "items": { "$ref": "#/$defs/FilterValue" },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "contains": { "$ref": "#/$defs/SearchPattern" },
+        "starts_with": { "$ref": "#/$defs/SearchPattern" },
+        "ends_with": { "$ref": "#/$defs/SearchPattern" },
+        "is_null": {
+          "type": "boolean",
+          "description": "true matches NULL; false matches non-NULL."
+        },
+        "is_not_null": {
+          "type": "boolean",
+          "description": "true matches non-NULL; false matches NULL."
+        },
+        "token_match": {
+          "$ref": "#/$defs/SearchPattern",
+          "description": "Exact word match. Only on fields that support word matching."
+        },
+        "all_tokens": {
+          "$ref": "#/$defs/SearchPattern",
+          "description": "All words present. Only on fields that support word matching."
+        },
+        "any_tokens": {
+          "$ref": "#/$defs/SearchPattern",
+          "description": "Any word present. Only on fields that support word matching."
+        }
+      },
+      "additionalProperties": false
     },
     "FilterValue": {
       "description": "A filter value - can be a number (integer or float), string, boolean, or list",
@@ -447,49 +459,10 @@
         }
       ]
     },
-    "PropertyFilter": {
-      "type": "object",
-      "description": "Advanced filter with operator",
-      "required": ["op"],
-      "properties": {
-        "op": {
-          "type": "string",
-          "description": "Filter operator. Comparison: eq, gt, lt, gte, lte. Set membership: in (array value). Substring matching: contains, starts_with, ends_with. Nullability: is_null, is_not_null (no value). Word matching: token_match (exact word match), all_tokens (all words present), any_tokens (any word present) — only on fields that support word matching.",
-          "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null", "token_match", "all_tokens", "any_tokens"]
-        },
-        "value": {
-          "description": "Filter value. Required for all operators except is_null/is_not_null. Type: array for 'in', string for contains/starts_with/ends_with/token_match/all_tokens/any_tokens, scalar for comparison operators."
-        }
-      },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": { "properties": { "op": { "enum": ["eq", "gt", "lt", "gte", "lte"] } } },
-          "then": { "required": ["value"], "properties": { "value": { "$ref": "#/$defs/FilterValue" } } }
-        },
-        {
-          "if": { "properties": { "op": { "const": "in" } } },
-          "then": {
-            "required": ["value"],
-            "properties": {
-              "value": {
-                "type": "array",
-                "items": { "$ref": "#/$defs/FilterValue" },
-                "minItems": 1,
-                "maxItems": 100
-              }
-            }
-          }
-        },
-        {
-          "if": { "properties": { "op": { "enum": ["contains", "starts_with", "ends_with"] } } },
-          "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
-        },
-        {
-          "if": { "properties": { "op": { "enum": ["token_match", "all_tokens", "any_tokens"] } } },
-          "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
-        }
-      ]
+    "SearchPattern": {
+      "type": "string",
+      "description": "Substring or word-match pattern. Patterns shorter than 3 characters are rejected at compile time (traversal_path exempt).",
+      "maxLength": 1024
     },
     "RelationshipSelector": {
       "type": "object",
@@ -508,19 +481,17 @@
           "$ref": "#/$defs/Identifier",
           "description": "Target node variable ID (must match a node's id field)"
         },
-        "min_hops": {
-          "type": "integer",
-          "description": "Minimum number of relationship hops",
-          "minimum": 0,
-          "maximum": 3,
-          "default": 1
-        },
-        "max_hops": {
-          "type": "integer",
-          "description": "Maximum number of relationship hops. Limited to prevent resource exhaustion.",
-          "minimum": 1,
-          "maximum": 3,
-          "default": 1
+        "hops": {
+          "type": "array",
+          "description": "Inclusive [min, max] hop range; [2, 2] means exactly 2 hops.",
+          "default": [1, 1],
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "minItems": 2,
+          "maxItems": 2
         },
         "direction": {
           "$ref": "#/$defs/Direction",
@@ -540,18 +511,7 @@
           "default": {}
         }
       },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "description": "max_hops must be >= min_hops",
-          "if": { "required": ["min_hops"], "properties": { "min_hops": { "minimum": 2 } } },
-          "then": { "properties": { "max_hops": { "minimum": 2 } } }
-        },
-        {
-          "if": { "required": ["min_hops"], "properties": { "min_hops": { "minimum": 3 } } },
-          "then": { "properties": { "max_hops": { "minimum": 3 } } }
-        }
-      ]
+      "additionalProperties": false
     },
     "RelationshipType": {
       "description": "Relationship type specification - single, multiple, or wildcard",
@@ -582,107 +542,70 @@
       "enum": ["outgoing", "incoming", "both"],
       "default": "outgoing"
     },
+    "NodeOrPropertyRef": {
+      "type": "string",
+      "description": "Reference to a node (\"mr\") or a scalar property (\"mr.merge_duration\").",
+      "pattern": "^(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})(\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63}))?$"
+    },
+    "NodePropertyRef": {
+      "type": "string",
+      "description": "Reference to a scalar property as \"node.property\".",
+      "pattern": "^(?<node>[a-zA-Z_][a-zA-Z0-9_]{0,63})\\.(?<property>[a-zA-Z_][a-zA-Z0-9_]{0,63})$"
+    },
     "Aggregation": {
       "type": "object",
-      "description": "Aggregation function specification",
-      "required": ["function"],
+      "description": "Single function key, e.g. {\"avg\": \"mr.merge_duration\", \"as\": \"avg_dur\"}. Output column: \"as\", else function_node or function_node_property.",
       "properties": {
-        "function": {
-          "$ref": "#/$defs/AggFunction",
-          "description": "Aggregation function to apply"
+        "count": {
+          "$ref": "#/$defs/NodeOrPropertyRef",
+          "description": "Count rows where the node matched (\"mr\") or non-null values of a property (\"mr.merged_at\")."
         },
-        "target": {
+        "sum": { "$ref": "#/$defs/NodePropertyRef" },
+        "avg": { "$ref": "#/$defs/NodePropertyRef" },
+        "min": { "$ref": "#/$defs/NodePropertyRef" },
+        "max": { "$ref": "#/$defs/NodePropertyRef" },
+        "collect": { "$ref": "#/$defs/NodePropertyRef" },
+        "as": {
           "$ref": "#/$defs/Identifier",
-          "description": "Node variable to aggregate over. If omitted, aggregates all matching nodes."
-        },
-        "property": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Property to aggregate. Required for sum, avg, min, max functions."
-        },
-        "alias": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Output column alias for the aggregation result"
+          "description": "Custom output column name; referenced by aggregation_sort."
         }
       },
-      "additionalProperties": false,
-      "if": {
-        "properties": {
-          "function": { "enum": ["sum", "avg", "min", "max"] }
-        }
-      },
-      "then": {
-        "required": ["property"]
-      }
+      "oneOf": [
+        { "required": ["count"] },
+        { "required": ["sum"] },
+        { "required": ["avg"] },
+        { "required": ["min"] },
+        { "required": ["max"] },
+        { "required": ["collect"] }
+      ],
+      "maxProperties": 2,
+      "additionalProperties": false
     },
     "GroupByKey": {
-      "description": "A group key for aggregation output rows. Node keys return an entity object per bucket; property keys return the scalar property value per bucket.",
+      "description": "\"node\" buckets by entity, \"node.property\" by scalar value. Output column: \"as\" when given, else node id or node_property (_unit suffix when truncated).",
       "oneOf": [
         {
-          "type": "object",
-          "description": "Group by a node selector.",
-          "required": ["kind", "node"],
-          "properties": {
-            "kind": {
-              "const": "node"
-            },
-            "node": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Node variable to use as the group key"
-            },
-            "alias": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Output column alias for this group key"
-            }
-      }
-    },
+          "$ref": "#/$defs/NodeOrPropertyRef"
+        },
         {
           "type": "object",
-          "description": "Group by a scalar property on a node selector.",
-          "required": ["kind", "node", "property"],
+          "description": "Truncation and/or output name: {\"key\": \"mr.created_at\", \"truncate\": \"month\", \"as\": \"month\"}. truncate needs a Date/DateTime property; minute/hour also need node_ids or a filter on it.",
+          "required": ["key"],
+          "anyOf": [{ "required": ["truncate"] }, { "required": ["as"] }],
           "properties": {
-            "kind": {
-              "const": "property"
+            "key": {
+              "$ref": "#/$defs/NodeOrPropertyRef"
             },
-            "node": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Node variable whose property is used as the group key"
+            "truncate": {
+              "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
             },
-            "property": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Property name to group by"
-            },
-            "transform": {
-              "$ref": "#/$defs/PropertyTransform",
-              "description": "Optional transform applied to the property before grouping (e.g. date truncation)."
-            },
-            "alias": {
-              "$ref": "#/$defs/Identifier",
-              "description": "Output column alias for this group key"
+            "as": {
+              "$ref": "#/$defs/Identifier"
             }
           },
           "additionalProperties": false
         }
       ]
-    },
-    "PropertyTransform": {
-      "description": "Tagged enum: add new variants by `kind`.",
-      "oneOf": [
-        {
-          "type": "object",
-          "description": "Truncate a Date/DateTime property. minute/hour require node_ids or a filter on the property.",
-          "required": ["kind", "unit"],
-          "properties": {
-            "kind": {"const": "truncate"},
-            "unit": {"enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]}
-          },
-          "additionalProperties": false
-        }
-      ]
-    },
-    "AggFunction": {
-      "type": "string",
-      "description": "Available aggregation functions",
-      "enum": ["count", "sum", "avg", "min", "max", "collect"]
     },
     "PathConfig": {
       "type": "object",
@@ -709,7 +632,7 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Relationship types to traverse. Required when an endpoint uses filters or id_range (not node_ids) to constrain the frontier. Optional when both endpoints use node_ids.",
+          "description": "Relationship types to traverse. Required when an endpoint is constrained by filters or id_range; optional when both endpoints use node_ids.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
@@ -721,25 +644,20 @@
     "PathType": {
       "type": "string",
       "description": "Path finding algorithm type",
-      "enum": ["shortest", "all_shortest", "any"]
+      "enum": ["shortest"]
     },
     "NeighborsConfig": {
       "type": "object",
-      "description": "Configuration for neighbors queries",
-      "required": ["node"],
+      "description": "Configuration for neighbors queries. The center is the query's single node.",
       "properties": {
-        "node": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Node variable ID to find neighbors for"
-        },
         "direction": {
           "$ref": "#/$defs/Direction",
-          "description": "Direction to traverse relationships (outgoing, incoming, or both)",
+          "description": "Traversal direction (default: both).",
           "default": "both"
         },
         "rel_types": {
           "type": "array",
-          "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+          "description": "Relationship types to traverse; omitted = all.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
@@ -749,62 +667,18 @@
       },
       "additionalProperties": false
     },
-    "OrderBy": {
-      "type": "object",
-      "description": "Result ordering specification",
-      "required": ["node", "property"],
-      "properties": {
-        "node": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Node variable to order by"
-        },
-        "property": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Property name to order by"
-        },
-        "direction": {
-          "$ref": "#/$defs/OrderDirection",
-          "description": "Sort direction",
-          "default": "ASC"
-        }
-      },
-      "additionalProperties": false
-    },
-    "AggregationSort": {
-      "type": "object",
-      "description": "Ordering for aggregation outputs",
-      "required": ["column"],
-      "properties": {
-        "column": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Output column name to sort by. Can reference an aggregation alias or group key alias."
-        },
-        "direction": {
-          "$ref": "#/$defs/OrderDirection",
-          "description": "Sort direction",
-          "default": "ASC"
-        }
-      },
-      "additionalProperties": false
-    },
-    "OrderDirection": {
-      "type": "string",
-      "description": "Sort direction",
-      "enum": ["ASC", "DESC"],
-      "default": "ASC"
-    },
     "QueryOptions": {
       "type": "object",
-      "description": "Optional presentation hints that control response shape without affecting query semantics. Only 'dynamic_columns' and 'include_debug_sql' are recognized; all other fields are ignored.",
+      "description": "Presentation hints; never affect query semantics. Unrecognized fields are ignored.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",
-          "description": "Columns fetched for dynamically-discovered entities (PathFinding, Neighbors hydration). '*' returns all columns; 'default' returns the entity's default_columns from the ontology. Defaults to 'default'.",
+          "description": "Columns for dynamically-discovered entities (path_finding, neighbors hydration): '*' = all, 'default' = ontology default_columns (the default).",
           "default": "default"
         },
         "include_debug_sql": {
           "type": "boolean",
-          "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. On SaaS: honored for GitLab team members. On self-managed/Dedicated: honored for instance admins. Defaults to false.",
+          "description": "Include compiled SQL in response metadata. Honored only for GitLab team members (SaaS) or instance admins (self-managed/Dedicated).",
           "default": false
         }
       },

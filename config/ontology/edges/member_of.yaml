@@ -45,18 +45,27 @@ variants:
     scope: prune_to_target
     description: "User has access to project (via direct membership or group inheritance)."
 
-etl:
-  - scope: namespaced
-    source: siphon_members
-    order_by: [traversal_path, id]
-    from:
-      id: user_id
-      type: User
-      enrich: [state, private_profile, admin, auditor, external, user_type]
-    to:
-      id: source_id
-      type_column: source_type
-      type_mapping:
-        Namespace: Group
-        Project: Project
-      enrich: [visibility_level, archived]
+indexer:
+  reindex: [siphon_members]
+pipelines:
+  - name: MEMBER_OF_siphon_members
+    extract:
+      type: clickhouse
+      tables: [siphon_members]
+      fields: [user_id, source_id, source_type]
+      order_by: [traversal_path, id]
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to:
+            field: source_id
+            kind:
+              derive: source_type
+              mapping:
+                Namespace: Group
+                Project: Project
+          label: MEMBER_OF

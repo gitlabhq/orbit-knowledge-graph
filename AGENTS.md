@@ -20,7 +20,16 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
 - **Rails owns authorization.** GKG delegates all access decisions to Rails via gRPC (traversal paths, resource permissions). See `docs/design-documents/security.md`.
 - **ClickHouse = datalake + graph.** Datalake DB holds raw Siphon rows; graph DB holds indexed property graph tables. The indexer transforms between them.
-- **Ontology-driven graph.** YAML in `config/ontology/nodes/` and `config/ontology/edges/` drives ETL, query validation, redaction, and edge table routing. New entity types start there, not in Rust. Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`). Schema: `config/schemas/ontology.schema.json`.
+- **Ontology-driven graph.** YAML in `config/ontology/nodes/`, `config/ontology/edges/`, and `config/ontology/derived/` drives ETL, query validation, redaction, and edge table routing.
+  Nodes, edges, and derived entities declare `pipelines:` with `extract` and `transform` sections.
+  Setting `query: generated` lets the indexer build the extract SQL from the declaration's single base table. Node projections come from database-backed properties; standalone edges declare their base projection under `extract.fields`. Optional `extract.lookups` add point-lookup CTEs whose tables resolve from their node pipelines and are not repeated in `extract.tables`.
+  Nodes may declare `enrichment_props`; a slim lookup with only `node` and `id` expands its source fields from that contract, while a transform endpoint with `enrich: true` independently expands its property bindings from the same contract. Extract and transform compile from their own declarations and meet through `RecordBatch` field names. Same-node references derive distinct field namespaces from their ID fields. Explicit lookup `fields` and endpoint `properties` remain escape hatches.
+  An optional `extract.filter` adds a `_batch` predicate (e.g. `state = 5`) and may use `{{watermark_column}}`/`{{deleted_column}}`.
+  Seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) plus the SystemNote derived entity keep a `.sql.j2` MiniJinja template next to the YAML (all ontology SQL templates render through `ontology::sql_template`); derived pipelines are always authored SQL, since their rows are neither node properties nor edge endpoints to generate a projection from.
+  New entity types start in the ontology, not in Rust.
+  Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`).
+  Schema: `config/schemas/ontology.schema.json`.
+- **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `gkg-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
 - **Layered configuration.** `AppConfig` in `crates/gkg-server-config/` loads three sources (lowest to highest priority): `config/default.yaml`, K8s secret files from `/etc/secrets/`, and `GKG_*` environment variables (`__` separates nested keys, e.g. `GKG_GRAPH__DATABASE`). The CLI (`orbit`) has its own clap-based config and does not use `AppConfig`. See `docs/dev/runbooks/server_configuration.md` for full reference.
 - **Siphon and NATS are external.** [Siphon](https://gitlab.com/gitlab-org/analytics-section/siphon) (Go, Analytics team) and NATS are consumed, not owned. Use `/related-repositories` for local checkouts.
@@ -30,6 +39,8 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - `AGENTS.md` and `CLAUDE.md` must be identical (`agent-file-sync-check`)
 - Clippy with all features, warnings as errors (`lint-check`)
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
+- Named query YAML validated against JSON schema (`named-query-schema-validate`); each query is also compiled against the ontology by `gkg-server`'s build script, so drift fails every build
+- Migration ledger validated and scope-checked (`migration-ledger-schema-validate`, `migration-ledger-check`, plus `gkg-server` build-time drift checks); full ledger rules in `docs/design-documents/schema_management.md`
 - `cargo fmt` (`fmt-check`)
 - `cargo shear` detects unused workspace and crate dependencies (`unused-deps-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
@@ -39,14 +50,16 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - `rust-toolchain.toml` must match `mise.toml` (`rust-toolchain-sync-check`; regenerate with `mise toolchain:generate`)
-- Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
+- Markdown files must pass markdownlint, Vale, and lychee checks (`check_docs_markdown`)
 - Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
 - GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
 - Skill version bumped when files under `skills/<name>/` change (`skill-version-bump-check`)
+- Prompt version bumped when files under `config/prompts/` change (`prompt-version-bump-check`)
 - Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
 - Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
 - Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
+- Every `[workspace]` member has a row in `docs/dev/agents-crate-map.md`, and no stale rows remain (`crates/xtask/build.rs`, so any workspace build/clippy fails on drift)
 
 ## Where to find things
 

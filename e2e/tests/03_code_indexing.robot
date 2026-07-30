@@ -1,15 +1,16 @@
 *** Settings ***
-Documentation       Push fixture code into ruby- and java-named projects under the shared
-...                 namespace and verify the code-graph (files, definitions, structural
-...                 DEFINES + IMPORTS edges) lands in the property graph via the Orbit
-...                 query API. Every assertion goes through /api/v4/orbit/query — the
-...                 system under test.
+Documentation       Push fixture code into ruby- and java-named projects, then enable the
+...                 dedicated namespace and verify the code-graph (files, definitions,
+...                 structural DEFINES + IMPORTS edges) lands in the property graph via the
+...                 Orbit query API. Every assertion goes through /api/v4/orbit/query — the
+...                 system under test. Enabling after the pushes makes indexing dispatch
+...                 deterministic: no code task can race the push.
 
 Resource            gitlab.resource
 Resource            orbit.resource
 Resource            git.resource
 
-Suite Setup         Attach To Shared Fixture
+Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Push Weather Fixtures
 
 
 *** Variables ***
@@ -23,26 +24,16 @@ ${JAVA_FILE_COUNT}      ${8}
 
 *** Test Cases ***
 Ruby Weather Project Is Pushed And Indexed
-    [Documentation]    Create ruby-weather-<random>, push the ruby fixture, wait until the
-    ...                project node appears via Orbit. Stores ${RUBY_PROJECT} for follow-up cases.
+    [Documentation]    The ruby fixture is pushed during suite setup so both repos index
+    ...                concurrently; wait until the project node appears via Orbit.
     [Tags]    code-indexing
-    ${suffix}=    Random Suffix
-    ${name}=    Set Variable    ruby-weather-${suffix}
-    ${project}=    Create Project    ${name}    ${SHARED_NAMESPACE_ID}
-    Push Fixture To Project    ${project}    ${RUBY_FIXTURE_DIR}
-    Wait For Node Indexed    Project    ${project["id"]}    ${name}    timeout=180s
-    Set Suite Variable    ${RUBY_PROJECT}    ${project}
+    Wait For Node Indexed    Project    ${RUBY_PROJECT}[id]    ${RUBY_PROJECT}[name]    timeout=180s
 
 Java Weather Project Is Pushed And Indexed
-    [Documentation]    Create java-weather-<random>, push the java fixture, wait until the
-    ...                project node appears via Orbit. Stores ${JAVA_PROJECT} for follow-up cases.
+    [Documentation]    The java fixture is pushed during suite setup so both repos index
+    ...                concurrently; wait until the project node appears via Orbit.
     [Tags]    code-indexing
-    ${suffix}=    Random Suffix
-    ${name}=    Set Variable    java-weather-${suffix}
-    ${project}=    Create Project    ${name}    ${SHARED_NAMESPACE_ID}
-    Push Fixture To Project    ${project}    ${JAVA_FIXTURE_DIR}
-    Wait For Node Indexed    Project    ${project["id"]}    ${name}    timeout=180s
-    Set Suite Variable    ${JAVA_PROJECT}    ${project}
+    Wait For Node Indexed    Project    ${JAVA_PROJECT}[id]    ${JAVA_PROJECT}[name]    timeout=180s
 
 Ruby Project Code Graph Has Expected Files And Definitions
     [Documentation]    Assert exact File count and presence of canonical Ruby definitions
@@ -133,3 +124,16 @@ Java Project Has Expected Imports
     Imports Edge Exists Between File And Imported Symbol    ${pid}
     ...    src/main/java/com/example/weather/Main.java
     ...    com.example.weather.model    Forecast
+
+
+*** Keywords ***
+Push Weather Fixtures
+    ${suffix}=    Random Suffix
+    ${group}=    Create Group    e2e-code-${suffix}
+    ${ruby}=    Create Project    ruby-weather-${suffix}    ${group["id"]}
+    Push Fixture To Project    ${ruby}    ${RUBY_FIXTURE_DIR}
+    ${java}=    Create Project    java-weather-${suffix}    ${group["id"]}
+    Push Fixture To Project    ${java}    ${JAVA_FIXTURE_DIR}
+    Enable Knowledge Graph    ${group["id"]}
+    Set Suite Variable    ${RUBY_PROJECT}    ${ruby}
+    Set Suite Variable    ${JAVA_PROJECT}    ${java}

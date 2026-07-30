@@ -113,6 +113,50 @@ fixtures:
       def run_ambiguous(review):
           return score_review(review)
 
+  - path: tests/test_scoring.py
+    content: |
+      from scoring import score_review
+
+      def test_score_review():
+          return score_review(None)
+
+  - path: conftest.py
+    content: |
+      from scoring import score_review
+
+      def scoring_fixture():
+          return score_review(None)
+
+  - path: tests/test_vendor_client.py
+    content: |
+      from sdk.client import Client
+
+      def test_client():
+          return Client()
+
+  - path: pkg/__init__.py
+    content: |
+      pass
+
+  - path: pkg/json.py
+    content: |
+      def dumps(obj):
+          return obj
+
+  - path: tests/test_stdlib_shadow.py
+    content: |
+      import json
+
+      def test_dumps():
+          return json.dumps({})
+
+  - path: pkg/service.py
+    content: |
+      from json import dumps
+
+      def use_dumps():
+          return dumps({})
+
 tests:
   - name: "top-level source-root module import resolves"
     query: |
@@ -184,24 +228,81 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: "unmarked ancestor definitions do not capture external imports"
+  - name: "test file outside the source root resolves src-layout import"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'tests.test_scoring.test_score_review'
+        AND callee.fqn = 'src.scoring.score_review'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "repo-root file resolves src-layout import"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'conftest.scoring_fixture'
+        AND callee.fqn = 'src.scoring.score_review'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "stdlib-shadowing package submodule does not capture external imports"
     queries:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-          WHERE caller.fqn = 'src.external_client.build_external_client'
+          WHERE caller.fqn = 'tests.test_stdlib_shadow.test_dumps'
             AND e.edge_kind = 'Calls'
           RETURN caller.fqn AS caller, callee.fqn AS callee
         assert:
           - { empty: true }
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
-          WHERE caller.fqn = 'src.external_client.build_external_client'
-            AND sym.path = 'sdk.client'
-            AND sym.name = 'Client'
+          WHERE caller.fqn = 'tests.test_stdlib_shadow.test_dumps'
             AND e.edge_kind = 'Calls'
-          RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
+          RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
+
+  - name: "stdlib import inside a package does not bind a shadowing sibling submodule"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'pkg.service.use_dumps'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'pkg.service.use_dumps'
+            AND sym.path = 'json'
+            AND sym.name = 'dumps'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller
+        assert:
+          - { row_count: 1 }
+
+  - name: "unique cross-root import from a test file binds the vendored definition"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'tests.test_vendor_client.test_client'
+        AND callee.fqn = 'vendor.sdk.client.Client'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "unique cross-root import between roots binds the vendored definition"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'src.external_client.build_external_client'
+        AND callee.fqn = 'vendor.sdk.client.Client'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
 
   - name: "unmarked ancestor candidates do not bind arbitrary definitions"
     queries:

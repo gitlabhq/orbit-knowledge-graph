@@ -118,7 +118,7 @@ fn snapshot_aggregation_node_grouped() {
     r.columns = Some(vec![ColumnDescriptor {
         name: "merged_count".into(),
         function: "count".into(),
-        target: Some("u".into()),
+        target: "u".into(),
         property: None,
     }]);
     r.group_columns = Some(vec![GroupColumnDescriptor {
@@ -157,7 +157,7 @@ fn snapshot_aggregation_property_grouped() {
     r.columns = Some(vec![ColumnDescriptor {
         name: "vulnerability_count".into(),
         function: "count".into(),
-        target: Some("v".into()),
+        target: "v".into(),
         property: None,
     }]);
     r.group_columns = Some(vec![GroupColumnDescriptor {
@@ -189,7 +189,7 @@ fn snapshot_aggregation_ungrouped() {
     r.columns = Some(vec![ColumnDescriptor {
         name: "total".into(),
         function: "count".into(),
-        target: None,
+        target: "mr".into(),
         property: None,
     }]);
     r.group_columns = Some(vec![]);
@@ -254,7 +254,8 @@ fn snapshot_pagination() {
     }];
     r.pagination = Some(PaginationResponse {
         has_more: true,
-        total_rows: 100,
+        truncated: true,
+        next_cursor: Some("eyJoIjoiYWQyMTczMWM5MTZm".into()),
     });
     insta::assert_snapshot!(run(r));
 }

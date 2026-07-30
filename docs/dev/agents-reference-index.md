@@ -17,8 +17,13 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Duo / Orbit prompt routing (Rails-side) | `docs/design-documents/duo_orbit_prompt_routing.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
 | Ontology edge definitions | `config/ontology/edges/` |
+| Ontology derived entity definitions | `config/ontology/derived/` |
+| Ontology extraction SQL | Generated from the pipeline (`query: generated`) for nodes and edges; a `.sql.j2` MiniJinja template next to the YAML only for complex nodes (`config/ontology/nodes/`) and derived entities (`config/ontology/derived/`) |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
+| Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology by `crates/gkg-server/build.rs`, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |
+| Named query JSON schema | `config/schemas/named_query.schema.json` (validate with `mise named-queries:validate`; CI gate `named-query-schema-validate`) |
+| Agent prompt files (tool descriptions) | `config/prompts/` (versioned YAML, one file per prompt; `remote/` feeds `gkg-server`, `local/` feeds `orbit-local`; embedded via rust-embed and build-time validated by `crates/gkg-prompts`) |
 | Query DSL version | `config/QUERY_DSL_VERSION` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
@@ -26,6 +31,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Query test fixtures | `fixtures/queries/` |
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
+| Refreshable-view MiniJinja SQL templates | `config/ontology/sql/*.sql.j2` (ClickHouse SELECT templates rendered from the schema version and ontology-derived graph table metadata) |
 | Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
 | RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |

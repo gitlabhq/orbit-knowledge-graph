@@ -28,7 +28,7 @@ Before using Orbit, verify:
     ```
 4. Orbit Local: no server needed
     ```sh
-    glab orbit local --install --yes  # installs the orbit binary
-    orbit index /path/to/your/repo    # index a local repo
+    glab orbit local --install --yes       # installs the orbit binary
+    glab orbit local index /path/to/your/repo  # index a local repo
     ```
-    If running `orbit` displays `cannot find command`, then add `"$HOME/.config/glab-cli/bin/"` (for Linux/macOS) to `PATH` environment variable
+    If `glab orbit local` cannot find the managed binary, add `"$HOME/.config/glab-cli/bin/"` (Linux/macOS) to `PATH` as a fallback

@@ -35,8 +35,8 @@ pub(super) async fn search_returns_latest_version(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state"],
-                     "node_ids": [9001]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state"],
+                     "node_ids": [9001]}],
             "limit": 10
         }"#,
         &dedup_svc(),
@@ -65,8 +65,8 @@ pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "node_ids": [9002]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "node_ids": [9002]}],
             "limit": 10
         }"#,
         &dedup_svc(),
@@ -103,8 +103,8 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),
@@ -163,7 +163,7 @@ pub(super) async fn aggregation_multi_hop_self_join_dedups_edge_versions(ctx: &T
                 {"type": "HAS_LABEL", "from": "mr", "to": "label"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "project"}
             ],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "aggregations": [{"count": "mr", "as": "n"}],
             "limit": 1
         }"#,
         &dedup_svc(),
@@ -192,8 +192,8 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
-                     "filters": {"state": "active"}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+                     "filters": {"state": "active"}}],
             "limit": 100
         }"#,
         &dedup_svc(),
@@ -224,8 +224,8 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
-                     "filters": {"state": "active"}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
+                     "filters": {"state": "active"}}],
             "limit": 100
         }"#,
         &dedup_svc(),
@@ -269,8 +269,8 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),
@@ -448,8 +448,8 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9310]},
-            "neighbors": {"node": "mr", "direction": "both"}
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [9310]}],
+            "neighbors": {"direction": "both"}
         }"#,
         &dedup_svc(),
     )
@@ -490,8 +490,8 @@ pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9311]},
-            "neighbors": {"node": "mr", "direction": "both"}
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [9311]}],
+            "neighbors": {"direction": "both"}
         }"#,
         &dedup_svc(),
     )
@@ -599,9 +599,9 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest",
+            "nodes": [{"id": "mr", "entity": "MergeRequest",
                      "columns": ["title", "state"],
-                     "node_ids": [9800, 9801]},
+                     "node_ids": [9800, 9801]}],
             "limit": 10
         }"#,
         &dedup_svc(),
@@ -645,8 +645,8 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "mr", "as": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),

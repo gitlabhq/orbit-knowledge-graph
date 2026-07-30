@@ -1,9 +1,11 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod commands;
 mod descriptions;
 mod list;
 mod mcp;
+mod skill;
 mod sql;
 mod sql_format;
 mod workspace;
@@ -145,7 +147,7 @@ struct Cli {
 enum Commands {
     /// Print the version string and exit.
     Version,
-    #[command(about = descriptions::INDEX_SHORT)]
+    #[command(about = descriptions::short("index"))]
     Index {
         /// Path to the repository to index
         #[arg(value_name = "PATH")]
@@ -167,7 +169,7 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         db: Option<PathBuf>,
     },
-    #[command(about = descriptions::RUN_SQL_SHORT)]
+    #[command(about = descriptions::short("run_sql"))]
     Sql {
         /// SQL query, or `-` to read from stdin.
         #[arg(value_name = "QUERY", conflicts_with = "file")]
@@ -185,7 +187,7 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         db: Option<PathBuf>,
     },
-    #[command(about = descriptions::GET_SCHEMA_SHORT)]
+    #[command(about = descriptions::short("get_graph_schema"))]
     Schema {
         /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
         #[arg(long, value_name = "PATH")]
@@ -211,13 +213,48 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         db: Option<PathBuf>,
     },
-    #[command(about = descriptions::MCP_SERVE_SHORT)]
+    #[command(about = descriptions::short("mcp_serve"))]
     #[command(long_about = "Serve the local graph to MCP-compatible AI agents.\n\n\
                       Plug into editors that support MCP (Claude Code, Cursor, OpenCode, Codex) \
                       so the agent can call `run_sql`, `get_graph_schema`, and `index`.")]
     Mcp {
         #[command(subcommand)]
         command: McpCommands,
+    },
+    #[command(about = descriptions::short("skill"))]
+    #[command(
+        long_about = "Print the bundled, version-matched orbit-local skill content.\n\n\
+                      With no argument, prints SKILL.md (the manifest). Pass a relative path \
+                      such as `references/sql.md` or `references/repo_map.md` to print that file."
+    )]
+    Skill {
+        /// Skill file to print, relative to the skill root (default: SKILL.md).
+        #[arg(value_name = "PATH")]
+        path: Option<String>,
+    },
+    #[command(name = "repo-map", about = descriptions::short("repo_map"))]
+    #[command(
+        long_about = "Produce a high-level, LLM-oriented map of a locally indexed repository.\n\n\
+                       Scoped to the current commit; if it is not indexed, prints the index \
+                       command and exits. Running with no subcommand defaults to `overview`. \
+                       Drill down with `tree`, `api`, `class`, `extends`, and `imports`."
+    )]
+    RepoMap {
+        /// Repository path (default: current directory).
+        #[arg(long, value_name = "PATH")]
+        repo: Option<PathBuf>,
+
+        /// Limit output to source files with these extensions (repeat or
+        /// comma-separate; a leading dot is optional).
+        #[arg(long = "ext", value_name = "EXT")]
+        extensions: Vec<String>,
+
+        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
+
+        #[command(subcommand)]
+        command: Option<commands::repo_map::RepoMapCommand>,
     },
 }
 
@@ -285,6 +322,18 @@ async fn main() -> Result<()> {
                 .expect("setting default subscriber failed");
             mcp::serve().await
         }
+        Commands::Skill { path } => skill::run(path),
+        Commands::RepoMap {
+            repo,
+            extensions,
+            db,
+            command,
+        } => commands::repo_map::run(
+            repo,
+            extensions,
+            db,
+            command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
+        ),
     }
 }
 

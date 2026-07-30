@@ -61,7 +61,7 @@ pub struct QueryMetadata {
     /// compiled ClickHouse SQL(s) for debugging
     #[prost(string, repeated, tag = "2")]
     pub raw_query_strings: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// rows returned after redaction (and cursor slicing if applicable)
+    /// authorized rows in the returned page window
     #[prost(int32, tag = "3")]
     pub row_count: i32,
     /// semver string, e.g. "1.0.0"; empty for stub formatters
@@ -266,6 +266,28 @@ pub struct ResponseFormatSchema {
     /// semver string, e.g. "1.2.0"
     #[prost(string, tag = "2")]
     pub version: ::prost::alloc::string::String,
+}
+/// Request for the named-query catalog.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListNamedQueriesRequest {}
+/// Response listing every embedded named query.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListNamedQueriesResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub queries: ::prost::alloc::vec::Vec<NamedQueryDefinition>,
+}
+/// A named query with its DSL rendered for the requesting user.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NamedQueryDefinition {
+    /// stable identifier, e.g. "recent_merges"
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    /// human-readable summary from the template YAML
+    #[prost(string, tag = "2")]
+    pub description: ::prost::alloc::string::String,
+    /// rendered query DSL as a JSON string, executable as-is
+    #[prost(string, tag = "3")]
+    pub raw_query: ::prost::alloc::string::String,
 }
 /// Wrapper for the redaction handshake within a streaming query.
 /// Server sends `required` with resources to check, client responds with decisions.
@@ -583,11 +605,13 @@ impl FormatName {
         }
     }
 }
-/// Query language selector. Only JSON DSL is supported today.
+/// Query language selector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum QueryType {
     Json = 0,
+    /// `query` is a named-query envelope: {"name": ..., "parameters": {...}}
+    Named = 1,
 }
 impl QueryType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -597,12 +621,14 @@ impl QueryType {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::Json => "QUERY_TYPE_JSON",
+            Self::Named => "QUERY_TYPE_NAMED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "QUERY_TYPE_JSON" => Some(Self::Json),
+            "QUERY_TYPE_NAMED" => Some(Self::Named),
             _ => None,
         }
     }
@@ -614,6 +640,7 @@ pub enum ClusterStatus {
     Healthy = 1,
     Degraded = 2,
     Unhealthy = 3,
+    Migrating = 4,
 }
 impl ClusterStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -626,6 +653,7 @@ impl ClusterStatus {
             Self::Healthy => "CLUSTER_STATUS_HEALTHY",
             Self::Degraded => "CLUSTER_STATUS_DEGRADED",
             Self::Unhealthy => "CLUSTER_STATUS_UNHEALTHY",
+            Self::Migrating => "CLUSTER_STATUS_MIGRATING",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -635,6 +663,7 @@ impl ClusterStatus {
             "CLUSTER_STATUS_HEALTHY" => Some(Self::Healthy),
             "CLUSTER_STATUS_DEGRADED" => Some(Self::Degraded),
             "CLUSTER_STATUS_UNHEALTHY" => Some(Self::Unhealthy),
+            "CLUSTER_STATUS_MIGRATING" => Some(Self::Migrating),
             _ => None,
         }
     }
@@ -965,6 +994,37 @@ pub mod knowledge_graph_service_client {
                 .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetQueryDsl"));
             self.inner.unary(req, path, codec).await
         }
+        /// Lists the server-defined named queries with their DSL rendered for the
+        /// caller (bindings resolved from JWT claims, parameters filled with their
+        /// declared examples). Lets clients discover and display named queries
+        /// without owning copies of the query text.
+        /// Used by GET /api/v4/orbit/templates.
+        pub async fn list_named_queries(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListNamedQueriesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListNamedQueriesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/ListNamedQueries",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ListNamedQueries"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         /// Returns the JSON Schema describing the query response shape (the formatter
         /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
         /// Direct API helper for REST consumers. MCP agents should use the command
@@ -1128,6 +1188,18 @@ pub mod knowledge_graph_service_server {
             request: tonic::Request<super::GetQueryDslRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetQueryDslResponse>,
+            tonic::Status,
+        >;
+        /// Lists the server-defined named queries with their DSL rendered for the
+        /// caller (bindings resolved from JWT claims, parameters filled with their
+        /// declared examples). Lets clients discover and display named queries
+        /// without owning copies of the query text.
+        /// Used by GET /api/v4/orbit/templates.
+        async fn list_named_queries(
+            &self,
+            request: tonic::Request<super::ListNamedQueriesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListNamedQueriesResponse>,
             tonic::Status,
         >;
         /// Returns the JSON Schema describing the query response shape (the formatter
@@ -1512,6 +1584,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetQueryDslSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/ListNamedQueries" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListNamedQueriesSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::ListNamedQueriesRequest>
+                    for ListNamedQueriesSvc<T> {
+                        type Response = super::ListNamedQueriesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListNamedQueriesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::list_named_queries(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListNamedQueriesSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

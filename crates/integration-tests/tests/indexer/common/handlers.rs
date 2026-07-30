@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -80,6 +79,7 @@ async fn build_fan_out(
         &ontology,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
+        indexer::modules::sdlc::PARTITION_MIN_ROWS,
     )
     .await
     .expect("failed to register SDLC handlers");
@@ -110,16 +110,14 @@ pub async fn entity_handler_with_partitions(
     entity_name: &str,
     partitions: u32,
 ) -> Arc<dyn Handler> {
-    let mut config: IndexerConfig = create_test_indexer_config(&ctx.config);
-    config.engine.handlers.entity_handler.partition_overrides =
-        HashMap::from([(entity_name.to_string(), partitions)]);
-    config.engine.handlers.entity_handler.partition_min_rows = 0;
-
+    let config: IndexerConfig = create_test_indexer_config(&ctx.config);
     let writer = Arc::new(
         ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
             .expect("writer"),
     );
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let ontology = ontology::Ontology::load_embedded()
+        .expect("ontology must load")
+        .with_partition_count(entity_name, partitions);
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
@@ -127,6 +125,7 @@ pub async fn entity_handler_with_partitions(
         &ontology,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
+        0,
     )
     .await
     .expect("failed to register SDLC handlers");

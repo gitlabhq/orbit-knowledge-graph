@@ -67,14 +67,22 @@ const FILTER_OPS: &[&str] = &[
 ];
 const DIRECTIONS: &[&str] = &["outgoing", "incoming", "both"];
 const AGG_FUNCTIONS: &[&str] = &["count", "sum", "avg", "min", "max", "collect"];
-const PATH_TYPES: &[&str] = &["shortest", "all_shortest", "any"];
+const PATH_TYPES: &[&str] = &["shortest"];
 
 fn gen_filter(driver: &mut impl Driver) -> Option<Value> {
     let use_op: bool = driver.produce()?;
     if use_op {
         let op = *pick(driver, FILTER_OPS)?;
-        let val: i64 = driver.produce()?;
-        Some(json!({"op": op, "value": val}))
+        let val = if matches!(op, "is_null" | "is_not_null") {
+            let apply: bool = driver.produce()?;
+            json!(apply)
+        } else {
+            let n: i64 = driver.produce()?;
+            json!(n)
+        };
+        let mut filter = Map::new();
+        filter.insert(op.into(), val);
+        Some(Value::Object(filter))
     } else {
         let val: i64 = driver.produce()?;
         Some(json!(val))
@@ -139,23 +147,27 @@ fn gen_relationship(driver: &mut impl Driver, from: &str, to: &str) -> Option<Va
     if has_hops {
         let min: u8 = driver.produce()?;
         let max: u8 = driver.produce()?;
-        rel.insert("min_hops".into(), json!((min % 3) + 1));
-        rel.insert("max_hops".into(), json!((max % 5) + 1));
+        rel.insert("hops".into(), json!([(min % 3) + 1, (max % 5) + 1]));
     }
 
     Some(Value::Object(rel))
 }
 
-fn gen_aggregation(driver: &mut impl Driver, node_id: &str) -> Option<Value> {
+fn gen_aggregation(driver: &mut impl Driver, node_id: &str, index: u8) -> Option<Value> {
     let func = *pick(driver, AGG_FUNCTIONS)?;
     let mut agg = Map::new();
-    agg.insert("function".into(), json!(func));
-    agg.insert("target".into(), json!(node_id));
 
-    let has_group_by: bool = driver.produce()?;
-    if has_group_by {
-        agg.insert("group_by".into(), json!(node_id));
-        agg.insert("property".into(), json!("name"));
+    let with_property: bool = driver.produce()?;
+    let target = if with_property || func != "count" {
+        format!("{node_id}.name")
+    } else {
+        node_id.to_string()
+    };
+    agg.insert(func.into(), json!(target));
+
+    let with_alias: bool = driver.produce()?;
+    if with_alias {
+        agg.insert("as".into(), json!(format!("agg_{index}")));
     }
 
     Some(Value::Object(agg))
@@ -179,18 +191,11 @@ impl TypeGenerator for FuzzQuery {
 
                 let node_ids: Vec<String> = (0..node_count).map(|i| format!("n{i}")).collect();
 
-                let use_single_node: bool = driver.produce()?;
-                if node_count == 1 || use_single_node {
-                    if let Some(node) = gen_node(driver, &node_ids[0]) {
-                        query.insert("node".into(), node);
-                    }
-                } else {
-                    let nodes: Vec<Value> = node_ids
-                        .iter()
-                        .filter_map(|id| gen_node(driver, id))
-                        .collect();
-                    query.insert("nodes".into(), json!(nodes));
-                }
+                let nodes: Vec<Value> = node_ids
+                    .iter()
+                    .filter_map(|id| gen_node(driver, id))
+                    .collect();
+                query.insert("nodes".into(), json!(nodes));
 
                 if node_count > 1 {
                     let rel_count: u8 = driver.produce()?;
@@ -209,9 +214,9 @@ impl TypeGenerator for FuzzQuery {
                 if query_type == "aggregation" {
                     let agg_count: u8 = driver.produce()?;
                     let aggs: Vec<Value> = (0..(agg_count % 3) + 1)
-                        .filter_map(|_| {
+                        .filter_map(|i| {
                             let target = pick(driver, &node_ids)?;
-                            gen_aggregation(driver, target)
+                            gen_aggregation(driver, target, i)
                         })
                         .collect();
                     query.insert("aggregations".into(), json!(aggs));
@@ -233,11 +238,10 @@ impl TypeGenerator for FuzzQuery {
             }
             "neighbors" => {
                 let node = gen_node(driver, "center")?;
-                query.insert("node".into(), node);
+                query.insert("nodes".into(), json!([node]));
 
                 let direction = *pick(driver, DIRECTIONS)?;
                 let mut neighbors = Map::new();
-                neighbors.insert("node".into(), json!("center"));
                 neighbors.insert("direction".into(), json!(direction));
 
                 let has_rel_types: bool = driver.produce()?;

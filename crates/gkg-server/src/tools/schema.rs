@@ -65,6 +65,9 @@ fn condense_value(value: &mut Value) {
 
 fn condense_object(map: &mut Map<String, Value>) {
     map.remove("default");
+    map.remove("pattern");
+    map.remove("$schema");
+    map.remove("title");
 
     let should_remove = matches!(
         map.get("description"),
@@ -140,6 +143,37 @@ mod tests {
             toon.contains("Required for disconnected multi-node aggregation"),
             "Should tell agents when group_by is required"
         );
+    }
+
+    #[test]
+    fn condensed_schema_strips_patterns_and_metadata() {
+        let schema: Value =
+            serde_json::from_str(BASE_SCHEMA).expect("base schema must be valid JSON");
+        let condensed = condense_schema(schema);
+
+        for key in ["pattern", "$schema", "title"] {
+            assert_no_key(&condensed, key);
+        }
+    }
+
+    fn assert_no_key(value: &Value, key: &str) {
+        match value {
+            Value::Object(map) => {
+                assert!(
+                    !map.contains_key(key),
+                    "condensed schema should not contain `{key}` keys"
+                );
+                for nested in map.values() {
+                    assert_no_key(nested, key);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    assert_no_key(item, key);
+                }
+            }
+            _ => {}
+        }
     }
 
     #[test]
@@ -230,7 +264,7 @@ mod tests {
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));
@@ -238,6 +272,40 @@ mod tests {
         assert!(
             errors.iter().any(|error| error.contains("group_by")),
             "expected group_by schema error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn query_schema_accepts_aggregation_without_alias_and_requires_one_function_key() {
+        let query = |aggregations: Value| {
+            serde_json::json!({
+                "query_type": "aggregation",
+                "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}],
+                "aggregations": aggregations,
+                "limit": 1
+            })
+        };
+
+        let errors = validate_query_schema(query(
+            serde_json::json!([{"count": "mr"}, {"avg": "mr.added_lines"}]),
+        ));
+        assert!(
+            errors.is_empty(),
+            "expected schema success for alias-less aggregations, got: {errors:?}"
+        );
+
+        let errors = validate_query_schema(query(
+            serde_json::json!([{"count": "mr", "sum": "mr.added_lines"}]),
+        ));
+        assert!(
+            !errors.is_empty(),
+            "expected schema failure for two function keys in one aggregation"
+        );
+
+        let errors = validate_query_schema(query(serde_json::json!([{"as": "total"}])));
+        assert!(
+            !errors.is_empty(),
+            "expected schema failure for an aggregation with no function key"
         );
     }
 
@@ -253,7 +321,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "merged_mr_count"}
+                {"count": "mr", "as": "merged_mr_count"}
             ],
             "limit": 1
         }));
@@ -268,9 +336,9 @@ mod tests {
     fn query_schema_accepts_single_node_scalar_aggregation() {
         let errors = validate_query_schema(serde_json::json!({
             "query_type": "aggregation",
-            "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));
@@ -292,9 +360,9 @@ mod tests {
             "relationships": [
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
-            "group_by": [{"kind": "node", "node": "p"}],
+            "group_by": ["p"],
             "aggregations": [
-                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+                {"count": "mr", "as": "open_mr_count"}
             ],
             "limit": 1
         }));

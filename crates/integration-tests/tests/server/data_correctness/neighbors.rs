@@ -5,8 +5,8 @@ pub(super) async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing"}
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {"direction": "outgoing"}
         }"#,
         &allow_all(),
     )
@@ -41,8 +41,8 @@ pub(super) async fn neighbors_incoming_returns_correct_sources(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]}
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
         }"#,
         &allow_all(),
     )
@@ -62,8 +62,8 @@ pub(super) async fn neighbors_rel_types_filter_works(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]}
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "neighbors": {"direction": "outgoing", "rel_types": ["CONTAINS"]}
         }"#,
         &allow_all(),
     )
@@ -80,8 +80,8 @@ pub(super) async fn neighbors_both_direction_returns_all_connected(ctx: &TestCon
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "both"}
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
     )
@@ -105,8 +105,8 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
-            "neighbors": {"node": "mr", "direction": "both"}
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}],
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
     )
@@ -137,8 +137,8 @@ pub(super) async fn neighbors_both_fused_scan_returns_complete_bidirectional_set
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "both", "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "neighbors": {"direction": "both", "rel_types": ["MEMBER_OF", "CONTAINS"]},
             "limit": 50
         }"#,
         &allow_all(),
@@ -164,8 +164,8 @@ pub(super) async fn neighbors_redaction_removes_unauthorized_targets(ctx: &TestC
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]}
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]}
         }"#,
         &svc,
     )
@@ -182,8 +182,8 @@ pub(super) async fn neighbors_dynamic_columns_all_returns_properties(ctx: &TestC
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
@@ -210,8 +210,8 @@ pub(super) async fn neighbors_center_node_properties_hydrated(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name", "state"]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]}
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name", "state"]}],
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]}
         }"#,
         &allow_all(),
     )
@@ -242,12 +242,12 @@ pub(super) async fn neighbors_non_default_pk_with_non_denorm_filter(ctx: &TestCo
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {
+            "nodes": [{
                 "id": "d",
                 "entity": "MergeRequestDiff",
-                "filters": {"head_commit_sha": {"op": "starts_with", "value": "aaaa"}}
-            },
-            "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["HAS_DIFF"]}
+                "filters": {"head_commit_sha": {"starts_with": "aaaa"}}
+            }],
+            "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
         }"#,
         &allow_all(),
     )
@@ -268,12 +268,12 @@ pub(super) async fn neighbors_non_default_pk_filter_excludes_non_matching(ctx: &
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {
+            "nodes": [{
                 "id": "d",
                 "entity": "MergeRequestDiff",
-                "filters": {"head_commit_sha": {"op": "eq", "value": "no-such-sha"}}
-            },
-            "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["HAS_DIFF"]}
+                "filters": {"head_commit_sha": {"eq": "no-such-sha"}}
+            }],
+            "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
         }"#,
         &allow_all(),
     )
@@ -299,12 +299,12 @@ pub(super) async fn neighbors_non_default_pk_redaction_uses_merge_request_id(ctx
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {
+            "nodes": [{
                 "id": "d",
                 "entity": "MergeRequestDiff",
-                "filters": {"head_commit_sha": {"op": "starts_with", "value": "bbbb"}}
-            },
-            "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["HAS_DIFF"]}
+                "filters": {"head_commit_sha": {"starts_with": "bbbb"}}
+            }],
+            "neighbors": {"direction": "incoming", "rel_types": ["HAS_DIFF"]}
         }"#,
         &svc,
     )
@@ -327,8 +327,8 @@ pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &Test
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "both"}
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "neighbors": {"direction": "both"}
         }"#,
         &allow_all(),
     )

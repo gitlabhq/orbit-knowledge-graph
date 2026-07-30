@@ -141,8 +141,8 @@ fn apply_metrics(
         }
         for rel in &input.relationships {
             rel_types.extend(rel.types.iter().cloned());
-            max_hops = max_hops.max(rel.max_hops as i64);
-            variable_hops |= rel.min_hops != rel.max_hops;
+            max_hops = max_hops.max(rel.hops.max as i64);
+            variable_hops |= rel.hops.min != rel.hops.max;
             for (f, entries) in &rel.filters {
                 fields.insert(f.clone());
                 for ef in entries {
@@ -166,7 +166,7 @@ fn apply_metrics(
                 .aggregation
                 .metrics
                 .iter()
-                .map(|m| m.function.to_string())
+                .map(|m| m.expr.function().to_string())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
                 .filter_map(|s| s.parse().ok())
@@ -589,7 +589,7 @@ mod tests {
     fn input_fields_mapped_to_context() {
         use query_engine::compiler::HydrationPlan;
         use query_engine::compiler::input::{
-            Direction, FilterOp, InputFilter, InputNode, InputRelationship,
+            Direction, FilterOp, HopRange, InputFilter, InputNode, InputRelationship,
         };
 
         let claims = claims_with_paths(vec!["1/22/"]);
@@ -617,8 +617,7 @@ mod tests {
                     types: vec!["AUTHORED".into()],
                     from: "u".into(),
                     to: "mr".into(),
-                    min_hops: 1,
-                    max_hops: 1,
+                    hops: HopRange::default(),
                     direction: Direction::Outgoing,
                     filters: Default::default(),
                     fk_column: None,

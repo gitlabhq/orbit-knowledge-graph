@@ -8,7 +8,7 @@ goon_version:1.0.0
 nodes:0
 edges:0
 rows:1
-aggregations:total(count)
+aggregations:total(count:mr)
 @nodes
 @edges
 @rows

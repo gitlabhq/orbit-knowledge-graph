@@ -4,8 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::etl::EdgeDirection;
-use crate::{Adjacency, Field, Ontology, OntologyGraph};
+use crate::{Adjacency, Dir, Field, Ontology, OntologyGraph};
 
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
@@ -97,15 +96,11 @@ fn node_relationships(graph: &OntologyGraph, node_name: &str) -> (Vec<String>, V
     };
 
     let outgoing = group(
-        &graph
-            .neighbors(node_name, EdgeDirection::Outgoing)
-            .adjacencies(),
+        &graph.neighbors(node_name, Dir::Outgoing).adjacencies(),
         '→',
     );
     let incoming = group(
-        &graph
-            .neighbors(node_name, EdgeDirection::Incoming)
-            .adjacencies(),
+        &graph.neighbors(node_name, Dir::Incoming).adjacencies(),
         '←',
     );
     (outgoing, incoming)

@@ -11,7 +11,7 @@ proj_node_lookup_by_id:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}},
+      "nodes": [{"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"id": {"eq": {{PROJECT_ID}}}}}],
       "limit": 1
     }
 
@@ -22,7 +22,7 @@ proj_node_lookup_by_full_path:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}},
+      "nodes": [{"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}],
       "limit": 1
     }
 
@@ -35,10 +35,10 @@ proj_id_mr_in_project_eq:
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "limit": 100
     }
 
@@ -51,10 +51,10 @@ proj_full_path_mr_in_project_eq:
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
-        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "limit": 100
     }
 
@@ -67,7 +67,7 @@ proj_id_in_mr_in_project:
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "in", "value": [{{PROJECT_ID}}]}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"in": [{{PROJECT_ID}}]}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "limit": 100
@@ -82,7 +82,7 @@ proj_id_in2_mr_or_of_prefixes:
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "in", "value": [{{PROJECT_ID}}, {{PROJECT_ID_2}}]}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"in": [{{PROJECT_ID}}, {{PROJECT_ID_2}}]}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "limit": 100
@@ -97,7 +97,7 @@ proj_id_workitem_in_project_eq:
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "columns": ["iid", "title", "state", "work_item_type"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
       "limit": 100
@@ -112,10 +112,10 @@ proj_id_pipeline_in_project_eq:
       "query_type": "traversal",
       "nodes": [
         {"id": "pipe", "entity": "Pipeline", "columns": ["id", "status", "source", "ref", "created_at"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
-      "order_by": {"node": "pipe", "property": "created_at", "direction": "DESC"},
+      "order_by": "-pipe.created_at",
       "limit": 100
     }
 
@@ -127,8 +127,8 @@ proj_full_path_pipeline_source_filter:
     {
       "query_type": "traversal",
       "nodes": [
-        {"id": "pipe", "entity": "Pipeline", "columns": ["id", "status", "source", "ref"], "filters": {"source": {"op": "eq", "value": "merge_request_event"}}},
-        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+        {"id": "pipe", "entity": "Pipeline", "columns": ["id", "status", "source", "ref"], "filters": {"source": {"eq": "merge_request_event"}}},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
       "limit": 100
@@ -143,7 +143,7 @@ proj_id_vuln_in_project_eq:
       "query_type": "traversal",
       "nodes": [
         {"id": "v", "entity": "Vulnerability", "columns": ["id", "severity", "state", "report_type"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
       "limit": 100
@@ -158,7 +158,7 @@ note_in_project_id:
       "query_type": "traversal",
       "nodes": [
         {"id": "n", "entity": "Note", "columns": ["id", "note", "author_id"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "n", "to": "p"}],
       "limit": 100
@@ -172,13 +172,13 @@ proj_id_mr_count_by_state_agg:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["mr.state"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -190,13 +190,13 @@ proj_full_path_mr_count_by_state_agg:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
-        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["mr.state"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -210,7 +210,7 @@ proj_unknown_id_mr_in_project:
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{UNKNOWN_ID}}}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{UNKNOWN_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "limit": 100
@@ -229,7 +229,7 @@ grp_id_workitem_in_group:
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
       "limit": 50,
-      "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"}
+      "order_by": "-wi.created_at"
     }
 
 grp_fullpath_workitem_in_group:
@@ -241,11 +241,11 @@ grp_fullpath_workitem_in_group:
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "namespace_id"]},
-        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}}
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"eq": "{{GROUP_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
       "limit": 50,
-      "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"}
+      "order_by": "-wi.created_at"
     }
 
 grp_id_label_in_group:
@@ -286,13 +286,13 @@ grp_id_milestone_count_by_state_agg:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "m", "entity": "Milestone", "filters": {"state": {"op": "in", "value": ["active", "closed"]}}},
+        {"id": "m", "entity": "Milestone", "filters": {"state": {"in": ["active", "closed"]}}},
         {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "m", "to": "g"}],
-      "group_by": [{"kind": "property", "node": "m", "property": "state", "alias": "ms_state"}],
-      "aggregations": [{"function": "count", "target": "m", "alias": "ms_count"}],
-      "aggregation_sort": {"column": "ms_count", "direction": "DESC"},
+      "group_by": ["m.state"],
+      "aggregations": [{ "count": "m", "as": "ms_count" }],
+      "aggregation_sort": "-ms_count",
       "limit": 10
     }
 
@@ -313,7 +313,7 @@ grp_id_mr_in_project_contains:
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
       "limit": 50,
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"}
+      "order_by": "-mr.created_at"
     }
 
 grp_id_count_mrs_aggregation_MOTIVATING:
@@ -324,7 +324,7 @@ grp_id_count_mrs_aggregation_MOTIVATING:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project"},
         {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
       ],
@@ -332,9 +332,9 @@ grp_id_count_mrs_aggregation_MOTIVATING:
         {"type": "IN_PROJECT", "from": "mr", "to": "p"},
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
-      "group_by": [{"kind": "node", "node": "p"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["p"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 50
     }
 
@@ -346,7 +346,7 @@ subgrp_id_count_mrs_aggregation_deeper_prefix:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project"},
         {"id": "g", "entity": "Group", "node_ids": [{{SUBGROUP_ID}}]}
       ],
@@ -354,9 +354,9 @@ subgrp_id_count_mrs_aggregation_deeper_prefix:
         {"type": "IN_PROJECT", "from": "mr", "to": "p"},
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
-      "group_by": [{"kind": "node", "node": "p"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["p"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 50
     }
 
@@ -369,14 +369,14 @@ subgrp_fullpath_workitem_in_group:
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "namespace_id"]},
-        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{SUBGROUP_FULL_PATH}}"}}}
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"eq": "{{SUBGROUP_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
       "limit": 50
     }
 
 subgrp_id_workitem_transitive_contains:
-  desc: "Transitive subgroup descent. Group CONTAINS Group (max_hops 2) down to a nested subgroup, then WorkItem IN_GROUP that subgroup, scoped by the TOP group id. Proves the top-group prefix still prunes across a Group->Group hop."
+  desc: "Transitive subgroup descent. Group CONTAINS Group (hops [1, 2]) down to a nested subgroup, then WorkItem IN_GROUP that subgroup, scoped by the TOP group id. Proves the top-group prefix still prunes across a Group->Group hop."
   category: traversal
   suite: scoping
   query: |
@@ -389,7 +389,7 @@ subgrp_id_workitem_transitive_contains:
       ],
       "relationships": [
         {"type": "IN_GROUP", "from": "wi", "to": "sub"},
-        {"type": "CONTAINS", "from": "g", "to": "sub", "min_hops": 1, "max_hops": 2}
+        {"type": "CONTAINS", "from": "g", "to": "sub", "hops": [1, 2]}
       ],
       "limit": 50
     }
@@ -402,7 +402,7 @@ grp_id_vuln_count_by_severity_agg:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "v", "entity": "Vulnerability", "filters": {"state": {"op": "in", "value": ["detected", "confirmed"]}}},
+        {"id": "v", "entity": "Vulnerability", "filters": {"state": {"in": ["detected", "confirmed"]}}},
         {"id": "p", "entity": "Project"},
         {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
       ],
@@ -410,9 +410,9 @@ grp_id_vuln_count_by_severity_agg:
         {"type": "IN_PROJECT", "from": "v", "to": "p"},
         {"type": "CONTAINS", "from": "g", "to": "p"}
       ],
-      "group_by": [{"kind": "property", "node": "v", "property": "severity", "alias": "sev"}],
-      "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
-      "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+      "group_by": ["v.severity"],
+      "aggregations": [{ "count": "v", "as": "vuln_count" }],
+      "aggregation_sort": "-vuln_count",
       "limit": 20
     }
 
@@ -425,7 +425,7 @@ grp_namespace_id_project_leaf_GAP:
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "project_id"]},
-        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
       "limit": 50
@@ -459,9 +459,9 @@ grp_id_count_workitems_aggregation:
         {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
-      "group_by": [{"kind": "property", "node": "wi", "property": "work_item_type", "alias": "wi_type"}],
-      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
-      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "group_by": ["wi.work_item_type"],
+      "aggregations": [{ "count": "wi", "as": "wi_count" }],
+      "aggregation_sort": "-wi_count",
       "limit": 20
     }
 
@@ -472,7 +472,7 @@ ns_group_id_resolves_traversal:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"id": {"eq": {{GROUP_ID}}}}}],
       "limit": 50
     }
 
@@ -483,7 +483,7 @@ ns_group_full_path_resolves_traversal:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"full_path": {"eq": "{{GROUP_FULL_PATH}}"}}}],
       "limit": 50
     }
 
@@ -494,7 +494,7 @@ ns_subgroup_id_scopes_to_subtree:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path", "traversal_path"], "filters": {"id": {"op": "eq", "value": {{SUBGROUP_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "full_path", "traversal_path"], "filters": {"id": {"eq": {{SUBGROUP_ID}}}}}],
       "limit": 50
     }
 
@@ -506,7 +506,7 @@ ns_project_namespace_id_GAP:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"eq": {{PROJECT_NAMESPACE_ID}}}}}],
       "limit": 50
     }
 
@@ -518,7 +518,7 @@ ns_unknown_id_no_widen:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{UNKNOWN_ID}}}}},
+      "nodes": [{"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"eq": {{UNKNOWN_ID}}}}}],
       "limit": 50
     }
 
@@ -531,10 +531,10 @@ proj_id_mr_in_project_scoped_traversal:
       "query_type": "traversal",
       "nodes": [
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
-        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "order_by": "-mr.created_at",
       "limit": 50
     }
 
@@ -546,13 +546,13 @@ proj_full_path_mr_count_agg_scoped:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
-        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "node", "node": "p"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["p"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 10
     }
 
@@ -567,7 +567,7 @@ multihop_user_authored_mr_in_project_group_scoped:
       "nodes": [
         {"id": "u", "entity": "User", "columns": ["username"]},
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "project_id"]},
-        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}, "id_property": "namespace_id"}}
+        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"id": {"eq": {{GROUP_ID}}}, "id_property": "namespace_id"}}
       ],
       "relationships": [
         {"type": "AUTHORED", "from": "u", "to": "mr"},
@@ -587,7 +587,7 @@ multihop_group_scope_via_group_node:
         {"id": "u", "entity": "User", "columns": ["username"]},
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "project_id"]},
         {"id": "p", "entity": "Project", "columns": ["id", "full_path"]},
-        {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}}}
+        {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"eq": {{GROUP_ID}}}}}
       ],
       "relationships": [
         {"type": "AUTHORED", "from": "u", "to": "mr"},
@@ -607,7 +607,7 @@ edge_rel_scoped_prune_reviewer:
       "nodes": [
         {"id": "u", "entity": "User", "columns": ["username"]},
         {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state"]},
-        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+        {"id": "p", "entity": "Project", "filters": {"id": {"eq": {{PROJECT_ID}}}}}
       ],
       "relationships": [
         {"type": "REVIEWER", "from": "u", "to": "mr"},
@@ -656,8 +656,8 @@ path_finding_two_projects_in_group_by_full_path:
     {
       "query_type": "path_finding",
       "nodes": [
-        {"id": "a", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}},
-        {"id": "b", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH_2}}"}}}
+        {"id": "a", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}},
+        {"id": "b", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH_2}}"}}}
       ],
       "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["CONTAINS", "IN_PROJECT"]}
     }
@@ -669,8 +669,8 @@ neighbors_project_center_outgoing:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}], "columns": ["id", "full_path"]},
-      "neighbors": {"node": "p", "direction": "both"},
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}], "columns": ["id", "full_path"]}],
+      "neighbors": {"direction": "both"},
       "limit": 100
     }
 
@@ -682,8 +682,8 @@ unknown_id_neighbors_no_widen:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}], "columns": ["id", "full_path"]},
-      "neighbors": {"node": "p", "direction": "both"},
+      "nodes": [{"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}], "columns": ["id", "full_path"]}],
+      "neighbors": {"direction": "both"},
       "limit": 100
     }
 
@@ -694,8 +694,8 @@ neighbors_group_center_contains_rel_filter:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}], "columns": ["id", "full_path"]},
-      "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
+      "nodes": [{"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}], "columns": ["id", "full_path"]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["CONTAINS"]},
       "limit": 100
     }
 
@@ -707,11 +707,11 @@ proj_id_mr_count:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
       "limit": 1,
       "options": {"include_debug_sql": true}
     }
@@ -724,11 +724,11 @@ proj_fullpath_mr_count:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
-        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
       "limit": 1,
       "options": {"include_debug_sql": true}
     }
@@ -741,13 +741,13 @@ proj_id_mr_by_state:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["mr.state"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 10,
       "options": {"include_debug_sql": true}
     }
@@ -760,7 +760,7 @@ group_id_mr_by_author:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "author", "entity": "User"},
         {"id": "p", "entity": "Project"},
         {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
@@ -770,9 +770,9 @@ group_id_mr_by_author:
         {"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"},
         {"type": "CONTAINS", "from": "g", "to": "p", "direction": "outgoing"}
       ],
-      "group_by": [{"kind": "node", "node": "author", "alias": "author"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["author"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 20,
       "options": {"include_debug_sql": true}
     }
@@ -785,50 +785,48 @@ group_fullpath_wi_by_state:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "wi", "entity": "WorkItem", "filters": {"state": {"op": "in", "value": ["opened", "closed"]}}},
-        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}}
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": {"in": ["opened", "closed"]}}},
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"eq": "{{GROUP_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g", "direction": "outgoing"}],
-      "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "wi_state"}],
-      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
-      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "group_by": ["wi.state"],
+      "aggregations": [{ "count": "wi", "as": "wi_count" }],
+      "aggregation_sort": "-wi_count",
       "limit": 10,
       "options": {"include_debug_sql": true}
     }
 
 proj_id_mr_orderby_limit_page:
-  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with limit and a first-page cursor. Verifies order_by + limit produce a stable, deterministic top-N under PK pruning. Pairs with the next case to prove paging stability."
+  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with a first-page keyset cursor. Verifies order_by + tie-breakers produce a stable, deterministic top-N under PK pruning. Pairs with the next case (larger page) for containment checks."
   category: traversal
   suite: scoping
   query: |
     {
       "query_type": "traversal",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "columns": ["id", "iid", "title", "state", "created_at"], "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["id", "iid", "title", "state", "created_at"], "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
-      "limit": 40,
-      "cursor": {"offset": 0, "page_size": 20},
+      "order_by": "-mr.created_at",
+      "cursor": {"page_size": 20},
       "options": {"include_debug_sql": true}
     }
 
 proj_id_mr_orderby_limit_page2:
-  desc: "Second page of the exact same scoped+ordered query (offset 20). Proves pagination is stable. page1 and page2 are disjoint, contiguous, and together equal the global ORDER BY created_at DESC top-40 with no gaps, duplicates, or reordering."
+  desc: "Same scoped+ordered query with a larger first page (40). The 20-row page must be a prefix of this 40-row page under the deterministic order."
   category: traversal
   suite: scoping
   query: |
     {
       "query_type": "traversal",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "columns": ["id", "iid", "title", "state", "created_at"], "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["id", "iid", "title", "state", "created_at"], "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
-      "limit": 40,
-      "cursor": {"offset": 20, "page_size": 20},
+      "order_by": "-mr.created_at",
+      "cursor": {"page_size": 40},
       "options": {"include_debug_sql": true}
     }
 
@@ -840,9 +838,9 @@ aggpaging_namespace_id_project_gap:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "wi", "entity": "WorkItem", "filters": {"state": {"op": "in", "value": ["opened", "closed"]}, "namespace_id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}}
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": {"in": ["opened", "closed"]}, "namespace_id": {"eq": {{PROJECT_NAMESPACE_ID}}}}}
       ],
-      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
+      "aggregations": [{ "count": "wi", "as": "wi_count" }],
       "limit": 1,
       "options": {"include_debug_sql": true}
     }
@@ -855,11 +853,11 @@ unknown_id_no_widen:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}]}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
       "limit": 1,
       "options": {"include_debug_sql": true}
     }
@@ -873,7 +871,7 @@ unknown_project_id_mr_empty:
     {
       "query_type": "traversal",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "eq", "value": {{UNKNOWN_ID}}}}, "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}, "project_id": {"eq": {{UNKNOWN_ID}}}}, "columns": ["iid", "title", "state", "project_id"]},
         {"id": "p", "entity": "Project"}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -889,7 +887,7 @@ unknown_full_path_proj_empty:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "this-org/does-not-exist-nowhere"}}, "columns": ["full_path", "name", "visibility_level"]},
+      "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "this-org/does-not-exist-nowhere"}}, "columns": ["full_path", "name", "visibility_level"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -902,7 +900,7 @@ full_path_trailing_slash:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}/"}}, "columns": ["full_path", "name"]},
+      "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH}}/"}}, "columns": ["full_path", "name"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -915,7 +913,7 @@ full_path_case_variant:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH_UPPER}}"}}, "columns": ["full_path", "name"]},
+      "nodes": [{"id": "p", "entity": "Project", "filters": {"full_path": {"eq": "{{PROJECT_FULL_PATH_UPPER}}"}}, "columns": ["full_path", "name"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -928,13 +926,13 @@ project_id_in_multi:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "in", "value": [{{PROJECT_ID}}, {{PROJECT_ID_2}}, {{PROJECT_ID_3}}]}}, "columns": ["iid", "project_id"]},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}, "project_id": {"in": [{{PROJECT_ID}}, {{PROJECT_ID_2}}, {{PROJECT_ID_3}}]}}, "columns": ["iid", "project_id"]},
         {"id": "p", "entity": "Project"}
       ],
       "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-      "group_by": [{"kind": "node", "node": "p"}],
-      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
-      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "group_by": ["p"],
+      "aggregations": [{ "count": "mr", "as": "mr_count" }],
+      "aggregation_sort": "-mr_count",
       "limit": 20,
       "options": {"include_debug_sql": true}
     }
@@ -946,7 +944,7 @@ org_unscoped_control:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "u", "entity": "User", "filters": {"state": "active"}, "columns": ["username", "state"]},
+      "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}, "columns": ["username", "state"]}],
       "limit": 30,
       "options": {"include_debug_sql": true}
     }
@@ -959,7 +957,7 @@ out_of_scope_project_id_zero_leak:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "eq", "value": {{UNAUTH_PROJECT_ID}}}}, "columns": ["iid", "title", "project_id"]},
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": ["opened", "closed", "merged"]}, "project_id": {"eq": {{UNAUTH_PROJECT_ID}}}}, "columns": ["iid", "title", "project_id"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -974,7 +972,7 @@ out_of_scope_full_path_group:
       "query_type": "traversal",
       "nodes": [
         {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["iid", "title", "namespace_id"]},
-        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{UNAUTH_GROUP_FULL_PATH}}"}}}
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"eq": "{{UNAUTH_GROUP_FULL_PATH}}"}}}
       ],
       "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
       "limit": 50,
@@ -988,7 +986,7 @@ negsec_namespace_id_project_gap:
   query: |
     {
       "query_type": "traversal",
-      "node": {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened", "namespace_id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}, "columns": ["iid", "title", "namespace_id", "project_id"]},
+      "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"state": "opened", "namespace_id": {"eq": {{PROJECT_NAMESPACE_ID}}}}, "columns": ["iid", "title", "namespace_id", "project_id"]}],
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -1002,11 +1000,11 @@ unknown_namespace_id_group_empty:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "wi", "entity": "WorkItem", "filters": {"namespace_id": {"op": "eq", "value": {{UNKNOWN_ID}}}}}
+        {"id": "wi", "entity": "WorkItem", "filters": {"namespace_id": {"eq": {{UNKNOWN_ID}}}}}
       ],
-      "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "state"}],
-      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
-      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "group_by": ["wi.state"],
+      "aggregations": [{ "count": "wi", "as": "wi_count" }],
+      "aggregation_sort": "-wi_count",
       "limit": 10,
       "options": {"include_debug_sql": true}
     }
@@ -1018,8 +1016,8 @@ scoped_group_full_path_neighbors_authz_and:
   query: |
     {
       "query_type": "neighbors",
-      "node": {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}, "columns": ["name", "full_path"]},
-      "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
+      "nodes": [{"id": "g", "entity": "Group", "filters": {"full_path": {"eq": "{{GROUP_FULL_PATH}}"}}, "columns": ["name", "full_path"]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["CONTAINS"]},
       "limit": 50,
       "options": {"include_debug_sql": true}
     }
@@ -1033,7 +1031,7 @@ unauth_group_in_authorized_list_no_leak:
       "query_type": "traversal",
       "nodes": [
         {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
-        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "in", "value": ["{{GROUP_FULL_PATH}}", "{{UNAUTH_GROUP_FULL_PATH}}"]}}}
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"in": ["{{GROUP_FULL_PATH}}", "{{UNAUTH_GROUP_FULL_PATH}}"]}}}
       ],
       "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
       "limit": 50,
@@ -1056,9 +1054,9 @@ mr_ids_changed_paths_agg:
         {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
         {"type": "HAS_FILE", "from": "d", "to": "f"}
       ],
-      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
-      "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
-      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "group_by": ["f.old_path"],
+      "aggregations": [{ "count": "f", "as": "changes" }],
+      "aggregation_sort": "-changes",
       "limit": 40
     }
 
@@ -1070,7 +1068,7 @@ pipeline_filter_changed_paths_agg:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "pl", "entity": "Pipeline", "filters": {"project_id": {"op": "eq", "value": {{PROJECT_ID}}}, "status": {"op": "eq", "value": "failed"}, "source": {"op": "eq", "value": "merge_request_event"}}},
+        {"id": "pl", "entity": "Pipeline", "filters": {"project_id": {"eq": {{PROJECT_ID}}}, "status": {"eq": "failed"}, "source": {"eq": "merge_request_event"}}},
         {"id": "mr", "entity": "MergeRequest"},
         {"id": "d", "entity": "MergeRequestDiff"},
         {"id": "f", "entity": "MergeRequestDiffFile"}
@@ -1080,9 +1078,9 @@ pipeline_filter_changed_paths_agg:
         {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
         {"type": "HAS_FILE", "from": "d", "to": "f"}
       ],
-      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
-      "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
-      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "group_by": ["f.old_path"],
+      "aggregations": [{ "count": "f", "as": "changes" }],
+      "aggregation_sort": "-changes",
       "limit": 60
     }
 

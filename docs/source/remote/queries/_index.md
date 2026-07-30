@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the Orbit knowledge graph to find GitLab data, code, and relationships.
+description: Query the GitLab Orbit knowledge graph to find GitLab data, code, and relationships.
 title: Queries
 ---
 
@@ -26,7 +26,7 @@ title: Queries
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit queries are JSON objects that describe graph work. A query can fetch one
+GitLab Orbit queries are JSON objects that describe graph work. A query can fetch one
 kind of object, traverse relationships between objects, count matching objects,
 find a path, or ask for the neighbors of a node.
 
@@ -43,7 +43,7 @@ current user can read in GitLab.
 | Find a path between two bounded endpoints | `path_finding` |
 | Ask what is connected to one bounded node | `neighbors` |
 
-Single-node `traversal` is the search shape. Orbit does not have a separate
+Single-node `traversal` is the search shape. GitLab Orbit does not have a separate
 `search` query type.
 
 ## Example: fetch a merge request diff
@@ -54,12 +54,12 @@ merge request. Request virtual columns explicitly by name.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "mr",
     "entity": "MergeRequest",
     "node_ids": [12345],
     "columns": ["iid", "title", "state", "diff"]
-  },
+  }],
   "limit": 1
 }
 ```
@@ -121,17 +121,17 @@ path and returns the raw file text.
 ```json orbit-query
 {
   "query_type": "traversal",
-  "node": {
+  "nodes": [{
     "id": "file",
     "entity": "File",
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
-  },
+  }],
   "limit": 5
 }
 ```
 
 For the full syntax, available fields, and validation rules, see
-[Orbit query language](query-language.md).
+[GitLab Orbit query language](query-language.md).

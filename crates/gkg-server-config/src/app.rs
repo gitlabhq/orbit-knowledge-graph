@@ -147,8 +147,6 @@ mod tests {
     use super::*;
     use crate::engine::EngineConfiguration;
 
-    /// Verifies that topics (message-level config) and handlers (domain config)
-    /// deserialize correctly from kebab-case YAML keys.
     #[test]
     fn engine_config_deserializes_from_kebab_case_yaml() {
         let yaml = r#"
@@ -202,7 +200,10 @@ handlers:
             Some("code"),
         );
         assert_eq!(engine.topics["code-indexing-task"].max_attempts, Some(5));
-        assert!(engine.topics["code-indexing-task"].dead_letter_on_exhaustion);
+        assert_eq!(
+            engine.topics["code-indexing-task"].dead_letter_on_exhaustion,
+            Some(true)
+        );
         assert_eq!(
             engine.topics["namespace-deletion"]
                 .concurrency_group
@@ -290,6 +291,51 @@ handlers:
         assert_eq!(
             config.gitlab.jwt.verifying_key.as_deref(),
             Some("env-secret-at-least-32-bytes-long")
+        );
+    }
+
+    #[test]
+    fn env_style_overrides_reach_topics_and_schedule() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        let config = config::Config::builder()
+            .add_source(config::File::with_name("config/default").required(false))
+            .add_source(SecretFileSource::new(dir.path()))
+            .set_default("nats.url", "localhost:4222")
+            .unwrap()
+            .set_default("datalake.url", "http://127.0.0.1:8123")
+            .unwrap()
+            .set_default("datalake.database", "default")
+            .unwrap()
+            .set_default("datalake.username", "default")
+            .unwrap()
+            .set_default("graph.url", "http://127.0.0.1:8123")
+            .unwrap()
+            .set_default("graph.database", "default")
+            .unwrap()
+            .set_default("graph.username", "default")
+            .unwrap()
+            .set_override(
+                "gitlab.jwt.verifying_key",
+                "env-secret-at-least-32-bytes-long",
+            )
+            .unwrap()
+            .set_override("engine.topics.code-indexing-task.max_attempts", "2")
+            .unwrap()
+            .set_override("schedule.tasks.global.cron", "0 */2 * * * *")
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let config: AppConfig = config.try_deserialize().expect("config should deserialize");
+
+        assert_eq!(
+            config.engine.topics["code-indexing-task"].max_attempts,
+            Some(2)
+        );
+        assert_eq!(
+            config.schedule.tasks.global.schedule.cron.as_deref(),
+            Some("0 */2 * * * *")
         );
     }
 

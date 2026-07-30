@@ -66,7 +66,7 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
-              "big_indexing_slots": 2,
+              "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
               "job_timeout_secs": 250,
@@ -78,7 +78,7 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": 6,
+              "small_indexing_slots": null,
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
@@ -91,14 +91,11 @@
           },
           "entity-handler": {
             "batch_size_overrides": {},
-            "datalake_batch_size": 500000,
-            "partition_min_rows": 50000000,
-            "partition_overrides": {},
-            "stream_block_size": 65536,
+            "datalake_batch_size": null,
             "system_notes_resolve_lookup_batch_size": 1000
           }
         },
-        "max_concurrent_workers": 16,
+        "max_concurrent_workers": null,
         "modules": [
           "sdlc",
           "code",
@@ -209,6 +206,7 @@
         "fetch_expires_secs": 5,
         "max_deliver": 5,
         "password": null,
+        "release_gc_idle_threshold_secs": 3600,
         "request_timeout_secs": 5,
         "stream_max_age_secs": 14400,
         "stream_max_bytes": null,
@@ -246,13 +244,13 @@
       "default": {
         "tasks": {
           "code-backfill": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           },
           "global": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           },
           "migration-completion": {
-            "cron": "0 */5 * * * *"
+            "cron": "0 */1 * * * *"
           },
           "namespace": {
             "cron": "*/30 * * * * *",
@@ -266,7 +264,8 @@
             "events_stream_name": "siphon_stream_main_db"
           },
           "stale-edge-reconciliation": {
-            "cron": "0 */30 * * * *"
+            "cron": "0 */30 * * * *",
+            "lookback_secs": 3600
           },
           "table-cleanup": {
             "cron": "0 0 3 * * *"
@@ -408,10 +407,13 @@
       "type": "object",
       "properties": {
         "big_indexing_slots": {
-          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Defaults to 2.",
-          "type": "integer",
+          "description": "Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count, capped by its memory limit.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 2,
+          "default": null,
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
@@ -486,10 +488,13 @@
           "minimum": 0
         },
         "small_indexing_slots": {
-          "description": "Concurrent indexing slots for small repositories. Defaults to 6.",
-          "type": "integer",
+          "description": "Concurrent indexing slots for small repositories. Unset = derived from the container CPU count, capped by its memory limit.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 6,
+          "default": null,
           "minimum": 0
         },
         "small_repo_max_files": {
@@ -556,7 +561,7 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
-            "big_indexing_slots": 2,
+            "big_indexing_slots": null,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 10,
             "job_timeout_secs": 250,
@@ -568,7 +573,7 @@
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
             "per_file_walk_timeout_ms": 100,
-            "small_indexing_slots": 6,
+            "small_indexing_slots": null,
             "small_repo_max_files": 650,
             "worker_threads": 0,
             "write_buffer_age_secs": 60,
@@ -634,11 +639,11 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `topics`: empty (no retry/DLQ by default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
+      "description": "ETL engine configuration. Scale fields left unset derive from the\ncontainer's resources at startup; an explicit value always wins.",
       "type": "object",
       "properties": {
         "concurrency_groups": {
-          "description": "Named concurrency groups with their limits.\nSubscriptions reference these by name via `SubscriptionConfig::concurrency_group`.",
+          "description": "Named concurrency groups with their limits. Empty = derived from the\nenabled `modules` and the worker cap.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
@@ -661,7 +666,7 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
-                "big_indexing_slots": 2,
+                "big_indexing_slots": null,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 10,
                 "job_timeout_secs": 250,
@@ -673,7 +678,7 @@
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
                 "per_file_walk_timeout_ms": 100,
-                "small_indexing_slots": 6,
+                "small_indexing_slots": null,
                 "small_repo_max_files": 650,
                 "worker_threads": 0,
                 "write_buffer_age_secs": 60,
@@ -686,23 +691,23 @@
             },
             "entity-handler": {
               "batch_size_overrides": {},
-              "datalake_batch_size": 500000,
-              "partition_min_rows": 50000000,
-              "partition_overrides": {},
-              "stream_block_size": 65536,
+              "datalake_batch_size": null,
               "system_notes_resolve_lookup_batch_size": 1000
             }
           }
         },
         "max_concurrent_workers": {
-          "description": "Maximum concurrent message handlers across all modules. Defaults to 16.",
-          "type": "integer",
+          "description": "Maximum concurrent message handlers across all modules. Unset = derived\nfrom the container CPU count, capped by its memory limit.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 16,
+          "default": null,
           "minimum": 0
         },
         "modules": {
-          "description": "Modules whose handlers this indexer process should register. Defaults to all\nmodules for backward compatibility (universal indexer). Set to a subset to\nrun a specialised pool, e.g. `[code]` for a code-only Deployment.",
+          "description": "Modules whose handlers this process registers. Unset = all modules.",
           "type": "array",
           "default": [
             "sdlc",
@@ -714,7 +719,7 @@
           }
         },
         "topics": {
-          "description": "Per-subscription message processing policy (retry, concurrency, DLQ).\nKeyed by a human-readable label matching topic name constants.",
+          "description": "Sparse per-subscription policy overrides, keyed by topic name. Each entry\nis layered field-wise over the module-declared default for that topic;\nomit a topic to use its declared default unchanged.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/SubscriptionConfig"
@@ -737,33 +742,14 @@
           "default": {}
         },
         "datalake_batch_size": {
-          "type": "integer",
+          "description": "Rows per SDLC datalake page (also the ClickHouse `max_block_size`). Unset =\nderived from the container memory limit (prod's 32 GiB sdlc pool anchors\nthe tuned 500k page), floored at 100k.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint64",
-          "default": 500000,
+          "default": null,
           "minimum": 0
-        },
-        "partition_min_rows": {
-          "description": "Skip partitioning a scope smaller than this; the probe isn't worth it.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 50000000,
-          "minimum": 0
-        },
-        "partition_overrides": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "default": {}
-        },
-        "stream_block_size": {
-          "description": "Rows per block streamed from the datalake (`max_block_size`). Larger blocks\namortize per-batch write round-trips (more throughput) at the cost of peak\nmemory per in-flight block.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 65536,
-          "minimum": 1
         },
         "system_notes_resolve_lookup_batch_size": {
           "description": "Maximum number of items bound into each SystemNote resolver lookup.",
@@ -916,7 +902,7 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
-              "big_indexing_slots": 2,
+              "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
               "job_timeout_secs": 250,
@@ -928,7 +914,7 @@
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "per_file_walk_timeout_ms": 100,
-              "small_indexing_slots": 6,
+              "small_indexing_slots": null,
               "small_repo_max_files": 650,
               "worker_threads": 0,
               "write_buffer_age_secs": 60,
@@ -944,10 +930,7 @@
           "$ref": "#/$defs/EntityHandlerConfig",
           "default": {
             "batch_size_overrides": {},
-            "datalake_batch_size": 500000,
-            "partition_min_rows": 50000000,
-            "partition_overrides": {},
-            "stream_block_size": 65536,
+            "datalake_batch_size": null,
             "system_notes_resolve_lookup_batch_size": 1000
           }
         }
@@ -1144,7 +1127,7 @@
           "minimum": 0
         },
         "consumer_inactive_threshold_secs": {
-          "description": "Inactive threshold for versioned dispatch consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nUsed for Siphon dispatch consumers during blue-green deployments.\nClamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).",
+          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. Clamped to a minimum of 60 seconds. Defaults to\n3600 (1 hour).",
           "type": "integer",
           "format": "uint64",
           "default": 3600,
@@ -1182,6 +1165,13 @@
             "null"
           ],
           "default": null
+        },
+        "release_gc_idle_threshold_secs": {
+          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. Clamped to a minimum of 600 seconds. Defaults to\n3600.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 600
         },
         "request_timeout_secs": {
           "description": "Request timeout in seconds. Defaults to 5.",
@@ -1533,13 +1523,13 @@
           "$ref": "#/$defs/ScheduledTasksConfiguration",
           "default": {
             "code-backfill": {
-              "cron": null
+              "cron": "0 */1 * * * *"
             },
             "global": {
-              "cron": null
+              "cron": "0 */1 * * * *"
             },
             "migration-completion": {
-              "cron": "0 */5 * * * *"
+              "cron": "0 */1 * * * *"
             },
             "namespace": {
               "cron": "*/30 * * * * *",
@@ -1553,7 +1543,8 @@
               "events_stream_name": "siphon_stream_main_db"
             },
             "stale-edge-reconciliation": {
-              "cron": "0 */30 * * * *"
+              "cron": "0 */30 * * * *",
+              "lookback_secs": 3600
             },
             "table-cleanup": {
               "cron": "0 0 3 * * *"
@@ -1570,19 +1561,19 @@
         "code-backfill": {
           "$ref": "#/$defs/CodeBackfillSweepConfig",
           "default": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           }
         },
         "global": {
           "$ref": "#/$defs/GlobalDispatcherConfig",
           "default": {
-            "cron": null
+            "cron": "0 */1 * * * *"
           }
         },
         "migration-completion": {
           "$ref": "#/$defs/MigrationCompletionConfig",
           "default": {
-            "cron": "0 */5 * * * *"
+            "cron": "0 */1 * * * *"
           }
         },
         "namespace": {
@@ -1608,7 +1599,8 @@
         "stale-edge-reconciliation": {
           "$ref": "#/$defs/StaleEdgeReconciliationConfig",
           "default": {
-            "cron": "0 */30 * * * *"
+            "cron": "0 */30 * * * *",
+            "lookback_secs": 3600
           }
         },
         "table-cleanup": {
@@ -1665,7 +1657,7 @@
       }
     },
     "StaleEdgeReconciliationConfig": {
-      "description": "Tombstones stale FK-derived \"latest\"/single-value edges whose endpoint no\nlonger matches the owner node's current FK column. ReplacingMergeTree keys\nthe edge on its (mutable) `target_id`, so an FK change orphans the old edge\ninstead of replacing it; this sweep reconciles them off the indexing path.",
+      "description": "Tombstones edges a node's pipeline stopped emitting, off the indexing path.",
       "type": "object",
       "properties": {
         "cron": {
@@ -1675,12 +1667,18 @@
             "null"
           ],
           "default": null
+        },
+        "lookback_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 0
         }
       },
       "additionalProperties": false
     },
     "SubscriptionConfig": {
-      "description": "Per-subscription message processing policy (retry, concurrency, DLQ).\n\nLives under `engine.topics.<name>` in YAML. Applied to the `Subscription`\nat handler registration time, so all handlers sharing a subscription\nshare the same processing policy.\n\nRetries are opt-in: a subscription with no retry config will ack on failure.",
+      "description": "Sparse per-subscription policy override (retry, concurrency, DLQ).\n\nThe correct default policy for each topic is declared in Rust by the indexer\nmodule that owns the topic (see `crates/indexer/src/modules/*`). A\n`engine.topics.<name>` entry in YAML is a *field-wise override* layered on top\nof that declared default via [`SubscriptionConfig::with_optional_override`]: only the\nfields the entry sets change; every unset field keeps the module default. Each\nfield is therefore `Option`, so \"unset\" is distinguishable from an explicit\nvalue (notably `dead_letter_on_exhaustion: false`).",
       "type": "object",
       "properties": {
         "concurrency_group": {
@@ -1693,8 +1691,11 @@
         },
         "dead_letter_on_exhaustion": {
           "description": "Route exhausted retries to the dead letter queue.",
-          "type": "boolean",
-          "default": false
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "max_ack_pending": {
           "description": "Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.\nWhen absent, the NATS server default applies (currently 1000).",
@@ -1707,7 +1708,7 @@
           "minimum": 0
         },
         "max_attempts": {
-          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the message is processed once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the message is processed once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.",
           "type": [
             "integer",
             "null"

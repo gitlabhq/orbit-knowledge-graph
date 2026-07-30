@@ -106,6 +106,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -136,6 +137,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -162,6 +164,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -191,6 +194,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -223,6 +227,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -266,6 +271,7 @@ mod tests {
                 key: "index_granularity".into(),
                 value: "2048".into(),
             }],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);
@@ -304,6 +310,7 @@ mod tests {
             partition_by: vec![],
             primary_key: None,
             settings: vec![],
+            ttl: None,
         };
 
         let sql = emit_create_table(&table);

@@ -6,7 +6,7 @@ use compiler::{Node, QueryError, compile};
 fn compile_to_ast_works() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
         "limit": 10
     }"#;
 
@@ -14,7 +14,11 @@ fn compile_to_ast_works() {
     let Node::Query(ref q) = node else {
         unreachable!()
     };
-    assert_eq!(q.limit, Some(10));
+    assert_eq!(
+        q.limit,
+        Some(11),
+        "fetch limit is the requested limit plus the has_more probe row"
+    );
     assert!(!q.select.is_empty());
 }
 
@@ -28,7 +32,7 @@ fn traversal_query() {
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25,
-        "order_by": {"node": "n", "property": "created_at", "direction": "DESC"}
+        "order_by": "-n.created_at"
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -36,7 +40,7 @@ fn traversal_query() {
 
     assert!(rendered.contains("gl_edge"));
     assert!(rendered.contains("relationship_kind"));
-    assert!(rendered.contains("LIMIT 25"));
+    assert!(rendered.contains("LIMIT 26"));
     assert!(has_param_value(
         &result.base.params,
         &serde_json::json!("AUTHORED")
@@ -47,12 +51,12 @@ fn traversal_query() {
 fn bool_filter_value_is_preserved() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "n",
             "entity": "Note",
             "columns": ["confidential"],
             "filters": { "confidential": true }
-        },
+        }],
         "limit": 5
     }"#;
 
@@ -72,8 +76,8 @@ fn aggregation_query() {
             {"id": "u", "entity": "User", "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "group_by": [{"kind": "node", "node": "u"}],
-        "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "n", "as": "note_count"}],
         "limit": 10
     }"#;
 
@@ -89,23 +93,21 @@ fn group_by_property_truncate_month_wraps_column() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "Note", "filters": {"confidential": {"op": "eq", "value": false}}}
+            {"id": "u", "entity": "Note", "filters": {"confidential": {"eq": false}}}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}}
-        ],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "group_by": [{"key": "u.created_at", "truncate": "month"}],
         "limit": 50
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
-        rendered.contains("toStartOfMonth(u.created_at)"),
-        "expected toStartOfMonth wrapper; got:\n{rendered}"
+        rendered.contains("toDate32(toStartOfMonth(u.created_at))"),
+        "expected toDate32(toStartOfMonth(...)) wrapper; got:\n{rendered}"
     );
     assert!(
-        rendered.contains("toStartOfMonth(u.created_at) AS created_at_month"),
-        "expected default alias `created_at_month`; got:\n{rendered}"
+        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS u_created_at_month"),
+        "expected derived column `u_created_at_month`; got:\n{rendered}"
     );
 }
 
@@ -118,24 +120,24 @@ fn group_by_property_truncate_all_units_compile() {
                 "nodes": [
                     {{"id": "u", "entity": "Note", "node_ids": [1]}}
                 ],
-                "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
-                "group_by": [
-                    {{"kind": "property", "node": "u", "property": "created_at", "transform": {{"kind": "truncate", "unit": "{unit}"}}}}
-                ],
+                "aggregations": [{{"count": "u", "as": "n"}}],
+                "group_by": [{{"key": "u.created_at", "truncate": "{unit}"}}],
                 "limit": 10
             }}"#
         );
         let result = compile(&json, &test_ontology(), &test_ctx())
             .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
         let rendered = result.base.render();
+        // Sub-daily units cast to DateTime64, daily+ to Date32, so the key
+        // crosses Arrow as a typed date/timestamp rather than a bare integer.
         let expected = match unit {
-            "minute" => "toStartOfMinute",
-            "hour" => "toStartOfHour",
-            "day" => "toStartOfDay",
-            "week" => "toStartOfWeek",
-            "month" => "toStartOfMonth",
-            "quarter" => "toStartOfQuarter",
-            "year" => "toStartOfYear",
+            "minute" => "toDateTime64(toStartOfMinute(u.created_at), 0)",
+            "hour" => "toDateTime64(toStartOfHour(u.created_at), 0)",
+            "day" => "toDate32(toStartOfDay(u.created_at))",
+            "week" => "toDate32(toStartOfWeek(u.created_at))",
+            "month" => "toDate32(toStartOfMonth(u.created_at))",
+            "quarter" => "toDate32(toStartOfQuarter(u.created_at))",
+            "year" => "toDate32(toStartOfYear(u.created_at))",
             _ => unreachable!(),
         };
         assert!(
@@ -152,10 +154,8 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         "nodes": [
             {"id": "u", "entity": "Note"}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
-        ],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
     let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
@@ -173,10 +173,8 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         "nodes": [
             {"id": "u", "entity": "Note", "node_ids": [1, 2]}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
-        ],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "group_by": [{"key": "u.created_at", "truncate": "minute"}],
         "limit": 10
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -184,7 +182,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         result
             .base
             .render()
-            .contains("toStartOfMinute(u.created_at)")
+            .contains("toDateTime64(toStartOfMinute(u.created_at), 0)")
     );
 }
 
@@ -193,16 +191,19 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "Note", "filters": {"created_at": {"op": "gte", "value": "2026-04-01T00:00:00Z"}}}
+            {"id": "u", "entity": "Note", "filters": {"created_at": {"gte": "2026-04-01T00:00:00Z"}}}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "hour"}}
-        ],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "group_by": [{"key": "u.created_at", "truncate": "hour"}],
         "limit": 50
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    assert!(result.base.render().contains("toStartOfHour(u.created_at)"));
+    assert!(
+        result
+            .base
+            .render()
+            .contains("toDateTime64(toStartOfHour(u.created_at), 0)")
+    );
 }
 
 #[test]
@@ -212,10 +213,8 @@ fn group_by_truncate_on_non_date_property_rejected() {
         "nodes": [
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [
-            {"kind": "property", "node": "u", "property": "confidential", "transform": {"kind": "truncate", "unit": "month"}}
-        ],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "group_by": [{"key": "u.confidential", "truncate": "month"}],
         "limit": 10
     }"#;
     let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
@@ -233,16 +232,14 @@ fn group_by_truncate_custom_alias_preserved() {
         "nodes": [
             {"id": "u", "entity": "Note", "node_ids": [1]}
         ],
-        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
-        "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
-        ],
+        "aggregations": [{"count": "u", "as": "n"}],
+        "group_by": [{"key": "u.created_at", "truncate": "month", "as": "bucket"}],
         "limit": 10
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
-        rendered.contains("toStartOfMonth(u.created_at) AS bucket"),
+        rendered.contains("toDate32(toStartOfMonth(u.created_at)) AS bucket"),
         "expected alias `bucket`; got:\n{rendered}"
     );
 }
@@ -330,8 +327,8 @@ fn path_finding_depth_control() {
 fn neighbors_query() {
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]},
-        "neighbors": {"node": "u", "direction": "both"}
+        "nodes": [{"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]}],
+        "neighbors": {"direction": "both"}
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -359,16 +356,16 @@ fn neighbors_query() {
 fn filter_operators() {
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "columns": ["username", "state", "created_at"],
             "filters": {
-                "created_at": {"op": "gte", "value": "2024-01-01"},
-                "state": {"op": "in", "value": ["active", "blocked"]},
-                "username": {"op": "contains", "value": "admin"}
+                "created_at": {"gte": "2024-01-01"},
+                "state": {"in": ["active", "blocked"]},
+                "username": {"contains": "admin"}
             }
-        },
+        }],
         "limit": 30
     }"#;
 
@@ -651,12 +648,12 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {
+        "nodes": [{
             "id": "f",
             "entity": "File",
-            "filters": {"path": {"op": "contains", "value": "labkit"}}
-        },
-        "neighbors": {"node": "f", "direction": "both"}
+            "filters": {"path": {"contains": "labkit"}}
+        }],
+        "neighbors": {"direction": "both"}
     }"#;
     let result = compile(json, &ontology, &test_ctx()).unwrap();
     let rendered = result.base.render();
@@ -676,8 +673,8 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
 fn multi_table_neighbors_scans_all_tables() {
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1]},
-        "neighbors": {"node": "p", "direction": "both"}
+        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
+        "neighbors": {"direction": "both"}
     }"#;
     let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
@@ -710,7 +707,7 @@ fn scoped_traversal_injects_tight_prefix() {
         "query_type": "traversal",
         "nodes": [
             {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
-            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
         "limit": 100
@@ -724,11 +721,11 @@ fn scoped_aggregation_injects_tight_prefix() {
         "query_type": "aggregation",
         "nodes": [
             {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
-            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}}
+            {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
-        "group_by": [{"kind": "node", "node": "p"}],
-        "aggregations": [{"function": "count", "target": "wi", "alias": "c"}],
+        "group_by": ["p"],
+        "aggregations": [{"count": "wi", "as": "c"}],
         "limit": 100
     }"#;
     assert!(render_scoped(json).contains(SCOPED_PREFIX));
@@ -739,7 +736,7 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}},
+            {"id": "p", "entity": "Project", "filters": {"id": {"eq": 1}}},
             {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
             {"id": "rel", "entity": "WorkItem", "columns": ["id", "title"]}
         ],

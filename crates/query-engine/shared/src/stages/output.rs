@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::types::{HydrationOutput, PaginationMeta, PipelineOutput, QueryExecutionLog};
+use crate::types::{HydrationOutput, PipelineOutput, QueryExecutionLog};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
 #[derive(Clone)]
@@ -44,15 +44,7 @@ impl PipelineStage for OutputStage {
             .unwrap_or_default();
 
         let mut query_result = input.query_result.clone();
-
-        let pagination = compiled.input.cursor.map(|cursor| {
-            let total_rows = query_result.authorized_count();
-            let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-            PaginationMeta {
-                has_more,
-                total_rows,
-            }
-        });
+        let pagination = Some(crate::types::paginate(&mut query_result, &compiled.input));
 
         Ok(PipelineOutput {
             row_count: query_result.authorized_count(),

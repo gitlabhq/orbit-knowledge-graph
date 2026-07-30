@@ -66,6 +66,8 @@ All modes share the same configuration structure.
 | `nats.stream_max_age_secs` | `GKG_NATS__STREAM_MAX_AGE_SECS` | None | Max message age before deletion |
 | `nats.stream_max_bytes` | `GKG_NATS__STREAM_MAX_BYTES` | None | Max stream size in bytes |
 | `nats.stream_max_messages` | `GKG_NATS__STREAM_MAX_MESSAGES` | None | Max messages per stream |
+| `nats.consumer_inactive_threshold_secs` | `GKG_NATS__CONSUMER_INACTIVE_THRESHOLD_SECS` | `3600` | Idle time after which NATS auto-deletes a versioned durable consumer (min 60) |
+| `nats.release_gc_idle_threshold_secs` | `GKG_NATS__RELEASE_GC_IDLE_THRESHOLD_SECS` | `3600` | Idle time after which a starting dispatcher deletes another release's streams (min 600) |
 
 The `GKG_INDEXER` stream is created with:
 
@@ -86,7 +88,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `datalake.database` | `GKG_DATALAKE__DATABASE` | `default` | Database name |
 | `datalake.username` | `GKG_DATALAKE__USERNAME` | `default` | Auth user |
 | `datalake.password` | `GKG_DATALAKE__PASSWORD` | None | Auth password |
-| `datalake.query_settings` | | `{}` | ClickHouse session settings (e.g., `max_rows_to_read`) |
+| `datalake.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `max_execution_time`, `max_query_size`) |
 
 ### Graph
 
@@ -96,7 +98,8 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.database` | `GKG_GRAPH__DATABASE` | `default` | Database name |
 | `graph.username` | `GKG_GRAPH__USERNAME` | `default` | Auth user |
 | `graph.password` | `GKG_GRAPH__PASSWORD` | None | Auth password |
-| `graph.query_settings` | | `{}` | ClickHouse session settings |
+| `graph.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
+| `graph.insert_settings` | | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
 
 ### Profiling (debug)
 
@@ -114,14 +117,24 @@ The worker pool limits how many messages are processed concurrently. It uses a t
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
-| `engine.max_concurrent_workers` | `GKG_ENGINE__MAX_CONCURRENT_WORKERS` | `16` | Global concurrency cap |
-| `engine.concurrency_groups` | | `{}` | Named group limits |
+| `engine.max_concurrent_workers` | `GKG_ENGINE__MAX_CONCURRENT_WORKERS` | derived | Global concurrency cap |
+| `engine.concurrency_groups` | | derived | Named group limits |
+
+### Resource-derived defaults
+
+These fields derive from the container's resources at startup when left unset; an explicit config value (YAML or env var) always wins. Each derived value logs once at info level with its input, so an operator can read a pod's choice from its logs without exec'ing in.
+
+- `max_concurrent_workers` unset → the container's available parallelism (`std::thread::available_parallelism`, which is cgroup-aware on Linux, so it tracks the pod's CPU limit), capped by the cgroup memory limit at 1.5 GiB per worker so a CPU-rich but memory-tight pod cannot derive more workers than it can feed. The budget is calibrated on production's hand-tuned pools (code: 16 workers in 24 GiB, sdlc: 20 in 32 GiB). No readable memory limit (unlimited cgroup, bare metal, macOS) means CPU alone decides.
+- `concurrency_groups` empty → derived from the modules the pool registers (`engine.modules`) and the resolved worker cap. A single-group pool gives that group the whole cap; a pool spanning both the SDLC and code groups splits the cap 75% / 25% (the historical universal-pool ratio of sdlc 12 / code 4 out of 16). Namespace deletion shares the sdlc group.
+- `handlers.entity-handler.datalake_batch_size` unset → the SDLC datalake page size scales with the cgroup memory limit, anchored at prod's 32 GiB sdlc pool (its hand-tuned 500k page), floored at 100k rows so a memory-scarce host can't OOM on a full page. No readable memory limit means the 500k anchor default. `batch_size_overrides` still apply on top per entity.
+
+On a 16-core universal pool this reproduces the previous hardcoded defaults exactly (16 workers, sdlc 12 / code 4).
 
 ### How concurrency groups work
 
 Each handler can declare a `concurrency_group`. When a message arrives, the handler acquires the group semaphore first, then the global semaphore. Both are released after processing.
 
-This prevents one handler type from monopolizing all workers. For example, with 16 global workers, you can cap SDLC at 12 and code at 4:
+This prevents one handler type from monopolizing all workers. To pin explicit values instead of deriving them, e.g. 16 global workers capped at SDLC 12 and code 4:
 
 ```yaml
 engine:
@@ -133,41 +146,49 @@ engine:
 
 ## Topic configuration
 
-Each NATS subscription has retry and concurrency settings under `engine.topics.<name>`:
+Each topic's default subscription policy (retry, DLQ, concurrency group) is
+**declared in Rust** by the indexer module that owns the topic, next to the
+handler it protects:
 
-| Config path | Default | Description |
-|-------------|---------|-------------|
-| `topics.<name>.concurrency_group` | None | Which group semaphore to use |
-| `topics.<name>.max_attempts` | None | Total attempts (1 = no retry, 5 = 4 retries) |
-| `topics.<name>.retry_interval_secs` | None | Delay between retries (NATS nack delay) |
+- `code-indexing-task` — `crates/indexer/src/modules/code/mod.rs`
+- `global-handler`, `namespace-handler` — `crates/indexer/src/modules/sdlc/mod.rs`
+- `namespace-deletion` — `crates/indexer/src/modules/namespace_deletion/mod.rs`
+
+Because the policy lives in code, a deployment that omits config still gets the
+correct policy — omitting `engine.topics` no longer silently disables
+`code-indexing-task` retries and dead-lettering.
+
+An `engine.topics.<name>` entry in YAML is a **sparse, field-wise override**
+layered on top of the declared default: only the fields the entry sets change;
+every unset field keeps the module default. `dead_letter_on_exhaustion` is
+`Option<bool>`, so an entry can explicitly turn it off, not just on.
+
+| Config path | Overrides | Description |
+|-------------|-----------|-------------|
+| `topics.<name>.concurrency_group` | declared default | Which group semaphore to use |
+| `topics.<name>.max_attempts` | declared default | Total attempts (1 = no retry, 5 = 4 retries) |
+| `topics.<name>.retry_interval_secs` | declared default | Delay between retries (NATS nack delay) |
+| `topics.<name>.dead_letter_on_exhaustion` | declared default | Route exhausted retries to the DLQ |
 
 ### Default topic settings
 
-From `config/default.yaml`:
+These are the module-declared defaults (canonical values, matching the production
+Helm chart). They apply with no `engine.topics` config at all:
+
+| Topic | concurrency_group | max_attempts | retry_interval_secs | dead_letter_on_exhaustion |
+|-------|-------------------|--------------|---------------------|---------------------------|
+| `global-handler` | `sdlc` | 1 | — | — |
+| `namespace-handler` | `sdlc` | 1 | — | — |
+| `code-indexing-task` | `code` | 5 | 60 | true |
+| `namespace-deletion` | `sdlc` | 1 | — | — |
+
+To override a single field, e.g. raise code retries to 8:
 
 ```yaml
 engine:
-  max_concurrent_workers: 16
-  concurrency_groups:
-    sdlc: 12
-    code: 4
   topics:
-    global-handler:
-      concurrency_group: sdlc
-      max_attempts: 1
-      retry_interval_secs: 60
-    namespace-handler:
-      concurrency_group: sdlc
-      max_attempts: 1
-      retry_interval_secs: 60
     code-indexing-task:
-      concurrency_group: code
-      max_attempts: 5
-      retry_interval_secs: 60
-      dead_letter_on_exhaustion: true
-    namespace-deletion:
-      concurrency_group: code
-      max_attempts: 1
+      max_attempts: 8
 ```
 
 ### Handler-specific settings
@@ -176,9 +197,10 @@ engine:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `engine.handlers.entity-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+| `engine.handlers.entity-handler.datalake_batch_size` | derived | Rows per datalake extraction query (see [Resource-derived defaults](#resource-derived-defaults)) |
 | `engine.handlers.entity-handler.batch_size_overrides.<Entity>` | None | Per-entity override for datalake batch size |
-| `engine.handlers.entity-handler.partition_overrides.<Entity>` | None | Number of partitions for initial load parallelism |
+
+Initial-load partition parallelism is no longer configured here; a pipeline declares `extract.partition_count` in its ontology node YAML (e.g. `config/ontology/nodes/ci/job.yaml`).
 
 #### Code indexing task handler
 
@@ -200,7 +222,7 @@ engine:
 
 ## Scheduler configuration
 
-Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Tasks without a cron expression fall back to a 60-second interval.
+Scheduled tasks run in `DispatchIndexing` mode. Each task has a 6-field cron expression (seconds, minutes, hours, day-of-month, month, day-of-week). Every task's default cron is declared in Rust (`ScheduledTasksConfiguration` in `crates/gkg-server-config/src/engine.rs`); a `schedule.tasks.<name>` entry in YAML overrides only the cadence you set. A task with no declared cron and no config falls back to a 60-second interval.
 
 Distributed locking via NATS KV ensures only one dispatcher instance runs each task per interval.
 
@@ -441,7 +463,7 @@ GKG_NATS__AUTO_CREATE_STREAMS=true        # Auto-create on startup
 
 ## Helm chart configuration
 
-In production, GKG is deployed via the [`gkg-helm-charts`](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables.
+In production, GKG is deployed via the [`orbit-helm-charts`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts). Most configuration is set through Helm values rather than raw YAML or environment variables.
 
 ### Key Helm values mapping
 
@@ -460,7 +482,7 @@ In production, GKG is deployed via the [`gkg-helm-charts`](https://gitlab.com/gi
 ### Overriding configuration via Helm
 
 ```shell
-helm upgrade gkg gkg-helm-charts/gkg \
+helm upgrade gkg orbit-helm-charts/gkg \
   --set nats.consumerName=gkg-indexer \
   --set clickhouse.graph.database=gkg-production
 ```
@@ -468,7 +490,7 @@ helm upgrade gkg gkg-helm-charts/gkg \
 For complex overrides, use a values file:
 
 ```shell
-helm upgrade gkg gkg-helm-charts/gkg -f custom-values.yaml
+helm upgrade gkg orbit-helm-charts/gkg -f custom-values.yaml
 ```
 
 ## Troubleshooting with kubectl

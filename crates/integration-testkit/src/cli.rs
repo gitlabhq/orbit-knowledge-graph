@@ -104,7 +104,10 @@ pub fn create_test_repo() -> gitalisk_core::repository::testing::local::LocalGit
     repo.fs.create_file(
         "src/main.py",
         Some(
-            "def hello():\n    print('hello')\n\nclass App:\n    def run(self):\n        hello()\n",
+            "from utils import read_file\n\n\
+             class Base:\n    def setup(self):\n        pass\n\n\
+             def hello():\n    print('hello')\n\n\
+             class App(Base):\n    def run(self):\n        hello()\n        read_file('x')\n",
         ),
     );
     repo.fs.create_file(

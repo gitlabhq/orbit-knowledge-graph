@@ -113,7 +113,7 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
         "limit": 10
     }"#;
 
@@ -142,7 +142,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
         "limit": 10
     }"#;
 
@@ -181,7 +181,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
         "limit": 10
     }"#;
 
@@ -514,7 +514,7 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+        "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}],
         "limit": 10
     }"#;
 
@@ -601,7 +601,7 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "filters": {"username": "nonexistent"}},
+        "nodes": [{"id": "u", "entity": "User", "filters": {"username": "nonexistent"}}],
         "limit": 10
     }"#;
 
@@ -805,7 +805,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
         "limit": 10
     }"#;
 
@@ -1445,15 +1445,15 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "filters": {
-                "state": {"op": "eq", "value": "active"},
-                "username": {"op": "in", "value": ["alice", "bob", "charlie", "diana"]}
+                "state": {"eq": "active"},
+                "username": {"in": ["alice", "bob", "charlie", "diana"]}
             }
-        },
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+        }],
+        "order_by": "u.username",
         "limit": 100
     }"#;
 
@@ -1499,14 +1499,14 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "p",
             "entity": "Project",
             "filters": {
-                "visibility_level": {"op": "in", "value": ["public", "internal"]}
+                "visibility_level": {"in": ["public", "internal"]}
             }
-        },
-        "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+        }],
+        "order_by": "p.id",
         "limit": 50
     }"#;
 
@@ -1542,11 +1542,11 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "g",
             "entity": "Group",
             "node_ids": [100, 101, 102]
-        },
+        }],
         "limit": 100
     }"#;
 
@@ -1582,11 +1582,11 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "id_range": {"start": 2, "end": 4}
-        },
+        }],
         "limit": 100
     }"#;
 
@@ -1616,11 +1616,11 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "p",
             "entity": "Project",
             "node_ids": [1000, 1003]
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -1656,13 +1656,13 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "filters": {
-                "username": {"op": "eq", "value": "definitely_does_not_exist_12345"}
+                "username": {"eq": "definitely_does_not_exist_12345"}
             }
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -1686,11 +1686,11 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "g",
             "entity": "Group",
             "id_range": {"start": 1, "end": 10000}
-        },
+        }],
         "limit": 100
     }"#;
 
@@ -1718,13 +1718,13 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "filters": {
                 "state": "active"
             }
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -1817,12 +1817,12 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "id_range": {"start": 1, "end": 10000},
             "columns": ["username", "state"]
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -1880,12 +1880,12 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "g",
             "entity": "Group",
             "id_range": {"start": 1, "end": 10000},
             "columns": "*"
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -1944,7 +1944,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
         "limit": 10
     }"#;
 
@@ -2163,14 +2163,14 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "id_range": {"start": 1, "end": 10000},
             "columns": ["username", "name", "state"],
-            "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
-        },
-        "order_by": {"node": "u", "property": "username", "direction": "ASC"},
+            "filters": {"username": {"in": ["alice", "bob"]}}
+        }],
+        "order_by": "u.username",
         "limit": 10
     }"#;
 
@@ -2205,12 +2205,12 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "p",
             "entity": "Project",
             "id_range": {"start": 1, "end": 10000},
             "columns": ["id", "name", "visibility_level"]
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -2283,8 +2283,8 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": [{"kind": "node", "node": "u"}],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "limit": 10
     }"#;
 
@@ -2375,8 +2375,8 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "group_by": [{"kind": "node", "node": "u"}],
-        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "mr", "as": "mr_count"}],
         "limit": 10
     }"#;
 
@@ -2490,13 +2490,13 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "id_range": {"start": 1, "end": 10000},
             "columns": ["username"],
             "filters": {"state": "active"}
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -2535,12 +2535,12 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {
+        "nodes": [{
             "id": "u",
             "entity": "User",
             "id_range": {"start": 1, "end": 10000},
             "columns": ["username", "name", "state"]
-        },
+        }],
         "limit": 10
     }"#;
 
@@ -2564,8 +2564,8 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2686,8 +2686,8 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2712,8 +2712,8 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1, 3]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 3]}],
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2751,8 +2751,8 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-        "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]}
+        "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+        "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -2849,8 +2849,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "f", "entity": "File", "node_ids": [3000]},
-        "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [3000]}],
+        "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3034,8 +3034,8 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "f", "entity": "File", "node_ids": [3000, 3002]},
-        "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]}
+        "nodes": [{"id": "f", "entity": "File", "node_ids": [3000, 3002]}],
+        "neighbors": {"direction": "outgoing", "rel_types": ["DEFINES"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3365,8 +3365,8 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
-        "neighbors": {"node": "u", "direction": "outgoing"}
+        "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+        "neighbors": {"direction": "outgoing"}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3436,7 +3436,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // User.user_type is int-based: 0=human, 6=project_bot, 11=service_account.
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}
+        "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3466,7 +3466,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}
+        "nodes": [{"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3482,7 +3482,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // MergeRequest.state is int-based: 1=opened, 2=closed, 3=merged, 4=locked.
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}
+        "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3508,7 +3508,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}
+        "nodes": [{"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3523,7 +3523,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2]}}}
+        "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 2]}}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3538,7 +3538,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}
+        "nodes": [{"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3564,7 +3564,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "filters": {"state": "blocked"}}
+        "nodes": [{"id": "u", "entity": "User", "filters": {"state": "blocked"}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3579,7 +3579,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "filters": {"state": {"op": "in", "value": ["active", "blocked"]}}}
+        "nodes": [{"id": "u", "entity": "User", "filters": {"state": {"in": ["active", "blocked"]}}}]
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3593,66 +3593,73 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     );
 }
 
+fn with_after(json: &str, after: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
+    v["cursor"]["after"] = serde_json::Value::String(after.to_string());
+    v.to_string()
+}
+
+async fn fetch_page(
+    ctx: &TestContext,
+    json: &str,
+    ontology: &ontology::Ontology,
+    security_ctx: &query_engine::compiler::SecurityContext,
+) -> (QueryResult, query_engine::shared::PaginationMeta) {
+    let query = compile(json, ontology, security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let meta = query_engine::shared::paginate(&mut result, &query.input);
+    (result, meta)
+}
+
+fn page_ids(result: &QueryResult) -> Vec<i64> {
+    let u = result.ctx().get("u").unwrap().clone();
+    result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect()
+}
+
 async fn cursor_pagination_basic(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+        "order_by": "u.id",
+        "cursor": {"page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
-        query.base.sql.contains("LIMIT 100"),
-        "SQL LIMIT should come from limit field, not cursor: {}",
+        query.base.sql.contains("LIMIT 3"),
+        "SQL LIMIT should be page_size + 1 probe row: {}",
         query.base.sql
     );
 
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let (result, meta) = fetch_page(ctx, json, &ontology, &security_ctx).await;
+    assert!(meta.has_more);
+    assert_eq!(page_ids(&result), vec![1, 2], "first page");
+    let after = meta
+        .next_cursor
+        .expect("mid-stream page must carry a token");
 
-    assert_eq!(result.len(), 5, "ClickHouse should return all 5 users");
+    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
+    assert!(meta.has_more);
+    assert_eq!(
+        page_ids(&result),
+        vec![3, 4],
+        "second page continues past the seek anchor"
+    );
+    let after = meta
+        .next_cursor
+        .expect("mid-stream page must carry a token");
 
-    let has_more = result.apply_cursor(0, 2);
-    assert!(has_more);
-    assert_eq!(result.authorized_count(), 2);
-
-    let u = result.ctx().get("u").unwrap().clone();
-    let page1_ids: Vec<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect();
-    assert_eq!(page1_ids, vec![1, 2], "first page should be user IDs 1, 2");
-
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let has_more = result.apply_cursor(2, 2);
-    assert!(has_more);
-    assert_eq!(result.authorized_count(), 2);
-
-    let u = result.ctx().get("u").unwrap().clone();
-    let page2_ids: Vec<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect();
-    assert_eq!(page2_ids, vec![3, 4], "second page should be user IDs 3, 4");
-
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let has_more = result.apply_cursor(4, 2);
-    assert!(!has_more, "last page should not have more");
-    assert_eq!(result.authorized_count(), 1);
-
-    let u = result.ctx().get("u").unwrap().clone();
-    let last_ids: Vec<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect();
-    assert_eq!(last_ids, vec![5], "last page should be user ID 5");
+    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
+    assert!(!meta.has_more, "last page should not have more");
+    assert_eq!(meta.next_cursor, None, "exhausted stream has no token");
+    assert_eq!(page_ids(&result), vec![5], "last page");
 }
 
 async fn cursor_pagination_with_redaction(ctx: &TestContext) {
@@ -3661,64 +3668,74 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+        "order_by": "u.id",
+        "cursor": {"page_size": 2}
     }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 3, 5]);
     mock_service.deny("user", &[2, 4]);
+
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
     run_redaction(&mut result, &mock_service);
+    let meta = query_engine::shared::paginate(&mut result, &query.input);
+
+    assert!(meta.has_more);
+    assert_eq!(
+        page_ids(&result),
+        vec![1],
+        "redaction shortens the page (user 2 denied) instead of pulling user 3 forward"
+    );
+    let after = meta
+        .next_cursor
+        .expect("token anchors on last scanned row, even a denied one");
+
+    let query = compile(&with_after(json, &after), &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    run_redaction(&mut result, &mock_service);
+    let meta = query_engine::shared::paginate(&mut result, &query.input);
 
     assert_eq!(
-        result.authorized_count(),
-        3,
-        "3 users should survive redaction"
+        page_ids(&result),
+        vec![3],
+        "next page continues after user 2, not after the last authorized row"
     );
-
-    let has_more = result.apply_cursor(0, 2);
-    assert!(has_more);
-    assert_eq!(result.authorized_count(), 2);
-
-    let u = result.ctx().get("u").unwrap().clone();
-    let page_ids: Vec<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect();
-    assert_eq!(
-        page_ids,
-        vec![1, 3],
-        "cursor should slice the authorized (post-redaction) set, not the raw set"
-    );
+    assert!(meta.has_more);
 }
 
-async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
+async fn cursor_pagination_rejects_foreign_token(ctx: &TestContext) {
+    let _ = ctx;
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        "limit": 1000,
-        "cursor": {"offset": 100, "page_size": 10}
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+        "order_by": "u.id",
+        "cursor": {"page_size": 2}
+    }"#;
+    let other = r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 5000}}],
+        "order_by": "u.id",
+        "cursor": {"page_size": 2}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-
-    let has_more = result.apply_cursor(100, 10);
-    assert!(!has_more);
-    assert_eq!(
-        result.authorized_count(),
-        0,
-        "offset beyond data should return 0 rows"
+    let token = query_engine::compiler::passes::cursor::encode(
+        {
+            let v: serde_json::Value = serde_json::from_str(other).unwrap();
+            query_engine::compiler::passes::cursor::canonical_hash(&v)
+        },
+        &[Some("2".into()), Some("2".into())],
+    );
+    let err = compile(&with_after(json, &token), &ontology, &security_ctx).unwrap_err();
+    assert!(
+        err.to_string().contains("different query"),
+        "token minted for a different query must be rejected: {err}"
     );
 }
 
@@ -3728,38 +3745,27 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "traversal",
-        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "limit": 100,
-        "cursor": {"offset": 0, "page_size": 2}
+        "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
+        "order_by": "u.id",
+        "cursor": {"page_size": 2}
     }"#;
 
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let (result, meta) = fetch_page(ctx, json, &ontology, &security_ctx).await;
+    assert!(meta.has_more);
+    assert_eq!(
+        page_ids(&result),
+        vec![1, 2],
+        "first page of filtered results"
+    );
+    let after = meta.next_cursor.unwrap();
 
-    let has_more = result.apply_cursor(0, 2);
-    assert!(has_more);
-    assert_eq!(result.authorized_count(), 2);
-
-    let u = result.ctx().get("u").unwrap().clone();
-    let ids: Vec<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect();
-    assert_eq!(ids, vec![1, 2], "first page of filtered results");
-
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let has_more = result.apply_cursor(2, 2);
-    assert!(!has_more);
-
-    let u = result.ctx().get("u").unwrap().clone();
-    let ids: Vec<i64> = result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect();
-    assert_eq!(ids, vec![3, 4], "second page of filtered results");
+    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
+    assert!(!meta.has_more);
+    assert_eq!(
+        page_ids(&result),
+        vec![3, 4],
+        "second page of filtered results"
+    );
 }
 
 async fn search_merge_requests_with_redaction(ctx: &TestContext) {
@@ -3767,7 +3773,7 @@ async fn search_merge_requests_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}}],
             "limit": 10
         }"#,
     )
@@ -3802,8 +3808,8 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+            "order_by": "u.id",
             "limit": 10
         }"#,
     )
@@ -3835,8 +3841,8 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-            "order_by": {"node": "u", "property": "id", "direction": "DESC"},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+            "order_by": "-u.id",
             "limit": 10
         }"#,
     )
@@ -4019,7 +4025,7 @@ async fn redaction_integration() {
         enum_filter_normalization_int_vs_string_enums,
         cursor_pagination_basic,
         cursor_pagination_with_redaction,
-        cursor_pagination_offset_beyond_data,
+        cursor_pagination_rejects_foreign_token,
         cursor_pagination_with_filters,
         search_merge_requests_with_redaction,
         redaction_preserves_row_order,

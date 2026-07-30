@@ -736,6 +736,10 @@ pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<Strin
     }
 }
 
+pub use crate::arrow_logical_bytes::{
+    UnsupportedTypeError, has_logical_byte_size, logical_byte_size,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

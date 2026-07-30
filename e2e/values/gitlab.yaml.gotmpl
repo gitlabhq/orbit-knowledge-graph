@@ -154,6 +154,9 @@ gitlab:
     # in this deployment pulls the exact same image.
     image:
       tag: "master@{{ $v.gitlab.images.webservice.digest }}"
+    # The e2e cluster is IPv4-only (pods have no ::1); IPv6 binds crash-loop puma with EADDRNOTAVAIL.
+    puma:
+      bindIp6: false
     minReplicas: 1
     maxReplicas: 1
     resources:

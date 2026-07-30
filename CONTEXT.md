@@ -37,8 +37,12 @@ A typed directed connection between two **Nodes** (e.g., `AUTHORED`, `CONTAINS`,
 _Avoid_: interaction, link
 
 **Derived Entity**:
-A third **Ontology** shape alongside **Node** and **Relationship**: a **Datalake** extract with no node table, whose rows a named Rust transform turns into **Relationships**. Declared per domain in `schema.yaml` and named via `etl.transform`; it stays dormant until that transform is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection — they need multi-hop datalake reads or free-text parsing. See ADR 015.
+A third **Ontology** shape alongside **Node** and **Relationship**: one or more **Pipelines** with no node table, whose extracted rows a named Rust transform turns into **Relationships**. Declared per domain in `schema.yaml` and implemented in `config/ontology/derived/`; a derived entity stays dormant until its `transform.type` is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection — they need multi-hop datalake reads or free-text parsing. See ADR 015.
 _Avoid_: storageless node, derived node
+
+**Pipeline**:
+An **Ontology** ETL unit with `extract` and `transform` sections. Nodes, **Relationships**, and **Derived Entities** all use this shape. The extract names source tables, cursor ordering, and either a `.sql.j2` template next to the YAML that references it or `query: generated` (optionally with an `extract.filter` predicate); the transform is `datafusion` or a registered Rust transform.
+_Avoid_: old-style `etl` block
 
 **Ontology**:
 The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, **Derived Entity** definitions, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.
@@ -88,11 +92,15 @@ _Avoid_: replication (too broad)
 
 **Dispatch ID**:
 A UUID stamped on each indexing request message, identifying one dispatch unit — per (namespace × cycle) for SDLC namespace dispatch, per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.
-_Avoid_: request ID, trace ID (dispatch_id groups many requests, not a single one)
+_Avoid_: request ID, trace ID (`dispatch_id` groups many requests, not a single one)
 
 **Campaign**:
 The parent correlation above **Dispatch ID**: one campaign per "re-index everything" decision, `null` in steady state. Today a campaign is a schema migration — opened (`migration-v<N>`) when the dispatcher marks a version `migrating`, attached to every dispatch while the migration runs, and closed when the migration completes (promotion to `active`). Held in process memory (`CampaignState`), not persisted. Lets analysts aggregate the cost of one re-index across pipelines without time-based joins.
 _Avoid_: batch, job (a campaign spans many dispatches and both pipelines)
+
+**Migration ledger**:
+`config/schema-migrations.yaml`, one entry per `SCHEMA_VERSION` bump declaring how much of the graph that version invalidates (`scope: "*" | sdlc | code`, optional `entities`). A clone-based **schema migration** reads it to decide what to clone versus rebuild. Entries are auto-derived from a fingerprint snapshot by `mise schema:bump`; humans may only widen them.
+_Avoid_: changelog, migration script (there is no per-version SQL)
 
 **Siphon**:
 The GitLab CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.
@@ -107,6 +115,10 @@ _Avoid_: data lake, raw data tables, lake
 **Query DSL**:
 The JSON-based query language for the property graph. Supports four query types: traversal, aggregation, path_finding, and neighbors. Compiled to parameterized ClickHouse SQL. Versioned by `QUERY_DSL_VERSION`.
 _Avoid_: intermediate query language, intermediary LLM query language, JSON query language
+
+**Named Query**:
+A graph query defined in YAML under `config/named_queries/` and invoked by name, instead of the client authoring the **Query DSL** string. Compiled against the ontology at `gkg-server` build time so drift fails the build.
+_Avoid_: preset query, query template
 
 **Hop**:
 A single **Relationship** traversal in the graph. Multi-hop queries traverse multiple relationships in sequence. Hard-capped at 3 hops for security and performance.

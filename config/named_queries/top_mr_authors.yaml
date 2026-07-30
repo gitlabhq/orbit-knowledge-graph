@@ -1,0 +1,19 @@
+name: top_mr_authors
+description: Top authors of merged merge requests
+query:
+  query_type: aggregation
+  nodes:
+    - id: u
+      entity: User
+      columns: [id, username]
+    - id: mr
+      entity: MergeRequest
+      filters:
+        state: merged
+  relationships:
+    - { type: AUTHORED, from: u, to: mr }
+  group_by: [u]
+  aggregations:
+    - { count: mr, as: mr_count }
+  aggregation_sort: "-mr_count"
+  limit: 100

@@ -6,7 +6,7 @@ pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestConte
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -26,7 +26,7 @@ pub(super) async fn search_scoped_to_single_project_namespace(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -43,7 +43,7 @@ pub(super) async fn search_multi_path_returns_union_of_scopes(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -62,7 +62,7 @@ pub(super) async fn search_scoped_mr_excludes_other_namespaces(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -81,8 +81,8 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
-                     "filters": {"visibility_level": "public"}},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
+                     "filters": {"visibility_level": "public"}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -105,10 +105,10 @@ pub(super) async fn search_traversal_path_filter_returns_matching_descendants(ct
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
+            "nodes": [{"id": "p", "entity": "Project",
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["name", "traversal_path"],
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/200/"}}},
+                     "filters": {"traversal_path": {"starts_with": "1/100/200/"}}}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -132,8 +132,8 @@ pub(super) async fn search_traversal_path_filter_outside_scope_rejects_at_compil
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "nodes": [{"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
             "limit": 10
         }"#,
         &ontology,
@@ -319,8 +319,8 @@ pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestCon
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                     "filters": {"is_admin": true}},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"is_admin": true}}],
             "limit": 10
         }"#,
         &ontology,
@@ -341,8 +341,8 @@ pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestC
     let result = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-            "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+            "order_by": "-u.is_admin",
             "limit": 10
         }"#,
         &ontology,
@@ -368,12 +368,10 @@ pub(super) async fn admin_only_non_admin_max_aggregation_rejects_at_compile(ctx:
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [{
-                "function": "max",
-                "target": "u",
-                "property": "is_admin",
-                "alias": "has_admin"
+                "max": "u.is_admin",
+                "as": "has_admin"
             }],
             "limit": 10
         }"#,
@@ -402,12 +400,10 @@ pub(super) async fn admin_only_non_admin_count_aggregation_on_auditor_rejects_at
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [{
-                "function": "count",
-                "target": "u",
-                "property": "is_auditor",
-                "alias": "auditor_count"
+                "count": "u.is_auditor",
+                "as": "auditor_count"
             }],
             "limit": 10
         }"#,
@@ -428,7 +424,7 @@ pub(super) async fn admin_only_non_admin_wildcard_columns_excludes_admin_fields(
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -457,10 +453,10 @@ pub(super) async fn admin_only_non_admin_explicit_columns_silently_stripped(ctx:
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User",
+            "nodes": [{"id": "u", "entity": "User",
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["username", "is_admin", "is_auditor"],
-                     "node_ids": [1]},
+                     "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -487,8 +483,8 @@ pub(super) async fn admin_only_admin_filter_compiles(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"],
-                     "filters": {"is_admin": false}, "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"],
+                     "filters": {"is_admin": false}, "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -516,8 +512,8 @@ pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
     compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]},
-            "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
+            "order_by": "-u.is_admin",
             "limit": 10
         }"#,
         &ontology,
@@ -537,12 +533,10 @@ pub(super) async fn admin_only_admin_aggregation_compiles(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
+            "group_by": ["g"],
             "aggregations": [{
-                "function": "max",
-                "target": "u",
-                "property": "is_admin",
-                "alias": "has_admin"
+                "max": "u.is_admin",
+                "as": "has_admin"
             }],
             "limit": 10
         }"#,
@@ -557,7 +551,7 @@ pub(super) async fn admin_only_admin_wildcard_columns_includes_admin_fields(ctx:
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
+            "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -590,8 +584,8 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_wildcard_strips_admin
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
@@ -634,8 +628,8 @@ pub(super) async fn admin_only_non_admin_neighbors_dynamic_center_node_strips_ad
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
@@ -715,8 +709,8 @@ pub(super) async fn admin_only_admin_neighbors_dynamic_wildcard_includes_admin_f
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
-            "neighbors": {"node": "g", "direction": "incoming", "rel_types": ["MEMBER_OF"]},
+            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "neighbors": {"direction": "incoming", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
         &allow_all(),
@@ -747,7 +741,7 @@ pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 50
         }"#,
         &allow_all(),
@@ -795,8 +789,8 @@ pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) 
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -819,7 +813,7 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            "nodes": [{"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}],
             "limit": 50
         }"#,
         &svc,
@@ -851,8 +845,8 @@ pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestCon
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -896,8 +890,8 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -953,8 +947,8 @@ pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -983,8 +977,8 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1072,8 +1066,8 @@ pub(super) async fn aggregation_vulnerability_security_manager_meets_the_require
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1100,8 +1094,8 @@ pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_coun
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1129,7 +1123,7 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
         ctx,
         r#"{
             "query_type": "traversal",
-            "node": {"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]},
+            "nodes": [{"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1154,8 +1148,8 @@ pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: 
                 {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "c"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "c"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1183,8 +1177,8 @@ pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_se
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["v.severity"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1192,7 +1186,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_se
     )
     .await;
 
-    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_group_column("v_severity", "v", "severity");
     resp.assert_empty_aggregation();
 }
 
@@ -1210,8 +1204,8 @@ pub(super) async fn aggregation_vulnerability_property_grouping_filter_oracle_is
                 {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["v.severity"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1219,7 +1213,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_filter_oracle_is
     )
     .await;
 
-    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_group_column("v_severity", "v", "severity");
     resp.assert_empty_aggregation();
 }
 
@@ -1235,8 +1229,8 @@ pub(super) async fn aggregation_vulnerability_property_grouping_security_manager
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["v.severity"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1244,9 +1238,9 @@ pub(super) async fn aggregation_vulnerability_property_grouping_security_manager
     )
     .await;
 
-    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_group_column("v_severity", "v", "severity");
     resp.assert_row_count(1);
-    resp.assert_row_value_str(0, "severity", "high");
+    resp.assert_row_value_str(0, "v_severity", "high");
     resp.assert_row_value_i64(0, "vuln_count", 1);
 }
 
@@ -1267,8 +1261,8 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["v.severity"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1278,7 +1272,7 @@ pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_report
 
     let sql = &compiled.base.sql;
     assert!(
-        sql.contains("v.severity AS severity"),
+        sql.contains("v.severity AS v_severity"),
         "property group key must be selected from Vulnerability alias, got:\n{sql}"
     );
     assert!(
@@ -1316,8 +1310,8 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_reporter_rej
                  "filters": {"traversal_path": "1/100/1000/"}}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "c"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "c"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1348,8 +1342,8 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_security_man
                  "filters": {"traversal_path": "1/100/1000/"}}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "c"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "c"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1381,8 +1375,8 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "v", "as": "vuln_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1425,8 +1419,8 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1453,7 +1447,7 @@ pub(super) async fn aggregation_user_only_rejects_at_compile(ctx: &TestContext) 
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "cnt"}],
+            "aggregations": [{"count": "u", "as": "cnt"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1478,7 +1472,7 @@ pub(super) async fn aggregation_user_only_with_pii_filter_rejects_at_compile(ctx
                 "id": "u", "entity": "User", "columns": ["username"],
                 "filters": {"email": "target@example.com"}
             }],
-            "aggregations": [{"function": "count", "target": "u", "alias": "hit"}],
+            "aggregations": [{"count": "u", "as": "hit"}],
             "limit": 1
         }"#,
         &ontology,
@@ -1500,8 +1494,8 @@ pub(super) async fn aggregation_user_joined_to_scoped_group_compiles(ctx: &TestC
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1517,7 +1511,7 @@ pub(super) async fn aggregation_user_only_admin_still_compiles(ctx: &TestContext
         r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "cnt"}],
+            "aggregations": [{"count": "u", "as": "cnt"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1536,7 +1530,7 @@ pub(super) async fn aggregation_user_only_rejection_happens_before_sql_compile(c
                 "id": "u", "entity": "User",
                 "filters": {"email": "victim@example.com"}
             }],
-            "aggregations": [{"function": "count", "target": "u", "alias": "oracle"}],
+            "aggregations": [{"count": "u", "as": "oracle"}],
             "limit": 1
         }"#,
         &ontology,
@@ -1557,8 +1551,8 @@ pub(super) async fn aggregation_user_only_neighbors_query_is_not_blocked(ctx: &T
     compile(
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {"direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "limit": 10
         }"#,
         &ontology,
@@ -1582,8 +1576,8 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
                 {"id": "u", "entity": "User", "filters": {"email": "target@example.com"}},
                 {"id": "g", "entity": "Group"}
             ],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "hit"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "hit"}],
             "limit": 1
         }"#,
         &ontology,
@@ -1615,8 +1609,8 @@ pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestConte
                 {"id": "p", "entity": "Project"}
             ],
             "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "hit"}],
+            "group_by": ["p"],
+            "aggregations": [{"count": "u", "as": "hit"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1635,8 +1629,8 @@ pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx:
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1647,4 +1641,62 @@ pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx:
     resp.assert_group_row_value_i64("g", "Group", 100, "member_count", 3);
     resp.assert_group_node_absent("g", "Group", 101);
     resp.assert_group_node_absent("g", "Group", 102);
+}
+
+pub(super) async fn aggregation_two_hop_anchor_scoped_excludes_other_namespaces(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            ],
+            "relationships": [
+                {"type": "APPROVED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "approved_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_row_value_i64("u", "User", 2, "approved_count", 1);
+    resp.assert_group_row_value_i64("u", "User", 3, "approved_count", 1);
+    resp.assert_group_node_absent("u", "User", 1);
+}
+
+pub(super) async fn aggregation_two_hop_anchor_multi_path_counts_union_of_scopes(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
+            ],
+            "relationships": [
+                {"type": "APPROVED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "approved_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/100/".into(), "1/101/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_row_value_i64("u", "User", 1, "approved_count", 1);
+    resp.assert_group_row_value_i64("u", "User", 2, "approved_count", 1);
+    resp.assert_group_row_value_i64("u", "User", 3, "approved_count", 1);
 }

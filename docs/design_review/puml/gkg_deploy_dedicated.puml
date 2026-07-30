@@ -1,0 +1,33 @@
+@startuml gkg_deploy_dedicated
+!include gkg_common.puml
+
+title Deployment: GitLab Dedicated
+
+' ===================================================================
+' DEDICATED-SPECIFIC: ClickHouse Cloud per-tenant, control plane
+' ===================================================================
+database "**ClickHouse Cloud**\nCode + SDLC data lake\n(per-tenant instance)" as ch #d09191
+
+rectangle "**Dedicated Control Plane**" as cp #F5F5F5 {
+  component "Provisioning\n& Updates" as prov
+}
+
+' Data layer connections
+sdlc_idx --> ch : TCP native (write)
+code_idx --> ch : TCP native (write)
+query_eng --> ch : TCP native (read, parameterized SQL)
+
+' Control plane
+prov --> module : deploy / update
+
+note bottom of module
+  **Provisioned:** One Orbit instance + ClickHouse Cloud
+  database per tenant. Fully isolated.
+
+  **Billing:** Same credit-based model as SaaS.
+
+  **Updated:** Via Dedicated control plane,
+  independent of monolith release cycle.
+end note
+
+@enduml

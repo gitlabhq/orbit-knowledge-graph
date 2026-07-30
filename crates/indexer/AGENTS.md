@@ -38,10 +38,18 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 The **dispatcher** owns schema migration. At boot, `schema::migration::run_if_needed()` compares
 the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
-NATS KV distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
-creates new-prefix ClickHouse tables, and marks the new version as `migrating`. Marking
-`migrating` also opens a re-index **campaign** (`campaign::CampaignState`, in-memory) that
-dispatchers stamp onto every request as `campaign_id` until completion clears it.
+NATS KV distributed lock and reads the requested scope from the migration ledger. A table-local
+SDLC change rebuilds the affected table and clones unaffected tables from the active version. If an
+affected table has writers outside the requested scope, the dispatcher widens the migration to a
+full rebuild. A code migration is the exception: it clones the shared `gl_edge` table intact (rather
+than widening) and lets the code stale sweep tombstone its own rows as the re-index drains, so it
+re-indexes only code without re-pulling SDLC.
+
+Selective migrations seed the new checkpoint table with completed checkpoints for unchanged
+pipelines. Required pipelines are left out so the normal sweep tasks run them again. The dispatcher
+then marks the version as `migrating` and opens a re-index **campaign**
+(`campaign::CampaignState`, in-memory) that it stamps onto requests as `campaign_id` until
+completion clears it.
 
 Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`,
 which polls `gkg_schema_version` with backoff until its version is `active`/`migrating`, exiting
@@ -53,9 +61,10 @@ table-set.
 ### Migration completion and dead-version GC
 
 `migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
-mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
-comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
-`active`, and retires the old active version. After promotion it clears the re-index campaign.
+mode. It checks the IDs of currently enabled top-level namespaces against completed checkpoints for
+every required namespaced pipeline. Disabled namespace checkpoints do not count. Required global
+pipelines must also be complete. The checker then promotes the `migrating` version to `active`,
+retires the old active version, and clears the re-index campaign.
 
 A single SQL query then enumerates all `v<N>_*` objects in `system.tables` whose version falls
 outside a keep-set computed in the same query (active + newest retired within
@@ -66,7 +75,7 @@ settings.
 
 ### Stale FK-edge reconciliation
 
-`scheduler::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
+`orchestrator::scheduled::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
 stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orphans its old row when
 the FK changes, because `target_id` is part of the `ReplacingMergeTree` identity, so the prior
 `(source, old_target)` row is never replaced. The task runs one idempotent `INSERT … SELECT` per
@@ -83,7 +92,7 @@ ready, connects to NATS and ClickHouse, registers handlers via `sdlc::register_h
 `code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
 and runs until shutdown.
 
-`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `configuration.rs` — no string-keyed lookups.
+`IndexerConfig` holds all configuration (NATS, ClickHouse graph/datalake, engine concurrency, handler configs, GitLab client). Handler configs are typed via `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs` — no string-keyed lookups.
 
 ## Development
 
@@ -125,8 +134,28 @@ preventable feedback (see #2772, !1416). Check each of these first:
 - **Edge/node `RecordBatch` specs:** derive column specs from the ontology — `edge_specs(ontology)`
   in `modules/code/arrow_converter.rs` (also `crates/duckdb-client/src/converter.rs`). Do not
   hardcode them; hardcoded specs silently drift from `config/graph.sql`.
-- **Filtering:** push row filters into the extraction SQL (`WHERE`, `action IN (...)`) instead of
-  post-filtering in Rust, so rows you discard never cross the wire.
+- **Extraction SQL:** declare the source shape in ontology pipelines. Use `query: generated` for
+  single-table projections and extracts with point lookups. Generated extracts list only their base
+  table; lookup tables resolve from the referenced node pipelines. Nodes may declare
+  `enrichment_props`. A slim lookup with only `node` and `id` expands source columns and stable
+  aliases from that contract; an endpoint with `enrich: true` independently expands its property
+  bindings from the same contract. Same-node references derive distinct field namespaces from
+  their ID fields. Explicit lookup `fields` and endpoint `properties` remain escape hatches. The
+  indexer builds lookup joins without reading transform mappings. Use an `extract.filter` for row predicates; use a
+  co-located `.sql.j2` file (`query: <name>.sql.j2`) only for genuinely complex joins or
+  materialized arrays, so rows you discard never cross the wire. The ontology carries a `.sql.j2`
+  file's raw content verbatim as `ExtractQuery::Sql`; the indexer's `plan/extract/sql.rs` renders
+  `{{watermark_column}}`/`{{deleted_column}}` through MiniJinja at plan build, recovers the
+  effective watermark/deleted from the file's `AS _version`/`AS _deleted`, and passes `{{filters}}`/
+  `{{batch_size}}` through to query time. All ClickHouse dialect and SQL generation live in the
+  indexer's `plan/` module. `build.rs` is the only place that reads `pipeline.transform`: it
+  decomposes each pipeline and hands `extract/` transform-neutral inputs (it produces an
+  `ExtractSpec` with a validated `ExtractTemplate`) and `transform.rs` an owned, narrow
+  `TransformDeclaration`; Arrow `RecordBatch` schemas are the runtime extract-transform contract,
+  not a duplicated planning type. Transform endpoint property bindings determine which batch
+  fields form denormalized edge tags; no extraction metadata side channel exists.
+  `extract/lookup.rs` derives its internal `_eN` joins only from the extract declaration.
+  `extract/` imports nothing from `transform`. None of the SQL generation lives in the ontology crate.
 - **Concurrency:** independent datalake lookups (routes / MR / work-item) should run concurrently
   (e.g. `tokio::try_join!`), not sequentially.
 - **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
@@ -145,9 +174,10 @@ below and in the root `AGENTS.md`.
 
 ### When a Rust transform is justified (ADR 015)
 
-The SDLC transform stage is pluggable (`modules/sdlc/transform.rs`): the built-in `data_fusion`
+The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `datafusion`
 transform is a row-wise SQL projection of one extracted block and is the **default** for every
-node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity's `etl.transform`)
+node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity pipeline's
+`transform.type`)
 is justified **only when the graph shape cannot be expressed as that SQL projection** — concretely,
 when it needs:
 
@@ -157,7 +187,7 @@ when it needs:
   several edge kinds).
 
 If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
-`data_fusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
+`datafusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
 `docs/design-documents/decisions/015_pluggable_entity_pipelines.md`.
 
 ### Adding a handler
@@ -166,7 +196,7 @@ If the transform is a per-row projection of one extracted batch, express it as a
 2. Define event type implementing `Event`
 3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
 4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
-5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
+5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `crates/gkg-server-config/src/engine.rs`
 6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
 
 ### No `#[allow(dead_code)]` in shipped code

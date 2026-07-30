@@ -4,6 +4,7 @@ use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUM
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use strum::VariantNames;
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
@@ -68,7 +69,6 @@ impl Default for EntityAuthConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,
-    #[serde(flatten, deserialize_with = "deserialize_nodes_or_node")]
     pub nodes: Vec<InputNode>,
     #[serde(default)]
     pub relationships: Vec<InputRelationship>,
@@ -164,6 +164,10 @@ pub struct CompilerMetadata {
     pub edge_target_kinds: HashMap<String, Vec<String>>,
     /// Namespace entity (Group/Project) → (tp-dict table, key column) for pinning a neighbors anchor arm to its centers' exact traversal_paths.
     pub tp_id_lookup: HashMap<String, (String, String)>,
+    /// FNV-1a of the canonicalized query JSON minus `cursor`; binds `after` tokens to their query.
+    pub query_hash: u64,
+    /// Number of `_gkg_cursor_N` readback columns the cursor pass appended.
+    pub cursor_key_count: usize,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -184,6 +188,8 @@ impl Default for CompilerMetadata {
             edge_source_kinds: HashMap::new(),
             edge_target_kinds: HashMap::new(),
             tp_id_lookup: HashMap::new(),
+            query_hash: 0,
+            cursor_key_count: 0,
         }
     }
 }
@@ -229,6 +235,12 @@ impl Input {
             && self.nodes.len() == 1
             && self.relationships.is_empty()
     }
+
+    /// Rows to fetch from ClickHouse: the page window plus one probe row that
+    /// proves `has_more` without being returned.
+    pub fn fetch_limit(&self) -> u32 {
+        self.cursor.as_ref().map_or(self.limit, |c| c.page_size) + 1
+    }
 }
 
 impl Default for Input {
@@ -251,47 +263,19 @@ impl Default for Input {
     }
 }
 
-fn deserialize_nodes_or_node<'de, D>(deserializer: D) -> Result<Vec<InputNode>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    struct Helper {
-        #[serde(default)]
-        node: Option<InputNode>,
-        #[serde(default)]
-        nodes: Option<Vec<InputNode>>,
-    }
-
-    let helper = Helper::deserialize(deserializer)?;
-
-    match (helper.node, helper.nodes) {
-        (Some(node), None) => Ok(vec![node]),
-        (None, Some(nodes)) => Ok(nodes),
-        (Some(_), Some(_)) => Err(serde::de::Error::custom(
-            "cannot specify both 'node' and 'nodes'",
-        )),
-        (None, None) => Err(serde::de::Error::custom(
-            "must specify either 'node' or 'nodes'",
-        )),
-    }
-}
-
 fn default_limit() -> u32 {
     30
 }
 
-/// Agent-driven pagination cursor. Slices the authorized (post-redaction)
-/// result set by `offset` and `page_size`. The server re-runs the query,
-/// authorizes all rows up to `limit`, and returns `[offset..offset+page_size]`.
-///
-/// This model avoids SQL-level keyset pagination, which only generalizes to
-/// Search queries and breaks when redaction removes rows from the LIMIT window.
-// TODO: Server-side query caching with TTL to avoid re-running the same query on page 2+
-#[derive(Debug, Clone, Copy, Deserialize)]
+/// Keyset pagination cursor: `after` is an opaque token from the previous
+/// page's `pagination.next_cursor`, anchored on the last scanned SQL row so
+/// redaction can only shorten a page, never strand it.
+#[derive(Debug, Clone, Deserialize)]
 pub struct InputCursor {
-    pub offset: u32,
     pub page_size: u32,
+    pub after: Option<String>,
+    #[serde(skip)]
+    pub seek: Option<Vec<Option<String>>>,
 }
 
 #[derive(
@@ -468,7 +452,7 @@ pub struct InputFilter {
     pub selectivity: ontology::FieldSelectivity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
@@ -498,40 +482,78 @@ where
     D: Deserializer<'de>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
-    Ok(raw
-        .into_iter()
-        .map(|(k, v)| (k, parse_filter_entry(v)))
-        .collect())
+    raw.into_iter()
+        .map(|(k, v)| match parse_filter_entry(v) {
+            Ok(filters) => Ok((k, filters)),
+            Err(e) => Err(serde::de::Error::custom(format!("filter on \"{k}\": {e}"))),
+        })
+        .collect()
 }
 
-/// Parse a filter entry that may be a single filter or an array of
-/// PropertyFilter objects (AND-combined, for expressing ranges).
-fn parse_filter_entry(value: Value) -> Vec<InputFilter> {
-    if let Value::Array(ref arr) = value
-        && !arr.is_empty()
-        && arr.iter().all(|v| v.is_object() && v.get("op").is_some())
-    {
-        return arr.iter().cloned().map(parse_single_filter).collect();
-    }
-    vec![parse_single_filter(value)]
-}
-
-fn parse_single_filter(value: Value) -> InputFilter {
-    if let Value::Object(ref obj) = value
-        && let Some(op_val) = obj.get("op")
-        && let Ok(op) = serde_json::from_value::<FilterOp>(op_val.clone())
-    {
-        return InputFilter {
-            op: Some(op),
-            value: obj.get("value").cloned(),
+/// Parse a filter entry: a bare value is an equality match, an operator
+/// object AND-combines its operator keys, and an array of operator objects
+/// AND-combines its entries (the form needed to repeat an operator).
+fn parse_filter_entry(value: Value) -> Result<Vec<InputFilter>, String> {
+    match value {
+        Value::Object(obj) => parse_operator_object(obj),
+        Value::Array(arr) if arr.iter().any(Value::is_object) => {
+            let mut filters = Vec::new();
+            for elem in arr {
+                let Value::Object(obj) = elem else {
+                    return Err(
+                        "an array of operator objects must not mix in bare values".to_string()
+                    );
+                };
+                filters.extend(parse_operator_object(obj)?);
+            }
+            Ok(filters)
+        }
+        other => Ok(vec![InputFilter {
+            op: None,
+            value: Some(other),
             ..Default::default()
-        };
+        }]),
     }
-    InputFilter {
-        op: None,
-        value: Some(value),
-        ..Default::default()
+}
+
+fn parse_operator_object(obj: serde_json::Map<String, Value>) -> Result<Vec<InputFilter>, String> {
+    if obj.is_empty() {
+        return Err(format!(
+            "operator object needs at least one operator (one of: {})",
+            FilterOp::VARIANTS.join(", ")
+        ));
     }
+    obj.into_iter()
+        .map(|(key, value)| {
+            let op: FilterOp =
+                serde_json::from_value(Value::String(key.clone())).map_err(|_| {
+                    format!(
+                        "unknown operator \"{key}\" (one of: {})",
+                        FilterOp::VARIANTS.join(", ")
+                    )
+                })?;
+            let (op, value) = match (op, value) {
+                (FilterOp::IsNull | FilterOp::IsNotNull, Value::Bool(apply)) => {
+                    let wants_null = (op == FilterOp::IsNull) == apply;
+                    let op = if wants_null {
+                        FilterOp::IsNull
+                    } else {
+                        FilterOp::IsNotNull
+                    };
+                    (op, None)
+                }
+                (FilterOp::IsNull | FilterOp::IsNotNull, _) => {
+                    return Err(format!("\"{key}\" takes a boolean value"));
+                }
+                (op, value) => (op, Some(value)),
+            };
+            Ok(InputFilter {
+                op: Some(op),
+                value,
+                ..Default::default()
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -540,10 +562,8 @@ pub struct InputRelationship {
     pub types: Vec<String>,
     pub from: String,
     pub to: String,
-    #[serde(default = "default_hops")]
-    pub min_hops: u32,
-    #[serde(default = "default_hops")]
-    pub max_hops: u32,
+    #[serde(default)]
+    pub hops: HopRange,
     #[serde(default)]
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
@@ -567,8 +587,56 @@ pub struct InputRelationship {
     pub scope_preserving: bool,
 }
 
-fn default_hops() -> u32 {
-    1
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HopRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+impl Default for HopRange {
+    fn default() -> Self {
+        Self { min: 1, max: 1 }
+    }
+}
+
+impl<'de> Deserialize<'de> for HopRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_hops(Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_hops(value: Value) -> Result<HopRange, String> {
+    let as_hop_count = |v: &Value| -> Result<u32, String> {
+        let n = v
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| format!("hops bound must be a positive integer, got {v}"))?;
+        if n == 0 {
+            return Err("hops bounds must be at least 1".to_string());
+        }
+        Ok(n)
+    };
+    let Value::Array(arr) = &value else {
+        return Err(format!(
+            "hops must be a [min, max] pair (e.g. [1, 3]; [2, 2] for exactly 2), got {value}"
+        ));
+    };
+    let [min, max] = arr.as_slice() else {
+        return Err(format!(
+            "hops must be a [min, max] pair, got {} element(s)",
+            arr.len()
+        ));
+    };
+    let (min, max) = (as_hop_count(min)?, as_hop_count(max)?);
+    if min > max {
+        return Err(format!(
+            "hops range [{min}, {max}] is inverted: min must not exceed max"
+        ));
+    }
+    Ok(HopRange { min, max })
 }
 
 fn deserialize_rel_types<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -619,52 +687,263 @@ pub struct InputAggregation {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct InputAggregationMetric {
-    pub function: AggFunction,
-    #[serde(default)]
-    pub target: Option<String>,
-    #[serde(default)]
-    pub property: Option<String>,
-    #[serde(default)]
+    #[serde(flatten)]
+    pub expr: AggExpr,
+    #[serde(rename = "as", default)]
     pub alias: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+impl InputAggregationMetric {
+    pub fn output_name(&self) -> String {
+        self.alias
+            .clone()
+            .unwrap_or_else(|| self.expr.derived_name())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, strum::EnumDiscriminants)]
+#[serde(rename_all = "lowercase")]
+#[strum_discriminants(
+    name(AggFunction),
+    vis(pub),
+    derive(strum::Display),
+    strum(serialize_all = "lowercase")
+)]
+pub enum AggExpr {
+    Count(TargetRef),
+    Sum(PropertyRef),
+    Avg(PropertyRef),
+    Min(PropertyRef),
+    Max(PropertyRef),
+    Collect(PropertyRef),
+}
+
+impl AggExpr {
+    pub fn function(&self) -> AggFunction {
+        self.into()
+    }
+
+    pub fn node(&self) -> &str {
+        match self {
+            Self::Count(target) => &target.node,
+            Self::Sum(prop)
+            | Self::Avg(prop)
+            | Self::Min(prop)
+            | Self::Max(prop)
+            | Self::Collect(prop) => &prop.node,
+        }
+    }
+
+    pub fn property(&self) -> Option<&str> {
+        match self {
+            Self::Count(target) => target.property.as_deref(),
+            Self::Sum(prop)
+            | Self::Avg(prop)
+            | Self::Min(prop)
+            | Self::Max(prop)
+            | Self::Collect(prop) => Some(&prop.property),
+        }
+    }
+
+    pub fn derived_name(&self) -> String {
+        let function = self.function();
+        let node = self.node();
+        match self.property() {
+            Some(property) => format!("{function}_{node}_{property}"),
+            None => format!("{function}_{node}"),
+        }
+    }
+}
+
+#[cfg(test)]
+impl AggExpr {
+    pub(crate) fn from_parts(function: AggFunction, node: &str, property: Option<&str>) -> Self {
+        let prop_ref = |property: &str| PropertyRef {
+            node: node.to_owned(),
+            property: property.to_owned(),
+        };
+        match function {
+            AggFunction::Count => Self::Count(TargetRef {
+                node: node.to_owned(),
+                property: property.map(str::to_owned),
+            }),
+            AggFunction::Sum => Self::Sum(prop_ref(property.expect("sum needs a property"))),
+            AggFunction::Avg => Self::Avg(prop_ref(property.expect("avg needs a property"))),
+            AggFunction::Min => Self::Min(prop_ref(property.expect("min needs a property"))),
+            AggFunction::Max => Self::Max(prop_ref(property.expect("max needs a property"))),
+            AggFunction::Collect => {
+                Self::Collect(prop_ref(property.expect("collect needs a property")))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetRef {
+    pub node: String,
+    pub property: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for TargetRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let caps = crate::passes::validate::node_ref_regex()
+            .captures(&spec)
+            .ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "aggregation target {spec:?} must be \"node\" or \"node.property\""
+                ))
+            })?;
+        Ok(TargetRef {
+            node: caps["node"].to_owned(),
+            property: caps.name("property").map(|p| p.as_str().to_owned()),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyRef {
+    pub node: String,
+    pub property: String,
+}
+
+impl<'de> Deserialize<'de> for PropertyRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let caps = crate::passes::validate::node_ref_regex()
+            .captures(&spec)
+            .filter(|caps| caps.name("property").is_some())
+            .ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "aggregation target {spec:?} must be \"node.property\""
+                ))
+            })?;
+        Ok(PropertyRef {
+            node: caps["node"].to_owned(),
+            property: caps["property"].to_owned(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputGroupByKey {
     Node {
         node: String,
-        #[serde(default)]
         alias: Option<String>,
     },
     Property {
         node: String,
         property: String,
-        #[serde(default)]
+        truncate: Option<TruncateUnit>,
         alias: Option<String>,
-        #[serde(default)]
-        transform: Option<PropertyTransform>,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum PropertyTransform {
-    /// Truncate a Date or DateTime property to the start of `unit`.
-    Truncate { unit: TruncateUnit },
-}
-
-impl PropertyTransform {
-    pub fn output_suffix(&self) -> String {
-        match self {
-            Self::Truncate { unit } => unit.name().to_string(),
+impl<'de> Deserialize<'de> for InputGroupByKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::String(spec) => {
+                parse_group_by_spec(&spec, None, None).map_err(serde::de::Error::custom)
+            }
+            Value::Object(obj) => parse_group_by_object(obj).map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(
+                "group_by key must be a \"node\"/\"node.property\" string or a {\"key\": ..., \"truncate\"?: ..., \"as\"?: ...} object",
+            )),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+fn parse_group_by_spec(
+    spec: &str,
+    truncate: Option<TruncateUnit>,
+    alias: Option<String>,
+) -> Result<InputGroupByKey, String> {
+    let caps = crate::passes::validate::node_ref_regex()
+        .captures(spec)
+        .ok_or_else(|| match truncate {
+            Some(unit) => format!(
+                "truncate \"{}\" target {spec:?} must be \"node.property\"",
+                unit.name()
+            ),
+            None => format!("group_by key {spec:?} must be \"node\" or \"node.property\""),
+        })?;
+    match caps.name("property") {
+        Some(property) => Ok(InputGroupByKey::Property {
+            node: caps["node"].to_owned(),
+            property: property.as_str().to_owned(),
+            truncate,
+            alias,
+        }),
+        None => match truncate {
+            Some(unit) => Err(format!(
+                "truncate \"{}\" target {spec:?} must be \"node.property\" — a node cannot be truncated",
+                unit.name()
+            )),
+            None => Ok(InputGroupByKey::Node {
+                node: caps["node"].to_owned(),
+                alias,
+            }),
+        },
+    }
+}
+
+fn parse_group_by_object(
+    mut obj: serde_json::Map<String, Value>,
+) -> Result<InputGroupByKey, String> {
+    if obj.contains_key("kind") {
+        return Err(
+            "the {\"kind\": ...} group_by form was removed; use \"node\", \"node.property\", or {\"key\": ..., \"truncate\"?: ..., \"as\"?: ...}"
+                .to_string(),
+        );
+    }
+    let Some(key) = obj.remove("key") else {
+        return Err("a group_by object requires \"key\"".to_string());
+    };
+    let Value::String(spec) = key else {
+        return Err("\"key\" takes a \"node\"/\"node.property\" string".to_string());
+    };
+    let truncate = match obj.remove("truncate") {
+        Some(unit) => Some(
+            serde_json::from_value::<TruncateUnit>(unit.clone()).map_err(|_| {
+                format!(
+                    "unknown truncation unit {unit} (one of: {})",
+                    TruncateUnit::VARIANTS.join(", ")
+                )
+            })?,
+        ),
+        None => None,
+    };
+    let alias = match obj.remove("as") {
+        Some(Value::String(name)) => Some(name),
+        Some(_) => return Err("\"as\" takes an output column name string".to_string()),
+        None => None,
+    };
+    if let Some(unknown) = obj.keys().next() {
+        return Err(format!(
+            "unknown group_by object field \"{unknown}\" (expected \"key\", \"truncate\", \"as\")"
+        ));
+    }
+    if truncate.is_none() && alias.is_none() {
+        return Err(format!(
+            "{{\"key\": {spec:?}}} without \"truncate\" or \"as\" is just {spec:?} — use the string form"
+        ));
+    }
+    parse_group_by_spec(&spec, truncate, alias)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum TruncateUnit {
     Minute,
     Hour,
@@ -721,59 +1000,31 @@ impl InputGroupByKey {
         }
     }
 
-    pub fn transform(&self) -> Option<&PropertyTransform> {
+    pub fn truncate(&self) -> Option<TruncateUnit> {
         match self {
-            Self::Property { transform, .. } => transform.as_ref(),
+            Self::Property { truncate, .. } => *truncate,
             Self::Node { .. } => None,
         }
     }
 
-    pub fn truncate(&self) -> Option<TruncateUnit> {
-        self.transform()
-            .map(|PropertyTransform::Truncate { unit }| *unit)
-    }
-
-    pub fn output_name(&self, is_unique_property: bool) -> String {
+    pub fn output_name(&self) -> String {
         match self {
             Self::Node { node, alias } => alias.clone().unwrap_or_else(|| node.clone()),
             Self::Property {
                 node,
                 property,
+                truncate,
                 alias,
-                transform,
-            } => alias.clone().unwrap_or_else(|| {
-                let base = if is_unique_property {
-                    property.clone()
-                } else {
-                    format!("{}_{}", node, property)
-                };
-                match transform {
-                    Some(t) => format!("{}_{}", base, t.output_suffix()),
-                    None => base,
-                }
+            } => alias.clone().unwrap_or_else(|| match truncate {
+                Some(unit) => format!("{}_{}_{}", node, property, unit.name()),
+                None => format!("{}_{}", node, property),
             }),
         }
     }
 }
 
 pub fn group_by_output_names(groups: &[InputGroupByKey]) -> Vec<String> {
-    let mut property_counts: HashMap<&str, usize> = HashMap::new();
-    for group in groups {
-        if let Some(property) = group.property() {
-            *property_counts.entry(property).or_default() += 1;
-        }
-    }
-
-    groups
-        .iter()
-        .map(|group| {
-            let is_unique_property = group
-                .property()
-                .map(|property| property_counts[property] == 1)
-                .unwrap_or(false);
-            group.output_name(is_unique_property)
-        })
-        .collect()
+    groups.iter().map(InputGroupByKey::output_name).collect()
 }
 
 pub fn node_group_ids(groups: &[InputGroupByKey]) -> impl Iterator<Item = &str> {
@@ -783,16 +1034,11 @@ pub fn node_group_ids(groups: &[InputGroupByKey]) -> impl Iterator<Item = &str> 
     })
 }
 
-pub fn property_groups(
-    groups: &[InputGroupByKey],
-) -> impl Iterator<Item = (&str, &str, Option<&str>)> {
+pub fn property_groups(groups: &[InputGroupByKey]) -> impl Iterator<Item = (&str, &str)> {
     groups.iter().filter_map(|group| match group {
-        InputGroupByKey::Property {
-            node,
-            property,
-            alias,
-            ..
-        } => Some((node.as_str(), property.as_str(), alias.as_deref())),
+        InputGroupByKey::Property { node, property, .. } => {
+            Some((node.as_str(), property.as_str()))
+        }
         InputGroupByKey::Node { .. } => None,
     })
 }
@@ -802,18 +1048,6 @@ pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
         InputGroupByKey::Node { .. } => "node",
         InputGroupByKey::Property { .. } => "property",
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum AggFunction {
-    Count,
-    Sum,
-    Avg,
-    Min,
-    Max,
-    Collect,
 }
 
 impl AggFunction {
@@ -856,27 +1090,56 @@ pub struct InputPath {
     pub backward_first_hop_rel_types: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum PathType {
     Shortest,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputNeighbors {
-    pub node: String,
     #[serde(default)]
     pub direction: Direction,
     #[serde(default)]
     pub rel_types: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+// ─────────────────────────────────────────────────────────────────────────────
+// Ordering
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputOrderBy {
     pub node: String,
     pub property: String,
-    #[serde(default)]
     pub direction: OrderDirection,
+}
+
+impl<'de> Deserialize<'de> for InputOrderBy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let caps = crate::passes::validate::order_by_regex()
+            .captures(&spec)
+            .ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "order_by {spec:?} must be \"[-]node.property\" (leading \"-\" = descending)"
+                ))
+            })?;
+        let direction = if caps.name("descending").is_some() {
+            OrderDirection::Desc
+        } else {
+            OrderDirection::Asc
+        };
+        Ok(InputOrderBy {
+            node: caps["node"].to_owned(),
+            property: caps["property"].to_owned(),
+            direction,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -887,11 +1150,40 @@ pub enum OrderDirection {
     Desc,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputAggSort {
     pub column: String,
-    #[serde(default)]
     pub direction: OrderDirection,
+}
+
+impl<'de> Deserialize<'de> for InputAggSort {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let spec = String::deserialize(deserializer)?;
+        let caps = crate::passes::validate::aggregation_sort_regex()
+            .captures(&spec)
+            .ok_or_else(|| {
+                let hint = if spec.contains('.') {
+                    "; aggregation_sort takes a bare output column name (aggregation alias or group-key column) — \"node.property\" belongs in order_by"
+                } else {
+                    ""
+                };
+                serde::de::Error::custom(format!(
+                    "aggregation_sort {spec:?} must be \"[-]column\" (leading \"-\" = descending){hint}"
+                ))
+            })?;
+        let direction = if caps.name("descending").is_some() {
+            OrderDirection::Desc
+        } else {
+            OrderDirection::Asc
+        };
+        Ok(InputAggSort {
+            column: caps["column"].to_owned(),
+            direction,
+        })
+    }
 }
 
 #[must_use = "the parsed input should be used"]
@@ -902,6 +1194,140 @@ pub fn parse_input(json: &str) -> Result<Input, serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn order_by(spec: &str) -> InputOrderBy {
+        serde_json::from_str(&format!("\"{spec}\"")).expect("order_by parses")
+    }
+
+    fn hops(json: &str) -> Result<HopRange, String> {
+        serde_json::from_str::<HopRange>(json).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn hops_pair_means_inclusive_range() {
+        assert_eq!(hops("[1, 3]").unwrap(), HopRange { min: 1, max: 3 });
+        assert_eq!(hops("[2, 2]").unwrap(), HopRange { min: 2, max: 2 });
+    }
+
+    #[test]
+    fn hops_bare_integer_rejects_with_pair_example() {
+        let err = hops("2").unwrap_err();
+        assert!(err.contains("[min, max] pair"), "{err}");
+    }
+
+    #[test]
+    fn hops_omitted_defaults_to_single_hop() {
+        let rel: InputRelationship =
+            serde_json::from_str(r#"{"type": "CONTAINS", "from": "a", "to": "b"}"#).unwrap();
+        assert_eq!(rel.hops, HopRange { min: 1, max: 1 });
+    }
+
+    #[test]
+    fn hops_inverted_pair_rejects_with_ordering_error() {
+        let err = hops("[3, 1]").unwrap_err();
+        assert!(err.contains("inverted"), "{err}");
+    }
+
+    #[test]
+    fn hops_zero_bound_rejects() {
+        assert!(hops("[0, 2]").unwrap_err().contains("at least 1"));
+    }
+
+    #[test]
+    fn hops_wrong_arity_rejects() {
+        let err = hops("[1, 2, 3]").unwrap_err();
+        assert!(err.contains("[min, max] pair"), "{err}");
+    }
+
+    #[test]
+    fn order_by_descending_uses_leading_dash() {
+        assert_eq!(
+            order_by("-mr.merged_at"),
+            InputOrderBy {
+                node: "mr".into(),
+                property: "merged_at".into(),
+                direction: OrderDirection::Desc,
+            }
+        );
+    }
+
+    #[test]
+    fn order_by_without_dash_is_ascending() {
+        assert_eq!(order_by("u.username").direction, OrderDirection::Asc);
+    }
+
+    #[test]
+    fn order_by_requires_node_and_property() {
+        for malformed in [
+            "merged_at",
+            "-mr.",
+            ".merged_at",
+            "-",
+            "a.b.c",
+            "1mr.merged_at",
+            "mr.1merged_at",
+        ] {
+            assert!(
+                serde_json::from_str::<InputOrderBy>(&format!("\"{malformed}\"")).is_err(),
+                "{malformed:?} should not parse"
+            );
+        }
+
+        let over_length = "a".repeat(65);
+        assert!(
+            serde_json::from_str::<InputOrderBy>(&format!("\"{over_length}.prop\"")).is_err(),
+            "identifier longer than 64 chars should not parse"
+        );
+    }
+
+    fn agg_sort(spec: &str) -> InputAggSort {
+        serde_json::from_str(&format!("\"{spec}\"")).expect("aggregation_sort parses")
+    }
+
+    #[test]
+    fn aggregation_sort_descending_uses_leading_dash() {
+        assert_eq!(
+            agg_sort("-note_count"),
+            InputAggSort {
+                column: "note_count".into(),
+                direction: OrderDirection::Desc,
+            }
+        );
+    }
+
+    #[test]
+    fn aggregation_sort_without_dash_is_ascending() {
+        assert_eq!(agg_sort("note_count").direction, OrderDirection::Asc);
+    }
+
+    #[test]
+    fn aggregation_sort_requires_bare_identifier() {
+        for malformed in [
+            "",
+            "-",
+            "1count",
+            "note-count",
+            "mr.merged_at",
+            "-mr.merged_at",
+        ] {
+            assert!(
+                serde_json::from_str::<InputAggSort>(&format!("\"{malformed}\"")).is_err(),
+                "{malformed:?} should not parse"
+            );
+        }
+
+        let over_length = "a".repeat(65);
+        assert!(
+            serde_json::from_str::<InputAggSort>(&format!("\"{over_length}\"")).is_err(),
+            "identifier longer than 64 chars should not parse"
+        );
+    }
+
+    #[test]
+    fn aggregation_sort_dotted_value_error_points_to_order_by() {
+        let err = serde_json::from_str::<InputAggSort>("\"-mr.merged_at\"").unwrap_err();
+        assert!(err.to_string().contains("order_by"), "{err}");
+    }
 
     #[test]
     fn simple_traversal() {
@@ -933,8 +1359,8 @@ mod tests {
             "nodes": [{
                 "id": "u", "entity": "User",
                 "filters": {
-                    "created_at": {"op": "gte", "value": "2024-01-01"},
-                    "state": {"op": "in", "value": ["active", "blocked"]}
+                    "created_at": {"gte": "2024-01-01"},
+                    "state": {"in": ["active", "blocked"]}
                 }
             }]
         }"#,
@@ -958,8 +1384,8 @@ mod tests {
                 "id": "mr", "entity": "MergeRequest",
                 "filters": {
                     "created_at": [
-                        {"op": "gte", "value": "2026-04-01T00:00:00Z"},
-                        {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                        {"gte": "2026-04-01T00:00:00Z"},
+                        {"lt": "2026-05-01T00:00:00Z"}
                     ],
                     "state": "merged"
                 }
@@ -1008,6 +1434,145 @@ mod tests {
     }
 
     #[test]
+    fn operator_object_keys_and_combine() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {"created_at": {"gte": "2026-04-01", "lt": "2026-05-01"}}
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let created_at = input.nodes[0].filters.get("created_at").unwrap();
+        assert_eq!(created_at.len(), 2);
+        assert_eq!(created_at[0].op, Some(FilterOp::Gte));
+        assert_eq!(created_at[0].value, Some(serde_json::json!("2026-04-01")));
+        assert_eq!(created_at[1].op, Some(FilterOp::Lt));
+        assert_eq!(created_at[1].value, Some(serde_json::json!("2026-05-01")));
+    }
+
+    #[test]
+    fn unknown_operator_lists_candidates() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "u", "entity": "User",
+                "filters": {"state": {"op": "eq", "value": "active"}}
+            }]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("unknown operator \"op\""), "{err}");
+        assert!(err.contains("token_match"), "{err}");
+    }
+
+    #[test]
+    fn nullability_operators_take_booleans() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {
+                    "merged_at": {"is_null": true},
+                    "closed_at": {"is_null": false},
+                    "created_at": {"is_not_null": false}
+                }
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let filters = &input.nodes[0].filters;
+        let merged_at = &filters.get("merged_at").unwrap()[0];
+        assert_eq!(merged_at.op, Some(FilterOp::IsNull));
+        assert_eq!(merged_at.value, None);
+        assert_eq!(
+            filters.get("closed_at").unwrap()[0].op,
+            Some(FilterOp::IsNotNull)
+        );
+        assert_eq!(
+            filters.get("created_at").unwrap()[0].op,
+            Some(FilterOp::IsNull)
+        );
+    }
+
+    #[test]
+    fn nullability_operator_rejects_non_boolean() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {"merged_at": {"is_null": 1}}
+            }]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("takes a boolean"), "{err}");
+    }
+
+    #[test]
+    fn empty_operator_object_is_rejected() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User", "filters": {"state": {}}}]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("at least one operator"), "{err}");
+    }
+
+    #[test]
+    fn filter_array_rejects_mixed_values_and_objects() {
+        let err = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "u", "entity": "User",
+                "filters": {"state": [{"gte": 1}, 5]}
+            }]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("must not mix"), "{err}");
+    }
+
+    #[test]
+    fn filter_array_of_operator_objects_repeats_an_operator() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {"title": [{"contains": "foo"}, {"contains": "bar"}]}
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let title = input.nodes[0].filters.get("title").unwrap();
+        assert_eq!(title.len(), 2);
+        assert_eq!(title[0].op, Some(FilterOp::Contains));
+        assert_eq!(title[0].value, Some(serde_json::json!("foo")));
+        assert_eq!(title[1].op, Some(FilterOp::Contains));
+        assert_eq!(title[1].value, Some(serde_json::json!("bar")));
+    }
+
+    #[test]
     fn multiple_rel_types() {
         let input = parse_input(
             r#"{
@@ -1027,16 +1592,209 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "n"}, {"id": "u"}],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
-            "aggregation_sort": {"column": "note_count", "direction": "DESC"}
+            "group_by": ["u"],
+            "aggregations": [{"count": "n", "as": "note_count"}],
+            "aggregation_sort": "-note_count"
         }"#,
         )
         .unwrap();
 
         assert_eq!(input.query_type, QueryType::Aggregation);
-        assert_eq!(input.aggregation.metrics[0].function, AggFunction::Count);
+        assert_eq!(
+            input.aggregation.metrics[0].expr,
+            AggExpr::Count(TargetRef {
+                node: "n".into(),
+                property: None
+            })
+        );
+        assert_eq!(input.aggregation.metrics[0].output_name(), "note_count");
         assert!(input.aggregation.sort.is_some());
+    }
+
+    #[test]
+    fn aggregation_value_forms() {
+        let input = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "mr"}],
+            "aggregations": [
+                {"count": "mr.merged_at", "as": "merged"},
+                {"avg": "mr.merge_duration", "as": "avg_dur"}
+            ]
+        }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input.aggregation.metrics[0].expr,
+            AggExpr::Count(TargetRef {
+                node: "mr".into(),
+                property: Some("merged_at".into())
+            })
+        );
+        assert_eq!(
+            input.aggregation.metrics[1].expr,
+            AggExpr::Avg(PropertyRef {
+                node: "mr".into(),
+                property: "merge_duration".into()
+            })
+        );
+    }
+
+    #[test]
+    fn aggregation_rejects_bare_node_for_property_functions() {
+        let err = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "mr"}],
+            "aggregations": [{"sum": "mr", "as": "total"}]
+        }"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("node.property"), "got: {err}");
+    }
+
+    #[test]
+    fn aggregation_derives_output_name_without_alias() {
+        let input = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "mr"}],
+            "aggregations": [
+                {"count": "mr"},
+                {"avg": "mr.merge_duration"},
+                {"max": "mr.additions", "as": "biggest"}
+            ]
+        }"#,
+        )
+        .unwrap();
+
+        let names: Vec<String> = input
+            .aggregation
+            .metrics
+            .iter()
+            .map(InputAggregationMetric::output_name)
+            .collect();
+        assert_eq!(names, ["count_mr", "avg_mr_merge_duration", "biggest"]);
+    }
+
+    fn group_by_key(json: &str) -> Result<InputGroupByKey, String> {
+        serde_json::from_str::<InputGroupByKey>(json).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn group_by_string_forms() {
+        assert_eq!(
+            group_by_key(r#""u""#).unwrap(),
+            InputGroupByKey::Node {
+                node: "u".into(),
+                alias: None
+            }
+        );
+        assert_eq!(
+            group_by_key(r#""mr.state""#).unwrap(),
+            InputGroupByKey::Property {
+                node: "mr".into(),
+                property: "state".into(),
+                truncate: None,
+                alias: None
+            }
+        );
+        let err = group_by_key(r#""mr.state.x""#).unwrap_err();
+        assert!(
+            err.contains("must be \"node\" or \"node.property\""),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn group_by_truncate_object() {
+        assert_eq!(
+            group_by_key(r#"{"key": "mr.created_at", "truncate": "month"}"#).unwrap(),
+            InputGroupByKey::Property {
+                node: "mr".into(),
+                property: "created_at".into(),
+                truncate: Some(TruncateUnit::Month),
+                alias: None
+            }
+        );
+        let err = group_by_key(r#"{"key": "mr.created_at", "truncate": "fortnight"}"#).unwrap_err();
+        assert!(
+            err.contains("unknown truncation unit \"fortnight\""),
+            "{err}"
+        );
+        let err = group_by_key(r#"{"key": "mr", "truncate": "month"}"#).unwrap_err();
+        assert!(err.contains("a node cannot be truncated"), "{err}");
+    }
+
+    #[test]
+    fn group_by_alias_forms() {
+        assert_eq!(
+            group_by_key(r#"{"key": "u", "as": "author"}"#).unwrap(),
+            InputGroupByKey::Node {
+                node: "u".into(),
+                alias: Some("author".into())
+            }
+        );
+        assert_eq!(
+            group_by_key(r#"{"key": "mr.state", "as": "state"}"#).unwrap(),
+            InputGroupByKey::Property {
+                node: "mr".into(),
+                property: "state".into(),
+                truncate: None,
+                alias: Some("state".into())
+            }
+        );
+        assert_eq!(
+            group_by_key(r#"{"key": "mr.created_at", "truncate": "month", "as": "month"}"#)
+                .unwrap(),
+            InputGroupByKey::Property {
+                node: "mr".into(),
+                property: "created_at".into(),
+                truncate: Some(TruncateUnit::Month),
+                alias: Some("month".into())
+            }
+        );
+    }
+
+    #[test]
+    fn group_by_object_rejects_degenerate_forms() {
+        let err = group_by_key(r#"{"key": "mr.state"}"#).unwrap_err();
+        assert!(err.contains("use the string form"), "{err}");
+        let err = group_by_key(r#"{"as": "name"}"#).unwrap_err();
+        assert!(err.contains("requires \"key\""), "{err}");
+        let err = group_by_key(r#"{"key": "mr.state", "unit": "month"}"#).unwrap_err();
+        assert!(
+            err.contains("unknown group_by object field \"unit\""),
+            "{err}"
+        );
+        let err = group_by_key(r#"{"month": "mr.created_at"}"#).unwrap_err();
+        assert!(err.contains("requires \"key\""), "{err}");
+        let err = group_by_key(r#"{"kind": "node", "node": "u"}"#).unwrap_err();
+        assert!(err.contains("form was removed"), "{err}");
+    }
+
+    #[test]
+    fn group_by_output_names_derive_and_alias() {
+        let input = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u"}, {"id": "mr"}],
+            "group_by": [
+                "u",
+                "mr.state",
+                {"key": "mr.created_at", "truncate": "month"},
+                {"key": "mr.target_branch", "as": "branch"}
+            ],
+            "aggregations": [{"count": "mr", "as": "count"}]
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            group_by_output_names(&input.aggregation.group_by),
+            vec!["u", "mr_state", "mr_created_at_month", "branch"]
+        );
     }
 
     #[test]
@@ -1072,7 +1830,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "filters": {"username": "admin"}}
+            "nodes": [{"id": "u", "entity": "User", "filters": {"username": "admin"}}]
         }"#,
         )
         .unwrap();
@@ -1088,7 +1846,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": "*"}
+            "nodes": [{"id": "u", "entity": "User", "columns": "*"}]
         }"#,
         )
         .unwrap();
@@ -1101,7 +1859,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "email", "created_at"]}
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username", "email", "created_at"]}]
         }"#,
         )
         .unwrap();
@@ -1121,7 +1879,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"}
+            "nodes": [{"id": "u", "entity": "User"}]
         }"#,
         )
         .unwrap();
@@ -1155,22 +1913,21 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [100]},
-            "neighbors": {"node": "u", "direction": "both"}
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
+            "neighbors": {"direction": "both"}
         }"#,
         )
         .unwrap();
 
         assert_eq!(input.query_type, QueryType::Neighbors);
         let neighbors = input.neighbors.unwrap();
-        assert_eq!(neighbors.node, "u");
         assert_eq!(neighbors.direction, Direction::Both);
     }
 
     #[test]
     fn options_default_when_omitted() {
         let input =
-            parse_input(r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}}"#)
+            parse_input(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#)
                 .unwrap();
 
         assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
@@ -1181,8 +1938,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u"},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {},
             "options": {"dynamic_columns": "*"}
         }"#,
         )
@@ -1196,8 +1953,8 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "neighbors": {"node": "u"},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+            "neighbors": {},
             "options": {"dynamic_columns": "default"}
         }"#,
         )
@@ -1211,7 +1968,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"},
+            "nodes": [{"id": "u", "entity": "User"}],
             "options": {}
         }"#,
         )
@@ -1226,7 +1983,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"},
+            "nodes": [{"id": "u", "entity": "User"}],
             "options": {"include_debug_sql": true}
         }"#,
         )
@@ -1240,7 +1997,7 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"},
+            "nodes": [{"id": "u", "entity": "User"}],
             "options": {"dynamic_columns": "*"}
         }"#,
         )
@@ -1254,11 +2011,11 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {
+            "nodes": [{
                 "id": "u",
                 "entity": "User",
                 "node_ids": [1, "9007199254740993", -42]
-            }
+            }]
         }"#,
         )
         .unwrap();
@@ -1271,11 +2028,11 @@ mod tests {
         let input = parse_input(
             r#"{
             "query_type": "traversal",
-            "node": {
+            "nodes": [{
                 "id": "u",
                 "entity": "User",
                 "id_range": {"start": 1, "end": "9007199254740993"}
-            }
+            }]
         }"#,
         )
         .unwrap();

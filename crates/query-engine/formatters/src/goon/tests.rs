@@ -45,19 +45,17 @@ fn empty_response_emits_section_markers() {
 #[test]
 fn pagination_offset_emits_has_more_and_total() {
     let mut r = response("traversal", vec![node("User", 1, &[])], vec![]);
-    r.pagination = Some(pagination(true, 50));
+    r.pagination = Some(pagination(true));
     let out = enc(&r);
     assert!(out.contains("has_more:true"));
-    assert!(out.contains("total_rows:50"));
 }
 
 #[test]
 fn pagination_no_more_omits_has_more() {
     let mut r = response("traversal", vec![node("User", 1, &[])], vec![]);
-    r.pagination = Some(pagination(false, 1));
+    r.pagination = Some(pagination(false));
     let out = enc(&r);
     assert!(!out.contains("has_more"));
-    assert!(out.contains("total_rows:1"));
 }
 
 #[test]
@@ -443,7 +441,7 @@ fn aggregation_function_appears_in_header() {
         ("c", json!(5)),
     ])]);
     let out = enc(&r);
-    assert!(out.contains("aggregations:c(count)"));
+    assert!(out.contains("aggregations:c(count:n)"));
     assert!(out.contains("group_by:severity(property)"));
 }
 
@@ -456,7 +454,7 @@ fn aggregation_descriptor_carries_target_node_alias() {
     r.columns = Some(vec![ColumnDescriptor {
         name: "user_count".into(),
         function: "count".into(),
-        target: Some("u".into()),
+        target: "u".into(),
         property: None,
     }]);
     r.group_columns = Some(vec![]);
@@ -472,7 +470,7 @@ fn aggregation_descriptor_carries_target_dot_property_for_max_over_property() {
     r.columns = Some(vec![ColumnDescriptor {
         name: "latest_update".into(),
         function: "max".into(),
-        target: Some("v".into()),
+        target: "v".into(),
         property: Some("updated_at".into()),
     }]);
     r.group_columns = Some(vec![]);
@@ -572,7 +570,7 @@ fn null_metric_value_renders_as_bare_null_not_dropped() {
 
 #[test]
 fn variable_length_traversal_edges_carry_depth() {
-    // Variable-length traversal (`max_hops>1`) tags each hit with the hop
+    // Variable-length traversal (`hops` above 1) tags each hit with the hop
     // it was found at. Without surfacing it, depth-1 and depth-3 results
     // are indistinguishable in the output.
     let mut deep = edge("MEMBER_OF", "User", 1, "Group", 200);
@@ -703,7 +701,7 @@ fn ungrouped_aggregation_emits_single_row() {
     r.group_columns = Some(vec![]);
     r.rows = Some(vec![agg_row(&[("total", json!(42))])]);
     let out = enc(&r);
-    assert!(out.contains("aggregations:total(count)"));
+    assert!(out.contains("aggregations:total(count:n)"));
     assert!(out.contains("rows:1"));
     assert!(
         !out.contains("group_by:"),

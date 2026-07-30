@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=schemas/schema-migrations.schema.json
+#
+# One entry per SCHEMA_VERSION bump, newest first (prepended by `mise schema:bump`).
+# Each entry declares how much of the graph a given version invalidates:
+#   scope: "*"    full rebuild (fail-safe; the default for anything unmapped)
+#   scope: sdlc   SDLC-sourced tables; optional `entities:` narrows to a subset
+#   scope: code   the code-graph tables (Definition, File, Directory, Branch,
+#                 ImportedSymbol) and their edge table
+#   scope: none   re-index NOTHING; the source text changed but the produced
+#                 output is byte-identical. Requires a `note:` certifying
+#                 output-neutrality. This deliberately bypasses the
+#                 under-declaration guard, so the note is mandatory and audited.
+#
+# Humans may WIDEN an entry (scope or entities), never narrow it below the
+# drift detected from the fingerprint snapshot — CI enforces this, except for a
+# note-gated `scope: none` entry, the certified output-neutral escape hatch. A
+# version with no entry is treated as "*", which also makes pruning old entries safe.
+migrations:
+- version: 88
+  scope: none
+  note: Marks 13 edge mappings mutable so the stale-edge sweep reconciles them. The flag is read only by the sweep's group derivation; extract SQL, transform output and DDL are untouched, so every indexed row is byte-identical.
+- version: 87
+  scope: '*'
+  note: Project/Group extract collapses its traversal-path join with argMax, so a transferred entity indexes once at its current path instead of once per historical path; rebuild drops the already-written stale-path duplicates.
+- version: 86
+  scope: '*'
+  note: HAS_VULNERABILITY extract switched to LEFT JOINs from _batch so paging keys on driver-row cardinality (#1064); windows skipped by the old INNER JOINs must backfill. Deriver widens a .sql.j2 edge change to '*'.
+- version: 85
+  scope: sdlc
+  entities:
+  - HAS_VULNERABILITY
+  note: New HAS_VULNERABILITY edge (Package->Vulnerability); clone carries every prior table intact and only this edge re-derives.
+- version: 84
+  scope: none
+  note: isValidUTF8 guard on decoded_sha; a no-op for every value already written (raw-binary SHAs previously failed the decode and produced no row), so no indexed row changes.
+- version: 83
+  scope: none
+  note: Source-owned base projections and independent stage compilation preserve all 47 serialized plans byte-identically.
+- version: 82
+  scope: none
+  note: Extract lookups and transform property bindings expand independently from node enrichment_props; graph rows remain byte-identical.
+- version: 81
+  scope: none
+  note: MR !1931 pipeline/.sql.j2 restructuring plus indexer.reindex explicit-list unification; DDL and reindex_sources() output byte-identical.
+- version: 80
+  scope: '*'
+  note: ledger introduced; earlier versions implicitly "*"

@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: MCPツールquery_graphとget_graph_schemaを使用して、Claude Code、Codex、またはMCP対応のAIエージェントをOrbitに接続します。
+description: MCPツールlist_commandsとinvoke_commandを使用して、Claude Code、Codex、またはMCP対応のAIエージェントをGitLab Orbitに接続します。
 title: MCPを使用してOrbitにアクセスする
 ---
 
@@ -26,11 +26,11 @@ title: MCPを使用してOrbitにアクセスする
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-OrbitはMCP対応のAIエージェントがGitLabのナレッジグラフをクエリできる2つのMCPツールを公開しています。Claude Code、OpenAI Codex、またはModel Context Protocolをサポートするその他のツールと組み合わせて使用できます。
+GitLab OrbitはMCP対応のAIエージェントがGitLabのナレッジグラフに対してGitLab Orbitコマンドを検出・実行できる2つのMCPツールを公開しています。Claude Code、OpenAI Codex、またはModel Context Protocolをサポートするその他のツールと組み合わせて使用できます。
 
 ## 前提条件 {#prerequisites}
 
-- Orbitが[グループで有効化](../getting-started.md)されていること。
+- GitLab Orbitが[グループで有効化](../getting-started.md)されていること。
 - GitLabに認証済みであること。`glab auth login`を実行してください（デフォルトではOAuthを使用。`read_api`スコープを持つパーソナルアクセストークンも使用可能）。
 - クエリ対象のグループへのアクセス権限があること。
 - MCPクライアントが（`mcp-remote`を経由せず）ネイティブHTTPで直接接続する場合、OAuthリクエストに`mcp_orbit`スコープを含める必要があります。以下のGemini CLIの例を参照してください。
@@ -39,8 +39,17 @@ OrbitはMCP対応のAIエージェントがGitLabのナレッジグラフをク�
 
 | ツール | 説明 |
 |------|-------------|
-| `query_graph` | OrbitクエリDSLを使用してグラフクエリを実行します。型付きの結果を返します。 |
+| `list_commands` | 説明と入力スキーマを含む利用可能なGitLab Orbitコマンドを一覧表示します。 |
+| `invoke_command` | 名前とパラメーターでコマンドを実行します。型付きの結果を返します。 |
+
+`invoke_command`で利用可能なコマンド:
+
+| コマンド | 説明 |
+|---------|-------------|
+| `query_graph` | OrbitクエリDSLを使用してグラフクエリを実行します。 |
 | `get_graph_schema` | 現在のスキーマ（すべてのノードタイプ、プロパティ、リレーションシップタイプ）を取得します。 |
+| `get_query_dsl` | `query_graph` JSONのDSL文法とバージョンを返します。 |
+| `get_response_format` | `query_graph`レスポンスのJSONスキーマとバージョンを返します。 |
 
 ## MCPクライアントを接続する {#connect-your-mcp-client}
 
@@ -53,7 +62,7 @@ MCPクライアントが`https://gitlab.com/api/v4/orbit/mcp`を指すように�
 claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 ```
 
-最初の`query_graph`または`get_graph_schema`の呼び出し時にブラウザが開き、GitLabで認証が行われます。JSONの設定ファイルを編集する必要はありません。
+最初の`list_commands`または`invoke_command`の呼び出し時にブラウザが開き、GitLabで認証が行われます。JSONの設定ファイルを編集する必要はありません。
 
 > [!note]
 > Claude CodeはHTTPで直接接続します。Claude Codeで`npx mcp-remote`を使用しないでください。エンドポイントをstdioプロセスでラップするため、組み込みトランスポートと競合し、「Failed to connect」エラーが発生します。代わりに上記の`claude mcp add --transport http`コマンドを使用してください。
@@ -135,9 +144,9 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 認証には既存の`glab auth login`セッションを使用します。トークンのコピーや貼り付けは不要です。サポートされているクライアント: Claude Code、OpenCode、Cursor、Codex、Gemini CLI、Antigravity。
 
 > [!note]
-> 計画中の`glab orbit setup`サブコマンドにより、OrbitスキルのインストールとこのMCP設定の書き込みを1ステップで行えるようになります。リリースまでは、上記の手順に従ってMCPクライアントを手動で設定してください。
+> 計画中の`glab orbit setup`サブコマンドにより、GitLab OrbitスキルのインストールとこのMCP設定の書き込みを1ステップで行えるようになります。リリースまでは、上記の手順に従ってMCPクライアントを手動で設定してください。
 
-また、[Orbitスキルを手動でインストール](../../ai_coding_agents.md)することで、エージェントにクエリレシピ、DSLガイダンス、トラブルシューティング情報を提供できます。
+また、[GitLab Orbitスキルを手動でインストール](../../ai_coding_agents.md)することで、エージェントにクエリレシピ、DSLガイダンス、トラブルシューティング情報を提供できます。
 
 ### 動作確認 {#test-it}
 
@@ -145,21 +154,21 @@ AIエージェントで次のように質問します:
 
 > 「Orbitを使用して、グループ内で最近更新された5つのプロジェクトを一覧表示してください。」
 
-プロジェクト名とパスを含む型付きの結果が返されれば、接続は成功しています。結果が返されない場合は、`glab auth status`を実行して認証状態を確認し、少なくとも1つのグループでOrbitが有効になっていることを確認してください。
+プロジェクト名とパスを含む型付きの結果が返されれば、接続は成功しています。結果が返されない場合は、`glab auth status`を実行して認証状態を確認し、少なくとも1つのグループでGitLab Orbitが有効になっていることを確認してください。
 
 ## 課金 {#billing}
 
-MCP経由のクエリはGitLabクレジットを消費します。`query_graph`へのクエリ呼び出しはGitLabサブスクリプションのクレジットを使用します。`get_graph_schema`の呼び出しは消費対象外です。
+MCP経由のクエリはGitLabクレジットを消費します。`query_graph`を実行する`invoke_command`の呼び出しはGitLabサブスクリプションのクレジットを使用します。`list_commands`、`get_graph_schema`、`get_query_dsl`、`get_response_format`コマンドは消費対象外です。
 
 ## ツールの使用方法 {#using-the-tools}
 
-接続後、AIエージェントにOrbitツールを直接使用するよう指示します:
+接続後、AIエージェントにGitLab Orbitツールを直接使用するよう指示します:
 
-スキーマの確認:
-> 「`get_graph_schema`を使用して、Orbitがインデックス作成するノードタイプを表示してください。」
+コマンドとスキーマの確認:
+> 「`list_commands`を使用して利用可能なGitLab Orbitコマンドを表示し、次に`get_graph_schema`コマンドを実行してGitLab Orbitがインデックス作成するノードタイプを確認してください。」
 
 クエリの実行:
-> 「`query_graph`を使用して、グループ内でオープンなマージリクエストが最も多い10件のプロジェクトを検索してください。」
+> 「`query_graph`コマンドを使用して、グループ内でオープンなマージリクエストが最も多い10件のプロジェクトを検索してください。」
 
 影響範囲の分析:
 > 「Orbitを使用して、このプロジェクト内で`AuthService`を直接または推移的にインポートしているすべてのファイルを検索してください。」
@@ -167,9 +176,11 @@ MCP経由のクエリはGitLabクレジットを消費します。`query_graph`�
 オンボーディング:
 > 「Orbitを使用して、このグループの主要なサービス、使用言語、および依存プロジェクトをマップしてください。」
 
-エージェントはJSONクエリDSLを構成し、代わりに`query_graph`を呼び出します。結果を正確に制御したい場合は、生のJSONクエリを直接渡すこともできます。
+エージェントはJSONクエリDSLを構成し、代わりに`query_graph`コマンドを呼び出します。結果を正確に制御したい場合は、生のJSONクエリを直接渡すこともできます。
 
-## 例: query_graphの手動呼び出し {#example-manual-querygraph-call}
+## 例: invoke_commandによるquery_graphの手動呼び出し {#example-manual-invokecommand-call-for-querygraph}
+
+以下のクエリを`invoke_command`に`{"command_name": "query_graph", "parameters": {"query": ...}}`の形式で渡します:
 
 ```json orbit-query
 {
@@ -181,11 +192,11 @@ MCP経由のクエリはGitLabクレジットを消費します。`query_graph`�
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
-  "group_by": [{"kind": "node", "node": "p"}],
+  "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "open_mrs"}
+    { "count": "mr", "as": "open_mrs" }
   ],
-  "aggregation_sort": {"column": "open_mrs", "direction": "DESC"},
+  "aggregation_sort": "-open_mrs",
   "limit": 10
 }
 ```
@@ -205,7 +216,7 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 
 ### 初回使用時に「Needs authentication」が表示される {#needs-authentication-on-first-use}
 
-これは想定された動作です。最初の`query_graph`または`get_graph_schema`の呼び出し時にブラウザが開き、GitLabでOAuth認証が完了します。ブラウザフローが起動しない場合は、セッションを確認してください:
+これは想定された動作です。最初の`list_commands`または`invoke_command`の呼び出し時にブラウザが開き、GitLabでOAuth認証が完了します。ブラウザフローが起動しない場合は、セッションを確認してください:
 
 ```shell
 glab auth status
@@ -219,7 +230,7 @@ glab auth login
 
 ### 接続後のクエリエラー {#query-errors-after-connecting}
 
-クエリ時のエラー（検証の失敗、空の結果、レート制限）については、DSLガイダンス、クエリレシピ、終了コードの診断情報が含まれる[Orbitスキルのドキュメント](../../ai_coding_agents.md)を参照してください。インラインガイダンスのためにスキルをインストールします:
+クエリ時のエラー（検証の失敗、空の結果、レート制限）については、DSLガイダンス、クエリレシピ、終了コードの診断情報が含まれる[GitLab Orbitスキルのドキュメント](../../ai_coding_agents.md)を参照してください。インラインガイダンスのためにスキルをインストールします:
 
 ```shell
 glab skills install --global orbit

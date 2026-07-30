@@ -468,11 +468,20 @@ mod tests {
         }
 
         fn make_request(task_id: i64, project_id: i64, branch: &str) -> Envelope {
+            Self::make_request_with_sha(task_id, project_id, branch, Some("abc123"))
+        }
+
+        fn make_request_with_sha(
+            task_id: i64,
+            project_id: i64,
+            branch: &str,
+            commit_sha: Option<&str>,
+        ) -> Envelope {
             Envelope::new(&CodeIndexingTaskRequest {
                 task_id,
                 project_id,
                 branch: Some(branch.to_string()),
-                commit_sha: Some("abc123".to_string()),
+                commit_sha: commit_sha.map(str::to_string),
                 traversal_path: format!("1/{project_id}/"),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
@@ -631,7 +640,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_repository_sets_checkpoint_and_acks() {
+    async fn empty_repository_without_commit_sha_sets_checkpoint_and_acks() {
         use crate::modules::code::repository::RepositoryServiceError;
         use gitlab_client::GitlabClientError;
 
@@ -641,7 +650,7 @@ mod tests {
             RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(123)),
         );
 
-        let envelope = TestContext::make_request(42, 123, "main");
+        let envelope = TestContext::make_request_with_sha(42, 123, "main", None);
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
         assert!(result.is_ok(), "empty repo should ack, got {result:?}");
@@ -656,7 +665,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_error_sets_checkpoint_and_acks() {
+    async fn empty_repository_with_commit_sha_nacks_without_checkpoint() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_download_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(123)),
+        );
+
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            result.is_err(),
+            "push-dispatched task must retry on empty archive, got {result:?}"
+        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .get_checkpoint("1/123/", 123, "main")
+            .await
+            .unwrap();
+        assert!(checkpoint.is_none(), "no checkpoint on the raced attempt");
+    }
+
+    #[tokio::test]
+    async fn server_error_without_commit_sha_sets_checkpoint_and_acks() {
         use crate::modules::code::repository::RepositoryServiceError;
         use gitlab_client::GitlabClientError;
 
@@ -669,7 +704,7 @@ mod tests {
             }),
         );
 
-        let envelope = TestContext::make_request(7, 123, "main");
+        let envelope = TestContext::make_request_with_sha(7, 123, "main", None);
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
 
         assert!(result.is_ok());

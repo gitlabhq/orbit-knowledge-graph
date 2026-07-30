@@ -3,6 +3,7 @@
 
 pub mod check;
 pub mod codegen;
+pub mod cursor;
 pub mod enforce;
 mod errors;
 pub mod hydrate;

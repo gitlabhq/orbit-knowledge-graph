@@ -35,10 +35,48 @@ health-check sidecar ◄── HTTP GET /health
     │ JSON
     ▼
 InfrastructureHealthClient ──► ClusterHealthChecker (shared Arc)
-                                   │              │
-                              HTTP /api/v1/   gRPC GetCluster
-                              cluster_health  Health(format)
+                                   ▲   │              │
+              gkg_schema_version ──┘   │              │
+              (migrating row)     HTTP /api/v1/   gRPC GetCluster
+                                  cluster_health  Health(format)
 ```
+
+## Migration awareness
+
+During a schema migration the newly deployed webserver pods are `Pending`
+(embedded version > active version) and drop out of the K8s rotation, so
+the sidecar reports the webserver deployment Unhealthy for the whole
+migration window. Without extra context that is indistinguishable from a
+genuinely broken deployment.
+
+To disambiguate, `ClusterHealthChecker` reads the shared
+`gkg_schema_version` table when the sidecar's aggregated status is
+Unhealthy. If a `migrating` row exists (`read_migrating_version`) it applies
+the `Migrating` status:
+
+- top-level status becomes `Migrating` instead of `Unhealthy`;
+- a synthetic `schema_migration` component (`Migrating`) is appended with a
+  `migrating_version` metric so consumers can see the cause;
+- the factual service components keep their real Unhealthy replica counts.
+
+**Guard — the `Migrating` status only fires when every ClickHouse component
+reports Healthy.** A migration can never excuse an unreachable database, and
+if the sidecar itself is unreachable it synthesizes an Unhealthy ClickHouse
+component, so the guard also blocks it there. Any error reading
+`gkg_schema_version` leaves the status Unhealthy (fail toward the stricter
+state).
+
+**Rails caveat:** the monolith's gRPC client currently maps only Healthy,
+Degraded, and Unhealthy, so `GET /api/v4/orbit/status` reports `"unknown"`
+for `Migrating` until the `gitlab-gkg-proto` gem is bumped and the mapping
+added. The TOON/LLM format returns `"migrating"` immediately.
+
+**Accepted false negative:** an unrelated pod failure that happens *during*
+a migration window reads `Migrating` rather than `Unhealthy`. This is
+time-bounded (only while a `migrating` row exists) and gated on ClickHouse
+health, so a hard infrastructure failure is never masked. See
+[`schema_management.md`](schema_management.md) for the migration lifecycle
+that writes the `migrating` row.
 
 ## Modes
 

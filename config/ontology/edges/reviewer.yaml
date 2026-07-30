@@ -8,15 +8,22 @@ variants:
     scope: prune_to_target
     description: "User is a reviewer of merge request."
 
-etl:
-  - scope: namespaced
-    source: siphon_merge_request_reviewers
-    order_by: [traversal_path, merge_request_id, id]
-    from:
-      id: user_id
-      type: User
-      enrich: [state, private_profile, admin, auditor, external, user_type]
-    to:
-      id: merge_request_id
-      type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
+indexer:
+  reindex: [siphon_merge_request_reviewers]
+pipelines:
+  - name: REVIEWER_siphon_merge_request_reviewers_MergeRequest
+    extract:
+      type: clickhouse
+      tables: [siphon_merge_request_reviewers]
+      fields: [user_id, merge_request_id]
+      order_by: [traversal_path, merge_request_id, id]
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+        - { node: MergeRequest, id: merge_request_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: merge_request_id, kind: MergeRequest, enrich: true }
+          label: REVIEWER

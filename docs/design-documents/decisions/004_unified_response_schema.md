@@ -136,7 +136,7 @@ Nodes are deduplicated. Edges are instance-level.
 
 User:1 appears once even though it has 2 edges. Table view stacks a Users table above a Projects table. Graph view gets 4 nodes and 3 edges directly.
 
-#### Traversal (variable-length, max_hops > 1)
+#### Traversal (variable-length, hops above 1)
 
 Edges carry a `depth` field.
 
@@ -291,7 +291,7 @@ The frontend builds composite IDs (`"User:42"`) for deduplication. Property name
 { "name": "mr_count", "function": "count", "target": "m" }
 ```
 
-Optional fields: `target` (node alias being aggregated) and `property` (field being aggregated, absent for plain `count`). Present for all aggregation queries so the consumer can display correct table headers while reading metric values from `rows`.
+`target` names the node alias being aggregated; optional `property` names the field being aggregated (absent for a plain node `count`). Present for all aggregation queries so the consumer can display correct table headers while reading metric values from `rows`.
 
 **Edge:** two nodes connected by type and ID.
 
@@ -311,7 +311,7 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.
 7. Ontology is cached. Display metadata (labels, styles, descriptions) comes from the schema, not the response.
 8. `id` and `type` are always included on nodes, even if the user didn't select them.
-9. Pagination uses an agent-driven cursor model (`{ offset, page_size }`) that slices the authorized (post-redaction) result set. `PaginationInfo { has_more, total_rows }` is returned in both the proto metadata and the JSON body.
+9. Pagination uses keyset cursors (`{ page_size, after }`): the seek predicate is compiled into SQL and the response always carries `pagination { has_more, truncated, next_cursor? }`; there is no row-count field (the proto metadata's `row_count` carries the page's authorized row count).
 
 ### Display hint
 

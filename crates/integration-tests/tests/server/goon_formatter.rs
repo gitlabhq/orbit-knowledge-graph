@@ -95,14 +95,10 @@ async fn run_pipeline(
         .expect("pipeline should succeed");
 
     let mut query_result = hydration_output.query_result;
-    let pagination = compiled.input.cursor.map(|cursor| {
-        let total_rows = query_result.authorized_count();
-        let has_more = query_result.apply_cursor(cursor.offset, cursor.page_size);
-        query_engine::shared::PaginationMeta {
-            has_more,
-            total_rows,
-        }
-    });
+    let pagination = Some(query_engine::shared::paginate(
+        &mut query_result,
+        &compiled.input,
+    ));
 
     PipelineOutput {
         row_count: query_result.authorized_count(),
@@ -135,7 +131,7 @@ async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),
@@ -149,6 +145,50 @@ async fn format_stamped_returns_goon_name_and_version(ctx: &TestContext) {
         formatted.is_string(),
         "GoonFormatter must wrap its output in Value::String so the gRPC \
          layer routes it as Content::FormattedText, got: {formatted:?}"
+    );
+}
+
+async fn pagination_header_carries_cursor_and_pages_forward(ctx: &TestContext) {
+    let json = r#"{"query_type": "traversal",
+        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
+        "order_by": "u.id",
+        "cursor": {"page_size": 2}}"#;
+
+    let output = run_pipeline(ctx, json, &allow_all(), test_security_context()).await;
+    let page1 = GoonFormatter.format(&output);
+    let s1 = goon_str(&page1);
+    assert!(
+        s1.contains("has_more:true"),
+        "page 1 GOON header must flag more: {s1}"
+    );
+    assert!(
+        s1.contains("truncated:true"),
+        "page 1 GOON header must flag truncation: {s1}"
+    );
+    let after = s1
+        .lines()
+        .find_map(|l| l.strip_prefix("next_cursor:"))
+        .expect("GOON header must carry next_cursor so an LLM can page forward")
+        .to_string();
+
+    let mut next: serde_json::Value = serde_json::from_str(json).unwrap();
+    next["cursor"]["after"] = serde_json::Value::String(after);
+    let output2 = run_pipeline(
+        ctx,
+        &next.to_string(),
+        &allow_all(),
+        test_security_context(),
+    )
+    .await;
+    let page2 = GoonFormatter.format(&output2);
+    let s2 = goon_str(&page2);
+    assert!(
+        s2.contains("username=unicode"),
+        "the token from the GOON header must advance to the last user: {s2}"
+    );
+    assert!(
+        !s2.contains("has_more:true"),
+        "final GOON page must not flag more: {s2}"
     );
 }
 
@@ -198,7 +238,7 @@ async fn empty_result_still_emits_section_markers(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]},
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 99000, "end": 99999}, "columns": ["username"]}],
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),
@@ -221,7 +261,7 @@ async fn quoting_handles_strings_with_spaces_and_escapes(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [2], "columns": ["name"]},
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [2], "columns": ["name"]}],
             "limit": 1}"#,
         &allow_all(),
         test_security_context(),
@@ -252,8 +292,8 @@ async fn aggregation_node_grouping_lifts_unique_nodes_and_emits_rows(ctx: &TestC
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "node", "node": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
+            "group_by": ["g"],
+            "aggregations": [{"count": "u", "as": "user_count"}],
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),
@@ -290,9 +330,9 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "group_by": [{"kind": "property", "node": "u", "property": "state"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
-            "aggregation_sort": {"column": "user_count", "direction": "DESC"},
+            "group_by": ["u.state"],
+            "aggregations": [{"count": "u", "as": "user_count"}],
+            "aggregation_sort": "-user_count",
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),
@@ -304,8 +344,8 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
 
     assert!(s.contains("query_type:aggregation"));
     assert!(
-        s.contains("group_by:state(property)"),
-        "property group must declare kind=property: {s}"
+        s.contains("group_by:u_state(property:state)"),
+        "property group must declare kind=property and its source property: {s}"
     );
     assert!(
         s.contains("aggregations:user_count(count:u)"),
@@ -313,7 +353,7 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
     );
     assert!(s.contains("@rows\n"));
     assert!(
-        s.contains("state=active"),
+        s.contains("u_state=active"),
         "active state bucket must appear bare: {s}"
     );
 }
@@ -327,7 +367,7 @@ async fn ungrouped_aggregation_emits_single_row_no_group_by_line(ctx: &TestConte
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "aggregations": [{"count": "u", "as": "total"}],
             "limit": 1}"#,
         &allow_all(),
         test_security_context(),
@@ -388,6 +428,7 @@ async fn goon_formatter_e2e() {
 
     run_subtests_shared!(
         &ctx,
+        pagination_header_carries_cursor_and_pages_forward,
         format_stamped_returns_goon_name_and_version,
         traversal_emits_header_nodes_and_edges_sections,
         empty_result_still_emits_section_markers,
