@@ -52,8 +52,14 @@ bash scripts/retrieve_gitlab_charts.sh
 bash scripts/retrieve_orbit_charts.sh
 
 log "Building operator image"
-docker build \
+# The operator Dockerfile uses --platform=${BUILDPLATFORM} (a buildx feature).
+# Enable BuildKit and pass the platform ARGs explicitly for the single-arch
+# e2e build.
+DOCKER_BUILDKIT=1 docker build \
   -t "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}" \
+  --build-arg BUILDPLATFORM=linux/amd64 \
+  --build-arg TARGETOS=linux \
+  --build-arg TARGETARCH=amd64 \
   --build-arg BUILD_IMAGE="docker.io/golang:1.26" \
   .
 
