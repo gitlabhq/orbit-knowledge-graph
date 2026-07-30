@@ -22,12 +22,16 @@ pub use clickhouse::QuerySummary;
 
 use crate::error::ClickHouseError;
 
+/// ClickHouse rejects an async insert that also carries `insert_quorum`.
+const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
+
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
+    quorum_writes: bool,
 }
 
 impl ArrowClickHouseClient {
@@ -63,11 +67,16 @@ impl ArrowClickHouseClient {
             base_url: url.to_string(),
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
+            quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
         }
     }
 
     pub fn database(&self) -> &str {
         &self.database
+    }
+
+    pub fn has_quorum_writes(&self) -> bool {
+        self.quorum_writes
     }
 
     pub fn query(&self, sql: &str) -> ArrowQuery {
@@ -81,6 +90,9 @@ impl ArrowClickHouseClient {
     pub fn insert_query(&self, sql: &str) -> ArrowQuery {
         let mut q = self.query(sql);
         for (k, v) in &self.insert_settings {
+            if self.should_drop_async_insert_setting(k) {
+                continue;
+            }
             q = q.with_setting(k, v);
         }
         q
@@ -88,9 +100,6 @@ impl ArrowClickHouseClient {
 
     /// Sorted so the emitted `SETTINGS` clause is deterministic.
     fn insert_settings_clause(&self, overrides: &[(&str, &str)]) -> String {
-        if self.insert_settings.is_empty() && overrides.is_empty() {
-            return String::new();
-        }
         let mut merged: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
         for (k, v) in &self.insert_settings {
             merged.insert(k, v);
@@ -98,8 +107,16 @@ impl ArrowClickHouseClient {
         for &(k, v) in overrides {
             merged.insert(k, v);
         }
+        merged.retain(|k, _| !self.should_drop_async_insert_setting(k));
+        if merged.is_empty() {
+            return String::new();
+        }
         let pairs: Vec<String> = merged.iter().map(|(k, v)| format!("{k}={v}")).collect();
         format!(" SETTINGS {}", pairs.join(", "))
+    }
+
+    fn should_drop_async_insert_setting(&self, key: &str) -> bool {
+        self.quorum_writes && ASYNC_INSERT_SETTING_KEYS.contains(&key)
     }
 
     pub fn build_insert_sql(&self, table: &str) -> String {
@@ -540,6 +557,19 @@ impl std::io::Write for DrainableWriter {
     }
 }
 
+fn has_quorum_insert_setting(
+    session_settings: &std::collections::HashMap<String, String>,
+    insert_settings: &std::collections::HashMap<String, String>,
+) -> bool {
+    [session_settings, insert_settings]
+        .into_iter()
+        .any(|settings| {
+            settings
+                .get("insert_quorum")
+                .is_some_and(|value| value != "0")
+        })
+}
+
 async fn flush_drain(
     insert: &mut clickhouse::insert_formatted::InsertFormatted,
     drain: &DrainableWriter,
@@ -559,20 +589,33 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn client_with_settings(insert_settings: HashMap<String, String>) -> ArrowClickHouseClient {
+    fn client_with_insert_settings(
+        insert_settings: HashMap<String, String>,
+    ) -> ArrowClickHouseClient {
+        client_with_session_and_insert_settings(HashMap::new(), insert_settings)
+    }
+
+    fn client_with_session_and_insert_settings(
+        session_settings: HashMap<String, String>,
+        insert_settings: HashMap<String, String>,
+    ) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
             "http://localhost:8123",
             "default",
             "default",
             None,
-            &HashMap::new(),
+            &session_settings,
             &insert_settings,
         )
     }
 
+    fn insert_quorum_setting() -> HashMap<String, String> {
+        HashMap::from([("insert_quorum".to_string(), "auto".to_string())])
+    }
+
     #[test]
     fn no_settings_emits_no_clause() {
-        let client = client_with_settings(HashMap::new());
+        let client = client_with_insert_settings(HashMap::new());
         assert_eq!(
             client.build_insert_sql("t"),
             "INSERT INTO t FORMAT ArrowStream"
@@ -581,7 +624,7 @@ mod tests {
 
     #[test]
     fn config_settings_sort_for_deterministic_sql() {
-        let client = client_with_settings(HashMap::from([
+        let client = client_with_insert_settings(HashMap::from([
             ("wait_for_async_insert".to_string(), "0".to_string()),
             ("async_insert".to_string(), "1".to_string()),
         ]));
@@ -593,7 +636,7 @@ mod tests {
 
     #[test]
     fn overrides_win_over_config() {
-        let client = client_with_settings(HashMap::from([(
+        let client = client_with_insert_settings(HashMap::from([(
             "wait_for_async_insert".to_string(),
             "0".to_string(),
         )]));
@@ -602,5 +645,46 @@ mod tests {
             client.build_insert_sql_with_overrides("t", &overrides),
             "INSERT INTO t SETTINGS async_insert=1, wait_for_async_insert=1 FORMAT ArrowStream"
         );
+    }
+
+    #[test]
+    fn quorum_writes_drop_async_insert_overrides() {
+        let client =
+            client_with_session_and_insert_settings(insert_quorum_setting(), HashMap::new());
+        let overrides = [("async_insert", "1"), ("wait_for_async_insert", "1")];
+        assert_eq!(
+            client.build_insert_sql_with_overrides("t", &overrides),
+            "INSERT INTO t FORMAT ArrowStream"
+        );
+    }
+
+    #[test]
+    fn quorum_writes_drop_configured_async_insert_settings() {
+        let client = client_with_session_and_insert_settings(
+            insert_quorum_setting(),
+            HashMap::from([
+                ("async_insert".to_string(), "1".to_string()),
+                ("optimize_on_insert".to_string(), "0".to_string()),
+            ]),
+        );
+        assert_eq!(
+            client.build_insert_sql("t"),
+            "INSERT INTO t SETTINGS optimize_on_insert=0 FORMAT ArrowStream"
+        );
+    }
+
+    #[test]
+    fn quorum_writes_detected_from_insert_settings() {
+        let client = client_with_insert_settings(insert_quorum_setting());
+        assert!(client.has_quorum_writes());
+    }
+
+    #[test]
+    fn insert_quorum_zero_keeps_async_inserts() {
+        let client = client_with_session_and_insert_settings(
+            HashMap::from([("insert_quorum".to_string(), "0".to_string())]),
+            HashMap::new(),
+        );
+        assert!(!client.has_quorum_writes());
     }
 }

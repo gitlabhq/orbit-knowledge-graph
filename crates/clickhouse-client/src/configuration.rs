@@ -1,6 +1,15 @@
+use std::collections::HashMap;
+
 use gkg_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
+
+/// Serializing quorum inserts is what makes `select_sequential_consistency` take effect.
+const QUORUM_SESSION_SETTINGS: [(&str, &str); 3] = [
+    ("insert_quorum", "auto"),
+    ("insert_quorum_parallel", "0"),
+    ("select_sequential_consistency", "1"),
+];
 
 pub trait ClickHouseConfigurationExt {
     fn build_client(&self) -> ArrowClickHouseClient;
@@ -13,10 +22,29 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             &self.database,
             &self.username,
             self.password.as_deref(),
-            &self.session_settings,
+            &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
         )
     }
+}
+
+fn build_session_settings_with_quorum_defaults(
+    config: &ClickHouseConfiguration,
+) -> HashMap<String, String> {
+    if !config.quorum_writes {
+        return config.session_settings.clone();
+    }
+    let mut settings: HashMap<String, String> = QUORUM_SESSION_SETTINGS
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+    settings.extend(
+        config
+            .session_settings
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+    settings
 }
 
 #[cfg(test)]
@@ -57,6 +85,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
+            quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -72,6 +101,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
+            quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -88,6 +118,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
+            quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -104,12 +135,89 @@ mod tests {
             username: "".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
+            quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
 
         let result = config.validate();
         assert!(matches!(result, Err(ConfigurationError::EmptyUsername)));
+    }
+
+    #[test]
+    fn quorum_writes_with_zero_insert_quorum_is_rejected() {
+        let config = ClickHouseConfiguration {
+            quorum_writes: true,
+            session_settings: HashMap::from([("insert_quorum".to_string(), "0".to_string())]),
+            ..ClickHouseConfiguration::default()
+        };
+
+        let result = config.validate();
+
+        assert!(matches!(
+            result,
+            Err(ConfigurationError::QuorumWritesWithoutQuorum)
+        ));
+    }
+
+    #[test]
+    fn quorum_writes_expand_to_session_settings() {
+        let config = ClickHouseConfiguration {
+            quorum_writes: true,
+            ..ClickHouseConfiguration::default()
+        };
+
+        let settings = build_session_settings_with_quorum_defaults(&config);
+
+        assert_eq!(
+            settings.get("insert_quorum").map(String::as_str),
+            Some("auto")
+        );
+        assert_eq!(
+            settings.get("insert_quorum_parallel").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            settings
+                .get("select_sequential_consistency")
+                .map(String::as_str),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn explicit_session_setting_overrides_quorum_default() {
+        let config = ClickHouseConfiguration {
+            quorum_writes: true,
+            session_settings: std::collections::HashMap::from([(
+                "insert_quorum".to_string(),
+                "3".to_string(),
+            )]),
+            ..ClickHouseConfiguration::default()
+        };
+
+        let settings = build_session_settings_with_quorum_defaults(&config);
+
+        assert_eq!(settings.get("insert_quorum").map(String::as_str), Some("3"));
+    }
+
+    #[test]
+    fn quorum_writes_unset_leaves_session_settings_alone() {
+        let config = ClickHouseConfiguration::default();
+
+        let settings = build_session_settings_with_quorum_defaults(&config);
+
+        assert!(settings.is_empty());
+    }
+
+    #[test]
+    fn quorum_writes_reach_the_built_client() {
+        let config = ClickHouseConfiguration {
+            quorum_writes: true,
+            ..ClickHouseConfiguration::default()
+        };
+
+        assert!(config.build_client().has_quorum_writes());
     }
 
     #[test]
@@ -130,6 +238,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             session_settings: std::collections::HashMap::new(),
+            quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
