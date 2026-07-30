@@ -265,7 +265,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.namespace-code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
-| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |
+| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Sweeps tombstoned keys from every graph table |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -638,7 +638,7 @@ engine:
 schedule:
   tasks:
     table-cleanup:
-      cron: "0 0 3 * * *"
+      cron: "0 0 3 * * 0"
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:

@@ -270,9 +270,10 @@
             "lookback_secs": 3600
           },
           "table-cleanup": {
-            "cron": "0 0 3 * * *",
+            "cron": "0 0 3 * * 0",
             "lookback_secs": 604800,
             "max_backlog_secs": 2592000,
+            "max_concurrent_tables": 4,
             "max_memory_bytes": 8000000000,
             "statement_timeout_secs": 5400,
             "verify_poll_interval_secs": 5,
@@ -1559,9 +1560,10 @@
               "lookback_secs": 3600
             },
             "table-cleanup": {
-              "cron": "0 0 3 * * *",
+              "cron": "0 0 3 * * 0",
               "lookback_secs": 604800,
               "max_backlog_secs": 2592000,
+              "max_concurrent_tables": 4,
               "max_memory_bytes": 8000000000,
               "statement_timeout_secs": 5400,
               "verify_poll_interval_secs": 5,
@@ -1624,9 +1626,10 @@
         "table-cleanup": {
           "$ref": "#/$defs/TableCleanupConfig",
           "default": {
-            "cron": "0 0 3 * * *",
+            "cron": "0 0 3 * * 0",
             "lookback_secs": 604800,
             "max_backlog_secs": 2592000,
+            "max_concurrent_tables": 4,
             "max_memory_bytes": 8000000000,
             "statement_timeout_secs": 5400,
             "verify_poll_interval_secs": 5,
@@ -1776,6 +1779,12 @@
           "type": "integer",
           "format": "uint64",
           "default": 2592000,
+          "minimum": 0
+        },
+        "max_concurrent_tables": {
+          "type": "integer",
+          "format": "uint",
+          "default": 4,
           "minimum": 0
         },
         "max_memory_bytes": {

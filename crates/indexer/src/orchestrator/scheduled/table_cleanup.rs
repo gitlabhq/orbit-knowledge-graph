@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
+use futures::StreamExt;
 use tracing::{info, warn};
 
 use gkg_utils::arrow::ArrowUtils;
@@ -16,8 +17,14 @@ use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const TASK_NAME: &str = "maintenance.table_cleanup";
-const KEYS_TABLE: &str = "tombstone_sweep_keys";
+const KEYS_TABLE_PREFIX: &str = "tombstone_sweep_keys";
+/// Primary-index analysis of a larger IN set can run unboundedly: it happens
+/// during planning, where `max_execution_time` is never checked, and a query
+/// wedged there survived both `KILL QUERY` and dropping its table on prod.
+/// Above the cap ClickHouse skips the index and takes a bounded filtered scan.
+const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000;
 
+#[derive(Clone)]
 struct ReplacingMergeTreeTable {
     name: String,
     sort_key: Vec<String>,
@@ -75,31 +82,20 @@ impl ScheduledTask for TableCleanup {
 }
 
 impl TableCleanup {
+    /// Delete cost is bounded by the rows the mutation scans, not by tombstone
+    /// volume, so tables run concurrently: the run finishes in the slowest
+    /// table's time instead of the sum of all of them.
     async fn sweep_tombstones_from_all_tables(&self) -> Result<(), TaskError> {
-        let mut failed = 0u64;
-
-        for table in &self.tables {
-            let started = Instant::now();
-            match self.sweep_tombstones_from_table(table).await {
-                Ok(()) => {
-                    let elapsed = started.elapsed().as_secs_f64();
-                    self.metrics.record_query_duration(&table.name, elapsed);
-                    info!(
-                        table = table.name,
-                        duration_ms = (elapsed * 1000.0) as u64,
-                        "swept tombstoned keys"
-                    );
-                }
-                Err(error) => {
-                    failed += 1;
-                    self.metrics.record_error(self.name(), "sweep_tombstones");
-                    warn!(table = table.name, %error, "failed to sweep tombstoned keys");
-                }
-            }
-            if let Err(error) = self.drop_keys_table().await {
-                warn!(table = table.name, %error, "failed to drop the keys table");
-            }
-        }
+        let sweeps = self
+            .tables
+            .iter()
+            .cloned()
+            .map(|table| self.sweep_table_and_drop_its_keys(table));
+        let failed = futures::stream::iter(sweeps)
+            .buffer_unordered(self.config.max_concurrent_tables.max(1))
+            .filter(|succeeded| futures::future::ready(!succeeded))
+            .count()
+            .await;
 
         let tables = self.tables.len();
         info!(tables, failed, "tombstone sweep complete");
@@ -112,13 +108,39 @@ impl TableCleanup {
         Ok(())
     }
 
+    async fn sweep_table_and_drop_its_keys(&self, table: ReplacingMergeTreeTable) -> bool {
+        let table = &table;
+        let started = Instant::now();
+        let result = self.sweep_tombstones_from_table(table).await;
+        if let Err(error) = self.drop_keys_table(table).await {
+            warn!(table = table.name, %error, "failed to drop the keys table");
+        }
+        match result {
+            Ok(()) => {
+                let elapsed = started.elapsed().as_secs_f64();
+                self.metrics.record_query_duration(&table.name, elapsed);
+                info!(
+                    table = table.name,
+                    duration_ms = (elapsed * 1000.0) as u64,
+                    "swept tombstoned keys"
+                );
+                true
+            }
+            Err(error) => {
+                self.metrics.record_error(TASK_NAME, "sweep_tombstones");
+                warn!(table = table.name, %error, "failed to sweep tombstoned keys");
+                false
+            }
+        }
+    }
+
     async fn sweep_tombstones_from_table(
         &self,
         table: &ReplacingMergeTreeTable,
     ) -> Result<(), TaskError> {
         let window = self.next_window(&table.name).await?;
 
-        self.drop_keys_table().await?;
+        self.drop_keys_table(table).await?;
         self.graph
             .query(&build_tombstoned_keys_table_sql(table, &self.config))
             .param(
@@ -175,9 +197,10 @@ impl TableCleanup {
             .map_err(TaskError::new)
     }
 
-    /// `lightweight_deletes_sync = 1` returns before the mutation is guaranteed
-    /// applied, and `system.mutations` is not readable by the graph user, so
-    /// completion is confirmed against the data itself.
+    /// The delete is submitted without waiting (see
+    /// [`build_delete_tombstoned_keys_sql`]), and `system.mutations` is not
+    /// readable by the graph user, so completion is confirmed against the data
+    /// itself.
     async fn wait_until_tombstoned_keys_are_gone(
         &self,
         table: &ReplacingMergeTreeTable,
@@ -216,13 +239,20 @@ impl TableCleanup {
             .unwrap_or(0))
     }
 
-    async fn drop_keys_table(&self) -> Result<(), TaskError> {
+    async fn drop_keys_table(&self, table: &ReplacingMergeTreeTable) -> Result<(), TaskError> {
         self.graph
-            .query(&format!("DROP TABLE IF EXISTS {KEYS_TABLE}"))
+            .query(&format!("DROP TABLE IF EXISTS {}", keys_table_name(table)))
             .execute()
             .await
             .map_err(TaskError::new)
     }
+}
+
+/// One keys table per swept table, so concurrent sweeps cannot read each
+/// other's key sets. The name must not *start* with `v<version>_`, which is
+/// the glob schema garbage collection drops.
+fn keys_table_name(table: &ReplacingMergeTreeTable) -> String {
+    format!("{KEYS_TABLE_PREFIX}_{}", table.name)
 }
 
 fn build_tombstoned_keys_table_sql(
@@ -230,9 +260,10 @@ fn build_tombstoned_keys_table_sql(
     config: &TableCleanupConfig,
 ) -> String {
     let keys = table.sort_key.join(", ");
+    let keys_table = keys_table_name(table);
     let source = &table.name;
     format!(
-        "CREATE TABLE {KEYS_TABLE} ENGINE = MergeTree ORDER BY ({keys}) \
+        "CREATE TABLE {keys_table} ENGINE = MergeTree ORDER BY ({keys}) \
          AS SELECT {keys} FROM ( \
            SELECT {keys}, _deleted FROM {source} \
            WHERE _version > {{window_start:String}} AND _version <= {{window_end:String}} \
@@ -247,15 +278,22 @@ fn build_tombstoned_keys_table_sql(
     )
 }
 
+/// `lightweight_deletes_sync = 0`: a synchronous wait writes nothing to the
+/// connection until the mutation finishes, and the Cloud HTTP path drops such
+/// idle connections after ~20 minutes — while the mutation itself survives the
+/// disconnect and keeps running. Submit async; the remaining-rows poll is the
+/// completion signal.
 fn build_delete_tombstoned_keys_sql(
     table: &ReplacingMergeTreeTable,
     config: &TableCleanupConfig,
 ) -> String {
     let keys = table.sort_key.join(", ");
     format!(
-        "DELETE FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {KEYS_TABLE}) \
-         SETTINGS lightweight_deletes_sync = 1, max_execution_time = {}",
-        table.name, config.statement_timeout_secs
+        "DELETE FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {}) \
+         SETTINGS lightweight_deletes_sync = 0, max_execution_time = {}",
+        table.name,
+        keys_table_name(table),
+        config.statement_timeout_secs
     )
 }
 
@@ -269,9 +307,12 @@ fn build_count_remaining_tombstoned_rows_sql(
 ) -> String {
     let keys = table.sort_key.join(", ");
     format!(
-        "SELECT count() AS remaining FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {KEYS_TABLE}) \
-         SETTINGS max_execution_time = {}",
-        table.name, config.statement_timeout_secs
+        "SELECT count() AS remaining FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {}) \
+         SETTINGS use_index_for_in_with_subqueries_max_values = {MAX_KEYS_FOR_INDEX_ANALYSIS}, \
+                  max_execution_time = {}",
+        table.name,
+        keys_table_name(table),
+        config.statement_timeout_secs
     )
 }
 
@@ -330,11 +371,26 @@ mod tests {
     }
 
     #[test]
-    fn keys_table_name_avoids_the_schema_version_prefix() {
-        assert!(!KEYS_TABLE.starts_with('v'));
-        assert!(
-            !KEYS_TABLE.contains(&format!("v{}_", *SCHEMA_VERSION)),
-            "schema garbage collection globs v<version>_* and would drop the keys table"
+    fn keys_table_names_avoid_the_schema_version_prefix() {
+        for table in &all_tables() {
+            assert!(
+                !keys_table_name(table).starts_with(&format!("v{}_", *SCHEMA_VERSION)),
+                "schema garbage collection globs v<version>_* and would drop '{}'",
+                keys_table_name(table)
+            );
+        }
+    }
+
+    #[test]
+    fn each_table_gets_its_own_keys_table() {
+        let tables = all_tables();
+        let mut names: Vec<String> = tables.iter().map(keys_table_name).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            tables.len(),
+            "concurrent sweeps must not share a keys table"
         );
     }
 
@@ -403,8 +459,9 @@ mod tests {
 
         assert!(
             sql.contains(&format!(
-                "IN (SELECT {} FROM {KEYS_TABLE})",
-                table.sort_key.join(", ")
+                "IN (SELECT {} FROM {})",
+                table.sort_key.join(", "),
+                keys_table_name(table)
             )),
             "sql: {sql}"
         );
@@ -417,19 +474,41 @@ mod tests {
         let sql = build_count_remaining_tombstoned_rows_sql(table, &TableCleanupConfig::default());
 
         assert!(sql.contains("count() AS remaining"), "sql: {sql}");
-        assert!(sql.contains(KEYS_TABLE), "sql: {sql}");
+        assert!(sql.contains(&keys_table_name(table)), "sql: {sql}");
         assert!(!sql.contains("system.mutations"), "sql: {sql}");
     }
 
     #[test]
-    fn delete_waits_synchronously_instead_of_reading_system_mutations() {
+    fn completion_count_skips_index_analysis_for_large_key_sets() {
+        let tables = all_tables();
+        let sql = build_count_remaining_tombstoned_rows_sql(
+            find_table_ending_in(&tables, "gl_edge"),
+            &TableCleanupConfig::default(),
+        );
+
+        assert!(
+            sql.contains("use_index_for_in_with_subqueries_max_values"),
+            "an uncapped IN-set index analysis is unkillable and ignores max_execution_time; sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn delete_is_submitted_without_a_synchronous_wait() {
         let tables = all_tables();
         let sql = build_delete_tombstoned_keys_sql(
             find_table_ending_in(&tables, "gl_edge"),
             &TableCleanupConfig::default(),
         );
 
-        assert!(sql.contains("lightweight_deletes_sync = 1"), "sql: {sql}");
+        assert!(
+            sql.contains("lightweight_deletes_sync = 0"),
+            "a synchronous wait holds a silent connection the Cloud path drops at ~20min; sql: {sql}"
+        );
         assert!(!sql.contains("system.mutations"), "sql: {sql}");
+    }
+
+    #[test]
+    fn tables_sweep_concurrently_by_default() {
+        assert!(TableCleanupConfig::default().max_concurrent_tables > 1);
     }
 }

@@ -584,6 +584,8 @@ pub struct TableCleanupConfig {
     pub verify_poll_interval_secs: u64,
     #[serde(default = "default_sweep_max_backlog_secs")]
     pub max_backlog_secs: u64,
+    #[serde(default = "default_sweep_max_concurrent_tables")]
+    pub max_concurrent_tables: usize,
 }
 
 fn default_sweep_lookback_secs() -> u64 {
@@ -610,11 +612,18 @@ fn default_sweep_max_memory_bytes() -> u64 {
     8_000_000_000
 }
 
+fn default_sweep_max_concurrent_tables() -> usize {
+    4
+}
+
 impl Default for TableCleanupConfig {
     fn default() -> Self {
         Self {
+            // Weekly, Sunday 03:00 UTC: the window/lookback defaults below
+            // cover seven days, and the weekend slot leaves the background
+            // pool to the deletes.
             schedule: ScheduleConfiguration {
-                cron: Some("0 0 3 * * *".into()),
+                cron: Some("0 0 3 * * 0".into()),
             },
             statement_timeout_secs: default_sweep_statement_timeout_secs(),
             max_memory_bytes: default_sweep_max_memory_bytes(),
@@ -622,6 +631,7 @@ impl Default for TableCleanupConfig {
             window_secs: default_sweep_window_secs(),
             verify_poll_interval_secs: default_sweep_verify_poll_interval_secs(),
             max_backlog_secs: default_sweep_max_backlog_secs(),
+            max_concurrent_tables: default_sweep_max_concurrent_tables(),
         }
     }
 }
@@ -899,7 +909,7 @@ mod tests {
         );
         assert_eq!(
             tasks.table_cleanup.schedule.cron.as_deref(),
-            Some("0 0 3 * * *")
+            Some("0 0 3 * * 0")
         );
         assert_eq!(
             tasks.namespace_deletion.schedule.cron.as_deref(),
