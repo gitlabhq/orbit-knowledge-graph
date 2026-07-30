@@ -19,6 +19,7 @@ pub enum ColumnValue {
     Int64(i64),
     Float64(f64),
     String(String),
+    Bool(bool),
     Null,
 }
 
@@ -52,11 +53,18 @@ macro_rules! impl_coerce {
 impl_coerce!(i64, native: as_int64);
 impl_coerce!(f64, native: as_float64);
 impl_coerce!(String, from_str: |s| Some(s.clone()));
-impl_coerce!(bool, from_str: |s| match s.trim().to_ascii_lowercase().as_str() {
-    "true" | "1" => Some(true),
-    "false" | "0" => Some(false),
-    _ => None,
-});
+impl FromColumnValue for bool {
+    fn from_column_value(v: &ColumnValue) -> Option<Self> {
+        v.as_bool().copied().or_else(|| {
+            v.as_string()
+                .and_then(|s| match s.trim().to_ascii_lowercase().as_str() {
+                    "true" | "1" => Some(true),
+                    "false" | "0" => Some(false),
+                    _ => None,
+                })
+        })
+    }
+}
 
 impl ColumnValue {
     /// Extract as the requested type, parsing from string if needed.
@@ -86,7 +94,7 @@ impl From<serde_json::Value> for ColumnValue {
                     Self::String(n.to_string())
                 }
             }
-            serde_json::Value::Bool(b) => Self::String(b.to_string()),
+            serde_json::Value::Bool(b) => Self::Bool(b),
             serde_json::Value::Null => Self::Null,
             other => Self::String(other.to_string()),
         }
@@ -217,6 +225,7 @@ impl ArrowUtils {
             ColumnValue::Int64(v) => Some(v.to_string()),
             ColumnValue::Float64(v) => Some(v.to_string()),
             ColumnValue::String(v) => Some(v),
+            ColumnValue::Bool(v) => Some(v.to_string()),
             ColumnValue::Null => None,
         }
     }
@@ -246,7 +255,7 @@ impl ArrowUtils {
         downcast!(StringArray, v => ColumnValue::String(v.to_string()));
         downcast!(LargeStringArray, v => ColumnValue::String(v.to_string()));
         downcast!(Float64Array, v => ColumnValue::Float64(v));
-        downcast!(BooleanArray, v => ColumnValue::String(v.to_string()));
+        downcast!(BooleanArray, v => ColumnValue::Bool(v));
 
         if let Some(arr) = array.as_any().downcast_ref::<TimestampSecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));

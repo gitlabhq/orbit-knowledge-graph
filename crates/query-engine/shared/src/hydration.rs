@@ -1,7 +1,7 @@
 //! Shared hydration helpers used by both the server and local pipelines.
 //! The compile + execute step is left to the caller.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
@@ -14,6 +14,7 @@ use compiler::{
     InputNode, QueryType,
 };
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
+use ontology::{DataType, Ontology};
 use pipeline::PipelineError;
 use types::QueryResult;
 
@@ -187,14 +188,20 @@ pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
 }
 
 /// Expects columns: `{alias}_id`, `{alias}_entity_type`, `{alias}_props`
-/// where props is a JSON-encoded object.
-pub fn parse_hydration_batches(batches: &[RecordBatch]) -> Result<PropertyMap, PipelineError> {
+/// where props is a JSON-encoded object. The hydration SQL stringifies every
+/// value (`toJSONString(map(...))`), so properties the ontology declares as
+/// boolean are re-typed here.
+pub fn parse_hydration_batches(
+    batches: &[RecordBatch],
+    ontology: &Ontology,
+) -> Result<PropertyMap, PipelineError> {
     let alias = HYDRATION_NODE_ALIAS;
     let entity_type_col = format!("{alias}_entity_type");
     let props_col = format!("{alias}_props");
     let id_col = format!("{alias}_id");
 
     let mut result = HashMap::new();
+    let mut bool_fields_cache: HashMap<String, HashSet<String>> = HashMap::new();
 
     for batch in batches {
         for row_idx in 0..batch.num_rows() {
@@ -213,6 +220,21 @@ pub fn parse_hydration_batches(batches: &[RecordBatch]) -> Result<PropertyMap, P
                 continue;
             };
 
+            let bool_fields = bool_fields_cache
+                .entry(entity_type.clone())
+                .or_insert_with(|| {
+                    ontology
+                        .get_node(&entity_type)
+                        .map(|node| {
+                            node.fields
+                                .iter()
+                                .filter(|f| f.data_type == DataType::Bool)
+                                .map(|f| f.name.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                });
+
             let props: HashMap<String, ColumnValue> = row_data
                 .iter()
                 .find(|(name, _)| name.as_str() == props_col)
@@ -225,6 +247,9 @@ pub fn parse_hydration_batches(batches: &[RecordBatch]) -> Result<PropertyMap, P
                         .filter_map(|(k, v)| match ColumnValue::from(v) {
                             ColumnValue::Null => None,
                             ColumnValue::String(s) if s.is_empty() => None,
+                            cv @ ColumnValue::String(_) if bool_fields.contains(&k) => {
+                                Some((k, cv.coerce::<bool>().map_or(cv, ColumnValue::Bool)))
+                            }
                             cv => Some((k, cv)),
                         })
                         .collect()
