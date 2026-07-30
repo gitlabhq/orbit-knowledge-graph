@@ -64,6 +64,7 @@ impl TestContext {
             username: TEST_USERNAME.to_string(),
             password: Some(TEST_PASSWORD.to_string()),
             session_settings: std::collections::HashMap::new(),
+            quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -219,6 +220,7 @@ impl TestContext {
                 username: TEST_USERNAME.to_string(),
                 password: Some(TEST_PASSWORD.to_string()),
                 session_settings: std::collections::HashMap::new(),
+                quorum_writes: false,
                 insert_settings: std::collections::HashMap::new(),
                 profiling: Default::default(),
             },

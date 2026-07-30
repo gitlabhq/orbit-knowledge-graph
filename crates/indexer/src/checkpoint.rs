@@ -141,14 +141,18 @@ impl ClickHouseCheckpointStore {
     }
 
     // Single-row inserts must pin async batching regardless of durability, or per-row inserts
-    // explode the part count.
+    // explode the part count. ClickHouse rejects async inserts on a quorum-write cluster, so
+    // those deployments take the part-count hit instead.
     fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
+        let query = self.client.query(sql);
+        if self.client.has_quorum_writes() {
+            return query;
+        }
         let wait_for_flush = match durability {
             WriteDurability::FireAndForget => "0",
             WriteDurability::Durable => "1",
         };
-        self.client
-            .query(sql)
+        query
             .with_setting("async_insert", "1")
             .with_setting("wait_for_async_insert", wait_for_flush)
     }

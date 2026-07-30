@@ -15,6 +15,8 @@ pub struct ClickHouseConfiguration {
     pub password: Option<String>,
     #[serde(default)]
     pub session_settings: HashMap<String, String>,
+    #[serde(default)]
+    pub quorum_writes: bool,
     /// Settings applied to INSERT operations only (both bulk Arrow IPC and
     /// parameterized `INSERT VALUES`).
     ///
@@ -49,6 +51,7 @@ impl Default for ClickHouseConfiguration {
             username: "default".to_string(),
             password: None,
             session_settings: HashMap::new(),
+            quorum_writes: false,
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),
         }
@@ -69,6 +72,15 @@ impl ClickHouseConfiguration {
             return Err(ConfigurationError::EmptyUsername);
         }
 
+        if self.quorum_writes
+            && self
+                .session_settings
+                .get("insert_quorum")
+                .is_some_and(|value| value == "0")
+        {
+            return Err(ConfigurationError::QuorumWritesWithoutQuorum);
+        }
+
         Ok(())
     }
 }
@@ -83,4 +95,7 @@ pub enum ConfigurationError {
 
     #[error("username cannot be empty")]
     EmptyUsername,
+
+    #[error("quorum_writes is enabled but insert_quorum is set to 0")]
+    QuorumWritesWithoutQuorum,
 }
