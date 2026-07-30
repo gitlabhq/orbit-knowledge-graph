@@ -101,15 +101,19 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
 | `graph.insert_settings` | | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
 | `graph.quorum_writes` | `GKG_GRAPH__QUORUM_WRITES` | `false` | Replicated-cluster mode; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
+| `graph.replicated` | `GKG_GRAPH__REPLICATED` | `false` | Rewrite MergeTree engines in DDL to their `Replicated*` variants; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Self-managed replicated clusters
 
-Set `graph.quorum_writes: true` when the graph points at a self-managed `ReplicatedMergeTree` cluster with more than one replica. Leave it `false` on ClickHouse Cloud, where SharedMergeTree already writes with quorum.
+Set `graph.quorum_writes: true` and `graph.replicated: true` when the graph points at a self-managed `ReplicatedMergeTree` cluster with more than one replica. Leave both `false` on ClickHouse Cloud, where SharedMergeTree already writes with quorum and rewrites engines itself.
 
 ```yaml
 graph:
   quorum_writes: true
+  replicated: true
 ```
+
+`replicated` prefixes `Replicated` onto every MergeTree-family engine in DDL, the same rewrite the GitLab Rails migrations apply on a `Replicated` database. Without it, a `Replicated` database engine still replicates table metadata to every replica, but the data stays on whichever replica took the write. The ZooKeeper path and replica name come from the server's `default_replica_path`/`default_replica_name`; prefer `/clickhouse/tables/{uuid}/{shard}`, since name-based paths collide when a table is dropped and recreated.
 
 There is no equivalent setting for the datalake. GKG writes to its own graph tables and reads everything else, so the datalake is Siphon's to configure. To make datalake reads error out on a lagging replica instead of returning stale Siphon rows, put `select_sequential_consistency` in `datalake.session_settings` yourself.
 
@@ -120,7 +124,7 @@ The flag applies three session settings and suppresses a fourth:
 | `insert_quorum` | `auto` | Majority quorum that tracks replica count. A fixed number stops being a majority once replicas are added. |
 | `insert_quorum_parallel` | `0` | Required for `select_sequential_consistency` to take effect. Serializes quorum inserts per table. |
 | `select_sequential_consistency` | `1` | A read on a lagging replica errors instead of returning stale rows. |
-| `async_insert` | suppressed | ClickHouse rejects an async insert that also carries `insert_quorum`. |
+| `async_insert` | `0` | ClickHouse rejects an async insert that also carries `insert_quorum`, and 26.7 enables async inserts by default, so suppressing our own setting is not enough. |
 
 Anything set in `session_settings` wins over these, so you can still pin a fixed quorum size:
 
@@ -131,7 +135,7 @@ graph:
     insert_quorum: "2"
 ```
 
-Expect three costs. Writes create more parts and more merge work, because async inserts were what coalesced our many small per-page writes and each one now becomes its own part. Write throughput drops, because `insert_quorum_parallel: 0` serializes quorum inserts per table. And reads can fail with error 289, `REPLICA_IS_NOT_IN_QUORUM`, which is the point of the setting: retry against another replica.
+Expect three costs. Writes create more parts and more merge work, because async inserts were what coalesced our many small per-page writes and each one now becomes its own part. Write throughput drops, because `insert_quorum_parallel: 0` serializes quorum inserts per table, so concurrent writers on the same table collide with error 286, `UNSATISFIED_QUORUM`. And reads can fail with error 289, `REPLICA_IS_NOT_IN_QUORUM`, which is the point of the setting: it caught a lagging replica. The indexer treats both codes as routine and retries with backoff (graph writes, checkpoint reads and writes); SDLC topics also get NATS redelivery so a burst that outlives the in-process retries is redelivered instead of dead-lettered.
 
 ### Profiling (debug)
 
