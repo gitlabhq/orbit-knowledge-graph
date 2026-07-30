@@ -243,7 +243,8 @@ fn build_tombstoned_keys_table_sql(table: &ReplacingMergeTreeTable) -> String {
          ) WHERE _deleted \
          SETTINGS max_memory_usage = {MAX_STATEMENT_MEMORY_BYTES}, \
                   max_bytes_before_external_sort = {SPILL_SORT_TO_DISK_ABOVE_BYTES}, \
-                  optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}"
+                  optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}, \
+                  send_progress_in_http_headers = 1"
     )
 }
 
@@ -411,6 +412,18 @@ mod tests {
         assert!(
             sql.contains("use_index_for_in_with_subqueries_max_values"),
             "an uncapped IN-set index analysis is unkillable and ignores max_execution_time; sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn the_build_keeps_the_http_connection_alive() {
+        let tables = all_swept_tables();
+        let sql = build_tombstoned_keys_table_sql(find_table_ending_in(&tables, "gl_edge"));
+
+        assert!(
+            sql.contains("send_progress_in_http_headers = 1"),
+            "the biggest tables build for ~45min and write nothing until done; without \
+             periodic progress headers an idle-connection timeout drops the build; sql: {sql}"
         );
     }
 
