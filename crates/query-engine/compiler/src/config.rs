@@ -149,6 +149,9 @@ fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let security_ctx = ctx.security_ctx().clone();
     let mut input = require(ctx.take_input(), "input")?;
+    if let Some(channel) = security_ctx.channel {
+        validate::Validator::new(&ontology).check_channel_gating(&input, channel)?;
+    }
     restrict::restrict(&mut input, &ontology, &security_ctx)?;
     ctx.set_input(input);
     Ok(())

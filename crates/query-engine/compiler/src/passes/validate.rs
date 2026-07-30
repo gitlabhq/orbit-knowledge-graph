@@ -823,6 +823,25 @@ impl<'a> Validator<'a> {
         }
     }
 
+    /// ADR 013: reject any referenced entity not visible on the caller's
+    /// channel. The message mirrors an unknown-identifier error so a gated
+    /// entity is indistinguishable from a typo (§5). No-op when the channel is
+    /// unknown.
+    pub fn check_channel_gating(&self, input: &Input, channel: ontology::Channel) -> Result<()> {
+        let graph = self.ontology.graph();
+        for node in &input.nodes {
+            let Some(entity) = node.entity.as_deref() else {
+                continue;
+            };
+            if !graph.node_visible_on(entity, channel) {
+                return Err(QueryError::Validation(format!(
+                    "unknown entity type \"{entity}\""
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn check_aggregations(&self, input: &Input) -> Result<()> {
         if input.query_type != QueryType::Aggregation {
             if !input.aggregation.group_by.is_empty() {
@@ -1234,6 +1253,40 @@ mod tests {
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
         );
+    }
+
+    #[test]
+    fn channel_gating_rejects_entity_hidden_from_caller_channel() {
+        let ontology = test_ontology()
+            .with_node_channels("User", [ontology::Channel::CoreFeature])
+            .with_node_channels("Project", ontology::Channel::ALL);
+        let input =
+            parse_input(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#)
+                .unwrap();
+
+        Validator::new(&ontology)
+            .check_channel_gating(&input, ontology::Channel::CoreFeature)
+            .unwrap();
+
+        let err = Validator::new(&ontology)
+            .check_channel_gating(&input, ontology::Channel::ExternalAgent)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown entity type \"User\""),
+            "gated entity must read as unknown, got: {err}"
+        );
+    }
+
+    #[test]
+    fn channel_gating_accepts_entity_visible_on_caller_channel() {
+        let ontology = test_ontology().with_node_channels("Project", ontology::Channel::ALL);
+        let input = parse_input(
+            r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project"}]}"#,
+        )
+        .unwrap();
+        Validator::new(&ontology)
+            .check_channel_gating(&input, ontology::Channel::ExternalAgent)
+            .unwrap();
     }
 
     #[test]

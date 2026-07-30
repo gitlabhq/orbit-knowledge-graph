@@ -15,7 +15,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 
-use crate::{DenormDirection, EdgeVariantScope, Ontology, strip_schema_version_prefix};
+use crate::{Channel, DenormDirection, EdgeVariantScope, Ontology, strip_schema_version_prefix};
 
 #[derive(Debug, Clone)]
 pub(crate) struct EdgeMeta {
@@ -42,6 +42,9 @@ pub struct NodeTemplate {
     pub path_scopable: bool,
     pub role_floor: Option<u32>,
     pub redaction_id_column: Option<String>,
+    /// Channels this node may be queried through (ADR 013). Resolved from the
+    /// `settings.channel_gating` matrix at load time.
+    pub channels: BTreeSet<Channel>,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +164,7 @@ impl OntologyGraph {
                         .as_ref()
                         .map(|r| r.required_role.as_access_level()),
                     redaction_id_column: node.redaction.as_ref().map(|r| r.id_column.clone()),
+                    channels: node.channels.clone(),
                 },
             );
         }
@@ -243,6 +247,20 @@ impl OntologyGraph {
         self.node_template(self.table_to_node(table)?)
     }
 
+    /// Whether `entity` is visible on `channel` (ADR 013). An entity with no
+    /// resolved channels (fail-closed) or an unknown entity is not visible.
+    #[must_use]
+    pub fn node_visible_on(&self, entity: &str, channel: Channel) -> bool {
+        self.node_template(entity)
+            .is_some_and(|t| t.channels.contains(&channel))
+    }
+
+    /// Whether the edge triple is visible on `channel`: both endpoints must be.
+    #[must_use]
+    pub fn edge_visible_on(&self, source: &str, target: &str, channel: Channel) -> bool {
+        self.node_visible_on(source, channel) && self.node_visible_on(target, channel)
+    }
+
     /// Whether the triple keeps both endpoints in one namespace.
     #[must_use]
     pub fn is_scope_preserving(&self, kind: &str, source: &str, target: &str) -> bool {
@@ -303,6 +321,30 @@ mod tests {
 
     fn embedded() -> OntologyGraph {
         Ontology::load_embedded().unwrap().graph().clone()
+    }
+
+    #[test]
+    fn embedded_nodes_default_to_every_channel() {
+        let g = embedded();
+        for channel in Channel::ALL {
+            assert!(
+                g.node_visible_on("Project", channel),
+                "Project must be visible on {channel:?} under the initial [all_interfaces] sweep"
+            );
+        }
+    }
+
+    #[test]
+    fn node_visible_on_is_false_for_unknown_or_ungated() {
+        let g = graph_of(&[("R", "A", "B")]);
+        assert!(!g.node_visible_on("A", Channel::CoreFeature));
+        assert!(!g.node_visible_on("Nonexistent", Channel::CoreFeature));
+    }
+
+    #[test]
+    fn edge_visible_on_requires_both_endpoints() {
+        let g = embedded();
+        assert!(g.edge_visible_on("MergeRequest", "Project", Channel::ExternalAgent));
     }
 
     #[test]

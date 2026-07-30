@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
 use crate::OntologyError;
@@ -538,6 +538,7 @@ impl NodeYaml {
             pipelines,
             reindex_on,
             redaction: self.redaction,
+            channels: BTreeSet::new(),
             style: self.style,
             has_traversal_path,
             global: self.global,

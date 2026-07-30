@@ -1,5 +1,9 @@
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
+use crate::channel::Channel;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::etl::{Pipeline, ReindexSource};
 use serde::Deserialize;
@@ -344,6 +348,10 @@ pub struct NodeEntity {
     pub reindex_on: Vec<ReindexSource>,
     /// If `None`, this entity does not require redaction validation.
     pub redaction: Option<RedactionConfig>,
+    /// Channels this entity may be queried through (ADR 013). Resolved from the
+    /// `settings.channel_gating` matrix in `schema.yaml` at load time, not from
+    /// this node's YAML. Empty until the schema loader fills it in.
+    pub channels: BTreeSet<Channel>,
     pub style: NodeStyle,
     /// Derived from the declared fields during ontology loading.
     pub has_traversal_path: bool,
@@ -368,6 +376,7 @@ impl Default for NodeEntity {
             pipelines: vec![],
             reindex_on: vec![],
             redaction: None,
+            channels: BTreeSet::new(),
             style: NodeStyle::default(),
             has_traversal_path: false,
             global: false,

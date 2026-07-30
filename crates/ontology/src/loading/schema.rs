@@ -54,6 +54,8 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub denormalization: Vec<DenormalizationEntryYaml>,
     #[serde(default)]
+    pub channel_gating: Option<ChannelGatingYaml>,
+    #[serde(default)]
     pub statistics: Option<StatisticsYaml>,
     #[serde(default)]
     pub partition: Option<PartitionYaml>,
@@ -152,6 +154,21 @@ pub(super) struct DenormalizationEntryYaml {
     /// The full column name is `{direction}_{as}`, e.g. `source_status`.
     #[serde(rename = "as", default)]
     pub column_alias: Option<String>,
+}
+
+/// ADR 013 channel-gating matrix. `default` applies to every node; `entities`
+/// lists only the nodes that deviate from it.
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct ChannelGatingYaml {
+    pub default: Vec<crate::channel::ChannelAllowlistEntry>,
+    #[serde(default)]
+    pub entities: Vec<ChannelEntityYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct ChannelEntityYaml {
+    pub node: String,
+    pub channels: Vec<crate::channel::ChannelAllowlistEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

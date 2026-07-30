@@ -140,6 +140,12 @@ settings:
         indexes:
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+  # ADR 013: channel gating declared once. `default` opts every entity into
+  # every channel for the initial sweep; narrowing a specific entity is a
+  # deliberate product/monetization decision listed under `entities`.
+  channel_gating:
+    default: [all_interfaces]
+    entities: []
   denormalization:
     # --- Branch ---
     - {node: Branch, property: is_default}

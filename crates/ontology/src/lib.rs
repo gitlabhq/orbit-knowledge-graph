@@ -16,6 +16,7 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
+pub mod channel;
 pub mod constants;
 mod entities;
 pub mod errors;
@@ -30,6 +31,7 @@ pub mod pipelines;
 pub mod query_dsl;
 pub mod sql_template;
 
+pub use channel::{Channel, ChannelAllowlistEntry, ChannelGroup};
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN, siphon_deleted_column,
@@ -564,6 +566,22 @@ impl Ontology {
             .as_mut()
             .unwrap_or_else(|| panic!("node \"{node_name}\" has no redaction config"));
         redaction.required_role = role;
+        self
+    }
+
+    /// Set a node's resolved channel allowlist. Builder-style helper for
+    /// ontologies constructed in tests; production ontologies resolve channels
+    /// from the `settings.channel_gating` matrix at load time.
+    #[must_use]
+    pub fn with_node_channels(
+        mut self,
+        node_name: &str,
+        channels: impl IntoIterator<Item = Channel>,
+    ) -> Self {
+        self.nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"))
+            .channels = channels.into_iter().collect();
         self
     }
 

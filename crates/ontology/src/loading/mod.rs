@@ -107,6 +107,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     let schema: SchemaYaml = parse_yaml(&schema_content, ONTOLOGY_SCHEMA_FILE)?;
 
     let denormalization_entries = schema.settings.denormalization.clone();
+    let channel_gating = schema.settings.channel_gating.clone();
 
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
@@ -412,6 +413,29 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     }
                 }
             }
+        }
+    }
+
+    if let Some(gating) = &channel_gating {
+        let default = crate::channel::resolve(&gating.default);
+        let mut overrides: std::collections::HashMap<
+            &str,
+            std::collections::BTreeSet<crate::channel::Channel>,
+        > = std::collections::HashMap::new();
+        for entry in &gating.entities {
+            if !ontology.nodes.contains_key(&entry.node) {
+                return Err(OntologyError::Validation(format!(
+                    "channel_gating: unknown node '{}'",
+                    entry.node
+                )));
+            }
+            overrides.insert(&entry.node, crate::channel::resolve(&entry.channels));
+        }
+        for (name, node) in ontology.nodes.iter_mut() {
+            node.channels = overrides
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or_else(|| default.clone());
         }
     }
 

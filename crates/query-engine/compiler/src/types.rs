@@ -105,6 +105,9 @@ pub struct SecurityContext {
     /// ANDs onto that node's scan only; it never narrows `traversal_paths`,
     /// which still drive the broad per-alias authz filter.
     pub scope_prefixes: HashMap<String, String>,
+    /// Request channel (ADR 013). `None` means the caller channel is unknown,
+    /// in which case channel gating is not enforced.
+    pub channel: Option<ontology::Channel>,
 }
 
 impl SecurityContext {
@@ -142,6 +145,7 @@ impl SecurityContext {
             realm: None,
             is_gitlab_team_member: false,
             scope_prefixes: HashMap::new(),
+            channel: None,
         })
     }
 
@@ -163,6 +167,12 @@ impl SecurityContext {
 
     pub fn with_scope_prefixes(mut self, scope_prefixes: HashMap<String, String>) -> Self {
         self.scope_prefixes = scope_prefixes;
+        self
+    }
+
+    #[must_use]
+    pub fn with_channel(mut self, channel: Option<ontology::Channel>) -> Self {
+        self.channel = channel;
         self
     }
 

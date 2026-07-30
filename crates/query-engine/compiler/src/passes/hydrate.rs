@@ -315,6 +315,7 @@ mod tests {
             pipelines: vec![],
             reindex_on: vec![],
             redaction: None,
+            channels: Default::default(),
             style: Default::default(),
             has_traversal_path: false,
             global: false,

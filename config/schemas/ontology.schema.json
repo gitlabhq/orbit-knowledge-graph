@@ -18,6 +18,18 @@
     }
   ],
   "definitions": {
+    "channelAllowlistEntry": {
+      "type": "string",
+      "enum": [
+        "external_agent",
+        "dap_internal",
+        "core_feature",
+        "frontend",
+        "all_interfaces",
+        "internal_only"
+      ],
+      "description": "A raw channel (external_agent, dap_internal, core_feature, frontend) or a group alias (all_interfaces = every channel; internal_only = core_feature only)."
+    },
     "domainName": {
       "type": "string",
       "enum": [
@@ -482,6 +494,49 @@
             },
             "additionalProperties": false
           }
+        },
+        "channel_gating": {
+          "type": "object",
+          "description": "ADR 013 channel-gating matrix. Declares which request surfaces (channels) each entity may be queried through, resolved onto nodes at load time.",
+          "required": [
+            "default"
+          ],
+          "properties": {
+            "default": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/channelAllowlistEntry"
+              },
+              "description": "Channels applied to every entity that has no override under `entities`."
+            },
+            "entities": {
+              "type": "array",
+              "description": "Per-entity overrides. Only nodes that deviate from `default` appear here.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "node",
+                  "channels"
+                ],
+                "properties": {
+                  "node": {
+                    "type": "string",
+                    "description": "Entity type (e.g. Finding)."
+                  },
+                  "channels": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "$ref": "#/definitions/channelAllowlistEntry"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         },
         "statistics": {
           "type": "object",
