@@ -100,6 +100,42 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.password` | `GKG_GRAPH__PASSWORD` | None | Auth password |
 | `graph.session_settings` | | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
 | `graph.insert_settings` | | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
+| `graph.quorum_writes` | `GKG_GRAPH__QUORUM_WRITES` | `false` | Replicated-cluster mode; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
+
+### Self-managed replicated clusters
+
+Set `graph.quorum_writes: true` when the graph points at a self-managed `ReplicatedMergeTree` cluster with more than one replica. Leave it `false` on ClickHouse Cloud, where SharedMergeTree already writes with quorum.
+
+```yaml
+graph:
+  quorum_writes: true
+```
+
+This is a graph-only setting: GKG only ever writes to its own graph tables, and the datalake is written by Siphon. Siphon applies its own quorum settings, documented in [siphon#254](https://gitlab.com/gitlab-org/analytics-section/siphon/-/work_items/254). If datalake reads need to fail loudly on a lagging replica rather than return stale Siphon rows, set `select_sequential_consistency` directly in `datalake.session_settings`.
+
+The flag applies three session settings and suppresses a fourth:
+
+| Setting | Value | Reason |
+|---------|-------|--------|
+| `insert_quorum` | `auto` | Majority quorum that tracks replica count. A fixed number stops being a majority once replicas are added. |
+| `insert_quorum_parallel` | `0` | Required for `select_sequential_consistency` to take effect. Serializes quorum inserts per table. |
+| `select_sequential_consistency` | `1` | Reads fail loudly on a lagging replica (error 289) instead of returning stale rows. |
+| `async_insert` | suppressed | ClickHouse rejects an async insert that also carries `insert_quorum`. |
+
+Anything set explicitly in `session_settings` overrides these, so a fixed quorum size is still available:
+
+```yaml
+graph:
+  quorum_writes: true
+  session_settings:
+    insert_quorum: "2"
+```
+
+Costs to expect:
+
+- **More parts and more merge work.** Async inserts are what coalesce our many small per-page writes; without them, each write becomes its own part.
+- **Lower write throughput.** `insert_quorum_parallel: 0` serializes quorum inserts per table.
+- **Reads can fail with error 289 (`REPLICA_IS_NOT_IN_QUORUM`).** That is the intended behavior — retry against another replica.
 
 ### Profiling (debug)
 

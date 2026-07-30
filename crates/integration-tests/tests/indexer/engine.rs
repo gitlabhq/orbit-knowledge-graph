@@ -243,6 +243,7 @@ impl TestContext {
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
                     session_settings: std::collections::HashMap::new(),
+                    quorum_writes: false,
                     insert_settings: std::collections::HashMap::new(),
                     profiling: Default::default(),
                 },

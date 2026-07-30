@@ -15,6 +15,15 @@ pub struct ClickHouseConfiguration {
     pub password: Option<String>,
     #[serde(default)]
     pub session_settings: HashMap<String, String>,
+    /// Set on `graph` when it points at a self-managed ReplicatedMergeTree cluster with more
+    /// than one replica. Turns on majority quorum inserts and sequentially-consistent reads,
+    /// and turns off async inserts, which ClickHouse rejects on a quorum-write path.
+    ///
+    /// Leave unset on ClickHouse Cloud: SharedMergeTree already writes with quorum, and async
+    /// inserts are what keep our per-page write volume from exploding the part count. Leave
+    /// unset on `datalake` too, which Siphon writes and GKG only reads.
+    #[serde(default)]
+    pub quorum_writes: bool,
     /// Settings applied to INSERT operations only (both bulk Arrow IPC and
     /// parameterized `INSERT VALUES`).
     ///
@@ -49,6 +58,7 @@ impl Default for ClickHouseConfiguration {
             username: "default".to_string(),
             password: None,
             session_settings: HashMap::new(),
+            quorum_writes: false,
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),
         }
