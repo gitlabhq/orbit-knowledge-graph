@@ -5,10 +5,13 @@ use gkg_server_config::ClickHouseConfiguration;
 use crate::arrow_client::ArrowClickHouseClient;
 
 /// Serializing quorum inserts is what makes `select_sequential_consistency` take effect.
-const QUORUM_SESSION_SETTINGS: [(&str, &str); 3] = [
+/// `async_insert` is pinned off rather than left to the server: ClickHouse 26.7 enables
+/// it by default, and async inserts combined with `insert_quorum_parallel=0` are rejected.
+const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
     ("insert_quorum", "auto"),
     ("insert_quorum_parallel", "0"),
     ("select_sequential_consistency", "1"),
+    ("async_insert", "0"),
 ];
 
 pub trait ClickHouseConfigurationExt {
@@ -25,6 +28,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             &build_session_settings_with_quorum_defaults(self),
             &self.insert_settings,
         )
+        .with_replicated_ddl(self.replicated)
     }
 }
 
@@ -87,6 +91,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
+            replicated: false,
             profiling: Default::default(),
         };
 
@@ -103,6 +108,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
+            replicated: false,
             profiling: Default::default(),
         };
 
@@ -120,6 +126,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
+            replicated: false,
             profiling: Default::default(),
         };
 
@@ -137,6 +144,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
+            replicated: false,
             profiling: Default::default(),
         };
 
@@ -224,6 +232,7 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             quorum_writes: false,
             insert_settings: std::collections::HashMap::new(),
+            replicated: false,
             profiling: Default::default(),
         };
 
