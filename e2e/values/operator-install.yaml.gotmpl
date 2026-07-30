@@ -1,0 +1,16 @@
+{{ $operatorTag := env "E2E_OPERATOR_TAG" | default "3.2.1" }}
+{{ $operatorImage := env "E2E_OPERATOR_IMAGE" | default "registry.gitlab.com/gitlab-org/cloud-native/gitlab-operator" }}
+
+operator:
+  image:
+    repository: {{ $operatorImage }}
+    tag: {{ $operatorTag | quote }}
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-operator
+  labels:
+    app: gitlab-operator
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels:
+      app: gitlab-operator
+  template:
+    metadata:
+      labels:
+        app: gitlab-operator
+    spec:
+      serviceAccountName: gitlab-operator
+      containers:
+        - name: manager
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          args:
+            - --enable-leader-election=false
+            - --metrics-secure=false
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HELM_CHARTS
+              value: /charts
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}

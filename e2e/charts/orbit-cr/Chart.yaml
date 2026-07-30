@@ -1,0 +1,5 @@
+apiVersion: v2
+name: orbit-cr
+description: Applies an Orbit custom resource for e2e testing.
+version: 0.1.0
+type: application

@@ -1,0 +1,13 @@
+operator:
+  image:
+    repository: registry.gitlab.com/gitlab-org/cloud-native/gitlab-operator
+    tag: "3.2.1"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

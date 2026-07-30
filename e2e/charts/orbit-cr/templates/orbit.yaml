@@ -1,0 +1,9 @@
+apiVersion: apps.gitlab.com/v1beta1
+kind: Orbit
+metadata:
+  name: orbit
+spec:
+  gkg:
+    version: {{ .Values.gkg.version | quote }}
+    values:
+      {{- toYaml .Values.gkg.values | nindent 6 }}
