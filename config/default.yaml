@@ -65,6 +65,16 @@ graph:
 #   key_path: "/path/to/key.pem"
 
 engine:
+  # Serialized quorum inserts on replicated clusters collide under concurrency
+  # (UNSATISFIED_QUORUM); NATS redelivery is the recovery path, so SDLC topics
+  # need more than one delivery attempt.
+  topics:
+    global-handler:
+      max_attempts: 3
+      retry_interval_secs: 5
+    namespace-handler:
+      max_attempts: 3
+      retry_interval_secs: 5
   handlers:
     entity-handler:
       system_notes_resolve_lookup_batch_size: 1000

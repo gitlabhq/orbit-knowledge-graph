@@ -57,8 +57,8 @@ impl Default for ClickHouseConfiguration {
             password: None,
             session_settings: HashMap::new(),
             quorum_writes: false,
-            insert_settings: HashMap::new(),
             replicated: false,
+            insert_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),
         }
     }
