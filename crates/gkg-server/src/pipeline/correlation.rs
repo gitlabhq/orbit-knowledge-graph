@@ -32,6 +32,9 @@ pub(crate) fn log_comment(suffix: Option<&str>) -> String {
 
 /// A correlation ID is usable as a `query_id` only if it is a non-empty run of
 /// ASCII alphanumerics and dashes (the same rule the profiler validates against).
+/// A raw ID can't go into `query_id` unchecked: `query_id` rides the request URL
+/// and must be a valid, unique CH id, whereas a forwarded X-Request-Id may carry
+/// URL-unsafe bytes, so those fall back to a ULID and survive raw in `log_comment`.
 fn sanitize(id: &str) -> Option<String> {
     if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         Some(id.to_string())
