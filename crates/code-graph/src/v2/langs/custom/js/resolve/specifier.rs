@@ -225,9 +225,13 @@ impl JsCrossFileResolver {
             };
 
             for member_name in member_path {
-                let Some((next_path, next_binding)) =
-                    self.resolve_member_binding(&final_path, &final_binding, member_name, modules)
-                else {
+                let Some((next_path, next_binding)) = self.resolve_member_binding(
+                    &final_path,
+                    &final_binding,
+                    member_name,
+                    modules,
+                    0,
+                ) else {
                     continue 'call_loop;
                 };
                 final_path = next_path;
@@ -404,6 +408,7 @@ impl JsCrossFileResolver {
         binding: &ExportedBinding,
         member_name: &str,
         modules: &JsModuleIndex,
+        depth: usize,
     ) -> Option<ResolvedBinding> {
         if let Some(member_binding) = binding.member_bindings.get(member_name) {
             return self.follow_export_binding_target(
@@ -411,7 +416,7 @@ impl JsCrossFileResolver {
                 member_binding,
                 ImportedName::Named(member_name.to_string()),
                 modules,
-                0,
+                depth,
             );
         }
 
@@ -422,7 +427,7 @@ impl JsCrossFileResolver {
                 None => return None,
             };
             let (resolved_path, resolved_binding) =
-                self.resolve_reexport(source, &next_imported_name, module_path, modules, 0)?;
+                self.resolve_reexport(source, &next_imported_name, module_path, modules, depth)?;
 
             if matches!(
                 binding.reexport_imported_name,
@@ -436,6 +441,7 @@ impl JsCrossFileResolver {
                 &resolved_binding,
                 member_name,
                 modules,
+                depth + 1,
             );
         }
 
