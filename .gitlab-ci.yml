@@ -1341,7 +1341,7 @@ sm-e2e-spike:
     HELMFILE_VERSION: "1.4.2"
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
-    E2E_HELMFILE: helmfile-operator.yaml.gotmpl
+    E2E_USE_OPERATOR: "1"
   needs:
     - job: e2e-robot-image
       optional: true

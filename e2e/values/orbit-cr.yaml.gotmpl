@@ -3,6 +3,11 @@
 {{ $gkgImage := env "E2E_GKG_IMAGE" | default $v.gkg.image.repository }}
 {{ $gkgTag := env "E2E_GKG_TAG" | default $v.gkg.image.tag }}
 
+# Orbit CR values for the operator e2e variant.
+# The operator's defaults template handles dispatcher, healthCheck, indexer
+# pool cleanup, stream name, analytics/billing/metrics. This file carries
+# only environment-specific wiring that the defaults cannot know.
+
 gkg:
   version: {{ $v.gkg.chart | quote }}
   values:
@@ -18,7 +23,7 @@ gkg:
             name: e2e-ca
             kind: ClusterIssuer
           dnsNames:
-            - gkg-webserver.e2e-{{ $sha }}-gkg.svc.cluster.local
+            - orbit-gkg-webserver.e2e-{{ $sha }}-gkg.svc.cluster.local
 
     image:
       repository: {{ $gkgImage }}
@@ -39,53 +44,19 @@ gkg:
           secretName: "gkg-secrets"
 
     webserver:
-      enabled: true
       replicas: 1
       logLevel: "info"
       probes:
         enabled: true
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: 1
-          memory: 1Gi
-      service:
-        type: ClusterIP
-        httpPort: 8080
-        grpcPort: 50054
 
     indexer:
-      enabled: true
       replicas: 1
       logLevel: "info"
       probes:
         enabled: true
       tmpSizeLimit: "5Gi"
-      resources:
-        requests:
-          cpu: 500m
-          memory: 1Gi
-        limits:
-          cpu: 2
-          memory: 2Gi
-
-    dispatcher:
-      enabled: true
-      logLevel: "info"
-      probes:
-        enabled: true
-      resources:
-        requests:
-          cpu: 50m
-          memory: 128Mi
-        limits:
-          cpu: 200m
-          memory: 256Mi
 
     healthCheck:
-      enabled: true
       replicas: 1
       logLevel: "info"
       probes:
@@ -98,13 +69,6 @@ gkg:
         - namespace: e2e-{{ $sha }}-nats
           statefulSets:
             - nats
-      resources:
-        requests:
-          cpu: 50m
-          memory: 64Mi
-        limits:
-          cpu: 200m
-          memory: 128Mi
 
     clickhouse:
       datalake:
@@ -135,28 +99,15 @@ gkg:
       enabled: true
       existingSecret: "gkg-grpc-tls"
 
-    metrics:
-      prometheus:
-        enabled: false
-      otel:
-        enabled: false
-
-    analytics:
-      enabled: true
-      collector_url: "https://snowplowprd.trx.gitlab.net"
-      deployment:
-        type: self_managed
-        environment: development
-
     schedule:
       tasks:
+        siphon:
+          events_stream_name: "e2e_siphon_event_stream"
         global:
           cron: "*/2 * * * * *"
         namespace:
           cron: "*/2 * * * * *"
           sweep_interval_secs: 10
-        siphon:
-          events_stream_name: "e2e_siphon_event_stream"
         code-backfill:
           cron: "*/5 * * * * *"
         table-cleanup:
@@ -193,9 +144,7 @@ gkg:
             write_buffer_age_secs: 2
             write_max_flush_age_secs: 5
 
-# Link to the GitLab CR so the operator auto-injects knowledgeGraph config.
-# The reconciler patches the GitLab CR with the grpcEndpoint (derived from the
-# Orbit release name and namespace), the JWT secret reference, and the CA trust.
+# Auto-configure the GitLab CR with knowledgeGraph wiring.
 gitlab:
   name: gitlab
   jwtSecretName: gitlab-knowledge-graph-jwt

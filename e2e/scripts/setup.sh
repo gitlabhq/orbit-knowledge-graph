@@ -80,10 +80,9 @@ BOOTSTRAP_PID=$!
 DICTS_PID=$!
 trap 'kill "$BOOTSTRAP_PID" "$DICTS_PID" 2>/dev/null || true' EXIT
 
-HELMFILE="${E2E_HELMFILE:-helmfile.yaml.gotmpl}"
-log "Deploying via helmfile (${HELMFILE})"
+log "Deploying via helmfile"
 cd "$E2E_DIR"
-helmfile --file "${HELMFILE}" sync
+helmfile --file helmfile.yaml.gotmpl sync
 
 "$E2E_DIR/scripts/patch-ch-siphon-watermark.sh"
 

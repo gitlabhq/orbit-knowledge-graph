@@ -132,6 +132,32 @@ releases:
     values:
       - values/siphon.yaml.gotmpl
 
+  # --- Phase: gkg (standalone) or operator ---
+{{ if env "E2E_USE_OPERATOR" }}
+  - name: operator-install
+    namespace: e2e-{{ $sha }}-gkg
+    chart: charts/operator-install
+    labels:
+      phase: operator
+      component: operator
+    needs:
+      - e2e-{{ $sha }}-gkg/bootstrap
+    values:
+      - values/operator-install.yaml.gotmpl
+
+  - name: orbit-cr
+    namespace: e2e-{{ $sha }}-gkg
+    chart: charts/orbit-cr
+    labels:
+      phase: operator
+      component: orbit
+    needs:
+      - e2e-{{ $sha }}-gkg/operator-install
+      - e2e-{{ $sha }}-nats/nats
+      - e2e-{{ $sha }}-clickhouse/clickhouse
+    values:
+      - values/orbit-cr.yaml.gotmpl
+{{ else }}
   - name: gkg
     namespace: e2e-{{ $sha }}-gkg
     chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg
@@ -139,10 +165,9 @@ releases:
     labels:
       phase: pipeline
       component: gkg
-    # Deploy overlaps the GitLab boot; the webserver /ready probe still holds
-    # this release until Rails answers.
     needs:
       - e2e-{{ $sha }}-nats/nats
       - e2e-{{ $sha }}-clickhouse/clickhouse
     values:
       - values/gkg.yaml.gotmpl
+{{ end }}

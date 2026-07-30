@@ -54,7 +54,7 @@ if [ -n "$SHA" ]; then
   E2E_GITLAB_ROOT_PASS=x \
   E2E_PG_GITLAB_PASS=x E2E_PG_POSTGRES_PASS=x E2E_PG_REPLICATION_PASS=x \
   E2E_REDIS_PASS=x \
-  helmfile --file "${E2E_HELMFILE:-helmfile.yaml.gotmpl}" destroy 2>/dev/null || true
+  helmfile --file helmfile.yaml.gotmpl destroy 2>/dev/null || true
 else
   echo "==> No SHA specified, deleting namespaces directly (skipping helmfile destroy)"
 fi
