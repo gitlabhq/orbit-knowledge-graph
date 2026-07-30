@@ -36,41 +36,42 @@ pub fn build_schema_response(ontology: &Ontology, expand_nodes: &[String]) -> Sc
     build_schema_response_for_channel(ontology, expand_nodes, None)
 }
 
-/// ADR 013: when `channel` is set, entities not visible on it are omitted
-/// entirely (no annotation, §5) and edges are kept only when both endpoints are
-/// visible. `None` returns the full schema.
+/// ADR 013: builds the schema the caller on `channel` sees. It runs against the
+/// channel-scoped graph, so entities not visible on the channel are absent
+/// (their nodes and any touching edges never appear); the caller cannot tell
+/// they exist (§5). `None` returns the full schema.
 #[must_use]
 pub fn build_schema_response_for_channel(
     ontology: &Ontology,
     expand_nodes: &[String],
     channel: Option<Channel>,
 ) -> SchemaResponse {
-    let graph = ontology.graph();
+    let graph = ontology.graph_for(channel);
     let edges = ontology
         .edges()
         .filter(|e| {
-            channel.is_none_or(|c| graph.edge_visible_on(&e.source_kind, &e.target_kind, c))
+            graph.node_template(&e.source_kind).is_some()
+                && graph.node_template(&e.target_kind).is_some()
         })
         .map(|e| e.relationship_kind.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
     SchemaResponse {
-        domains: build_domains(ontology, expand_nodes, channel),
+        domains: build_domains(ontology, graph, expand_nodes),
         edges,
     }
 }
 
 fn build_domains(
     ontology: &Ontology,
+    graph: &OntologyGraph,
     expand_nodes: &[String],
-    channel: Option<Channel>,
 ) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
-    let graph = ontology.graph();
 
     for node in ontology.nodes() {
-        if channel.is_some_and(|c| !graph.node_visible_on(&node.name, c)) {
+        if graph.node_template(&node.name).is_none() {
             continue;
         }
         let domain_name = if node.domain.is_empty() {

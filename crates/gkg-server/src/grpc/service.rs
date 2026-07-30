@@ -588,10 +588,9 @@ impl KnowledgeGraphServiceImpl {
         expand_nodes: &[String],
         channel: Option<ontology::Channel>,
     ) -> StructuredSchema {
-        let graph = self.ontology.graph();
-        let visible = |entity: &str| channel.is_none_or(|c| graph.node_visible_on(entity, c));
-        let edge_visible =
-            |src: &str, tgt: &str| channel.is_none_or(|c| graph.edge_visible_on(src, tgt, c));
+        let graph = self.ontology.graph_for(channel);
+        let visible = |entity: &str| graph.node_template(entity).is_some();
+        let edge_visible = |src: &str, tgt: &str| visible(src) && visible(tgt);
 
         let domains: Vec<SchemaDomain> = self
             .ontology
@@ -714,9 +713,10 @@ impl KnowledgeGraphServiceImpl {
         node_name: &str,
         channel: Option<ontology::Channel>,
     ) -> (Vec<String>, Vec<String>) {
-        let graph = self.ontology.graph();
-        let edge_visible =
-            |src: &str, tgt: &str| channel.is_none_or(|c| graph.edge_visible_on(src, tgt, c));
+        let graph = self.ontology.graph_for(channel);
+        let edge_visible = |src: &str, tgt: &str| {
+            graph.node_template(src).is_some() && graph.node_template(tgt).is_some()
+        };
         let mut outgoing = Vec::new();
         let mut incoming = Vec::new();
 

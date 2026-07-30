@@ -132,16 +132,19 @@ impl EdgeTableConfig {
     }
 }
 
-/// A lazily-built memoized [`OntologyGraph`] that is transparent to `Clone` and
+/// Lazily-built memoized [`OntologyGraph`]s: the full graph plus one
+/// channel-scoped variant per [`Channel`] (ADR 013). Transparent to `Clone` and
 /// `Eq`: cloning yields an empty cache (rebuilt on demand), and equality ignores
-/// the cache so it never affects `Ontology` comparison. Lets `Ontology` keep its
-/// derives while carrying the memoized graph.
+/// the cache so it never affects `Ontology` comparison.
 #[derive(Debug, Default)]
-struct GraphCache(std::sync::OnceLock<OntologyGraph>);
+struct GraphCache {
+    full: std::sync::OnceLock<OntologyGraph>,
+    per_channel: [std::sync::OnceLock<OntologyGraph>; Channel::ALL.len()],
+}
 
 impl Clone for GraphCache {
     fn clone(&self) -> Self {
-        Self(std::sync::OnceLock::new())
+        Self::default()
     }
 }
 
@@ -1217,7 +1220,20 @@ impl Ontology {
     /// and memoized. Callers must not mutate the ontology after querying it.
     #[must_use]
     pub fn graph(&self) -> &OntologyGraph {
-        self.graph.0.get_or_init(|| OntologyGraph::build(self))
+        self.graph.full.get_or_init(|| OntologyGraph::build(self))
+    }
+
+    /// The [`OntologyGraph`] scoped to `channel` (ADR 013): entities not visible
+    /// on the channel are structurally absent. `None` returns the full graph.
+    /// Each variant is built once and memoized. Callers must not mutate the
+    /// ontology after querying it.
+    #[must_use]
+    pub fn graph_for(&self, channel: Option<Channel>) -> &OntologyGraph {
+        match channel {
+            None => self.graph(),
+            Some(c) => self.graph.per_channel[c as usize]
+                .get_or_init(|| OntologyGraph::build_for_channel(self, Some(c))),
+        }
     }
 
     /// Returns the partition key column for a given entity's statistics MV,

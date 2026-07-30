@@ -42,9 +42,6 @@ pub struct NodeTemplate {
     pub path_scopable: bool,
     pub role_floor: Option<u32>,
     pub redaction_id_column: Option<String>,
-    /// Channels this node may be queried through (ADR 013). Resolved from the
-    /// `settings.channel_gating` matrix at load time.
-    pub channels: BTreeSet<Channel>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +60,30 @@ pub struct OntologyGraph {
 impl OntologyGraph {
     #[must_use]
     pub fn build(ontology: &Ontology) -> Self {
+        Self::build_filtered(ontology, |_| true)
+    }
+
+    /// ADR 013: the graph a caller on `channel` sees. Nodes not visible on the
+    /// channel are structurally absent, and edges touching them are dropped, so
+    /// a reference to a gated entity fails as an unknown identifier through the
+    /// normal path and a gated table can never reach a `FROM` clause. `None`
+    /// returns the full graph.
+    #[must_use]
+    pub fn build_for_channel(ontology: &Ontology, channel: Option<Channel>) -> Self {
+        match channel {
+            None => Self::build(ontology),
+            Some(c) => Self::build_filtered(ontology, move |node| node.channels.contains(&c)),
+        }
+    }
+
+    fn build_filtered(ontology: &Ontology, visible: impl Fn(&crate::NodeEntity) -> bool) -> Self {
+        let hidden: BTreeSet<&str> = ontology
+            .nodes()
+            .filter(|n| !visible(n))
+            .map(|n| n.name.as_str())
+            .collect();
+        let endpoint_hidden = |kind: &str| hidden.contains(kind);
+
         let mut graph = DiGraph::new();
         let mut index: HashMap<String, NodeIndex> = HashMap::new();
         let mut edge_templates = HashMap::new();
@@ -79,6 +100,9 @@ impl OntologyGraph {
         };
 
         for edge in ontology.edges() {
+            if endpoint_hidden(&edge.source_kind) || endpoint_hidden(&edge.target_kind) {
+                continue;
+            }
             let source = node_of(&mut graph, &mut index, &edge.source_kind);
             let target = node_of(&mut graph, &mut index, &edge.target_kind);
             graph.add_edge(
@@ -124,6 +148,9 @@ impl OntologyGraph {
         let mut node_templates = HashMap::new();
         let mut global_nodes = BTreeSet::new();
         for node in ontology.nodes() {
+            if endpoint_hidden(&node.name) {
+                continue;
+            }
             table_to_node.insert(
                 strip_schema_version_prefix(&node.destination_table).to_string(),
                 node.name.clone(),
@@ -138,7 +165,7 @@ impl OntologyGraph {
                 .map(|c| c.name.as_str())
                 .collect();
             for (fk, anchor) in &anchor_fk {
-                if columns.contains(fk.as_str()) {
+                if columns.contains(fk.as_str()) && !endpoint_hidden(anchor) {
                     let source = node_of(&mut graph, &mut index, &node.name);
                     let target = node_of(&mut graph, &mut index, anchor);
                     graph.add_edge(
@@ -164,7 +191,6 @@ impl OntologyGraph {
                         .as_ref()
                         .map(|r| r.required_role.as_access_level()),
                     redaction_id_column: node.redaction.as_ref().map(|r| r.id_column.clone()),
-                    channels: node.channels.clone(),
                 },
             );
         }
@@ -247,20 +273,6 @@ impl OntologyGraph {
         self.node_template(self.table_to_node(table)?)
     }
 
-    /// Whether `entity` is visible on `channel` (ADR 013). An entity with no
-    /// resolved channels (fail-closed) or an unknown entity is not visible.
-    #[must_use]
-    pub fn node_visible_on(&self, entity: &str, channel: Channel) -> bool {
-        self.node_template(entity)
-            .is_some_and(|t| t.channels.contains(&channel))
-    }
-
-    /// Whether the edge triple is visible on `channel`: both endpoints must be.
-    #[must_use]
-    pub fn edge_visible_on(&self, source: &str, target: &str, channel: Channel) -> bool {
-        self.node_visible_on(source, channel) && self.node_visible_on(target, channel)
-    }
-
     /// Whether the triple keeps both endpoints in one namespace.
     #[must_use]
     pub fn is_scope_preserving(&self, kind: &str, source: &str, target: &str) -> bool {
@@ -323,28 +335,45 @@ mod tests {
         Ontology::load_embedded().unwrap().graph().clone()
     }
 
-    #[test]
-    fn embedded_nodes_default_to_every_channel() {
-        let g = embedded();
-        for channel in Channel::ALL {
-            assert!(
-                g.node_visible_on("Project", channel),
-                "Project must be visible on {channel:?} under the initial [all_interfaces] sweep"
-            );
-        }
+    fn gated_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["A", "B"])
+            .with_edges(["R"])
+            .with_edge_variant(edge("R", "A", "B"))
+            .with_node_channels("A", [Channel::CoreFeature])
+            .with_node_channels("B", Channel::ALL)
     }
 
     #[test]
-    fn node_visible_on_is_false_for_unknown_or_ungated() {
-        let g = graph_of(&[("R", "A", "B")]);
-        assert!(!g.node_visible_on("A", Channel::CoreFeature));
-        assert!(!g.node_visible_on("Nonexistent", Channel::CoreFeature));
+    fn for_channel_drops_hidden_node_and_its_edges() {
+        let ont = gated_ontology();
+        let g = OntologyGraph::build_for_channel(&ont, Some(Channel::ExternalAgent));
+
+        assert!(
+            g.node_template("A").is_none(),
+            "A is hidden on this channel"
+        );
+        assert!(g.node_template("B").is_some());
+        assert!(
+            g.edge_template("R", "A", "B").is_none(),
+            "R touches hidden A, so the triple is gone"
+        );
     }
 
     #[test]
-    fn edge_visible_on_requires_both_endpoints() {
-        let g = embedded();
-        assert!(g.edge_visible_on("MergeRequest", "Project", Channel::ExternalAgent));
+    fn for_channel_keeps_node_visible_on_channel() {
+        let ont = gated_ontology();
+        let g = OntologyGraph::build_for_channel(&ont, Some(Channel::CoreFeature));
+
+        assert!(g.node_template("A").is_some());
+        assert!(g.edge_template("R", "A", "B").is_some());
+    }
+
+    #[test]
+    fn for_channel_none_is_the_full_graph() {
+        let ont = gated_ontology();
+        let g = OntologyGraph::build_for_channel(&ont, None);
+        assert!(g.node_template("A").is_some());
     }
 
     #[test]
