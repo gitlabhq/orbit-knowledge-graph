@@ -31,4 +31,7 @@ WORKDIR /app
 
 COPY --from=builder /gkg-server /usr/local/bin/gkg-server
 
+# ClickHouse setup contract, shipped in the image so deployments read it at the exact version they run.
+COPY config/clickhouse-setup.sql /usr/share/gkg/clickhouse-setup.sql
+
 ENTRYPOINT ["gkg-server"]
