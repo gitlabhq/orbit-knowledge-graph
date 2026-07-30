@@ -25,6 +25,31 @@ use crate::error::ClickHouseError;
 /// ClickHouse rejects an async insert that also carries `insert_quorum`.
 const ASYNC_INSERT_SETTING_KEYS: [&str; 2] = ["async_insert", "wait_for_async_insert"];
 
+/// Prefixes `Replicated` onto every `ENGINE = <X>MergeTree` in a DDL
+/// statement, mirroring `ClickHouse::ReplicatedTableEnginePatcher` in the
+/// GitLab monolith. The ZooKeeper path and replica name come from the
+/// server's `default_replica_path`/`default_replica_name`, so existing engine
+/// arguments (e.g. the version column) are kept as-is.
+fn replicate_merge_tree_engines(sql: &str) -> String {
+    const MARKER: &str = "ENGINE = ";
+    let mut result = String::with_capacity(sql.len() + 32);
+    let mut remaining = sql;
+    while let Some(idx) = remaining.find(MARKER) {
+        let (head, tail) = remaining.split_at(idx + MARKER.len());
+        result.push_str(head);
+        let word_end = tail
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(tail.len());
+        let word = &tail[..word_end];
+        if word.ends_with("MergeTree") && !word.starts_with("Replicated") {
+            result.push_str("Replicated");
+        }
+        remaining = tail;
+    }
+    result.push_str(remaining);
+    result
+}
+
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
@@ -32,6 +57,7 @@ pub struct ArrowClickHouseClient {
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
     quorum_writes: bool,
+    replicated: bool,
 }
 
 impl ArrowClickHouseClient {
@@ -68,7 +94,15 @@ impl ArrowClickHouseClient {
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
+            replicated: false,
         }
+    }
+
+    /// Enables DDL engine rewriting for self-hosted replicated clusters. See
+    /// [`replicate_merge_tree_engines`].
+    pub fn with_replicated_ddl(mut self, replicated: bool) -> Self {
+        self.replicated = replicated;
+        self
     }
 
     pub fn database(&self) -> &str {
@@ -241,6 +275,12 @@ impl ArrowClickHouseClient {
     }
 
     pub async fn execute(&self, sql: &str) -> Result<(), ClickHouseError> {
+        if self.replicated && sql.contains("MergeTree") {
+            return self
+                .query(&replicate_merge_tree_engines(sql))
+                .execute()
+                .await;
+        }
         self.query(sql).execute().await
     }
 

@@ -54,7 +54,7 @@ properties:
 
 storage:
   settings:
-    auto_statistics_types: "'minmax, uniq, countmin'"
+    auto_statistics_types: "'basic, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}

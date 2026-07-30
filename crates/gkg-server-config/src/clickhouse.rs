@@ -24,6 +24,11 @@ pub struct ClickHouseConfiguration {
     /// part creation when many small or concurrent writes hit the same tables.
     #[serde(default)]
     pub insert_settings: HashMap<String, String>,
+    /// Rewrite `*MergeTree` engines in DDL to their `Replicated*` variants.
+    /// Required on self-hosted HA clusters: a `Replicated` database engine
+    /// replicates metadata only, so plain engines keep data on one replica.
+    #[serde(default)]
+    pub replicated: bool,
     #[serde(default)]
     pub profiling: ProfilingConfig,
 }
@@ -53,6 +58,7 @@ impl Default for ClickHouseConfiguration {
             session_settings: HashMap::new(),
             quorum_writes: false,
             insert_settings: HashMap::new(),
+            replicated: false,
             profiling: ProfilingConfig::default(),
         }
     }
