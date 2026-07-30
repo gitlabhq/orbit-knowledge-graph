@@ -68,7 +68,10 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             continue;
         }
         let relative_path = entry_path.strip_prefix("/").unwrap_or(&entry_path);
-        let relative_path = strip_archive_root(relative_path, &mut archive_root)?;
+        let Some(relative_path) = strip_archive_root(relative_path, &mut archive_root) else {
+            warn!(path = %entry_path_str, "skipping archive entry outside the root directory");
+            continue;
+        };
         if relative_path.as_os_str().is_empty() {
             continue;
         }
@@ -120,19 +123,30 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 // Both loaded states materialize the bytes; only the parse axis
                 // differs, which the pipeline acts on, not the extractor.
                 Decision::Parse | Decision::Load => {
-                    let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
-                    let mut file = std::fs::File::create(&dest_canonical)?;
-                    file.write_all(&content)?;
-                    inventory.push(meta);
+                    let written = crate::fs::resolve_dest_within(&target_canonical, &dest)
+                        .and_then(std::fs::File::create)
+                        .and_then(|mut file| file.write_all(&content));
+                    match written {
+                        Ok(()) => inventory.push(meta),
+                        Err(e) if e.kind() == std::io::ErrorKind::InvalidFilename => {
+                            warn!(path = %meta.path, error = %e, "skipping archive entry with over-long name");
+                        }
+                        Err(e) => return Err(StreamError::Io(e)),
+                    }
                 }
             }
             continue;
         }
 
-        let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
-        entry
-            .unpack(&dest_canonical)
-            .map_err(std::io::Error::other)?;
+        match crate::fs::resolve_dest_within(&target_canonical, &dest)
+            .and_then(|dest| entry.unpack(dest).map(|_| ()))
+        {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidFilename => {
+                warn!(path = %relative_path.display(), error = %e, "skipping archive entry with over-long name");
+            }
+            Err(e) => return Err(StreamError::Io(e)),
+        }
     }
 
     for (link_path, target) in deferred_symlinks {
@@ -156,28 +170,20 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
-/// root; later entries must share it. Returns an empty path for the root entry.
-fn strip_archive_root(
-    path: &Path,
-    detected_root: &mut Option<OsString>,
-) -> Result<PathBuf, StreamError> {
+/// root; entries outside it return `None` so the caller can skip them. Returns
+/// an empty path for the root entry.
+fn strip_archive_root(path: &Path, detected_root: &mut Option<OsString>) -> Option<PathBuf> {
     let mut components = path.components();
     let first = match components.next() {
         Some(c) => c.as_os_str().to_os_string(),
-        None => return Ok(PathBuf::new()),
+        None => return Some(PathBuf::new()),
     };
     match detected_root {
         None => *detected_root = Some(first),
-        Some(expected) if first != *expected => {
-            return Err(StreamError::Io(std::io::Error::other(format!(
-                "archive entry '{}' is not under the expected root directory '{}'",
-                path.display(),
-                expected.to_string_lossy()
-            ))));
-        }
+        Some(expected) if first != *expected => return None,
         _ => {}
     }
-    Ok(components.as_path().to_path_buf())
+    Some(components.as_path().to_path_buf())
 }
 
 #[cfg(test)]
@@ -300,14 +306,36 @@ mod tests {
     }
 
     #[test]
-    fn rejects_inconsistent_archive_root() {
+    fn skips_entries_outside_archive_root() {
         let dir = tempfile::tempdir().unwrap();
         let data = build_archive(&[
-            Entry::File("root-a/file1.rs", b"a"),
-            Entry::File("root-b/file2.rs", b"b"),
+            Entry::File("root/file1.rs", b"a"),
+            Entry::File("f2b2f233f34e40e3f2bd5ea1453e0e8975376dcb", b"lfs payload"),
+            Entry::File("root/file2.rs", b"b"),
         ]);
-        let err = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap_err();
-        assert!(err.to_string().contains("not under the expected root"));
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["file1.rs", "file2.rs"]);
+        assert!(
+            !dir.path()
+                .join("f2b2f233f34e40e3f2bd5ea1453e0e8975376dcb")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn skips_entries_with_over_long_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let long_name = format!("root/{}.txt", "a".repeat(300));
+        let data = build_archive(&[
+            Entry::File("root/ok.rs", b"fine"),
+            Entry::File(&long_name, b"too long"),
+        ]);
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["ok.rs"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("ok.rs")).unwrap(),
+            "fine"
+        );
     }
 
     #[test]

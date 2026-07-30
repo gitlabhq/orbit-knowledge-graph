@@ -276,6 +276,31 @@ async fn excluded_archive_entries_are_not_materialized_or_parsed() {
 }
 
 #[tokio::test]
+async fn stray_and_over_long_entries_do_not_fail_extraction() {
+    let dir = tempfile::tempdir().unwrap();
+    let long_name = format!("root/{}.ts", "a".repeat(300));
+    let entries = [
+        Entry::File("root/src/app.ts", b"export function run() { return 1; }\n"),
+        Entry::File(
+            "f2b2f233f34e40e3f2bd5ea1453e0e8975376dcb",
+            b"lfs payload outside the archive root",
+        ),
+        Entry::File(&long_name, b"export const x = 1;\n"),
+    ];
+    let (file_inventory, stream_reasons) = extract_via_archive_endpoint(&entries, dir.path()).await;
+    let inventory_paths: Vec<_> = file_inventory.iter().map(|e| e.path.as_str()).collect();
+    assert_eq!(inventory_paths, vec!["src/app.ts"]);
+    assert!(dir.path().join("src/app.ts").exists());
+
+    let run = run_pipeline(dir.path(), file_inventory, stream_reasons).await;
+    assert_eq!(run.files_discovered, 1);
+    assert!(
+        has_def(&run.graphs, "src/app.ts", "run"),
+        "in-root source file should still be parsed"
+    );
+}
+
+#[tokio::test]
 async fn js_tsconfig_alias_resolves_through_archive_endpoint() {
     let dir = tempfile::tempdir().unwrap();
     let entries = [
