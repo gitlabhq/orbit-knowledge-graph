@@ -49,6 +49,10 @@ yaml_test!(
     "javascript/security_hardening.yaml"
 );
 yaml_test!(
+    javascript_self_referential_reexport,
+    "javascript/self_referential_reexport.yaml"
+);
+yaml_test!(
     javascript_jsx_and_generated_js_files,
     "javascript/jsx_and_generated_js_files.yaml"
 );
