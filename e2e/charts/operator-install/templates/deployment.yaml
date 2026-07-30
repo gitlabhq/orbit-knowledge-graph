@@ -28,6 +28,7 @@ spec:
               openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
                 -keyout /certs/tls.key -out /certs/tls.crt \
                 -days 1 -nodes -subj "/CN=webhook"
+              chmod 644 /certs/tls.key /certs/tls.crt
           volumeMounts:
             - name: webhook-certs
               mountPath: /certs
