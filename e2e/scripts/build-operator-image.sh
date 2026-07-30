@@ -51,6 +51,11 @@ fi
 bash scripts/retrieve_gitlab_charts.sh
 bash scripts/retrieve_orbit_charts.sh
 
+# The Dockerfile COPYs .go/pkg/mod/ as a pre-populated module cache from the
+# operator's own CI. Our shallow clone does not have it. Create an empty dir
+# so the COPY succeeds; go mod download fetches everything on the next line.
+mkdir -p .go/pkg/mod
+
 log "Building operator image"
 # The operator Dockerfile uses FROM --platform=${BUILDPLATFORM} which requires
 # the buildx plugin. The e2e CI runner has legacy Docker without buildx.
