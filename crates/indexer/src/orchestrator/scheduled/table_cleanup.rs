@@ -15,15 +15,19 @@ use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 const TASK_NAME: &str = "maintenance.table_cleanup";
 const TOMBSTONED_KEYS_TABLE_PREFIX: &str = "tombstone_sweep_keys";
-const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000;
+
+// ── Pacing ───────────────────────────────────────────────────────────
 const CONCURRENT_TABLE_SWEEPS: usize = 4;
+const REMAINING_ROWS_POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+// ── ClickHouse statement settings ────────────────────────────────────
 /// Bounds a wedged sweep, not a normal one: prod's largest tables took 2-27min.
 const STATEMENT_TIMEOUT_SECS: u64 = 5400;
 /// Headroom for the external sort, against a measured sub-1-GiB peak.
 const MAX_STATEMENT_MEMORY_BYTES: u64 = 8_000_000_000;
 /// Spilling has to start before the memory limit kills the sort.
 const SPILL_SORT_TO_DISK_ABOVE_BYTES: u64 = 2_000_000_000;
-const REMAINING_ROWS_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000;
 
 #[derive(Clone)]
 struct ReplacingMergeTreeTable {
@@ -207,6 +211,20 @@ impl TableCleanup {
     }
 }
 
+fn list_replacing_merge_tree_tables(ontology: &ontology::Ontology) -> Vec<ReplacingMergeTreeTable> {
+    ontology
+        .nodes()
+        .map(|node| node.destination_table.as_str())
+        .chain(ontology.edge_tables())
+        .filter_map(|table| {
+            Some(ReplacingMergeTreeTable {
+                name: prefixed_table_name(table, *SCHEMA_VERSION),
+                sort_key: ontology.sort_key_for_table(table)?.to_vec(),
+            })
+        })
+        .collect()
+}
+
 fn tombstoned_keys_table_name(table: &ReplacingMergeTreeTable) -> String {
     format!("{TOMBSTONED_KEYS_TABLE_PREFIX}_{}", table.name)
 }
@@ -249,20 +267,6 @@ fn build_count_remaining_tombstoned_rows_sql(table: &ReplacingMergeTreeTable) ->
         table.name,
         tombstoned_keys_table_name(table),
     )
-}
-
-fn list_replacing_merge_tree_tables(ontology: &ontology::Ontology) -> Vec<ReplacingMergeTreeTable> {
-    ontology
-        .nodes()
-        .map(|node| node.destination_table.as_str())
-        .chain(ontology.edge_tables())
-        .filter_map(|table| {
-            Some(ReplacingMergeTreeTable {
-                name: prefixed_table_name(table, *SCHEMA_VERSION),
-                sort_key: ontology.sort_key_for_table(table)?.to_vec(),
-            })
-        })
-        .collect()
 }
 
 #[cfg(test)]
