@@ -573,11 +573,11 @@ impl Default for CodeBackfillSweepConfig {
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_sweep_lookback_secs")]
+    #[serde(default = "default_tombstone_sweep_lookback_secs")]
     pub lookback_secs: u64,
 }
 
-fn default_sweep_lookback_secs() -> u64 {
+fn default_tombstone_sweep_lookback_secs() -> u64 {
     691_200
 }
 
@@ -590,12 +590,11 @@ impl TableCleanupConfig {
 impl Default for TableCleanupConfig {
     fn default() -> Self {
         Self {
-            // Sunday 03:00 UTC leaves the background merge pool to the deletes;
-            // the lookback covers that week plus a day of replication slack.
+            // Sunday 03:00 UTC leaves the background merge pool to the deletes.
             schedule: ScheduleConfiguration {
                 cron: Some("0 0 3 * * 0".into()),
             },
-            lookback_secs: default_sweep_lookback_secs(),
+            lookback_secs: default_tombstone_sweep_lookback_secs(),
         }
     }
 }

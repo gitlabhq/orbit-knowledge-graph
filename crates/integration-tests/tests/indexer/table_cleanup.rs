@@ -4,7 +4,7 @@ use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 
-fn build_sweep_task(context: &TestContext) -> TableCleanup {
+fn build_tombstone_sweep_task(context: &TestContext) -> TableCleanup {
     let ontology = ontology::Ontology::load_embedded().unwrap();
     TableCleanup::new(
         context.config.build_client(),
@@ -14,8 +14,7 @@ fn build_sweep_task(context: &TestContext) -> TableCleanup {
     )
 }
 
-/// Versions are relative to now because the sweep only considers a recent
-/// `_version` window; fixed past timestamps fall outside it.
+/// Fixed past timestamps would fall outside the sweep's `_version` window.
 async fn seed_user(context: &TestContext, id: i64, hours_ago: u32, deleted: bool) {
     context
         .execute(&format!(
@@ -40,7 +39,7 @@ async fn live_user_ids(context: &TestContext) -> Vec<i64> {
 async fn sweep_succeeds_on_every_table() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
 
-    build_sweep_task(&context).run().await.unwrap();
+    build_tombstone_sweep_task(&context).run().await.unwrap();
 }
 
 #[tokio::test]
@@ -51,7 +50,7 @@ async fn sweep_removes_a_tombstoned_row_and_its_superseded_version() {
     seed_user(&context, 2, 48, false).await;
     seed_user(&context, 1, 24, true).await;
 
-    build_sweep_task(&context).run().await.unwrap();
+    build_tombstone_sweep_task(&context).run().await.unwrap();
 
     assert_eq!(live_user_ids(&context).await, vec![2]);
     let total = context
@@ -72,7 +71,7 @@ async fn sweep_keeps_a_row_recreated_after_its_tombstone() {
     seed_user(&context, 7, 24, true).await;
     seed_user(&context, 7, 1, false).await;
 
-    build_sweep_task(&context).run().await.unwrap();
+    build_tombstone_sweep_task(&context).run().await.unwrap();
 
     assert_eq!(live_user_ids(&context).await, vec![7]);
 }
@@ -85,8 +84,8 @@ async fn sweep_is_idempotent_across_runs() {
     seed_user(&context, 2, 48, false).await;
     seed_user(&context, 1, 24, true).await;
 
-    build_sweep_task(&context).run().await.unwrap();
-    build_sweep_task(&context).run().await.unwrap();
+    build_tombstone_sweep_task(&context).run().await.unwrap();
+    build_tombstone_sweep_task(&context).run().await.unwrap();
 
     assert_eq!(live_user_ids(&context).await, vec![2]);
 }
@@ -106,7 +105,7 @@ async fn sweep_removes_tombstoned_edges() {
             .await;
     }
 
-    build_sweep_task(&context).run().await.unwrap();
+    build_tombstone_sweep_task(&context).run().await.unwrap();
 
     let result = context
         .query(&format!(
