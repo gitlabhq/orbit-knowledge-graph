@@ -26,7 +26,8 @@ if docker manifest inspect "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}" >/dev/nul
 fi
 
 WORKDIR=$(mktemp -d)
-trap 'rm -rf "$WORKDIR"' EXIT
+ORIG_DIR="$(pwd)"
+trap 'cd "$ORIG_DIR"; rm -rf "$WORKDIR"' EXIT
 
 log "Cloning operator branch ${OPERATOR_BRANCH}"
 git clone --depth 1 --branch "${OPERATOR_BRANCH}" "${OPERATOR_REPO}" "${WORKDIR}/operator"
@@ -73,3 +74,9 @@ log "Pushing operator image"
 docker push "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}"
 
 log "Operator image ready: ${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}"
+
+# Restore working directory. The script is sourced, not executed, so cd
+# persists in the caller. The trap also restores on error paths.
+cd "$ORIG_DIR"
+rm -rf "$WORKDIR"
+trap - EXIT
