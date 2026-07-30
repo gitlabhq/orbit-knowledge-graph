@@ -426,16 +426,17 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
 
+        let channel = ctx.claims.effective_channel();
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon_text = self
                 .tool_service
-                .build_schema_toon(&req.expand_nodes)
+                .build_schema_toon(&req.expand_nodes, Some(channel))
                 .map_err(|e| Status::internal(e.to_string()))?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
         } else {
-            let structured = self.build_structured_schema(&req.expand_nodes);
+            let structured = self.build_structured_schema(&req.expand_nodes, Some(channel));
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::Structured(structured)),
             }
@@ -582,20 +583,35 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 }
 
 impl KnowledgeGraphServiceImpl {
-    fn build_structured_schema(&self, expand_nodes: &[String]) -> StructuredSchema {
+    fn build_structured_schema(
+        &self,
+        expand_nodes: &[String],
+        channel: Option<ontology::Channel>,
+    ) -> StructuredSchema {
+        let graph = self.ontology.graph();
+        let visible = |entity: &str| channel.is_none_or(|c| graph.node_visible_on(entity, c));
+        let edge_visible =
+            |src: &str, tgt: &str| channel.is_none_or(|c| graph.edge_visible_on(src, tgt, c));
+
         let domains: Vec<SchemaDomain> = self
             .ontology
             .domains()
             .map(|d| SchemaDomain {
                 name: d.name.clone(),
                 description: d.description.clone(),
-                node_names: d.node_names.clone(),
+                node_names: d
+                    .node_names
+                    .iter()
+                    .filter(|n| visible(n))
+                    .cloned()
+                    .collect(),
             })
             .collect();
 
         let nodes: Vec<SchemaNode> = self
             .ontology
             .nodes()
+            .filter(|n| visible(&n.name))
             .map(|n| {
                 let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
 
@@ -628,7 +644,7 @@ impl KnowledgeGraphServiceImpl {
                 };
 
                 let (outgoing_edges, incoming_edges) = if should_expand {
-                    self.get_node_edge_names(&n.name)
+                    self.get_node_edge_names(&n.name, channel)
                 } else {
                     (vec![], vec![])
                 };
@@ -654,13 +670,14 @@ impl KnowledgeGraphServiceImpl {
         let edges: Vec<SchemaEdge> = self
             .ontology
             .edge_names()
-            .map(|name| {
+            .filter_map(|name| {
                 let variants: Vec<SchemaEdgeVariant> = self
                     .ontology
                     .get_edge(name)
                     .map(|edges| {
                         edges
                             .iter()
+                            .filter(|e| edge_visible(&e.source_kind, &e.target_kind))
                             .map(|e| SchemaEdgeVariant {
                                 source_type: e.source_kind.clone(),
                                 target_type: e.target_kind.clone(),
@@ -669,7 +686,10 @@ impl KnowledgeGraphServiceImpl {
                     })
                     .unwrap_or_default();
 
-                SchemaEdge {
+                if variants.is_empty() {
+                    return None;
+                }
+                Some(SchemaEdge {
                     name: name.to_string(),
                     description: self
                         .ontology
@@ -677,7 +697,7 @@ impl KnowledgeGraphServiceImpl {
                         .unwrap_or_default()
                         .to_string(),
                     variants,
-                }
+                })
             })
             .collect();
 
@@ -689,7 +709,14 @@ impl KnowledgeGraphServiceImpl {
         }
     }
 
-    fn get_node_edge_names(&self, node_name: &str) -> (Vec<String>, Vec<String>) {
+    fn get_node_edge_names(
+        &self,
+        node_name: &str,
+        channel: Option<ontology::Channel>,
+    ) -> (Vec<String>, Vec<String>) {
+        let graph = self.ontology.graph();
+        let edge_visible =
+            |src: &str, tgt: &str| channel.is_none_or(|c| graph.edge_visible_on(src, tgt, c));
         let mut outgoing = Vec::new();
         let mut incoming = Vec::new();
 
@@ -699,6 +726,9 @@ impl KnowledgeGraphServiceImpl {
                 let mut has_incoming = false;
 
                 for edge in edges {
+                    if !edge_visible(&edge.source_kind, &edge.target_kind) {
+                        continue;
+                    }
                     if edge.source_kind == node_name {
                         has_outgoing = true;
                     }
@@ -989,7 +1019,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema(&[], None);
 
         assert!(!response.schema_version.is_empty());
         assert!(!response.nodes.is_empty());
@@ -1008,6 +1038,25 @@ mod tests {
     }
 
     #[test]
+    fn structured_schema_all_interfaces_channel_keeps_full_schema() {
+        let service = KnowledgeGraphServiceImpl::new(
+            Arc::new(mock_validator()),
+            test_ontology(),
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+            60,
+            Arc::new(AnalyticsConfig::default()),
+        );
+
+        let unfiltered = service.build_structured_schema(&[], None);
+        let on_channel =
+            service.build_structured_schema(&[], Some(ontology::Channel::ExternalAgent));
+
+        assert_eq!(unfiltered.nodes.len(), on_channel.nodes.len());
+        assert_eq!(unfiltered.edges.len(), on_channel.edges.len());
+    }
+
+    #[test]
     fn test_build_structured_schema_with_expand() {
         let validator = Arc::new(mock_validator());
         let service = KnowledgeGraphServiceImpl::new(
@@ -1019,7 +1068,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = service.build_structured_schema(&["User".to_string()], None);
 
         let user_node = response.nodes.iter().find(|n| n.name == "User");
         assert!(user_node.is_some());
@@ -1055,7 +1104,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let (outgoing, incoming) = service.get_node_edge_names("User");
+        let (outgoing, incoming) = service.get_node_edge_names("User", None);
 
         assert!(
             !outgoing.is_empty() || !incoming.is_empty(),
@@ -1079,7 +1128,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
+        let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode", None);
 
         assert!(outgoing.is_empty());
         assert!(incoming.is_empty());
@@ -1097,7 +1146,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = service.build_structured_schema(&["User".to_string()], None);
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
 
         let id_prop = user.properties.iter().find(|p| p.name == "id");
@@ -1126,7 +1175,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema(&[], None);
 
         for domain in &response.domains {
             assert!(!domain.name.is_empty(), "Domain should have a name");
@@ -1150,7 +1199,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema(&[], None);
 
         for edge in &response.edges {
             assert!(!edge.name.is_empty(), "Edge should have a name");
@@ -1179,7 +1228,7 @@ mod tests {
         );
 
         let response =
-            service.build_structured_schema(&["User".to_string(), "Project".to_string()]);
+            service.build_structured_schema(&["User".to_string(), "Project".to_string()], None);
 
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
         let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
@@ -1345,7 +1394,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
         );
 
-        let response = service.build_structured_schema(&["*".to_string()]);
+        let response = service.build_structured_schema(&["*".to_string()], None);
 
         assert_eq!(
             response.nodes.len(),

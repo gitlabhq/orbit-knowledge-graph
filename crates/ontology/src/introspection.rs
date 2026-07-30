@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::{Adjacency, Dir, Field, Ontology, OntologyGraph};
+use crate::{Adjacency, Channel, Dir, Field, Ontology, OntologyGraph};
 
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
@@ -33,17 +33,46 @@ pub enum SchemaNode {
 /// `expand_nodes`: pass `["*"]` to expand every node, or specific names.
 #[must_use]
 pub fn build_schema_response(ontology: &Ontology, expand_nodes: &[String]) -> SchemaResponse {
+    build_schema_response_for_channel(ontology, expand_nodes, None)
+}
+
+/// ADR 013: when `channel` is set, entities not visible on it are omitted
+/// entirely (no annotation, §5) and edges are kept only when both endpoints are
+/// visible. `None` returns the full schema.
+#[must_use]
+pub fn build_schema_response_for_channel(
+    ontology: &Ontology,
+    expand_nodes: &[String],
+    channel: Option<Channel>,
+) -> SchemaResponse {
+    let graph = ontology.graph();
+    let edges = ontology
+        .edges()
+        .filter(|e| {
+            channel.is_none_or(|c| graph.edge_visible_on(&e.source_kind, &e.target_kind, c))
+        })
+        .map(|e| e.relationship_kind.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     SchemaResponse {
-        domains: build_domains(ontology, expand_nodes),
-        edges: ontology.edge_names().map(str::to_string).collect(),
+        domains: build_domains(ontology, expand_nodes, channel),
+        edges,
     }
 }
 
-fn build_domains(ontology: &Ontology, expand_nodes: &[String]) -> Vec<SchemaDomain> {
+fn build_domains(
+    ontology: &Ontology,
+    expand_nodes: &[String],
+    channel: Option<Channel>,
+) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
     let graph = ontology.graph();
 
     for node in ontology.nodes() {
+        if channel.is_some_and(|c| !graph.node_visible_on(&node.name, c)) {
+            continue;
+        }
         let domain_name = if node.domain.is_empty() {
             "other".to_string()
         } else {
@@ -216,6 +245,50 @@ mod tests {
             "File should have incoming CONTAINS: {:?}",
             file.1
         );
+    }
+
+    fn node_names(response: &SchemaResponse) -> Vec<String> {
+        response
+            .domains
+            .iter()
+            .flat_map(|d| {
+                d.nodes.iter().map(|n| match n {
+                    SchemaNode::Name(s) => s.clone(),
+                    SchemaNode::Expanded { name, .. } => name.clone(),
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn channel_filter_omits_entities_hidden_from_channel() {
+        let ont = Ontology::new()
+            .with_nodes(["User", "Project"])
+            .with_edges(["CONTAINS"])
+            .with_edge_variant(crate::EdgeEntity {
+                relationship_kind: "CONTAINS".into(),
+                source: "Project".into(),
+                source_kind: "Project".into(),
+                target: "User".into(),
+                target_kind: "User".into(),
+                destination_table: crate::EDGE_TABLE.into(),
+                fk_column: None,
+                scope: None,
+            })
+            .with_node_channels("User", [Channel::CoreFeature])
+            .with_node_channels("Project", Channel::ALL);
+
+        let hidden = build_schema_response_for_channel(&ont, &[], Some(Channel::ExternalAgent));
+        assert_eq!(node_names(&hidden), vec!["Project"]);
+        assert!(
+            hidden.edges.is_empty(),
+            "CONTAINS touches the hidden User, so it drops: {:?}",
+            hidden.edges
+        );
+
+        let visible = build_schema_response_for_channel(&ont, &[], Some(Channel::CoreFeature));
+        assert!(node_names(&visible).contains(&"User".to_string()));
+        assert_eq!(visible.edges, vec!["CONTAINS"]);
     }
 
     #[test]

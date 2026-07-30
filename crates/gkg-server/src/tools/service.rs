@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use jsonschema::Validator;
 use ontology::Ontology;
-use ontology::introspection::{SchemaDomain, SchemaResponse, build_schema_response};
+use ontology::introspection::{SchemaDomain, SchemaResponse, build_schema_response_for_channel};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -181,8 +181,12 @@ impl ToolService {
         }
     }
 
-    pub fn build_schema_toon(&self, expand_nodes: &[String]) -> Result<String, ExecutorError> {
-        let response = self.build_graph_schema_response(expand_nodes);
+    pub fn build_schema_toon(
+        &self,
+        expand_nodes: &[String],
+        channel: Option<ontology::Channel>,
+    ) -> Result<String, ExecutorError> {
+        let response = self.build_graph_schema_response(expand_nodes, channel);
         let options = EncodeOptions::default();
         encode(&response, &options)
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
@@ -269,7 +273,7 @@ impl ToolService {
 
         let format = parse_format(arguments);
         let expand_nodes = args.resolve_expand_nodes();
-        let response = self.build_graph_schema_response(&expand_nodes);
+        let response = self.build_graph_schema_response(&expand_nodes, None);
 
         let result = match format {
             OutputFormat::Llm => {
@@ -331,16 +335,20 @@ impl ToolService {
         Ok(ToolPlan::Immediate { result })
     }
 
-    fn build_graph_schema_response(&self, expand_nodes: &[String]) -> SchemaResponse {
-        build_schema_response(&self.ontology, expand_nodes)
+    fn build_graph_schema_response(
+        &self,
+        expand_nodes: &[String],
+        channel: Option<ontology::Channel>,
+    ) -> SchemaResponse {
+        build_schema_response_for_channel(&self.ontology, expand_nodes, channel)
     }
 
     pub fn build_domains(&self, expand_nodes: &[String]) -> Vec<SchemaDomain> {
-        self.build_graph_schema_response(expand_nodes).domains
+        self.build_graph_schema_response(expand_nodes, None).domains
     }
 
     pub fn build_edges(&self) -> Vec<String> {
-        self.build_graph_schema_response(&[]).edges
+        self.build_graph_schema_response(&[], None).edges
     }
 }
 
@@ -573,7 +581,9 @@ mod tests {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
         let service = ToolService::new(ontology);
 
-        let toon = service.build_schema_toon(&[]).expect("Should succeed");
+        let toon = service
+            .build_schema_toon(&[], None)
+            .expect("Should succeed");
         assert!(toon.contains("domains"));
         assert!(toon.contains("edges"));
     }
@@ -584,7 +594,7 @@ mod tests {
         let service = ToolService::new(ontology);
 
         let toon = service
-            .build_schema_toon(&["User".to_string()])
+            .build_schema_toon(&["User".to_string()], None)
             .expect("Should succeed");
         assert!(toon.contains("username"));
         assert!(toon.contains("props"));
@@ -632,7 +642,7 @@ mod tests {
         let service = ToolService::new(ontology);
 
         let toon = service
-            .build_schema_toon(&["FakeNode".to_string()])
+            .build_schema_toon(&["FakeNode".to_string()], None)
             .expect("Should succeed without error");
         assert!(toon.contains("domains"), "Should still return valid schema");
     }
