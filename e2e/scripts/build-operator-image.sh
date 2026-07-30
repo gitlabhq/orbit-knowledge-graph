@@ -22,6 +22,7 @@ export E2E_OPERATOR_TAG="${CI_COMMIT_SHORT_SHA}"
 # Reuse on retry.
 if docker manifest inspect "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}" >/dev/null 2>&1; then
   log "Reusing existing operator image ${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}"
+  set +u
   return 0 2>/dev/null || exit 0
 fi
 
