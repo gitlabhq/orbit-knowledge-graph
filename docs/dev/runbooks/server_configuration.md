@@ -275,6 +275,15 @@ every later tick queries Siphon changes since that checkpoint, however old it is
 The hourly namespace sweep re-dispatches every enabled namespace regardless of
 recent Siphon activity, backstopping migration backfill and missed windows.
 
+Table cleanup sweeps only tombstones stamped within one day past its own cron
+cadence, and keeps no cursor between runs. Consecutive windows therefore overlap
+by a day and no more: a run that fails or is skipped strands every tombstone
+older than that overlap, and so does the first run after this task is deployed.
+Nothing reaches those rows again — clearing them means a one-off sweep over a
+wider window with `scripts/tombstone-sweep/`. Alert on
+`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`, because the task
+logs a failed table and moves on.
+
 ### Code dispatch task settings
 
 | Config path | Default | Description |
@@ -288,19 +297,6 @@ recent Siphon activity, backstopping migration backfill and missed windows.
 |-------------|---------|-------------|
 | `schedule.tasks.namespace-code-backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
 | `schedule.tasks.namespace-code-backfill.batch_size` | `100` | Events to process per cycle |
-
-### Table cleanup task settings
-
-| Config path | Default | Description |
-|-------------|---------|-------------|
-| `schedule.tasks.table-cleanup.lookback_secs` | Unset: one day past the cron cadence | `_version` window the sweep considers, in seconds |
-
-Each run sweeps only tombstones stamped inside that window, and keeps no cursor
-between runs. The derived default overlaps consecutive windows by a day, so a
-run that is skipped or fails strands the tombstones older than that overlap:
-nothing sweeps them until someone pins a wider `lookback_secs` and runs again.
-Alert on `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}` to catch
-that, since the task logs the failure and moves on.
 
 ## GitLab client
 
