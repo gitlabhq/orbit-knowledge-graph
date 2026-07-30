@@ -63,25 +63,22 @@ pub struct Claims {
     /// self-managed / Dedicated instances.
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
-    /// Channel the request arrived on (ADR 013). Absent on JWTs issued before
-    /// Rails populates it; `effective_channel` falls back to `source_type`.
-    #[serde(default)]
-    pub channel: Option<ontology::Channel>,
 }
 
 impl Claims {
-    /// The channel this request is gated on. Prefers the explicit claim; falls
-    /// back to a `source_type` mapping so this can ship before Rails sends the
-    /// claim. `Frontend`→`Frontend`, `Dws`→`DapInternal`, `Mcp`/`Rest`→
-    /// `ExternalAgent`, `Core`/`CodeIntelligence`→`CoreFeature`.
+    /// The channel this request is gated on (ADR 013), derived from the source
+    /// type: `Frontend`→`Frontend`, `Dws`→`DapInternal`, `Mcp`/`Rest`→
+    /// `ExternalAgent`, `Core`/`CodeIntelligence`→`CoreFeature`. When Rails
+    /// needs a channel that diverges from the source type it will send an
+    /// explicit claim; that claim is added in the MR that populates it.
     #[must_use]
     pub fn effective_channel(&self) -> ontology::Channel {
-        self.channel.unwrap_or(match self.source_type {
+        match self.source_type {
             SourceType::Frontend => ontology::Channel::Frontend,
             SourceType::Dws => ontology::Channel::DapInternal,
             SourceType::Mcp | SourceType::Rest => ontology::Channel::ExternalAgent,
             SourceType::Core | SourceType::CodeIntelligence => ontology::Channel::CoreFeature,
-        })
+        }
     }
 }
 
@@ -133,7 +130,7 @@ mod tests {
         assert_eq!(parse("something_else"), SourceType::Rest);
     }
 
-    fn claims_with(source_type: SourceType, channel: Option<ontology::Channel>) -> Claims {
+    fn claims_with(source_type: SourceType) -> Claims {
         Claims {
             sub: String::new(),
             iss: String::new(),
@@ -157,32 +154,25 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
-            channel,
         }
     }
 
     #[test]
-    fn effective_channel_prefers_explicit_claim() {
-        let c = claims_with(SourceType::Mcp, Some(ontology::Channel::CoreFeature));
-        assert_eq!(c.effective_channel(), ontology::Channel::CoreFeature);
-    }
-
-    #[test]
-    fn effective_channel_falls_back_to_source_type() {
+    fn effective_channel_maps_source_type() {
         assert_eq!(
-            claims_with(SourceType::Frontend, None).effective_channel(),
+            claims_with(SourceType::Frontend).effective_channel(),
             ontology::Channel::Frontend
         );
         assert_eq!(
-            claims_with(SourceType::Dws, None).effective_channel(),
+            claims_with(SourceType::Dws).effective_channel(),
             ontology::Channel::DapInternal
         );
         assert_eq!(
-            claims_with(SourceType::Rest, None).effective_channel(),
+            claims_with(SourceType::Rest).effective_channel(),
             ontology::Channel::ExternalAgent
         );
         assert_eq!(
-            claims_with(SourceType::Core, None).effective_channel(),
+            claims_with(SourceType::Core).effective_channel(),
             ontology::Channel::CoreFeature
         );
     }

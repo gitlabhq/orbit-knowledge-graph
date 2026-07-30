@@ -151,7 +151,6 @@ mod tests {
                 deployment_type: None,
                 realm: None,
                 is_gitlab_team_member: None,
-                channel: None,
             },
             user_agent: user_agent.map(Into::into),
         }
