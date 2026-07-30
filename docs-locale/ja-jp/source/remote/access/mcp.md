@@ -192,9 +192,9 @@ MCP経由のクエリはGitLabクレジットを消費します。`query_graph`�
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
-  "group_by": [{"kind": "node", "node": "p"}],
+  "group_by": ["p"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "open_mrs"}
+    { "count": "mr", "as": "open_mrs" }
   ],
   "aggregation_sort": "-open_mrs",
   "limit": 10
