@@ -52,15 +52,36 @@ bash scripts/retrieve_gitlab_charts.sh
 bash scripts/retrieve_orbit_charts.sh
 
 log "Building operator image"
-# The operator Dockerfile uses --platform=${BUILDPLATFORM} (a buildx feature).
-# Enable BuildKit and pass the platform ARGs explicitly for the single-arch
-# e2e build.
-DOCKER_BUILDKIT=1 docker build \
+# The operator Dockerfile uses FROM --platform=${BUILDPLATFORM} which requires
+# the buildx plugin. The e2e CI runner has legacy Docker without buildx.
+# Write a single-arch Dockerfile that skips the multi-arch machinery.
+cat > Dockerfile.e2e-operator <<'EODF'
+FROM docker.io/golang:1.26 AS builder
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY main.go main.go
+COPY bridge_stub.go bridge_stub.go
+COPY api/ api/
+COPY helm/ helm/
+COPY pkg/ pkg/
+COPY controllers/ controllers/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager .
+
+FROM registry.access.redhat.com/ubi9-micro:latest
+ARG CHART_DIR="/charts"
+ENV HELM_CHARTS=${CHART_DIR}
+COPY charts ${CHART_DIR}
+WORKDIR /
+COPY --from=builder /workspace/manager .
+USER 1001
+ENTRYPOINT ["/manager"]
+EODF
+
+docker build \
   -t "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}" \
-  --build-arg BUILDPLATFORM=linux/amd64 \
-  --build-arg TARGETOS=linux \
-  --build-arg TARGETARCH=amd64 \
-  --build-arg BUILD_IMAGE="docker.io/golang:1.26" \
+  -f Dockerfile.e2e-operator \
   .
 
 log "Pushing operator image"
