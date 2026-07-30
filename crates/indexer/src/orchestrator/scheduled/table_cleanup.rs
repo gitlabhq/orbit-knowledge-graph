@@ -1,17 +1,14 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::Utc;
 use futures::StreamExt;
 use tracing::{info, warn};
 
 use gkg_utils::arrow::ArrowUtils;
 
-use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
-use crate::durability::WriteDurability;
 use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
@@ -23,6 +20,15 @@ const KEYS_TABLE_PREFIX: &str = "tombstone_sweep_keys";
 /// wedged there survived both `KILL QUERY` and dropping its table on prod.
 /// Above the cap ClickHouse skips the index and takes a bounded filtered scan.
 const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000;
+/// Three multi-billion-row sweeps at once held per-table times on prod clones.
+const CONCURRENT_TABLE_SWEEPS: usize = 4;
+/// The largest prod tables took 2 to 27 minutes each, so this bounds a wedged
+/// sweep rather than a normal one.
+const STATEMENT_TIMEOUT_SECS: u64 = 5400;
+/// The keys build peaked under 1 GiB on the largest prod tables; the headroom
+/// is for the external sort, which spills at a quarter of this.
+const MAX_MEMORY_BYTES: u64 = 8_000_000_000;
+const VERIFY_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 struct ReplacingMergeTreeTable {
@@ -30,15 +36,9 @@ struct ReplacingMergeTreeTable {
     sort_key: Vec<String>,
 }
 
-struct VersionWindow {
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
-}
-
 pub struct TableCleanup {
     graph: ArrowClickHouseClient,
     tables: Vec<ReplacingMergeTreeTable>,
-    checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: ScheduledTaskMetrics,
     config: TableCleanupConfig,
 }
@@ -47,14 +47,12 @@ impl TableCleanup {
     pub fn new(
         graph: ArrowClickHouseClient,
         ontology: &ontology::Ontology,
-        checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: ScheduledTaskMetrics,
         config: TableCleanupConfig,
     ) -> Self {
         Self {
             graph,
             tables: list_replacing_merge_tree_tables(ontology),
-            checkpoint_store,
             metrics,
             config,
         }
@@ -92,7 +90,7 @@ impl TableCleanup {
             .cloned()
             .map(|table| self.sweep_table_and_drop_its_keys(table));
         let failed = futures::stream::iter(sweeps)
-            .buffer_unordered(self.config.max_concurrent_tables.max(1))
+            .buffer_unordered(CONCURRENT_TABLE_SWEEPS)
             .filter(|succeeded| futures::future::ready(!succeeded))
             .count()
             .await;
@@ -138,63 +136,29 @@ impl TableCleanup {
         &self,
         table: &ReplacingMergeTreeTable,
     ) -> Result<(), TaskError> {
-        let window = self.next_window(&table.name).await?;
+        let window_end = Utc::now();
+        let window_start = window_end - self.config.lookback();
 
         self.drop_keys_table(table).await?;
         self.graph
-            .query(&build_tombstoned_keys_table_sql(table, &self.config))
+            .query(&build_tombstoned_keys_table_sql(table))
             .param(
                 "window_start",
-                window.start.format(TIMESTAMP_FORMAT).to_string(),
+                window_start.format(TIMESTAMP_FORMAT).to_string(),
             )
             .param(
                 "window_end",
-                window.end.format(TIMESTAMP_FORMAT).to_string(),
+                window_end.format(TIMESTAMP_FORMAT).to_string(),
             )
             .execute()
             .await
             .map_err(TaskError::new)?;
         self.graph
-            .query(&build_delete_tombstoned_keys_sql(table, &self.config))
+            .query(&build_delete_tombstoned_keys_sql(table))
             .execute()
             .await
             .map_err(TaskError::new)?;
-        self.wait_until_tombstoned_keys_are_gone(table).await?;
-
-        self.save_cursor(&table.name, &window.end).await
-    }
-
-    /// The window always ends at now so a run applies the newest tombstones, and
-    /// always spans at least `window_secs` so a first run with no checkpoint is
-    /// still useful. A missed run widens it back to the last checkpoint, capped
-    /// at `max_backlog_secs` to keep any single run bounded.
-    async fn next_window(&self, table: &str) -> Result<VersionWindow, TaskError> {
-        let completed = self
-            .checkpoint_store
-            .load(&checkpoint_key_for_table(table))
-            .await
-            .map_err(TaskError::new)?
-            .map(|checkpoint| checkpoint.watermark);
-        let end = Utc::now();
-        let ago = |secs: u64| end - TimeDelta::seconds(secs as i64);
-        let resume = completed
-            .map(|watermark| watermark - TimeDelta::seconds(self.config.lookback_secs as i64))
-            .unwrap_or_else(|| ago(self.config.window_secs));
-        let start = resume
-            .min(ago(self.config.window_secs))
-            .max(ago(self.config.max_backlog_secs));
-        Ok(VersionWindow { start, end })
-    }
-
-    async fn save_cursor(&self, table: &str, watermark: &DateTime<Utc>) -> Result<(), TaskError> {
-        self.checkpoint_store
-            .save_completed(
-                &checkpoint_key_for_table(table),
-                watermark,
-                WriteDurability::Durable,
-            )
-            .await
-            .map_err(TaskError::new)
+        self.wait_until_tombstoned_keys_are_gone(table).await
     }
 
     /// The delete is submitted without waiting (see
@@ -205,18 +169,18 @@ impl TableCleanup {
         &self,
         table: &ReplacingMergeTreeTable,
     ) -> Result<(), TaskError> {
-        let deadline = Instant::now() + Duration::from_secs(self.config.statement_timeout_secs);
+        let deadline = Instant::now() + Duration::from_secs(STATEMENT_TIMEOUT_SECS);
         loop {
             if self.count_remaining_tombstoned_rows(table).await? == 0 {
                 return Ok(());
             }
             if Instant::now() >= deadline {
                 return Err(TaskError::new(format!(
-                    "delete on {} left rows behind after {}s",
-                    table.name, self.config.statement_timeout_secs
+                    "delete on {} left rows behind after {STATEMENT_TIMEOUT_SECS}s",
+                    table.name
                 )));
             }
-            tokio::time::sleep(Duration::from_secs(self.config.verify_poll_interval_secs)).await;
+            tokio::time::sleep(VERIFY_POLL_INTERVAL).await;
         }
     }
 
@@ -226,10 +190,7 @@ impl TableCleanup {
     ) -> Result<u64, TaskError> {
         let batches = self
             .graph
-            .query(&build_count_remaining_tombstoned_rows_sql(
-                table,
-                &self.config,
-            ))
+            .query(&build_count_remaining_tombstoned_rows_sql(table))
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;
@@ -255,10 +216,7 @@ fn keys_table_name(table: &ReplacingMergeTreeTable) -> String {
     format!("{KEYS_TABLE_PREFIX}_{}", table.name)
 }
 
-fn build_tombstoned_keys_table_sql(
-    table: &ReplacingMergeTreeTable,
-    config: &TableCleanupConfig,
-) -> String {
+fn build_tombstoned_keys_table_sql(table: &ReplacingMergeTreeTable) -> String {
     let keys = table.sort_key.join(", ");
     let keys_table = keys_table_name(table);
     let source = &table.name;
@@ -270,11 +228,10 @@ fn build_tombstoned_keys_table_sql(
            ORDER BY {keys}, _version DESC \
            LIMIT 1 BY {keys} \
          ) WHERE _deleted \
-         SETTINGS max_memory_usage = {}, max_bytes_before_external_sort = {}, \
-                  optimize_read_in_order = 1, max_execution_time = {}",
-        config.max_memory_bytes,
-        config.max_memory_bytes / 4,
-        config.statement_timeout_secs
+         SETTINGS max_memory_usage = {MAX_MEMORY_BYTES}, \
+                  max_bytes_before_external_sort = {}, \
+                  optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}",
+        MAX_MEMORY_BYTES / 4
     )
 }
 
@@ -283,36 +240,25 @@ fn build_tombstoned_keys_table_sql(
 /// idle connections after ~20 minutes — while the mutation itself survives the
 /// disconnect and keeps running. Submit async; the remaining-rows poll is the
 /// completion signal.
-fn build_delete_tombstoned_keys_sql(
-    table: &ReplacingMergeTreeTable,
-    config: &TableCleanupConfig,
-) -> String {
+fn build_delete_tombstoned_keys_sql(table: &ReplacingMergeTreeTable) -> String {
     let keys = table.sort_key.join(", ");
     format!(
         "DELETE FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {}) \
-         SETTINGS lightweight_deletes_sync = 0, max_execution_time = {}",
+         SETTINGS lightweight_deletes_sync = 0, \
+                  max_execution_time = {STATEMENT_TIMEOUT_SECS}",
         table.name,
         keys_table_name(table),
-        config.statement_timeout_secs
     )
 }
 
-fn checkpoint_key_for_table(table: &str) -> String {
-    format!("{TASK_NAME}.{table}")
-}
-
-fn build_count_remaining_tombstoned_rows_sql(
-    table: &ReplacingMergeTreeTable,
-    config: &TableCleanupConfig,
-) -> String {
+fn build_count_remaining_tombstoned_rows_sql(table: &ReplacingMergeTreeTable) -> String {
     let keys = table.sort_key.join(", ");
     format!(
         "SELECT count() AS remaining FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {}) \
          SETTINGS use_index_for_in_with_subqueries_max_values = {MAX_KEYS_FOR_INDEX_ANALYSIS}, \
-                  max_execution_time = {}",
+                  max_execution_time = {STATEMENT_TIMEOUT_SECS}",
         table.name,
         keys_table_name(table),
-        config.statement_timeout_secs
     )
 }
 
@@ -333,6 +279,7 @@ fn list_replacing_merge_tree_tables(ontology: &ontology::Ontology) -> Vec<Replac
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeDelta;
 
     fn all_tables() -> Vec<ReplacingMergeTreeTable> {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
@@ -395,38 +342,19 @@ mod tests {
     }
 
     #[test]
-    fn a_lookback_window_absorbs_late_arriving_tombstones() {
+    fn the_lookback_reaches_back_past_the_weekly_cadence() {
         let config = TableCleanupConfig::default();
         assert!(
-            config.lookback_secs >= 86400,
-            "_version is a source watermark, so the window must outlast replication delay"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_first_run_sweeps_the_recent_past_not_1970() {
-        let config = TableCleanupConfig::default();
-        let end = Utc::now();
-        let earliest = end - TimeDelta::seconds(config.max_backlog_secs as i64);
-        let standard = end - TimeDelta::seconds(config.window_secs as i64);
-
-        assert!(
-            standard > earliest,
-            "the standard window must sit inside the backlog cap so a first run covers recent time"
-        );
-        assert!(
-            earliest > DateTime::<Utc>::UNIX_EPOCH,
-            "a window anchored at the epoch would take thousands of runs to reach the present"
+            config.lookback() > TimeDelta::days(7),
+            "the sweep keeps no cursor, so a run that does not reach back past the weekly \
+             cadence leaves tombstones nothing will ever pick up"
         );
     }
 
     #[test]
     fn keys_are_bounded_to_one_version_window() {
         let tables = all_tables();
-        let sql = build_tombstoned_keys_table_sql(
-            find_table_ending_in(&tables, "gl_edge"),
-            &TableCleanupConfig::default(),
-        );
+        let sql = build_tombstoned_keys_table_sql(find_table_ending_in(&tables, "gl_edge"));
 
         assert!(
             sql.contains("_version > {window_start:String}"),
@@ -441,10 +369,7 @@ mod tests {
     #[test]
     fn keys_are_the_newest_version_of_each_sort_key() {
         let tables = all_tables();
-        let sql = build_tombstoned_keys_table_sql(
-            find_table_ending_in(&tables, "gl_edge"),
-            &TableCleanupConfig::default(),
-        );
+        let sql = build_tombstoned_keys_table_sql(find_table_ending_in(&tables, "gl_edge"));
 
         assert!(sql.contains("LIMIT 1 BY"), "sql: {sql}");
         assert!(sql.contains("_version DESC"), "sql: {sql}");
@@ -455,7 +380,7 @@ mod tests {
     fn delete_reads_keys_from_the_materialised_table_not_the_source() {
         let tables = all_tables();
         let table = find_table_ending_in(&tables, "gl_edge");
-        let sql = build_delete_tombstoned_keys_sql(table, &TableCleanupConfig::default());
+        let sql = build_delete_tombstoned_keys_sql(table);
 
         assert!(
             sql.contains(&format!(
@@ -471,7 +396,7 @@ mod tests {
     fn completion_is_confirmed_against_the_data_not_system_mutations() {
         let tables = all_tables();
         let table = find_table_ending_in(&tables, "gl_edge");
-        let sql = build_count_remaining_tombstoned_rows_sql(table, &TableCleanupConfig::default());
+        let sql = build_count_remaining_tombstoned_rows_sql(table);
 
         assert!(sql.contains("count() AS remaining"), "sql: {sql}");
         assert!(sql.contains(&keys_table_name(table)), "sql: {sql}");
@@ -481,10 +406,8 @@ mod tests {
     #[test]
     fn completion_count_skips_index_analysis_for_large_key_sets() {
         let tables = all_tables();
-        let sql = build_count_remaining_tombstoned_rows_sql(
-            find_table_ending_in(&tables, "gl_edge"),
-            &TableCleanupConfig::default(),
-        );
+        let sql =
+            build_count_remaining_tombstoned_rows_sql(find_table_ending_in(&tables, "gl_edge"));
 
         assert!(
             sql.contains("use_index_for_in_with_subqueries_max_values"),
@@ -495,20 +418,12 @@ mod tests {
     #[test]
     fn delete_is_submitted_without_a_synchronous_wait() {
         let tables = all_tables();
-        let sql = build_delete_tombstoned_keys_sql(
-            find_table_ending_in(&tables, "gl_edge"),
-            &TableCleanupConfig::default(),
-        );
+        let sql = build_delete_tombstoned_keys_sql(find_table_ending_in(&tables, "gl_edge"));
 
         assert!(
             sql.contains("lightweight_deletes_sync = 0"),
             "a synchronous wait holds a silent connection the Cloud path drops at ~20min; sql: {sql}"
         );
         assert!(!sql.contains("system.mutations"), "sql: {sql}");
-    }
-
-    #[test]
-    fn tables_sweep_concurrently_by_default() {
-        assert!(TableCleanupConfig::default().max_concurrent_tables > 1);
     }
 }

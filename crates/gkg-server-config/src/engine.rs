@@ -568,70 +568,34 @@ impl Default for CodeBackfillSweepConfig {
     }
 }
 
+/// Cadence and `_version` window for the tombstone sweep.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_sweep_statement_timeout_secs")]
-    pub statement_timeout_secs: u64,
-    #[serde(default = "default_sweep_max_memory_bytes")]
-    pub max_memory_bytes: u64,
     #[serde(default = "default_sweep_lookback_secs")]
     pub lookback_secs: u64,
-    #[serde(default = "default_sweep_window_secs")]
-    pub window_secs: u64,
-    #[serde(default = "default_sweep_verify_poll_interval_secs")]
-    pub verify_poll_interval_secs: u64,
-    #[serde(default = "default_sweep_max_backlog_secs")]
-    pub max_backlog_secs: u64,
-    #[serde(default = "default_sweep_max_concurrent_tables")]
-    pub max_concurrent_tables: usize,
 }
 
 fn default_sweep_lookback_secs() -> u64 {
-    604_800
+    691_200
 }
 
-fn default_sweep_window_secs() -> u64 {
-    604_800
-}
-
-fn default_sweep_verify_poll_interval_secs() -> u64 {
-    5
-}
-
-fn default_sweep_max_backlog_secs() -> u64 {
-    2_592_000
-}
-
-fn default_sweep_statement_timeout_secs() -> u64 {
-    5400
-}
-
-fn default_sweep_max_memory_bytes() -> u64 {
-    8_000_000_000
-}
-
-fn default_sweep_max_concurrent_tables() -> usize {
-    4
+impl TableCleanupConfig {
+    pub fn lookback(&self) -> chrono::TimeDelta {
+        chrono::TimeDelta::seconds(self.lookback_secs as i64)
+    }
 }
 
 impl Default for TableCleanupConfig {
     fn default() -> Self {
         Self {
-            // Weekly, Sunday 03:00 UTC: the window/lookback defaults below
-            // cover seven days, and the weekend slot leaves the background
-            // pool to the deletes.
+            // Sunday 03:00 UTC leaves the background merge pool to the deletes;
+            // the lookback covers that week plus a day of replication slack.
             schedule: ScheduleConfiguration {
                 cron: Some("0 0 3 * * 0".into()),
             },
-            statement_timeout_secs: default_sweep_statement_timeout_secs(),
-            max_memory_bytes: default_sweep_max_memory_bytes(),
             lookback_secs: default_sweep_lookback_secs(),
-            window_secs: default_sweep_window_secs(),
-            verify_poll_interval_secs: default_sweep_verify_poll_interval_secs(),
-            max_backlog_secs: default_sweep_max_backlog_secs(),
-            max_concurrent_tables: default_sweep_max_concurrent_tables(),
         }
     }
 }

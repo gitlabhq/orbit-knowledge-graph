@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use gkg_server_config::TableCleanupConfig;
 use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
@@ -11,9 +9,6 @@ fn build_sweep_task(context: &TestContext) -> TableCleanup {
     TableCleanup::new(
         context.config.build_client(),
         &ontology,
-        Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
-            Arc::new(context.config.build_client()),
-        )),
         ScheduledTaskMetrics::new(),
         TableCleanupConfig::default(),
     )

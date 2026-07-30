@@ -388,7 +388,6 @@ pub async fn run_dispatcher(
         Box::new(TableCleanup::new(
             graph,
             ontology,
-            checkpoint_store.clone(),
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
         )),

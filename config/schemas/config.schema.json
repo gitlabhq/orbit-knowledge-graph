@@ -271,13 +271,7 @@
           },
           "table-cleanup": {
             "cron": "0 0 3 * * 0",
-            "lookback_secs": 604800,
-            "max_backlog_secs": 2592000,
-            "max_concurrent_tables": 4,
-            "max_memory_bytes": 8000000000,
-            "statement_timeout_secs": 5400,
-            "verify_poll_interval_secs": 5,
-            "window_secs": 604800
+            "lookback_secs": 691200
           }
         }
       }
@@ -1561,13 +1555,7 @@
             },
             "table-cleanup": {
               "cron": "0 0 3 * * 0",
-              "lookback_secs": 604800,
-              "max_backlog_secs": 2592000,
-              "max_concurrent_tables": 4,
-              "max_memory_bytes": 8000000000,
-              "statement_timeout_secs": 5400,
-              "verify_poll_interval_secs": 5,
-              "window_secs": 604800
+              "lookback_secs": 691200
             }
           }
         }
@@ -1627,13 +1615,7 @@
           "$ref": "#/$defs/TableCleanupConfig",
           "default": {
             "cron": "0 0 3 * * 0",
-            "lookback_secs": 604800,
-            "max_backlog_secs": 2592000,
-            "max_concurrent_tables": 4,
-            "max_memory_bytes": 8000000000,
-            "statement_timeout_secs": 5400,
-            "verify_poll_interval_secs": 5,
-            "window_secs": 604800
+            "lookback_secs": 691200
           }
         }
       },
@@ -1758,7 +1740,7 @@
       "additionalProperties": false
     },
     "TableCleanupConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "description": "Cadence and `_version` window for the tombstone sweep.",
       "type": "object",
       "properties": {
         "cron": {
@@ -1772,43 +1754,7 @@
         "lookback_secs": {
           "type": "integer",
           "format": "uint64",
-          "default": 604800,
-          "minimum": 0
-        },
-        "max_backlog_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 2592000,
-          "minimum": 0
-        },
-        "max_concurrent_tables": {
-          "type": "integer",
-          "format": "uint",
-          "default": 4,
-          "minimum": 0
-        },
-        "max_memory_bytes": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 8000000000,
-          "minimum": 0
-        },
-        "statement_timeout_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 5400,
-          "minimum": 0
-        },
-        "verify_poll_interval_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 5,
-          "minimum": 0
-        },
-        "window_secs": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 604800,
+          "default": 691200,
           "minimum": 0
         }
       }
