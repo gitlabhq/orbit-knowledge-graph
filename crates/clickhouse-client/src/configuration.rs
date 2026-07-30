@@ -4,10 +4,7 @@ use gkg_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
 
-/// Validated against a 3-replica ReplicatedMergeTree cluster in
-/// <https://gitlab.com/gitlab-org/analytics-section/siphon/-/work_items/254>. `auto` is a
-/// majority quorum that tracks replica count, and serializing quorum inserts is what makes
-/// `select_sequential_consistency` take effect.
+/// Serializing quorum inserts is what makes `select_sequential_consistency` take effect.
 const QUORUM_SESSION_SETTINGS: [(&str, &str); 3] = [
     ("insert_quorum", "auto"),
     ("insert_quorum_parallel", "0"),
