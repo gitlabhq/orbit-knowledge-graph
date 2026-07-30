@@ -124,8 +124,8 @@ prettyplease = "0.2.37"
 typify = "0.7.0"
 
 # JS/TS ecosystem (v2 custom pipeline)
-oxc = { git = "https://github.com/oxc-project/oxc", rev = "69b2dfc1810e6ad9d5508ae9a20bc773ba5aa18d", features = ["semantic", "ast_visit"] }
-oxc_linter = { git = "https://github.com/oxc-project/oxc", rev = "69b2dfc1810e6ad9d5508ae9a20bc773ba5aa18d" }
+oxc = { git = "https://github.com/oxc-project/oxc", rev = "fc702c1fa9f0412d06ec6908b58cd395b826cf7f", features = ["semantic", "ast_visit"] }
+oxc_linter = { git = "https://github.com/oxc-project/oxc", rev = "fc702c1fa9f0412d06ec6908b58cd395b826cf7f" }
 oxc_resolver = "11.24.2"
 
 # Simulator dependencies
