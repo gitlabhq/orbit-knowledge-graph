@@ -557,8 +557,6 @@ impl std::io::Write for DrainableWriter {
     }
 }
 
-/// Read from the settings rather than a caller-passed flag, so quorum settings written by hand
-/// suppress async inserts too. `0` is ClickHouse's "no quorum" value.
 fn has_quorum_insert_setting(
     session_settings: &std::collections::HashMap<String, String>,
     insert_settings: &std::collections::HashMap<String, String>,

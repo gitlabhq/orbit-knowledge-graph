@@ -111,7 +111,7 @@ graph:
   quorum_writes: true
 ```
 
-This is a graph-only setting: GKG only ever writes to its own graph tables, and the datalake is written by Siphon. Siphon applies its own quorum settings, documented in [siphon#254](https://gitlab.com/gitlab-org/analytics-section/siphon/-/work_items/254). If datalake reads need to fail loudly on a lagging replica rather than return stale Siphon rows, set `select_sequential_consistency` directly in `datalake.session_settings`.
+There is no equivalent setting for the datalake. GKG writes to its own graph tables and reads everything else, so the datalake is Siphon's to configure. [siphon#254](https://gitlab.com/gitlab-org/analytics-section/siphon/-/work_items/254) covers what Siphon applies there. To make datalake reads error out on a lagging replica instead of returning stale Siphon rows, put `select_sequential_consistency` in `datalake.session_settings` yourself.
 
 The flag applies three session settings and suppresses a fourth:
 
@@ -119,10 +119,10 @@ The flag applies three session settings and suppresses a fourth:
 |---------|-------|--------|
 | `insert_quorum` | `auto` | Majority quorum that tracks replica count. A fixed number stops being a majority once replicas are added. |
 | `insert_quorum_parallel` | `0` | Required for `select_sequential_consistency` to take effect. Serializes quorum inserts per table. |
-| `select_sequential_consistency` | `1` | Reads fail loudly on a lagging replica (error 289) instead of returning stale rows. |
+| `select_sequential_consistency` | `1` | A read on a lagging replica errors instead of returning stale rows. |
 | `async_insert` | suppressed | ClickHouse rejects an async insert that also carries `insert_quorum`. |
 
-Anything set explicitly in `session_settings` overrides these, so a fixed quorum size is still available:
+Anything set in `session_settings` wins over these, so you can still pin a fixed quorum size:
 
 ```yaml
 graph:
@@ -131,11 +131,7 @@ graph:
     insert_quorum: "2"
 ```
 
-Costs to expect:
-
-- **More parts and more merge work.** Async inserts are what coalesce our many small per-page writes; without them, each write becomes its own part.
-- **Lower write throughput.** `insert_quorum_parallel: 0` serializes quorum inserts per table.
-- **Reads can fail with error 289 (`REPLICA_IS_NOT_IN_QUORUM`).** That is the intended behavior — retry against another replica.
+Expect three costs. Writes create more parts and more merge work, because async inserts were what coalesced our many small per-page writes and each one now becomes its own part. Write throughput drops, because `insert_quorum_parallel: 0` serializes quorum inserts per table. And reads can fail with error 289, `REPLICA_IS_NOT_IN_QUORUM`, which is the point of the setting: retry against another replica.
 
 ### Profiling (debug)
 

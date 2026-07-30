@@ -371,7 +371,7 @@
           }
         },
         "quorum_writes": {
-          "description": "Set on a self-managed ReplicatedMergeTree cluster with more than one replica.\nTurns on majority quorum inserts and sequentially-consistent reads, and turns off\nasync inserts, which ClickHouse rejects on a quorum-write path.\n\nLeave unset on ClickHouse Cloud: SharedMergeTree already writes with quorum, and\nasync inserts are what keep our per-page write volume from exploding the part count.",
+          "description": "Set on `graph` for a self-managed ReplicatedMergeTree cluster with more than one\nreplica. Applies quorum inserts and consistent reads, and drops async inserts, which\nClickHouse rejects alongside quorum. Leave unset on ClickHouse Cloud and on `datalake`.",
           "type": "boolean",
           "default": false
         },
