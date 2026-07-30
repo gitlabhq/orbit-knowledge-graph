@@ -89,6 +89,23 @@ pub(crate) fn insert_overrides(
     }
 }
 
+pub(crate) const QUORUM_RETRY_MAX_ATTEMPTS: u32 = 20;
+
+pub(crate) fn quorum_retry_backoff(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_millis((100 * u64::from(attempt)).min(1000))
+}
+
+/// 286 = a concurrent serialized quorum insert on the same table; 289 = a
+/// sequential-consistency read landed on a replica outside the last write's
+/// quorum. Both clear on retry (the load balancer rotates replicas).
+pub(crate) fn is_unsatisfied_quorum(error: &clickhouse_client::ClickHouseError) -> bool {
+    let msg = error.to_string();
+    msg.contains("Code: 286")
+        || msg.contains("UNSATISFIED_QUORUM")
+        || msg.contains("Code: 289")
+        || msg.contains("REPLICA_IS_NOT_IN_QUORUM")
+}
+
 impl ClickHouseWriter {
     pub async fn write(
         &self,
@@ -130,13 +147,30 @@ impl ClickHouseWriter {
 
         let start = std::time::Instant::now();
 
-        if let Err(error) = self
-            .client
-            .insert_arrow_streaming_with_sql(table, &insert_sql, &batches)
-            .await
-        {
-            self.metrics.record_write_error(table);
-            return Err(error.into());
+        // Quorum inserts with insert_quorum_parallel=0 are serialized per table, so
+        // concurrent handlers hitting the same table fail with UNSATISFIED_QUORUM (286)
+        // until the in-flight quorum settles. Retrying is the protocol, not a failure.
+        let mut attempt = 0u32;
+        loop {
+            match self
+                .client
+                .insert_arrow_streaming_with_sql(table, &insert_sql, &batches)
+                .await
+            {
+                Ok(_) => break,
+                Err(error)
+                    if self.client.has_quorum_writes()
+                        && attempt < QUORUM_RETRY_MAX_ATTEMPTS
+                        && is_unsatisfied_quorum(&error) =>
+                {
+                    attempt += 1;
+                    tokio::time::sleep(quorum_retry_backoff(attempt)).await;
+                }
+                Err(error) => {
+                    self.metrics.record_write_error(table);
+                    return Err(error.into());
+                }
+            }
         }
 
         self.metrics

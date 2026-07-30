@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, TIMESTAMP_FORMAT};
+use crate::clickhouse::{
+    ArrowClickHouseClient, ArrowQuery, QUORUM_RETRY_MAX_ATTEMPTS, TIMESTAMP_FORMAT,
+    is_unsatisfied_quorum, quorum_retry_backoff,
+};
 use crate::durability::WriteDurability;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use async_trait::async_trait;
@@ -101,18 +104,20 @@ impl ClickHouseCheckpointStore {
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
         let cursor_json = encode_cursor_column(cursor_values, resume_floor)?;
 
-        self.insert(
-            &format!(
-                "INSERT INTO {table} (key, watermark, cursor_values, _version) \
-                 VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}}, {{version:String}})"
-            ),
-            durability,
-        )
-        .param("key", key)
-        .param("watermark", formatted_watermark)
-        .param("cursor_values", cursor_json)
-        .param("version", client_version())
-        .execute()
+        let version = client_version();
+        self.execute_with_quorum_retry(|| {
+            self.insert(
+                &format!(
+                    "INSERT INTO {table} (key, watermark, cursor_values, _version) \
+                     VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}}, {{version:String}})"
+                ),
+                durability,
+            )
+            .param("key", key)
+            .param("watermark", formatted_watermark.clone())
+            .param("cursor_values", cursor_json.clone())
+            .param("version", version.clone())
+        })
         .await
         .map_err(checkpoint_store_error)?;
 
@@ -123,21 +128,69 @@ impl ClickHouseCheckpointStore {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
-        self.insert(
-            &format!(
-                "INSERT INTO {table} (key, watermark, cursor_values, _version, _deleted) \
-                 VALUES ({{key:String}}, {{watermark:String}}, '', {{version:String}}, true)"
-            ),
-            WriteDurability::Durable,
-        )
-        .param("key", key)
-        .param("watermark", formatted_watermark)
-        .param("version", client_version())
-        .execute()
+        let version = client_version();
+        self.execute_with_quorum_retry(|| {
+            self.insert(
+                &format!(
+                    "INSERT INTO {table} (key, watermark, cursor_values, _version, _deleted) \
+                     VALUES ({{key:String}}, {{watermark:String}}, '', {{version:String}}, true)"
+                ),
+                WriteDurability::Durable,
+            )
+            .param("key", key)
+            .param("watermark", formatted_watermark.clone())
+            .param("version", version.clone())
+        })
         .await
         .map_err(checkpoint_store_error)?;
 
         Ok(())
+    }
+
+    /// See the quorum-retry rationale on [`crate::clickhouse::writer`]'s write path:
+    /// serialized quorum inserts make transient 286s part of the protocol.
+    async fn execute_with_quorum_retry(
+        &self,
+        build: impl Fn() -> ArrowQuery,
+    ) -> Result<(), clickhouse_client::ClickHouseError> {
+        let mut attempt = 0u32;
+        loop {
+            match build().execute().await {
+                Ok(_) => return Ok(()),
+                Err(error)
+                    if self.client.has_quorum_writes()
+                        && attempt < QUORUM_RETRY_MAX_ATTEMPTS
+                        && is_unsatisfied_quorum(&error) =>
+                {
+                    attempt += 1;
+                    tokio::time::sleep(quorum_retry_backoff(attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// Sequential-consistency reads fail loud (289) on a replica outside the last
+    /// write's quorum; the load balancer rotates replicas between attempts.
+    async fn fetch_with_quorum_retry(
+        &self,
+        build: impl Fn() -> ArrowQuery,
+    ) -> Result<Vec<arrow::record_batch::RecordBatch>, clickhouse_client::ClickHouseError> {
+        let mut attempt = 0u32;
+        loop {
+            match build().fetch_arrow().await {
+                Ok(batches) => return Ok(batches),
+                Err(error)
+                    if self.client.has_quorum_writes()
+                        && attempt < QUORUM_RETRY_MAX_ATTEMPTS
+                        && is_unsatisfied_quorum(&error) =>
+                {
+                    attempt += 1;
+                    tokio::time::sleep(quorum_retry_backoff(attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     // Single-row inserts must pin async batching regardless of durability, or per-row inserts
@@ -202,16 +255,17 @@ impl CheckpointStore for ClickHouseCheckpointStore {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let batches = self
-            .client
-            .query(&format!(
-                "SELECT argMax(watermark, _version) AS watermark, \
-                        argMax(cursor_values, _version) AS cursor_values, \
-                        argMax(_deleted, _version) AS deleted \
-                 FROM {table} \
-                 WHERE key = {{key:String}}"
-            ))
-            .param("key", key)
-            .fetch_arrow()
+            .fetch_with_quorum_retry(|| {
+                self.client
+                    .query(&format!(
+                        "SELECT argMax(watermark, _version) AS watermark, \
+                                argMax(cursor_values, _version) AS cursor_values, \
+                                argMax(_deleted, _version) AS deleted \
+                         FROM {table} \
+                         WHERE key = {{key:String}}"
+                    ))
+                    .param("key", key)
+            })
             .await
             .map_err(checkpoint_store_error)?;
 
@@ -280,18 +334,19 @@ impl CheckpointStore for ClickHouseCheckpointStore {
     ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let batches = self
-            .client
-            .query(&format!(
-                "SELECT key, \
-                        argMax(watermark, _version) AS watermark, \
-                        argMax(cursor_values, _version) AS cursor_values, \
-                        argMax(_deleted, _version) AS deleted \
-                 FROM {table} \
-                 WHERE startsWith(key, {{prefix:String}}) \
-                 GROUP BY key"
-            ))
-            .param("prefix", prefix)
-            .fetch_arrow()
+            .fetch_with_quorum_retry(|| {
+                self.client
+                    .query(&format!(
+                        "SELECT key, \
+                                argMax(watermark, _version) AS watermark, \
+                                argMax(cursor_values, _version) AS cursor_values, \
+                                argMax(_deleted, _version) AS deleted \
+                         FROM {table} \
+                         WHERE startsWith(key, {{prefix:String}}) \
+                         GROUP BY key"
+                    ))
+                    .param("prefix", prefix)
+            })
             .await
             .map_err(checkpoint_store_error)?;
 

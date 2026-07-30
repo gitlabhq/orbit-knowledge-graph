@@ -168,6 +168,7 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         password: Some(TEST_PASSWORD.to_string()),
         session_settings: std::collections::HashMap::new(),
         quorum_writes: false,
+        replicated: false,
         insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
     }
@@ -320,6 +321,7 @@ async fn connection_failure_returns_error() {
         password: None,
         session_settings: std::collections::HashMap::new(),
         quorum_writes: false,
+        replicated: false,
         insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
     };
