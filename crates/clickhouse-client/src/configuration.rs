@@ -28,8 +28,6 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
     }
 }
 
-/// Explicit `session_settings` overlay the quorum defaults, so an operator can still pin a
-/// fixed quorum size.
 fn build_session_settings_with_quorum_defaults(
     config: &ClickHouseConfiguration,
 ) -> HashMap<String, String> {
