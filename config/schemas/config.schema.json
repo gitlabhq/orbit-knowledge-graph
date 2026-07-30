@@ -271,7 +271,7 @@
           },
           "table-cleanup": {
             "cron": "0 0 3 * * 0",
-            "lookback_secs": 691200
+            "lookback_secs": null
           }
         }
       }
@@ -1555,7 +1555,7 @@
             },
             "table-cleanup": {
               "cron": "0 0 3 * * 0",
-              "lookback_secs": 691200
+              "lookback_secs": null
             }
           }
         }
@@ -1615,7 +1615,7 @@
           "$ref": "#/$defs/TableCleanupConfig",
           "default": {
             "cron": "0 0 3 * * 0",
-            "lookback_secs": 691200
+            "lookback_secs": null
           }
         }
       },
@@ -1752,9 +1752,13 @@
           "default": null
         },
         "lookback_secs": {
-          "type": "integer",
+          "description": "Pins the window instead of deriving it from the cadence. Widen it to reach\ntombstones a failed run left behind, which no later window covers.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint64",
-          "default": 691200,
+          "default": null,
           "minimum": 0
         }
       }

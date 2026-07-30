@@ -573,17 +573,22 @@ impl Default for CodeBackfillSweepConfig {
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default = "default_tombstone_sweep_lookback_secs")]
-    pub lookback_secs: u64,
+    /// Pins the window instead of deriving it from the cadence. Widen it to reach
+    /// tombstones a failed run left behind, which no later window covers.
+    #[serde(default)]
+    pub lookback_secs: Option<u64>,
 }
 
-fn default_tombstone_sweep_lookback_secs() -> u64 {
-    691_200
-}
+/// The sweep keeps no cursor, so consecutive windows must overlap; tombstones
+/// falling between two windows are never swept.
+const TOMBSTONE_SWEEP_LOOKBACK_SLACK: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl TableCleanupConfig {
     pub fn lookback(&self) -> chrono::TimeDelta {
-        chrono::TimeDelta::seconds(self.lookback_secs as i64)
+        let seconds = self.lookback_secs.unwrap_or_else(|| {
+            (self.schedule.interval_hint() + TOMBSTONE_SWEEP_LOOKBACK_SLACK).as_secs()
+        });
+        chrono::TimeDelta::seconds(seconds as i64)
     }
 }
 
@@ -594,7 +599,7 @@ impl Default for TableCleanupConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 0 3 * * 0".into()),
             },
-            lookback_secs: default_tombstone_sweep_lookback_secs(),
+            lookback_secs: None,
         }
     }
 }
@@ -988,6 +993,30 @@ modules: [sdlc, namespace_deletion]
             cfg.validate(),
             Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
+    }
+
+    #[test]
+    fn tombstone_sweep_lookback_follows_the_cadence_when_unpinned() {
+        let daily = TableCleanupConfig {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 0 3 * * *".into()),
+            },
+            lookback_secs: None,
+        };
+
+        assert_eq!(daily.lookback(), chrono::TimeDelta::days(2));
+    }
+
+    #[test]
+    fn tombstone_sweep_lookback_secs_pins_the_window() {
+        let pinned = TableCleanupConfig {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 0 3 * * *".into()),
+            },
+            lookback_secs: Some(3600),
+        };
+
+        assert_eq!(pinned.lookback(), chrono::TimeDelta::hours(1));
     }
 
     #[test]

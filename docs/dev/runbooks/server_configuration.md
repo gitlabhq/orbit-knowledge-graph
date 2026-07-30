@@ -289,6 +289,19 @@ recent Siphon activity, backstopping migration backfill and missed windows.
 | `schedule.tasks.namespace-code-backfill.events_stream_name` | `siphon_stream_main_db` | NATS stream for namespace events |
 | `schedule.tasks.namespace-code-backfill.batch_size` | `100` | Events to process per cycle |
 
+### Table cleanup task settings
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `schedule.tasks.table-cleanup.lookback_secs` | Unset: one day past the cron cadence | `_version` window the sweep considers, in seconds |
+
+Each run sweeps only tombstones stamped inside that window, and keeps no cursor
+between runs. The derived default overlaps consecutive windows by a day, so a
+run that is skipped or fails strands the tombstones older than that overlap:
+nothing sweeps them until someone pins a wider `lookback_secs` and runs again.
+Alert on `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}` to catch
+that, since the task logs the failure and moves on.
+
 ## GitLab client
 
 Required for code indexing (repository archive download) and authorization.

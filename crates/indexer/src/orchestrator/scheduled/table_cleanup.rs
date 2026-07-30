@@ -21,6 +21,8 @@ const CONCURRENT_TABLE_SWEEPS: usize = 4;
 const STATEMENT_TIMEOUT_SECS: u64 = 5400;
 /// Headroom for the external sort, against a measured sub-1-GiB peak.
 const MAX_STATEMENT_MEMORY_BYTES: u64 = 8_000_000_000;
+/// Spilling has to start before the memory limit kills the sort.
+const SPILL_SORT_TO_DISK_ABOVE_BYTES: u64 = 2_000_000_000;
 const REMAINING_ROWS_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
@@ -222,9 +224,8 @@ fn build_tombstoned_keys_table_sql(table: &ReplacingMergeTreeTable) -> String {
            LIMIT 1 BY {keys} \
          ) WHERE _deleted \
          SETTINGS max_memory_usage = {MAX_STATEMENT_MEMORY_BYTES}, \
-                  max_bytes_before_external_sort = {}, \
-                  optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}",
-        MAX_STATEMENT_MEMORY_BYTES / 4
+                  max_bytes_before_external_sort = {SPILL_SORT_TO_DISK_ABOVE_BYTES}, \
+                  optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}"
     )
 }
 
@@ -330,12 +331,15 @@ mod tests {
     }
 
     #[test]
-    fn the_lookback_reaches_back_past_the_weekly_cadence() {
+    fn the_lookback_reaches_back_past_the_sweep_cadence() {
         let config = TableCleanupConfig::default();
+        let cadence =
+            TimeDelta::from_std(config.schedule.interval_hint()).expect("cadence fits a TimeDelta");
+
         assert!(
-            config.lookback() > TimeDelta::days(7),
-            "the sweep keeps no cursor, so a run that does not reach back past the weekly \
-             cadence leaves tombstones nothing will ever pick up"
+            config.lookback() > cadence,
+            "the sweep keeps no cursor, so windows that do not overlap leave tombstones \
+             nothing will ever pick up"
         );
     }
 
