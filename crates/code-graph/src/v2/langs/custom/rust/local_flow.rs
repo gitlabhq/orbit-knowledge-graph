@@ -75,7 +75,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         }
     }
 
-    fn local_key(&mut self, local: ra_ap_hir::Local) -> &'arena str {
+    fn local_key(&mut self, local: ra_ap_hir::Local<'db>) -> &'arena str {
         self.local_keys
             .entry(local.as_id())
             .or_insert_with(|| self.arena.alloc_str(&format!("local#{}", local.as_id())))
@@ -89,7 +89,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         key
     }
 
-    fn field_key(&mut self, local: ra_ap_hir::Local, field_name: &str) -> &'arena str {
+    fn field_key(&mut self, local: ra_ap_hir::Local<'db>, field_name: &str) -> &'arena str {
         self.field_keys
             .entry(local.as_id())
             .or_default()
@@ -100,7 +100,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
             })
     }
 
-    fn invalidate_local_fields(&mut self, local: ra_ap_hir::Local) {
+    fn invalidate_local_fields(&mut self, local: ra_ap_hir::Local<'db>) {
         let field_keys = self
             .field_keys
             .get(&local.as_id())
@@ -175,7 +175,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
     fn record_local_call_targets(
         &mut self,
         range: TextRange,
-        local: ra_ap_hir::Local,
+        local: ra_ap_hir::Local<'db>,
         _index: &mut LocalFlowIndex,
     ) {
         let key = self.local_key(local);
@@ -263,21 +263,21 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         }
     }
 
-    fn record_pat_binding_local(&self, pat: &ast::Pat) -> Option<ra_ap_hir::Local> {
+    fn record_pat_binding_local(&self, pat: &ast::Pat) -> Option<ra_ap_hir::Local<'db>> {
         pat.syntax()
             .descendants()
             .filter_map(ast::IdentPat::cast)
             .find_map(|ident_pat| self.sema.to_def(&ident_pat))
     }
 
-    fn simple_binding_local(&self, pat: &ast::Pat) -> Option<ra_ap_hir::Local> {
+    fn simple_binding_local(&self, pat: &ast::Pat) -> Option<ra_ap_hir::Local<'db>> {
         let ast::Pat::IdentPat(ident_pat) = pat else {
             return None;
         };
         self.sema.to_def(ident_pat)
     }
 
-    fn expr_local(&self, expr: &ast::Expr) -> Option<ra_ap_hir::Local> {
+    fn expr_local(&self, expr: &ast::Expr) -> Option<ra_ap_hir::Local<'db>> {
         let ast::Expr::PathExpr(path_expr) = expr else {
             return None;
         };
@@ -319,7 +319,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
 
     fn capture_assigned_local_fields(
         &mut self,
-        local: ra_ap_hir::Local,
+        local: ra_ap_hir::Local<'db>,
         expr: &ast::Expr,
         index: &mut LocalFlowIndex,
     ) {
@@ -341,7 +341,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
 
     fn capture_record_expr_fields(
         &mut self,
-        local: ra_ap_hir::Local,
+        local: ra_ap_hir::Local<'db>,
         record_expr: &ast::RecordExpr,
         index: &mut LocalFlowIndex,
     ) {
@@ -373,7 +373,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
 
     fn capture_tuple_expr_fields(
         &mut self,
-        local: ra_ap_hir::Local,
+        local: ra_ap_hir::Local<'db>,
         tuple_expr: &ast::TupleExpr,
         index: &mut LocalFlowIndex,
     ) {
@@ -386,7 +386,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
 
     fn capture_tuple_constructor_fields(
         &mut self,
-        local: ra_ap_hir::Local,
+        local: ra_ap_hir::Local<'db>,
         call_expr: &ast::CallExpr,
         index: &mut LocalFlowIndex,
     ) {
