@@ -45,7 +45,7 @@ mkdir -p charts bin
 if command -v helm >/dev/null 2>&1; then
   ln -sf "$(command -v helm)" bin/helm
 else
-  curl -fsSL https://get.helm.sh/helm-v3.20.0-linux-amd64.tar.gz | tar xz -C bin --strip-components=1 linux-amd64/helm
+  curl -fsSL https://get.helm.sh/helm-v4.2.2-linux-amd64.tar.gz | tar xz -C bin --strip-components=1 linux-amd64/helm
 fi
 
 bash scripts/retrieve_gitlab_charts.sh
