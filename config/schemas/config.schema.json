@@ -371,7 +371,6 @@
           }
         },
         "quorum_writes": {
-          "description": "Set on `graph` for a self-managed ReplicatedMergeTree cluster with more than one\nreplica. Applies quorum inserts and consistent reads, and drops async inserts, which\nClickHouse rejects alongside quorum. Leave unset on ClickHouse Cloud and on `datalake`.",
           "type": "boolean",
           "default": false
         },

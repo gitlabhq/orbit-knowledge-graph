@@ -15,9 +15,6 @@ pub struct ClickHouseConfiguration {
     pub password: Option<String>,
     #[serde(default)]
     pub session_settings: HashMap<String, String>,
-    /// Set on `graph` for a self-managed ReplicatedMergeTree cluster with more than one
-    /// replica. Applies quorum inserts and consistent reads, and drops async inserts, which
-    /// ClickHouse rejects alongside quorum. Leave unset on ClickHouse Cloud and on `datalake`.
     #[serde(default)]
     pub quorum_writes: bool,
     /// Settings applied to INSERT operations only (both bulk Arrow IPC and
