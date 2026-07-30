@@ -70,6 +70,40 @@ spec:
                     pattern: ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$
                     type: string
                 type: object
+              gitlab:
+                description: |-
+                  GitLab links this Orbit instance to a GitLab CR in the same namespace.
+                  When set, the Orbit reconciler patches the GitLab CR's chart values to
+                  inject the knowledgeGraph configuration (enabled, grpcEndpoint, jwtSecret,
+                  customCAs) so the customer does not need to wire them manually.
+                  When omitted, the customer configures the GitLab CR values by hand.
+                properties:
+                  caSecretName:
+                    description: |-
+                      CASecretName is the name of the Secret containing the GKG gRPC server's
+                      CA certificate. The reconciler adds it to global.certificates.customCAs
+                      on the GitLab CR so Rails and Workhorse trust the TLS connection.
+                    type: string
+                  jwtSecretKey:
+                    default: secret
+                    description: JWTSecretKey is the key within the JWT Secret. Defaults
+                      to "secret".
+                    type: string
+                  jwtSecretName:
+                    description: |-
+                      JWTSecretName is the name of the Kubernetes Secret containing the shared
+                      JWT key. The reconciler references it in the GitLab CR values as
+                      global.appConfig.knowledgeGraph.jwtSecret.secret.
+                    type: string
+                  name:
+                    default: gitlab
+                    description: Name of the GitLab CR in the same namespace. Defaults
+                      to "gitlab".
+                    type: string
+                required:
+                - caSecretName
+                - jwtSecretName
+                type: object
               gkg:
                 description: GKG chart reference and values.
                 properties:

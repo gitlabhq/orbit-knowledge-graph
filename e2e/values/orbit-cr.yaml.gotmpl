@@ -192,3 +192,12 @@ gkg:
             write_min_flush_rows: 1
             write_buffer_age_secs: 2
             write_max_flush_age_secs: 5
+
+# Link to the GitLab CR so the operator auto-injects knowledgeGraph config.
+# The reconciler patches the GitLab CR with the grpcEndpoint (derived from the
+# Orbit release name and namespace), the JWT secret reference, and the CA trust.
+gitlab:
+  name: gitlab
+  jwtSecretName: gitlab-knowledge-graph-jwt
+  jwtSecretKey: knowledge_graph_jwt_shared_key
+  caSecretName: gkg-grpc-ca
