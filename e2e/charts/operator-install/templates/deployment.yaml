@@ -15,6 +15,22 @@ spec:
         app: gitlab-operator
     spec:
       serviceAccountName: gitlab-operator
+      initContainers:
+        # The operator's webhook server expects TLS certs. In the e2e we do
+        # not provision a ValidatingWebhookConfiguration, but the server
+        # still starts and crashes without certs. Generate a self-signed pair.
+        - name: webhook-cert
+          image: alpine/openssl:latest
+          command:
+            - sh
+            - -c
+            - |
+              openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+                -keyout /certs/tls.key -out /certs/tls.crt \
+                -days 1 -nodes -subj "/CN=webhook"
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /certs
       containers:
         - name: manager
           image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag }}"
@@ -29,5 +45,12 @@ spec:
                   fieldPath: metadata.namespace
             - name: HELM_CHARTS
               value: /charts
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}
+      volumes:
+        - name: webhook-certs
+          emptyDir: {}
