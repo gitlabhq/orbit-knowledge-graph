@@ -137,8 +137,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 | `from` | `string` | 開始ノードセレクターのエイリアス。 |
 | `to` | `string` | 終了ノードセレクターのエイリアス。 |
 | `direction` | `string` | `outgoing`、`incoming`、または`both`。デフォルト`outgoing`。 |
-| `min_hops` | `integer` | 最小ホップ数。デフォルト1。最大3。 |
-| `max_hops` | `integer` | 最大ホップ数。デフォルト1。最大3。 |
+| `hops` | `array` | 包括的な`[min, max]`ホップ範囲（`[1, 3]`、ちょうど2の場合は`[2, 2]`）。デフォルト`[1, 1]`。最大3。 |
 | `filters` | `object` | リレーションシッププロパティフィルター。最大5フィルター。 |
 
 例えば、マージリクエストは`IN_PROJECT`でプロジェクトを指し、ユーザーは`AUTHORED`でマージリクエストを指します。
@@ -155,16 +154,18 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 }
 ```
 
-または演算子を使用できます。
+または演算子オブジェクトを使用できます。同じプロパティに複数の演算子キーを指定するとAND結合になり、範囲指定に使用できます。
 
 ```json
 {
   "filters": {
-    "created_at": {"op": "gte", "value": "2026-01-01"},
-    "state": {"op": "in", "value": ["opened", "merged"]}
+    "created_at": {"gte": "2026-01-01", "lt": "2026-02-01"},
+    "state": {"in": ["opened", "merged"]}
   }
 }
 ```
+
+同じプロパティに演算子を繰り返す場合は、演算子オブジェクトの配列を使用してください: `{"title": [{"contains": "foo"}, {"contains": "bar"}]}`。
 
 | 演算子 | 用途 |
 |----------|-----|
@@ -174,8 +175,8 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 | `contains` | 文字列が部分文字列を含む。 |
 | `starts_with` | 文字列がプレフィックスで始まる。 |
 | `ends_with` | 文字列がサフィックスで終わる。 |
-| `is_null` | 値がnull。`value`は指定しないでください。 |
-| `is_not_null` | 値がnullでない。`value`は指定しないでください。 |
+| `is_null` | nullチェック。ブール値を受け取ります: `false`はnullでない値にマッチします。 |
+| `is_not_null` | nullでないチェック。ブール値を受け取ります: `false`はnullの値にマッチします。 |
 | `token_match` | テキストインデックスが1つのトークンを含む。 |
 | `all_tokens` | テキストインデックスがすべてのトークンを含む。 |
 | `any_tokens` | テキストインデックスがいずれかのトークンを含む。 |
@@ -298,7 +299,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
     "id": "file",
     "entity": "File",
     "filters": {
-      "path": {"op": "ends_with", "value": "app/models/project.rb"}
+      "path": {"ends_with": "app/models/project.rb"}
     },
     "columns": ["path", "language", "content"]
   }],
@@ -315,7 +316,7 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
     "id": "d",
     "entity": "Definition",
     "filters": {
-      "fqn": {"op": "eq", "value": "Gitlab::Auth::authenticate"}
+      "fqn": {"eq": "Gitlab::Auth::authenticate"}
     },
     "columns": ["name", "fqn", "file_path", "start_line", "end_line", "content"]
   }],
@@ -358,8 +359,8 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
     "id": "p",
     "entity": "Pipeline",
     "filters": {
-      "merge_request_id": {"op": "eq", "value": 482908721},
-      "source": {"op": "eq", "value": "merge_request_event"}
+      "merge_request_id": {"eq": 482908721},
+      "source": {"eq": "merge_request_event"}
     },
     "columns": ["id", "status", "source", "sha", "ref", "created_at"]
   }],
@@ -376,24 +377,17 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 ## 集計 {#aggregation}
 
-集計クエリは`aggregations`を使用します。
+集計クエリは`aggregations`を使用します。各集計は、集計対象を値とする単一の関数キーと、オプションの`as`出力列名を持つオブジェクトです: `{"avg": "mr.merge_duration", "as": "avg_dur"}`。
 
-| フィールド | 型 | 説明 |
-|-------|------|-------------|
-| `function` | `string` | `count`、`sum`、`avg`、`min`、または`max`。 |
-| `target` | `string` | 集計するノードエイリアス。 |
-| `property` | `string` | 集計するプロパティ。`sum`、`avg`、`min`、および`max`に必須。 |
-| `alias` | `string` | 出力列の名前。 |
+| 関数キー | 値 | サポートされるプロパティタイプ |
+|--------------|-------|--------------------------|
+| `count` | `"node"`（マッチする行をカウント）または`"node.property"`（null以外の値をカウント） | 任意 |
+| `sum` | `"node.property"` | 数値のみ |
+| `avg` | `"node.property"` | 数値のみ |
+| `min` | `"node.property"` | 数値、文字列、ブール値、`Date`、または`DateTime` |
+| `max` | `"node.property"` | 数値、文字列、ブール値、`Date`、または`DateTime` |
 
-プロパティタイプのサポートは関数によって異なります。
-
-| 関数 | `property`が必須 | サポートされるプロパティタイプ |
-|----------|---------------------|--------------------------|
-| `count` | いいえ | N/A |
-| `sum` | はい | 数値のみ |
-| `avg` | はい | 数値のみ |
-| `min` | はい | 数値、文字列、ブール値、`Date`、または`DateTime` |
-| `max` | はい | 数値、文字列、ブール値、`Date`、または`DateTime` |
+`as`を省略した場合、出力列名は`<function>_<node>`（`count_mr`）または`<function>_<node>_<property>`（`avg_mr_merge_duration`）として導出されます。これらの名前を`aggregation_sort`で参照してください。
 
 `sum`と`avg`は`DateTime`プロパティをバリデーションエラーで拒否します。日付を集計するには`min`または`max`を使用してください。
 
@@ -403,10 +397,15 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
 
 | グループキー | 形式 | 結果の値 |
 |-----------|-------|--------------|
-| ノード | `{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}` | 各行にネストされたエンティティオブジェクト。 |
-| プロパティ | `{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}` | 各行のスカラーバケット値。 |
+| ノード | `"<node-id>"`（例: `"p"`） | 各行にネストされたエンティティオブジェクト。 |
+| プロパティ | `"<node-id>.<property>"`（例: `"mr.state"`） | 各行のスカラーバケット値。 |
+| 切り捨て日付 | `{"key": "<node-id>.<property>", "truncate": "<unit>"}` | 単位の開始に切り捨てられたプロパティ値。 |
 
-`alias`を省略した場合、ノードグループはノードIDを出力キーとして使用します。プロパティグループは、`group_by`リスト内で一意の場合はプロパティ名を使用し、曖昧さを避けるために必要な場合は`<node>_<property>`を使用します。グループまたは集計の出力名が重複している場合は拒否されます。
+出力列名は導出されます。ノードキーはノードID（`p`）を使用し、プロパティキーは`<node>_<property>`（`mr_state`）を使用し、切り捨てキーは単位を付加します（`mr_created_at_month`）。これらの名前を`aggregation_sort`で参照してください。グループまたは集計の出力名が重複している場合は拒否されます。
+
+導出された名前を使用してください。コンシューマーが特定の列名を必要とする場合のみ、オブジェクト形式のオプション`as`でリネームしてください: `{"key": "mr.state", "as": "state"}`、または切り捨てを使用する場合は`{"key": "mr.created_at", "truncate": "month", "as": "month"}`。
+
+切り捨て単位は`minute`、`hour`、`day`、`week`、`month`、`quarter`、`year`で、`Date`/`DateTime`プロパティにのみ適用されます。`minute`と`hour`は、バケットのカーディナリティを制限するために`node_ids`または切り捨てプロパティへのフィルターが必要です。
 
 プロパティグループは、呼び出し元が使用を許可されている、実際のClickHouseバックエンドのフィルタリング可能なプロパティを参照する必要があります。仮想フィールドとフィルタリング不可能なフィールドはバリデーション中に拒否されます。
 
@@ -430,9 +429,9 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "project"}
   ],
-  "group_by": [{"kind": "node", "node": "project"}],
+  "group_by": ["project"],
   "aggregations": [
-    {"function": "count", "target": "mr", "alias": "merged_mrs"}
+    { "count": "mr", "as": "merged_mrs" }
   ],
   "aggregation_sort": "-merged_mrs",
   "limit": 10
@@ -451,11 +450,9 @@ REST APIまたは`glab orbit remote query`でクエリを送信する場合は�
       "filters": {"state": "detected"}
     }
   ],
-  "group_by": [
-    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
-  ],
+  "group_by": ["v.severity"],
   "aggregations": [
-    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+    { "count": "v", "as": "vulnerability_count" }
   ],
   "aggregation_sort": "-vulnerability_count",
   "limit": 10
