@@ -279,8 +279,8 @@ Table cleanup sweeps only tombstones stamped within one day past its own cron
 cadence, and keeps no cursor between runs. Consecutive windows therefore overlap
 by a day and no more: a run that fails or is skipped strands every tombstone
 older than that overlap, and so does the first run after this task is deployed.
-Nothing reaches those rows again — clearing them means a one-off sweep over a
-wider window with `scripts/tombstone-sweep/`. Alert on
+Nothing reaches those rows again — clearing them means replaying the sweep's
+statements by hand over a wider window. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`, because the task
 logs a failed table and moves on.
 
