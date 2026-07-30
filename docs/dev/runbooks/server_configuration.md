@@ -111,7 +111,7 @@ graph:
   quorum_writes: true
 ```
 
-There is no equivalent setting for the datalake. GKG writes to its own graph tables and reads everything else, so the datalake is Siphon's to configure. [siphon#254](https://gitlab.com/gitlab-org/analytics-section/siphon/-/work_items/254) covers what Siphon applies there. To make datalake reads error out on a lagging replica instead of returning stale Siphon rows, put `select_sequential_consistency` in `datalake.session_settings` yourself.
+There is no equivalent setting for the datalake. GKG writes to its own graph tables and reads everything else, so the datalake is Siphon's to configure. To make datalake reads error out on a lagging replica instead of returning stale Siphon rows, put `select_sequential_consistency` in `datalake.session_settings` yourself.
 
 The flag applies three session settings and suppresses a fourth:
 

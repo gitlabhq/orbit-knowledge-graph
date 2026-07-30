@@ -145,6 +145,22 @@ mod tests {
     }
 
     #[test]
+    fn quorum_writes_with_zero_insert_quorum_is_rejected() {
+        let config = ClickHouseConfiguration {
+            quorum_writes: true,
+            session_settings: HashMap::from([("insert_quorum".to_string(), "0".to_string())]),
+            ..ClickHouseConfiguration::default()
+        };
+
+        let result = config.validate();
+
+        assert!(matches!(
+            result,
+            Err(ConfigurationError::QuorumWritesWithoutQuorum)
+        ));
+    }
+
+    #[test]
     fn quorum_writes_expand_to_session_settings() {
         let config = ClickHouseConfiguration {
             quorum_writes: true,

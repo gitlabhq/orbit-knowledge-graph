@@ -72,6 +72,15 @@ impl ClickHouseConfiguration {
             return Err(ConfigurationError::EmptyUsername);
         }
 
+        if self.quorum_writes
+            && self
+                .session_settings
+                .get("insert_quorum")
+                .is_some_and(|value| value == "0")
+        {
+            return Err(ConfigurationError::QuorumWritesWithoutQuorum);
+        }
+
         Ok(())
     }
 }
@@ -86,4 +95,7 @@ pub enum ConfigurationError {
 
     #[error("username cannot be empty")]
     EmptyUsername,
+
+    #[error("quorum_writes is enabled but insert_quorum is set to 0")]
+    QuorumWritesWithoutQuorum,
 }
