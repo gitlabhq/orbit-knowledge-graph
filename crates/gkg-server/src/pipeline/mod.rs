@@ -1,3 +1,4 @@
+pub(crate) mod correlation;
 mod helpers;
 pub(crate) mod metrics;
 pub(crate) mod path_resolver;

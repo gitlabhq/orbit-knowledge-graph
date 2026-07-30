@@ -18,6 +18,8 @@ use query_engine::shared::{
     DebugQuery, HydrationOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };
 
+use crate::pipeline::correlation;
+
 #[derive(Clone)]
 pub struct HydrationStage;
 
@@ -94,11 +96,11 @@ impl HydrationStage {
         let start = Instant::now();
         let mut query = client.query(&compiled.base.sql);
 
-        let log_comment = match labkit::correlation::current() {
-            Some(id) => format!("gkg;hydration:{kind};correlation_id={id}"),
-            None => format!("gkg;hydration:{kind}"),
-        };
-        query = query.with_setting("log_comment", log_comment);
+        let query_id = correlation::query_id(&format!("hydration-{kind}"));
+        query = query.with_setting("query_id", &query_id).with_setting(
+            "log_comment",
+            correlation::log_comment(Some(&format!("hydration:{kind}"))),
+        );
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
@@ -121,7 +123,7 @@ impl HydrationStage {
         let execution = QueryExecution {
             label: format!("hydration:{kind}"),
             rendered_sql,
-            query_id: String::new(),
+            query_id,
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats,
             explain_plan: None,

@@ -11,6 +11,8 @@ use ontology::{Ontology, TraversalPathKind, TraversalPathLookup};
 use query_engine::compiler::{PathResolutionKey, PathScopeId, is_valid_traversal_path};
 use tracing::{debug, warn};
 
+use crate::pipeline::correlation;
+
 const DICT_DEFAULT: &str = "0/";
 
 pub struct PathResolver {
@@ -135,6 +137,8 @@ impl PathResolver {
         let batches = self
             .client
             .query(&sql)
+            .with_setting("query_id", correlation::query_id("path-dict"))
+            .with_setting("log_comment", correlation::log_comment(Some("path:dict")))
             .param("ids", ids)
             .fetch_arrow()
             .await?;
@@ -172,6 +176,8 @@ impl PathResolver {
                 let batches = self
                     .client
                     .query(&sql)
+                    .with_setting("query_id", correlation::query_id("path-argmax"))
+                    .with_setting("log_comment", correlation::log_comment(Some("path:argmax")))
                     .param("ids", ids)
                     .fetch_arrow()
                     .await?;
@@ -194,6 +200,8 @@ impl PathResolver {
                 let batches = self
                     .client
                     .query(&sql)
+                    .with_setting("query_id", correlation::query_id("path-argmax"))
+                    .with_setting("log_comment", correlation::log_comment(Some("path:argmax")))
                     .param("vals", vals)
                     .fetch_arrow()
                     .await?;
@@ -256,7 +264,13 @@ async fn probe_dict_available(client: &ArrowClickHouseClient, dicts: &[&str]) ->
         "SELECT name AS p FROM system.dictionaries \
          WHERE database = currentDatabase() AND name IN ({list}) LIMIT 1"
     );
-    match client.query(&sql).fetch_arrow().await {
+    let result = client
+        .query(&sql)
+        .with_setting("query_id", correlation::query_id("path-probe"))
+        .with_setting("log_comment", correlation::log_comment(Some("path:probe")))
+        .fetch_arrow()
+        .await;
+    match result {
         Ok(batches) => first_string(&batches).is_some(),
         Err(e) => {
             debug!(error = %e, "system.dictionaries probe failed; assuming unavailable");
