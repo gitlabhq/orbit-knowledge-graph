@@ -193,5 +193,6 @@ local-cli-publish-npm:
     - local-cli-code-sign
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
+    - npm install --global npm@11.19.0
   script:
     - ./scripts/publish-npm.sh
