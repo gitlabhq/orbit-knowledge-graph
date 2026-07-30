@@ -1,3 +1,21 @@
+## [0.93.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.92.1...v0.93.0) (2026-07-30)
+
+### Features
+
+* **clickhouse:** add quorum_writes for self-managed replicated clusters ([2bae48f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2bae48f596f9fdd0b63807b5245745370ef84828)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **code-graph:** prevent crash when a JS module re-exports itself ([b7653c9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7653c94286fcb0150354ac1a4cce021e1af3fcc)) by Michael Angelo Rivera
+
+### Other
+
+* **deps:** bump oxc crates to crates_v0.142.0 ([aa4bf99](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa4bf991c48e5d2cffde87e3918e14675a9f9a5d)) by michaelangeloio
+* **deps:** bump ra_ap crates to 0.0.344 ([a7dbe0a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a7dbe0ad1e0eedbbd0a3b8a988f009cdb651abf9)) by Michael Angelo Rivera
+* **dsl:** shorten schema descriptions and strip patterns from condensed output ([66f84f8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/66f84f8e81199e9f23d4ca55424b65503f694309)) by Aaron Algutifan
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([b893cd9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b893cd9670b1af5c86248c1719897d67a1e16db6)) by Orbit automation bot
+* **i18n:** update ja-jp for commit f4a942d4 ([1480aea](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1480aea7685677d3e99a2b5a0354826f44ca2d80)) by GitLab-Argo Bot
+
 ## [0.92.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.92.0...v0.92.1) (2026-07-29)
 
 ### ⚠ BREAKING CHANGES
