@@ -275,24 +275,18 @@ every later tick queries Siphon changes since that checkpoint, however old it is
 The hourly namespace sweep re-dispatches every enabled namespace regardless of
 recent Siphon activity, backstopping migration backfill and missed windows.
 
-Table cleanup sweeps only tombstones stamped within one day past its own cron
-cadence, and keeps no cursor between runs. Consecutive windows therefore overlap
-by a day and no more: a run that fails or is skipped strands every tombstone
-older than that overlap, and so does the first run after this task is deployed.
-Nothing reaches those rows again — clearing them means replaying the sweep's
-statements by hand over a wider window. Alert on
-`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`, because the task
-logs a failed table and moves on.
+The sweep has no cursor. Each run covers its cron cadence plus one day, so a
+failed or skipped run strands every tombstone older than that overlap (same for
+the first run after deploy). Nothing picks those up again — clearing them means
+replaying the statements by hand over a wider window. Alert on
+`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
+failed table and moves on.
 
-Under `graph.quorum_writes` the sweep runs a replication-safe variant: the key
-set is built as a replicated table, and the delete spares each key's newest
-tombstone row, so a replica applying the delete before the key set has fully
-replicated in can only under-delete — never leave an older live row as a key's
-newest version. The cost is one retained tombstone row per deleted key
-(invisible to queries, which already filter on the newest version). This
-requires the graph database to be a `Replicated` database with
-`ReplicatedMergeTree`-family tables; plain engines do not replicate data
-between servers.
+Under `graph.quorum_writes` the key set is a replicated table and the delete
+never touches a key's newest tombstone row. A lagging replica can only delete
+too little, never bring an old row back. Cost: one leftover tombstone row per
+key, invisible to queries. Requires a `Replicated` database with
+`ReplicatedMergeTree` tables; plain engines don't replicate data.
 
 ### Code dispatch task settings
 
