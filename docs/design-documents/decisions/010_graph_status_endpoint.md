@@ -100,6 +100,8 @@ Reads are O(1) lookups — no extra ClickHouse queries for indexing metadata. Th
 
 Schema migrations trigger a full re-index, but the previous progress entry stays valid until the re-index completes. The data is stale but still accurate for the old schema version, so the endpoint keeps serving it rather than showing nothing.
 
+> Note: per-branch code indexing failures are also persisted in the graph as `gl_repository` rows (see `docs/design-documents/indexing/code_indexing.md`, "Repository status node"), which the KV store cannot capture because it is a per-key lookup, is project-scoped rather than per-branch, and is not scannable. That node complements this KV store; it does not replace it. This endpoint continues to read progress from NATS KV.
+
 ### Phase 3: Rename to GetGraphStatus, wire indexing metadata into the response
 
 Rename the RPC to `GetGraphStatus`.

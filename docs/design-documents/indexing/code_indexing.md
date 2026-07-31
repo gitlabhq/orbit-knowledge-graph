@@ -308,6 +308,10 @@ Tasks with no `branch` field resolve the default branch via `GET /api/v4/interna
 
 A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 250s) gets one retry to absorb a transient slowdown (a busy pod, a slow Gitaly fetch); a job that times out a second time is treated as structurally stuck and dead-lettered, rather than burning the full delivery budget re-attempting a repo that will almost certainly time out again and wasting an indexing slot each time. (A transient write failure is different — that is retried in the writer with backoff, above, and does not dead-letter the job.)
 
+#### Repository status node
+
+The checkpoint records only successes, so a branch that times out, fails to fetch, or dead-letters leaves no trace in the graph. The `gl_repository` node (keyed on `traversal_path, project_id, branch`) closes that gap. The handler writes a `status=indexing` row when it acquires the per-branch lock, then a terminal `indexed`/`failed` row at completion, carrying an enum-bounded `fail_reason` (`timeout`, `transient`, `permanent`), `last_task_id`, `last_commit`, and timing. The row exists even when indexing never completes, so a crash mid-run leaves the `indexing` row behind as evidence. Status writes are best-effort observability: a write failure is logged and never fails the task. The node shares its `id` with the matching `Branch` and links to it via `ON_BRANCH` (and to the project via `IN_PROJECT`), so a query can reach a branch's files from its indexing status. This is separate from and does not replace either the success-only checkpoint or the NATS KV indexing-progress store described in ADR 010.
+
 #### Flow visual representation
 
 ```plaintext

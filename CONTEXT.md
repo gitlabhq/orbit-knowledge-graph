@@ -62,6 +62,10 @@ _Avoid_: namespace graph (outdated alias)
 The sub-graph of source code structure and relationships — branches, directories, files, definitions, imported symbols, and their connections (containment, calls, imports, inheritance). Distinguished from **SDLC Data**. Built by parsing repository contents via Gitaly.
 _Avoid_: call graph (refers only to invocation relationships, not the full sub-graph)
 
+**Repository (Node)**:
+The per-branch code indexing status **Node** (`gl_repository`), carrying `status` and `fail_reason`. Unlike **Code Graph** nodes, a Repository row is written when indexing starts and again when it ends, so a branch that times out or fails still leaves a row behind. Shares its `id` with the matching **Branch**. Distinct from the success-only **Code Indexing Checkpoint**, which it does not replace.
+_Avoid_: repo status table (the graph shape is a node, not a side table)
+
 **Namespace Partitioning**:
 The physical `PARTITION BY` of every graph table carrying a **Traversal Path**, keyed by a hash bucket of the top-level **Namespace** (`sipHash64(top_level_ns) % N`, declared once in `settings.partition`). Gives each tenant bucket its own ClickHouse part budget so one tenant's reindex burst cannot dead-letter inserts for the rest. A query scoped to a single top-level namespace also prunes to one bucket: the compiler emits the same bucket expression as a predicate. A storage-layer property, distinct from the logical SDLC/Code sub-graphs and from the read-side extraction slices used for parallel initial loads.
 _Avoid_: sharding (Orbit does not shard); conflating with the SDLC/Code "graph partitions" sub-graph split.
