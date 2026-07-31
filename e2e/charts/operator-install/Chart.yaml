@@ -1,5 +1,0 @@
-apiVersion: v2
-name: operator-install
-description: Deploys the GitLab Operator CRD and a minimal operator Deployment for e2e testing of the Orbit CRD.
-version: 0.1.0
-type: application

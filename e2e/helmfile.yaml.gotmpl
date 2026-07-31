@@ -132,21 +132,10 @@ releases:
     values:
       - values/siphon.yaml.gotmpl
 
-  # --- Phase: gkg (standalone) or operator ---
-{{ if env "E2E_USE_OPERATOR" }}
-  - name: operator-install
-    namespace: e2e-{{ $sha }}-gkg
-    chart: charts/operator-install
-    labels:
-      phase: operator
-      component: operator
-    needs:
-      - e2e-{{ $sha }}-gkg/bootstrap
-      - e2e-{{ $sha }}-nats/nats
-      - e2e-{{ $sha }}-clickhouse/clickhouse
-    values:
-      - values/operator-install.yaml.gotmpl
-{{ else }}
+  # --- Phase: gkg ---
+  # When E2E_USE_OPERATOR is set, GKG is deployed by deploy-operator.sh
+  # after helmfile sync, not as a helmfile release.
+{{ if not (env "E2E_USE_OPERATOR") }}
   - name: gkg
     namespace: e2e-{{ $sha }}-gkg
     chart: oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg

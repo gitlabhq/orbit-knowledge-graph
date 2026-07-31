@@ -1380,53 +1380,10 @@ sm-e2e-spike:
         fi
         tail -3 e2e-image-build.log
       fi
-    # Wait for the operator to reconcile the Orbit CR and create GKG Deployments.
+    # Deploy operator + Orbit CR (replaces standalone gkg helm release).
     - |
       if [ -n "${E2E_USE_OPERATOR:-}" ]; then
-        echo "==> Waiting for operator to create GKG Deployments..."
-        echo "==> Operator logs:"
-        kubectl -n "e2e-${E2E_SHA}-gkg" logs deploy/gitlab-operator --tail=50 || true
-        echo "==> Orbit CR status:"
-        kubectl -n "e2e-${E2E_SHA}-gkg" get orbit -o yaml || true
-        echo "==> Pods in gkg namespace:"
-        kubectl -n "e2e-${E2E_SHA}-gkg" get pods || true
-        for i in $(seq 1 30); do
-          READY=$(kubectl -n "e2e-${E2E_SHA}-gkg" get deploy -l app.kubernetes.io/managed-by=gitlab-operator-orbit -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
-          if [ -n "$READY" ]; then
-            echo "==> GKG Deployments found: $READY"
-            break
-          fi
-          echo "  Waiting for GKG Deployments... ($i/30)"
-          sleep 10
-        done
-        if [ -z "$READY" ]; then
-          echo "==> ERROR: No GKG Deployments created after 5 minutes"
-          echo "==> Operator logs (full):"
-          kubectl -n "e2e-${E2E_SHA}-gkg" logs deploy/gitlab-operator || true
-          exit 1
-        fi
-        # Wait for pods to be ready and the webserver health to report healthy.
-        echo "==> Waiting for GKG rollout..."
-        kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-webserver --timeout=300s || true
-        kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-dispatcher --timeout=120s || true
-        kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-indexer-default --timeout=120s || true
-        echo "==> Waiting for GKG /ready to report healthy..."
-        for i in $(seq 1 60); do
-          HEALTH=$(kubectl -n "e2e-${E2E_SHA}-gkg" get --raw "/api/v1/namespaces/e2e-${E2E_SHA}-gkg/services/orbit-gkg-webserver:8080/proxy/ready" 2>/dev/null || echo '{}')
-          if echo "$HEALTH" | grep -q '"status":"ok"'; then
-            echo "==> GKG webserver is healthy: $HEALTH"
-            break
-          fi
-          echo "  /ready: $HEALTH ($i/60)"
-          sleep 5
-        done
-        # Wait for the dispatcher to complete schema migration. The Rails
-        # /api/v4/orbit/status returns "unknown" until the graph schema exists.
-        # In the standalone e2e, helmfile wait absorbs this time (~3-5 min).
-        echo "==> Waiting 120s for dispatcher schema initialization..."
-        sleep 120
-        echo "==> GKG pods:"
-        kubectl -n "e2e-${E2E_SHA}-gkg" get pods
+        bash e2e/scripts/deploy-operator.sh
       fi
     - bash e2e/scripts/test.sh
   after_script:
