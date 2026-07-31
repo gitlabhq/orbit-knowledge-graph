@@ -42,7 +42,7 @@ global:
       signupEnabled: false
     knowledgeGraph:
       enabled: true
-      grpcEndpoint: "tls://{{ env "E2E_USE_OPERATOR" | ternary "orbit-gkg" "gkg" }}-webserver.e2e-{{ requiredEnv "E2E_SHA" }}-gkg.svc.cluster.local:50054"
+      grpcEndpoint: "tls://{{- if env "E2E_USE_OPERATOR" }}orbit-gkg{{ else }}gkg{{ end }}-webserver.e2e-{{ requiredEnv "E2E_SHA" }}-gkg.svc.cluster.local:50054"
       jwtSecret:
         secret: gitlab-knowledge-graph-jwt
         key: knowledge_graph_jwt_shared_key
