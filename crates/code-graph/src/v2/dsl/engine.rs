@@ -823,10 +823,6 @@ impl LanguageSpec {
             return;
         }
         if state.budget.is_some_and(|b| b.expired()) {
-            tracing::warn!(
-                file_path = state.file_path,
-                "AST walk aborted: per-file CPU budget exceeded"
-            );
             state.timed_out = true;
             return;
         }

@@ -126,7 +126,6 @@ impl<L: LanguageExt> StrDoc<L> {
                     if let Some(budget) = budget
                         && budget.expired()
                     {
-                        tracing::warn!("tree-sitter parse aborted: CPU budget exceeded");
                         return ControlFlow::Break(());
                     }
                     let offset = state.current_byte_offset() as u64;
