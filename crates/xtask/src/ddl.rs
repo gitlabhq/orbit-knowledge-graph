@@ -108,10 +108,7 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-/// Emits the durable, unprefixed objects the dispatcher creates once at boot and
-/// never GCs: unversioned auxiliary tables and unversioned materialized views.
-/// These live independently of the schema-version lifecycle, so they are tracked
-/// in their own snapshot rather than `config/graph.sql`.
+/// Emits the durable unversioned tables and materialized views into their own snapshot.
 pub fn run_persistent(ontology_path: Option<PathBuf>, diff: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
 

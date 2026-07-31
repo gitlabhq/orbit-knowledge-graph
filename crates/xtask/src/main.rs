@@ -122,9 +122,6 @@ enum MigrationLedgerCommand {
     Snapshot,
 }
 
-/// ClickHouse DDL has two lifecycles: the versioned graph (schema-version
-/// prefixed, GCed on rollover) and the persistent set (created once at boot,
-/// never prefixed or GCed). Local DDL is the DuckDB dialect and has neither.
 #[derive(Debug, Clone, Copy)]
 enum DdlTarget {
     Remote(RemoteLifecycle),
