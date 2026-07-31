@@ -31,9 +31,11 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     // Symlinks are deferred until all regular files and directories exist, so no
     // symlink is on disk during the main loop to redirect a create_dir_all or
     // dest.exists() outside the target.
-    let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut deferred_symlinks: Vec<(PathBuf, PathBuf, String)> = Vec::new();
     let mut inventory = Vec::new();
     let mut content = Vec::new();
+    let mut outside_root_entries = 0usize;
+    let mut under_root_entries = 0usize;
 
     // False + a truncation-shaped error on the first `next()` means the body
     // ended before any tar header could be read (empty/truncated repo).
@@ -72,11 +74,13 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         let Some(relative_path) = strip_archive_root(relative_path, is_dir, &mut archive_root)
         else {
             warn!(path = %entry_path_str, "skipping archive entry outside the root directory");
+            outside_root_entries += 1;
             continue;
         };
         if relative_path.as_os_str().is_empty() {
             continue;
         }
+        under_root_entries += 1;
         if !crate::fs::is_safe_relative_path(&relative_path) {
             return Err(StreamError::Io(std::io::Error::other(format!(
                 "path traversal detected: {}",
@@ -101,7 +105,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                     .map_err(std::io::Error::other)?
                     .map(|cow| cow.into_owned())
                     .unwrap_or_default();
-                deferred_symlinks.push((dest, link_target));
+                deferred_symlinks.push((dest, link_target, meta.path.clone()));
                 inventory.push(meta);
             }
             continue;
@@ -151,31 +155,51 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         }
     }
 
-    for (link_path, target) in deferred_symlinks {
-        crate::fs::safe_create_dir_all(&link_path, &target_canonical)
-            .map_err(std::io::Error::other)?;
+    // A detected root that matched nothing but itself means root detection
+    // failed; a silent empty inventory would let the stale sweep tombstone the
+    // project's previously indexed graph.
+    if under_root_entries == 0 && outside_root_entries > 0 {
+        return Err(StreamError::Io(std::io::Error::other(format!(
+            "all {outside_root_entries} archive entries were outside the detected root directory"
+        ))));
+    }
+
+    let mut removed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (link_path, target, entry_path) in deferred_symlinks {
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &link_path)?;
+        let created = crate::fs::safe_create_dir_all(&link_path, &target_canonical)
+            .and_then(|_| std::os::unix::fs::symlink(&target, &link_path));
+        #[cfg(not(unix))]
+        let created = crate::fs::safe_create_dir_all(&link_path, &target_canonical).map(|_| ());
+        match created {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidFilename => {
+                warn!(path = %entry_path, error = %e, "skipping archive entry with over-long name");
+                removed.insert(entry_path);
+            }
+            Err(e) => return Err(StreamError::Io(e)),
+        }
     }
 
     let removed_symlinks =
         crate::fs::validate_symlinks(&target_canonical).map_err(std::io::Error::other)?;
-    if !removed_symlinks.is_empty() {
-        let removed: std::collections::HashSet<String> = removed_symlinks
+    removed.extend(
+        removed_symlinks
             .iter()
-            .map(|r| r.relative_path.to_string_lossy().into_owned())
-            .collect();
+            .map(|r| r.relative_path.to_string_lossy().into_owned()),
+    );
+    if !removed.is_empty() {
         inventory.retain(|entry| !removed.contains(&entry.path));
     }
 
     Ok(crate::fs_stream::canonicalize_inventory(inventory))
 }
 
-/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry that could
-/// be the root records it; the root is a directory, so a bare top-level file
-/// (e.g. a stray LFS payload ordered first) never becomes the detected root.
-/// Entries outside the root return `None` so the caller can skip them. Returns
-/// an empty path for the root entry.
+/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first directory or
+/// multi-component entry records the root; a bare top-level file (e.g. a stray
+/// LFS payload ordered first) cannot. Entries outside the detected root return
+/// `None` so the caller can skip them. Returns an empty path for the root
+/// entry.
 fn strip_archive_root(
     path: &Path,
     is_dir: bool,
@@ -381,6 +405,31 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(dir.path().join("ok.rs")).unwrap(),
             "fine"
+        );
+    }
+
+    #[test]
+    fn skips_symlinks_with_over_long_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let long_link = format!("root/{}", "l".repeat(300));
+        let link_under_long_dir = format!("root/{}/link", "d".repeat(300));
+        let data = build_archive(&[
+            Entry::File("root/ok.rs", b"fine"),
+            Entry::Symlink(&long_link, "ok.rs"),
+            Entry::Symlink(&link_under_long_dir, "../ok.rs"),
+        ]);
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["ok.rs"]);
+    }
+
+    #[test]
+    fn nothing_under_detected_root_fails_extraction() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[Entry::Dir("junk/"), Entry::File("root/file1.rs", b"a")]);
+        let err = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap_err();
+        assert!(
+            err.to_string().contains("outside the detected root"),
+            "got: {err}"
         );
     }
 
