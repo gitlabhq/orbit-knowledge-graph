@@ -25,7 +25,7 @@ Orbit Localはお使いのマシン上で動作します。`orbit`バイナリ�
 
 ## インストール {#install}
 
-`orbit`バイナリは、ワンラインインストーラーを使って直接インストールするか、すでに使用している場合はGitLab CLI（`glab`）経由でインストールできます。
+`orbit`バイナリは、ワンラインインストーラーを使って直接インストールするか、npmから、またはすでに使用している場合はGitLab CLI（`glab`）経由でインストールできます。
 
 Linuxでは、インストーラーはデフォルトでglibcアーカイブを使用し、Alpineなどのmuslベースのディストリビューションでは完全静的なmuslアーカイブを自動的に選択します。静的Linuxアーカイブを強制するには、`--libc musl`を渡してください。
 
@@ -58,6 +58,24 @@ irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 |
 ```
 
 新しいターミナルを開いて、確認します:
+
+```shell
+orbit help
+```
+
+{{< /tab >}}
+
+{{< tab title="npm" >}}
+
+任意のプラットフォームでnpmからインストールすることもできます:
+
+```shell
+npm install -g @gitlab/orbit
+```
+
+[`@gitlab/orbit`](https://www.npmjs.com/package/@gitlab/orbit)パッケージは、お使いのプラットフォーム向けのビルド済みバイナリをインストールします。Linuxでは、glibcとmuslの両方のディストリビューションで動作する完全静的なmuslバイナリが常に使用されます。
+
+確認します:
 
 ```shell
 orbit help

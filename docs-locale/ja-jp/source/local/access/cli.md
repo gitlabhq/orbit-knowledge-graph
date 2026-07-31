@@ -37,6 +37,8 @@ curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/insta
 orbit help
 ```
 
+`npm install -g @gitlab/orbit`でnpmからインストールすることもできます。
+
 GitLab CLI（`glab`）をすでに使用している場合は、`glab orbit local --install`でマネージドバイナリをインストールすることもできます。そのバイナリは`orbit`を直接使用するのではなく、`glab orbit local <command>`として実行します。詳細は[glabでOrbit Localを使用する](glab.md)を参照してください。
 
 ### ソースからビルドする {#build-from-source}
