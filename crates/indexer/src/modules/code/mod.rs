@@ -6,6 +6,7 @@ pub mod metrics;
 pub(crate) mod observer;
 mod pipeline;
 pub mod repository;
+mod repository_status;
 mod stale_data_cleaner;
 #[cfg(test)]
 pub(crate) mod test_helpers;
@@ -82,6 +83,9 @@ pub async fn register_handlers(
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
     let checkpoint_store: Arc<dyn checkpoint::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
+    let repository_status_store: Arc<dyn repository_status::RepositoryStatusStore> = Arc::new(
+        repository_status::ClickHouseRepositoryStatusStore::new(Arc::clone(&client), &table_names),
+    );
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
         stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
     );
@@ -124,6 +128,7 @@ pub async fn register_handlers(
         Arc::clone(&pipeline),
         Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
+        repository_status_store,
         metrics,
         config.nats.ack_wait(),
         subscription,

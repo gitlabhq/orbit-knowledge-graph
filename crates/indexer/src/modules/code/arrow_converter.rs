@@ -7,7 +7,6 @@ use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowE
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
 use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub struct IndexerEnvelope {
@@ -592,11 +591,7 @@ fn edge_row_batch(
 }
 
 fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
-    let mut hasher = rustc_hash::FxHasher::default();
-    project_id.hash(&mut hasher);
-    branch.hash(&mut hasher);
-    // Mask clears the sign bit so the result is always a positive i64.
-    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
+    super::repository_status::repository_id(project_id, branch)
 }
 
 /// Per-node-kind list of `(tag_key, property_name)` pairs derived from

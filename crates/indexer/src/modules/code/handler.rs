@@ -12,6 +12,9 @@ use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
+use super::repository_status::{
+    RepoFailReason, RepoStatus, RepositoryStatusRecord, RepositoryStatusStore,
+};
 use crate::analytics::IndexingAnalytics;
 
 use crate::engine::retry::{Backoff, RetryMode, RetryPolicy};
@@ -36,6 +39,23 @@ const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     dead_letter: true,
 };
 
+/// Maps a completed indexing attempt to a failure reason, or `None` on success.
+/// The timeout branch is flagged by the caller because it synthesizes its own
+/// error after cancelling the run.
+fn classify_failure(
+    result: &Result<super::pipeline::IndexOutcome, HandlerError>,
+    timed_out: bool,
+) -> Option<RepoFailReason> {
+    if timed_out {
+        return Some(RepoFailReason::Timeout);
+    }
+    match result {
+        Ok(_) => None,
+        Err(e) if e.is_permanent() => Some(RepoFailReason::Permanent),
+        Err(_) => Some(RepoFailReason::Transient),
+    }
+}
+
 fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
     let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch);
@@ -46,6 +66,7 @@ pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
+    repository_status_store: Arc<dyn RepositoryStatusStore>,
     metrics: CodeMetrics,
     lock_ttl: Duration,
     subscription: Subscription,
@@ -66,6 +87,7 @@ impl CodeIndexingTaskHandler {
         pipeline: Arc<CodeIndexingPipeline>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
+        repository_status_store: Arc<dyn RepositoryStatusStore>,
         metrics: CodeMetrics,
         lock_ttl: Duration,
         subscription: Subscription,
@@ -75,6 +97,7 @@ impl CodeIndexingTaskHandler {
             pipeline,
             repository_service,
             checkpoint_store,
+            repository_status_store,
             metrics,
             lock_ttl,
             subscription,
@@ -296,6 +319,18 @@ impl CodeIndexingTaskHandler {
             .indexing_status
             .record_start(&request.traversal_path, started_at)
             .await;
+        self.record_repository_status(RepositoryStatusRecord {
+            traversal_path: request.traversal_path.clone(),
+            project_id,
+            branch: branch.to_string(),
+            status: RepoStatus::Indexing,
+            fail_reason: None,
+            last_task_id: request.task_id,
+            last_commit: request.commit_sha.clone(),
+            started_at,
+            completed_at: None,
+        })
+        .await;
 
         let indexing_request = IndexingRequest {
             project_id,
@@ -310,11 +345,13 @@ impl CodeIndexingTaskHandler {
         let work =
             self.pipeline
                 .index_project(context, &indexing_request, observer, cancel.clone());
+        let mut timed_out = false;
         let result = match self.pipeline.job_timeout() {
             Some(timeout) => match tokio::time::timeout(timeout, work).await {
                 Ok(result) => result,
                 Err(_) => {
                     cancel.cancel();
+                    timed_out = true;
                     warn!(
                         project_id,
                         branch = %branch,
@@ -333,6 +370,25 @@ impl CodeIndexingTaskHandler {
             None => work.await,
         };
 
+        let completed_at = Utc::now();
+        let fail_reason = classify_failure(&result, timed_out);
+        self.record_repository_status(RepositoryStatusRecord {
+            traversal_path: request.traversal_path.clone(),
+            project_id,
+            branch: branch.to_string(),
+            status: if fail_reason.is_some() {
+                RepoStatus::Failed
+            } else {
+                RepoStatus::Indexed
+            },
+            fail_reason,
+            last_task_id: request.task_id,
+            last_commit: request.commit_sha.clone(),
+            started_at,
+            completed_at: Some(completed_at),
+        })
+        .await;
+
         let result = result.map(|outcome| outcome.metric_label());
 
         context
@@ -340,7 +396,7 @@ impl CodeIndexingTaskHandler {
             .record_completion(
                 &request.traversal_path,
                 started_at,
-                Utc::now(),
+                completed_at,
                 result.as_ref().err().map(ToString::to_string),
             )
             .await;
@@ -354,6 +410,19 @@ impl CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
+    /// Persist per-branch indexing state. A write failure must not fail the
+    /// task: this row is observability, not correctness.
+    async fn record_repository_status(&self, record: RepositoryStatusRecord) {
+        if let Err(error) = self.repository_status_store.record(&record).await {
+            warn!(
+                project_id = record.project_id,
+                branch = %record.branch,
+                %error,
+                "failed to record repository indexing status"
+            );
+        }
+    }
+
     async fn load_checkpoint(
         &self,
         request: &CodeIndexingTaskRequest,
@@ -378,6 +447,7 @@ mod tests {
     use crate::modules::code::repository::RepositoryResolver;
     use crate::modules::code::repository::cache::LocalRepositoryCache;
     use crate::modules::code::repository::service::test_utils::MockRepositoryService;
+    use crate::modules::code::repository_status::test_utils::MockRepositoryStatusStore;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices};
@@ -393,6 +463,7 @@ mod tests {
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
+        mock_repo_status: Arc<MockRepositoryStatusStore>,
         mock_repo: Arc<MockRepositoryService>,
         _cache_dir: tempfile::TempDir,
     }
@@ -403,10 +474,12 @@ mod tests {
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
             let mock_checkpoints = Arc::new(MockCodeCheckpointStore::new());
+            let mock_repo_status = Arc::new(MockRepositoryStatusStore::new());
             let stale_data_cleaner = Arc::new(MockStaleDataCleaner::default());
             let metrics = test_metrics();
 
             let checkpoint_store: Arc<dyn CodeCheckpointStore> = mock_checkpoints.clone();
+            let repository_status_store: Arc<dyn RepositoryStatusStore> = mock_repo_status.clone();
             let repo_service: Arc<dyn RepositoryService> = mock_repo.clone();
 
             let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
@@ -440,6 +513,7 @@ mod tests {
                 pipeline,
                 repo_service,
                 Arc::clone(&checkpoint_store),
+                repository_status_store,
                 metrics,
                 Duration::from_secs(60),
                 CodeIndexingTaskRequest::subscription(),
@@ -451,6 +525,7 @@ mod tests {
                 mock_nats,
                 mock_locks,
                 mock_checkpoints,
+                mock_repo_status,
                 mock_repo,
                 _cache_dir: temp_dir,
             }
@@ -662,6 +737,42 @@ mod tests {
             .expect("checkpoint should be set for empty repo");
         assert_eq!(checkpoint.last_task_id, 42);
         assert!(checkpoint.last_commit.is_none());
+
+        let status = ctx
+            .mock_repo_status
+            .get("1/123/", 123, "main")
+            .expect("repository status should be recorded");
+        assert_eq!(status.status, RepoStatus::Indexed);
+        assert!(status.fail_reason.is_none());
+        assert!(status.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn transient_fetch_error_records_failed_status() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        // A 5xx with a commit_sha is a non-empty transient fetch error: it nacks
+        // and must leave a failed status row behind.
+        ctx.mock_repo.set_download_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+                project_id: 123,
+                status: 500,
+            }),
+        );
+
+        let envelope = TestContext::make_request(77, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_err(), "transient fetch error should nack");
+        let status = ctx
+            .mock_repo_status
+            .get("1/123/", 123, "main")
+            .expect("repository status should be recorded");
+        assert_eq!(status.status, RepoStatus::Failed);
+        assert_eq!(status.fail_reason, Some(RepoFailReason::Transient));
     }
 
     #[tokio::test]

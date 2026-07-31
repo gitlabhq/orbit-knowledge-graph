@@ -8,6 +8,7 @@ const CODE_DOMAIN: &str = "source_code";
 
 pub struct CodeTableNames {
     pub branch: String,
+    pub repository: String,
     pub directory: String,
     pub file: String,
     pub definition: String,
@@ -40,6 +41,7 @@ impl CodeTableNames {
 
         Ok(Self {
             branch: prefixed_table_name(ontology.table_name("Branch")?, *SCHEMA_VERSION),
+            repository: prefixed_table_name(ontology.table_name("Repository")?, *SCHEMA_VERSION),
             directory: prefixed_table_name(ontology.table_name("Directory")?, *SCHEMA_VERSION),
             file: prefixed_table_name(ontology.table_name("File")?, *SCHEMA_VERSION),
             definition: prefixed_table_name(ontology.table_name("Definition")?, *SCHEMA_VERSION),
