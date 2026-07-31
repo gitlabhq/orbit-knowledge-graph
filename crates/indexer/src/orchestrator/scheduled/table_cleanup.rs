@@ -136,27 +136,30 @@ impl TableCleanup {
     ) -> Result<(), TaskError> {
         let window_end = Utc::now();
         let window_start = window_end - self.config.lookback();
+        let window_end = window_end.format(TIMESTAMP_FORMAT).to_string();
+        let quorum_writes = self.graph.has_quorum_writes();
 
         self.drop_tombstoned_keys_table(table).await?;
+        for statement in build_tombstoned_keys_table_statements(table, quorum_writes) {
+            self.graph
+                .query(&statement)
+                .param(
+                    "window_start",
+                    window_start.format(TIMESTAMP_FORMAT).to_string(),
+                )
+                .param("window_end", window_end.clone())
+                .execute()
+                .await
+                .map_err(TaskError::new)?;
+        }
         self.graph
-            .query(&build_tombstoned_keys_table_sql(table))
-            .param(
-                "window_start",
-                window_start.format(TIMESTAMP_FORMAT).to_string(),
-            )
-            .param(
-                "window_end",
-                window_end.format(TIMESTAMP_FORMAT).to_string(),
-            )
+            .query(&build_delete_tombstoned_keys_sql(table, quorum_writes))
+            .param("window_end", window_end.clone())
             .execute()
             .await
             .map_err(TaskError::new)?;
-        self.graph
-            .query(&build_delete_tombstoned_keys_sql(table))
-            .execute()
+        self.wait_until_tombstoned_keys_are_gone(table, &window_end)
             .await
-            .map_err(TaskError::new)?;
-        self.wait_until_tombstoned_keys_are_gone(table).await
     }
 
     /// `system.mutations` is not readable by the graph user, so the data itself
@@ -164,11 +167,19 @@ impl TableCleanup {
     async fn wait_until_tombstoned_keys_are_gone(
         &self,
         table: &ReplacingMergeTreeTable,
+        window_end: &str,
     ) -> Result<(), TaskError> {
         let deadline = Instant::now() + Duration::from_secs(STATEMENT_TIMEOUT_SECS);
         loop {
-            if self.count_remaining_tombstoned_rows(table).await? == 0 {
-                return Ok(());
+            match self
+                .count_remaining_tombstoned_rows(table, window_end)
+                .await
+            {
+                Ok(0) => return Ok(()),
+                Ok(_) => {}
+                Err(error)
+                    if self.graph.has_quorum_writes() && is_replica_not_in_quorum(&error) => {}
+                Err(error) => return Err(error),
             }
             if Instant::now() >= deadline {
                 return Err(TaskError::new(format!(
@@ -183,10 +194,15 @@ impl TableCleanup {
     async fn count_remaining_tombstoned_rows(
         &self,
         table: &ReplacingMergeTreeTable,
+        window_end: &str,
     ) -> Result<u64, TaskError> {
         let batches = self
             .graph
-            .query(&build_count_remaining_tombstoned_rows_sql(table))
+            .query(&build_count_remaining_tombstoned_rows_sql(
+                table,
+                self.graph.has_quorum_writes(),
+            ))
+            .param("window_end", window_end)
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;
@@ -229,45 +245,102 @@ fn tombstoned_keys_table_name(table: &ReplacingMergeTreeTable) -> String {
     format!("{TOMBSTONED_KEYS_TABLE_PREFIX}_{}", table.name)
 }
 
-fn build_tombstoned_keys_table_sql(table: &ReplacingMergeTreeTable) -> String {
+fn build_tombstoned_keys_table_statements(
+    table: &ReplacingMergeTreeTable,
+    quorum_writes: bool,
+) -> Vec<String> {
     let keys = table.sort_key.join(", ");
     let keys_table = tombstoned_keys_table_name(table);
     let source = &table.name;
-    format!(
-        "CREATE TABLE {keys_table} ENGINE = MergeTree ORDER BY ({keys}) \
-         AS SELECT {keys} FROM ( \
-           SELECT {keys}, _deleted FROM {source} \
+    let (inner_projection, outer_projection) = if quorum_writes {
+        (
+            format!("{keys}, _version, _deleted"),
+            format!("{keys}, _version AS tombstone_version"),
+        )
+    } else {
+        (format!("{keys}, _deleted"), keys.clone())
+    };
+    let tombstoned_keys_select = format!(
+        "SELECT {outer_projection} FROM ( \
+           SELECT {inner_projection} FROM {source} \
            WHERE _version > {{window_start:String}} AND _version <= {{window_end:String}} \
            ORDER BY {keys}, _version DESC \
            LIMIT 1 BY {keys} \
-         ) WHERE _deleted \
-         SETTINGS max_memory_usage = {MAX_STATEMENT_MEMORY_BYTES}, \
+         ) WHERE _deleted"
+    );
+    let scan_settings = format!(
+        "SETTINGS max_memory_usage = {MAX_STATEMENT_MEMORY_BYTES}, \
                   max_bytes_before_external_sort = {SPILL_SORT_TO_DISK_ABOVE_BYTES}, \
                   optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}, \
                   send_progress_in_http_headers = 1"
-    )
+    );
+    if quorum_writes {
+        // Replicated databases reject CREATE AS SELECT: schema inferred EMPTY, scan runs in a quorum-acked INSERT.
+        vec![
+            format!(
+                "CREATE TABLE {keys_table} ENGINE = ReplicatedMergeTree ORDER BY ({keys}) \
+                 EMPTY AS {tombstoned_keys_select}"
+            ),
+            format!("INSERT INTO {keys_table} {tombstoned_keys_select} {scan_settings}"),
+        ]
+    } else {
+        vec![format!(
+            "CREATE TABLE {keys_table} ENGINE = MergeTree ORDER BY ({keys}) \
+             AS {tombstoned_keys_select} {scan_settings}"
+        )]
+    }
 }
 
-fn build_delete_tombstoned_keys_sql(table: &ReplacingMergeTreeTable) -> String {
+/// The `window_end` bound keeps post-snapshot rows out: no deleting re-created rows, no poll flap.
+fn swept_rows_predicate(table: &ReplacingMergeTreeTable, quorum_writes: bool) -> String {
     let keys = table.sort_key.join(", ");
+    let keys_table = tombstoned_keys_table_name(table);
+    let mut predicate = format!(
+        "({keys}) IN (SELECT {keys} FROM {keys_table}) AND _version <= {{window_end:String}}"
+    );
+    if quorum_writes {
+        // Sparing the newest tombstone row caps a partially-replicated key set at under-deleting; removing it could leave an older live row newest.
+        predicate.push_str(&format!(
+            " AND ({keys}, _version) NOT IN (SELECT {keys}, tombstone_version FROM {keys_table})"
+        ));
+    }
+    predicate
+}
+
+fn build_delete_tombstoned_keys_sql(
+    table: &ReplacingMergeTreeTable,
+    quorum_writes: bool,
+) -> String {
+    let nondeterministic_opt_in = if quorum_writes {
+        ", allow_nondeterministic_mutations = 1"
+    } else {
+        ""
+    };
     format!(
-        "DELETE FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {}) \
-         SETTINGS lightweight_deletes_sync = 0, \
+        "DELETE FROM {} WHERE {} \
+         SETTINGS lightweight_deletes_sync = 0{nondeterministic_opt_in}, \
                   max_execution_time = {STATEMENT_TIMEOUT_SECS}",
         table.name,
-        tombstoned_keys_table_name(table),
+        swept_rows_predicate(table, quorum_writes),
     )
 }
 
-fn build_count_remaining_tombstoned_rows_sql(table: &ReplacingMergeTreeTable) -> String {
-    let keys = table.sort_key.join(", ");
+fn build_count_remaining_tombstoned_rows_sql(
+    table: &ReplacingMergeTreeTable,
+    quorum_writes: bool,
+) -> String {
     format!(
-        "SELECT count() AS remaining FROM {} WHERE ({keys}) IN (SELECT {keys} FROM {}) \
+        "SELECT count() AS remaining FROM {} WHERE {} \
          SETTINGS use_index_for_in_with_subqueries_max_values = {MAX_KEYS_FOR_INDEX_ANALYSIS}, \
                   max_execution_time = {STATEMENT_TIMEOUT_SECS}",
         table.name,
-        tombstoned_keys_table_name(table),
+        swept_rows_predicate(table, quorum_writes),
     )
+}
+
+fn is_replica_not_in_quorum(error: &TaskError) -> bool {
+    let message = error.to_string();
+    message.contains("REPLICA_IS_NOT_IN_QUORUM") || message.contains("Code: 289")
 }
 
 #[cfg(test)]
@@ -288,6 +361,10 @@ mod tests {
             .iter()
             .find(|table| table.name.ends_with(suffix))
             .unwrap_or_else(|| panic!("expected a table ending in {suffix}"))
+    }
+
+    fn joined_build_statements(table: &ReplacingMergeTreeTable, quorum_writes: bool) -> String {
+        build_tombstoned_keys_table_statements(table, quorum_writes).join("; ")
     }
 
     #[test]
@@ -351,7 +428,7 @@ mod tests {
     #[test]
     fn keys_are_bounded_to_one_version_window() {
         let tables = all_swept_tables();
-        let sql = build_tombstoned_keys_table_sql(find_table_ending_in(&tables, "gl_edge"));
+        let sql = joined_build_statements(find_table_ending_in(&tables, "gl_edge"), false);
 
         assert!(
             sql.contains("_version > {window_start:String}"),
@@ -366,7 +443,7 @@ mod tests {
     #[test]
     fn keys_are_the_newest_version_of_each_sort_key() {
         let tables = all_swept_tables();
-        let sql = build_tombstoned_keys_table_sql(find_table_ending_in(&tables, "gl_edge"));
+        let sql = joined_build_statements(find_table_ending_in(&tables, "gl_edge"), false);
 
         assert!(sql.contains("LIMIT 1 BY"), "sql: {sql}");
         assert!(sql.contains("_version DESC"), "sql: {sql}");
@@ -377,7 +454,7 @@ mod tests {
     fn delete_reads_keys_from_the_materialised_table_not_the_source() {
         let tables = all_swept_tables();
         let table = find_table_ending_in(&tables, "gl_edge");
-        let sql = build_delete_tombstoned_keys_sql(table);
+        let sql = build_delete_tombstoned_keys_sql(table, false);
 
         assert!(
             sql.contains(&format!(
@@ -390,10 +467,24 @@ mod tests {
     }
 
     #[test]
+    fn delete_is_bounded_to_the_version_window() {
+        let tables = all_swept_tables();
+        let table = find_table_ending_in(&tables, "gl_edge");
+
+        for quorum_writes in [false, true] {
+            let sql = build_delete_tombstoned_keys_sql(table, quorum_writes);
+            assert!(
+                sql.contains("_version <= {window_end:String}"),
+                "a row re-created after the key snapshot must survive the delete; sql: {sql}"
+            );
+        }
+    }
+
+    #[test]
     fn completion_is_confirmed_against_the_data_not_system_mutations() {
         let tables = all_swept_tables();
         let table = find_table_ending_in(&tables, "gl_edge");
-        let sql = build_count_remaining_tombstoned_rows_sql(table);
+        let sql = build_count_remaining_tombstoned_rows_sql(table, false);
 
         assert!(sql.contains("count() AS remaining"), "sql: {sql}");
         assert!(
@@ -404,10 +495,32 @@ mod tests {
     }
 
     #[test]
+    fn completion_count_matches_the_delete_predicate() {
+        let tables = all_swept_tables();
+        let table = find_table_ending_in(&tables, "gl_edge");
+
+        for quorum_writes in [false, true] {
+            let predicate = swept_rows_predicate(table, quorum_writes);
+            assert!(
+                build_delete_tombstoned_keys_sql(table, quorum_writes).contains(&predicate),
+                "quorum_writes={quorum_writes}"
+            );
+            assert!(
+                build_count_remaining_tombstoned_rows_sql(table, quorum_writes)
+                    .contains(&predicate),
+                "\"0 remaining\" must mean the delete's exact target set is gone; \
+                 quorum_writes={quorum_writes}"
+            );
+        }
+    }
+
+    #[test]
     fn completion_count_skips_index_analysis_for_large_key_sets() {
         let tables = all_swept_tables();
-        let sql =
-            build_count_remaining_tombstoned_rows_sql(find_table_ending_in(&tables, "gl_edge"));
+        let sql = build_count_remaining_tombstoned_rows_sql(
+            find_table_ending_in(&tables, "gl_edge"),
+            false,
+        );
 
         assert!(
             sql.contains("use_index_for_in_with_subqueries_max_values"),
@@ -418,7 +531,7 @@ mod tests {
     #[test]
     fn the_build_keeps_the_http_connection_alive() {
         let tables = all_swept_tables();
-        let sql = build_tombstoned_keys_table_sql(find_table_ending_in(&tables, "gl_edge"));
+        let sql = joined_build_statements(find_table_ending_in(&tables, "gl_edge"), false);
 
         assert!(
             sql.contains("send_progress_in_http_headers = 1"),
@@ -430,12 +543,108 @@ mod tests {
     #[test]
     fn delete_is_submitted_without_a_synchronous_wait() {
         let tables = all_swept_tables();
-        let sql = build_delete_tombstoned_keys_sql(find_table_ending_in(&tables, "gl_edge"));
+        let sql = build_delete_tombstoned_keys_sql(find_table_ending_in(&tables, "gl_edge"), false);
 
         assert!(
             sql.contains("lightweight_deletes_sync = 0"),
             "a synchronous wait holds a silent connection the Cloud path drops at ~20min; sql: {sql}"
         );
         assert!(!sql.contains("system.mutations"), "sql: {sql}");
+    }
+
+    #[test]
+    fn quorum_scratch_is_replicated_and_carries_the_tombstone_version() {
+        let tables = all_swept_tables();
+        let table = find_table_ending_in(&tables, "gl_edge");
+
+        let statements = build_tombstoned_keys_table_statements(table, true);
+        assert_eq!(
+            statements.len(),
+            2,
+            "Replicated databases reject CREATE AS SELECT; the schema and the scan \
+             must be separate statements"
+        );
+        assert!(
+            statements[0].contains("ENGINE = ReplicatedMergeTree"),
+            "a Replicated database replicates DDL only; a plain MergeTree scratch \
+             would leave every other replica's delete reading an empty key set; sql: {}",
+            statements[0]
+        );
+        assert!(statements[0].contains("EMPTY AS"), "sql: {}", statements[0]);
+        assert!(
+            statements[1].starts_with(&format!(
+                "INSERT INTO {}",
+                tombstoned_keys_table_name(table)
+            )),
+            "sql: {}",
+            statements[1]
+        );
+        for statement in &statements {
+            assert!(
+                statement.contains("_version AS tombstone_version"),
+                "sql: {statement}"
+            );
+        }
+
+        let statements = build_tombstoned_keys_table_statements(table, false);
+        assert_eq!(statements.len(), 1);
+        assert!(
+            statements[0].contains("ENGINE = MergeTree"),
+            "sql: {}",
+            statements[0]
+        );
+        assert!(
+            !statements[0].contains("tombstone_version"),
+            "sql: {}",
+            statements[0]
+        );
+    }
+
+    #[test]
+    fn quorum_delete_never_removes_the_newest_tombstone_row() {
+        let tables = all_swept_tables();
+        let table = find_table_ending_in(&tables, "gl_edge");
+        let keys = table.sort_key.join(", ");
+
+        let sql = build_delete_tombstoned_keys_sql(table, true);
+        assert!(
+            sql.contains(&format!(
+                "({keys}, _version) NOT IN (SELECT {keys}, tombstone_version FROM {})",
+                tombstoned_keys_table_name(table)
+            )),
+            "deleting the tombstone against a partially replicated key set can \
+             leave an older live row as the key's newest version; sql: {sql}"
+        );
+
+        assert!(
+            !build_delete_tombstoned_keys_sql(table, false).contains("NOT IN"),
+            "the shared-storage path has no replication race and removes the whole key"
+        );
+    }
+
+    #[test]
+    fn quorum_delete_declares_its_subquery_mutation_nondeterministic() {
+        let tables = all_swept_tables();
+        let table = find_table_ending_in(&tables, "gl_edge");
+
+        assert!(
+            build_delete_tombstoned_keys_sql(table, true)
+                .contains("allow_nondeterministic_mutations = 1"),
+            "replicated tables reject subquery mutations outright without the opt-in"
+        );
+        assert!(
+            !build_delete_tombstoned_keys_sql(table, false)
+                .contains("allow_nondeterministic_mutations")
+        );
+    }
+
+    #[test]
+    fn a_lagging_replica_read_is_not_a_sweep_failure() {
+        assert!(is_replica_not_in_quorum(&TaskError::new(
+            "Code: 289. DB::Exception: Replica doesn't have part ... REPLICA_IS_NOT_IN_QUORUM"
+        )));
+        assert!(!is_replica_not_in_quorum(&TaskError::new(
+            "Code: 241. DB::Exception: Memory limit exceeded"
+        )));
     }
 }

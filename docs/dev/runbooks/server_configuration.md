@@ -113,14 +113,14 @@ graph:
 
 There is no equivalent setting for the datalake. GKG writes to its own graph tables and reads everything else, so the datalake is Siphon's to configure. To make datalake reads error out on a lagging replica instead of returning stale Siphon rows, put `select_sequential_consistency` in `datalake.session_settings` yourself.
 
-The flag applies three session settings and suppresses a fourth:
+The flag applies four session settings:
 
 | Setting | Value | Reason |
 |---------|-------|--------|
 | `insert_quorum` | `auto` | Majority quorum that tracks replica count. A fixed number stops being a majority once replicas are added. |
 | `insert_quorum_parallel` | `0` | Required for `select_sequential_consistency` to take effect. Serializes quorum inserts per table. |
 | `select_sequential_consistency` | `1` | A read on a lagging replica errors instead of returning stale rows. |
-| `async_insert` | suppressed | ClickHouse rejects an async insert that also carries `insert_quorum`. |
+| `async_insert` | `0` | ClickHouse rejects an async insert that also carries `insert_quorum`, and servers since 26.x default `async_insert` on — every quorum insert would fail with `UNSUPPORTED_PARAMETER`. Client-sent async-insert settings are additionally suppressed. |
 
 Anything set in `session_settings` wins over these, so you can still pin a fixed quorum size:
 
@@ -283,6 +283,16 @@ Nothing reaches those rows again — clearing them means replaying the sweep's
 statements by hand over a wider window. Alert on
 `gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`, because the task
 logs a failed table and moves on.
+
+Under `graph.quorum_writes` the sweep runs a replication-safe variant: the key
+set is built as a replicated table, and the delete spares each key's newest
+tombstone row, so a replica applying the delete before the key set has fully
+replicated in can only under-delete — never leave an older live row as a key's
+newest version. The cost is one retained tombstone row per deleted key
+(invisible to queries, which already filter on the newest version). This
+requires the graph database to be a `Replicated` database with
+`ReplicatedMergeTree`-family tables; plain engines do not replicate data
+between servers.
 
 ### Code dispatch task settings
 
