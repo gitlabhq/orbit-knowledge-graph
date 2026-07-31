@@ -1,0 +1,24 @@
+{
+  "name": "@gitlab/orbit-darwin-arm64",
+  "version": "0.0.0",
+  "description": "GitLab Knowledge Graph (Orbit) local CLI binary for darwin arm64",
+  "author": "GitLab",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "homepage": "https://gitlab.com/gitlab-org/orbit/knowledge-graph",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.com/gitlab-org/orbit/knowledge-graph.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "orbit"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
