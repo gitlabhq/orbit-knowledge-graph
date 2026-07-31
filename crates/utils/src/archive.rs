@@ -36,6 +36,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     let mut content = Vec::new();
     let mut outside_root_entries = 0usize;
     let mut under_root_entries = 0usize;
+    let mut first_outside_root: Option<String> = None;
 
     // False + a truncation-shaped error on the first `next()` means the body
     // ended before any tar header could be read (empty/truncated repo).
@@ -73,7 +74,9 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         let is_dir = entry_type == tar::EntryType::Directory;
         let Some(relative_path) = strip_archive_root(relative_path, is_dir, &mut archive_root)
         else {
-            warn!(path = %entry_path_str, "skipping archive entry outside the root directory");
+            if first_outside_root.is_none() {
+                first_outside_root = Some(entry_path_str.to_string());
+            }
             outside_root_entries += 1;
             continue;
         };
@@ -155,6 +158,15 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         }
     }
 
+    // One aggregated warn: out-of-root entries bypass cap accounting, so a
+    // hostile archive could otherwise emit one log line per stray entry.
+    if let Some(first) = &first_outside_root {
+        warn!(
+            count = outside_root_entries,
+            first_path = %first,
+            "skipped archive entries outside the root directory"
+        );
+    }
     // A detected root that matched nothing but itself means root detection
     // failed; a silent empty inventory would let the stale sweep tombstone the
     // project's previously indexed graph.
