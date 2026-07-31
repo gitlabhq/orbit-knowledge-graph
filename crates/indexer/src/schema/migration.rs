@@ -33,7 +33,7 @@ use query_engine::compiler::{
     emit_create_refreshable_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
     generate_graph_tables_with_prefix, generate_refreshable_materialized_views,
-    generate_unversioned_graph_tables,
+    generate_unversioned_graph_tables, generate_unversioned_materialized_views,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -260,6 +260,15 @@ pub async fn create_unversioned_tables(
             .await
             .map_err(|error| MigrationError::Ddl {
                 table: table.name,
+                reason: error.to_string(),
+            })?;
+    }
+    for view in generate_unversioned_materialized_views(ontology) {
+        graph
+            .execute(&emit_create_materialized_view(&view))
+            .await
+            .map_err(|error| MigrationError::Ddl {
+                table: view.name,
                 reason: error.to_string(),
             })?;
     }

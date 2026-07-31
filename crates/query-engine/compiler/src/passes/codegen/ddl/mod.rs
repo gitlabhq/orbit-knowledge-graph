@@ -60,6 +60,12 @@ pub fn auxiliary_schema_fingerprints(ontology: &Ontology) -> BTreeMap<String, St
             ),
         );
     }
+    for view in generate_unversioned_materialized_views(ontology) {
+        fingerprints.insert(
+            format!("materialized_view/{}", view.name),
+            ontology::migrations::sha256_hex(&clickhouse::emit_create_materialized_view(&view)),
+        );
+    }
     fingerprints
 }
 
@@ -135,7 +141,23 @@ pub fn generate_graph_materialized_views_with_prefix(
     ontology
         .materialized_views()
         .iter()
+        .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
+        .collect()
+}
+
+/// Unversioned views survive schema-version rollover, so their names and `TO`
+/// targets are never prefixed. The empty prefix still resolves `{table_name}`
+/// placeholders to their bare names (an unversioned view only references
+/// unversioned tables or external system tables).
+pub fn generate_unversioned_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
+    let known_tables = collect_table_names(ontology);
+
+    ontology
+        .materialized_views()
+        .iter()
+        .filter(|mv| !mv.versioned)
+        .map(|mv| build_materialized_view(mv).with_prefix("", &known_tables))
         .collect()
 }
 
@@ -894,6 +916,7 @@ mod tests {
 
         let mv_def = ontology::MaterializedViewDefinition {
             name: "mv_edge_summary".into(),
+            versioned: true,
             to_table: None,
             select_query:
                 "SELECT traversal_path, count() AS cnt FROM {gl_edge} GROUP BY traversal_path"
@@ -914,6 +937,26 @@ mod tests {
         assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS v5_mv_edge_summary"));
         assert!(sql.contains("ENGINE = SummingMergeTree"));
         assert!(sql.contains("ORDER BY (traversal_path)"));
+    }
+
+    #[test]
+    fn unversioned_materialized_view_skips_name_and_to_table_prefix() {
+        let mv_def = ontology::MaterializedViewDefinition {
+            name: "query_log_sink".into(),
+            versioned: false,
+            to_table: Some("query_log_retention".into()),
+            select_query: "SELECT query_id, log_comment FROM system.query_log".into(),
+            engine: None,
+            engine_args: vec![],
+            order_by: vec![],
+            populate: false,
+        };
+        let known_tables = vec!["query_log_retention".into()];
+        let mv = build_materialized_view(&mv_def).with_prefix("", &known_tables);
+
+        assert_eq!(mv.name, "query_log_sink");
+        assert_eq!(mv.to_table.as_deref(), Some("query_log_retention"));
+        assert!(mv.select_query.contains("system.query_log"));
     }
 
     #[test]

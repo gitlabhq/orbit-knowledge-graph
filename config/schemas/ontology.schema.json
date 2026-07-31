@@ -779,11 +779,15 @@
             "properties": {
               "name": {
                 "type": "string",
-                "description": "Materialized view name. Receives the schema-version prefix during migration."
+                "description": "Materialized view name. Receives the schema-version prefix during migration unless versioned is false."
+              },
+              "versioned": {
+                "type": "boolean",
+                "description": "When true (default), the view and its to_table receive the schema-version prefix and are dropped on version rollover. When false, the view is created once and survives version churn; its to_table must be an unversioned auxiliary table. Use for durable sinks fed from external system tables."
               },
               "to_table": {
                 "type": "string",
-                "description": "Target table for the TO clause. The table must be an ontology-tracked table (auxiliary, node, or edge) so it is created and dropped alongside other graph tables during schema migration. Receives the schema-version prefix during migration."
+                "description": "Target table for the TO clause. The table must be an ontology-tracked table (auxiliary, node, or edge) so it is created and dropped alongside other graph tables during schema migration. Receives the schema-version prefix during migration unless versioned is false, in which case it must be an unversioned auxiliary table."
               },
               "select_query": {
                 "type": "string",

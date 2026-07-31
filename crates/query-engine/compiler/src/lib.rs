@@ -80,6 +80,7 @@ pub use passes::codegen::{
     ddl::generate_local_tables,
     ddl::generate_refreshable_materialized_views,
     ddl::generate_unversioned_graph_tables,
+    ddl::generate_unversioned_materialized_views,
     ddl::{auxiliary_schema_fingerprints, ddl_fingerprints},
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};

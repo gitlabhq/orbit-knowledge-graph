@@ -13,7 +13,7 @@ use crate::{Ontology, OntologyError};
 use derived::DerivedYaml;
 pub(crate) use edge::EdgeYaml;
 pub(crate) use node::NodeYaml;
-use schema::SchemaYaml;
+use schema::{MaterializedViewYaml, SchemaYaml};
 
 pub(crate) const ONTOLOGY_SCHEMA_FILE: &str = "schema.yaml";
 
@@ -550,45 +550,18 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .chain(ontology.edge_table_configs.keys().cloned())
         .collect();
 
+    let unversioned_table_names: std::collections::HashSet<String> = ontology
+        .auxiliary_tables
+        .iter()
+        .filter(|t| !t.versioned)
+        .map(|t| t.name.clone())
+        .collect();
+
     ontology.materialized_views = schema
         .settings
         .materialized_views
         .into_iter()
-        .map(|mv| {
-            match (&mv.to_table, &mv.engine) {
-                (None, None) => {
-                    return Err(OntologyError::Validation(format!(
-                        "materialized_view '{}': must set either `to_table` or `engine`",
-                        mv.name
-                    )));
-                }
-                (Some(_), Some(_)) => {
-                    return Err(OntologyError::Validation(format!(
-                        "materialized_view '{}': `to_table` and `engine` are mutually exclusive",
-                        mv.name
-                    )));
-                }
-                _ => {}
-            }
-            if let Some(ref to_table) = mv.to_table
-                && !all_table_names.contains(to_table)
-            {
-                return Err(OntologyError::Validation(format!(
-                    "materialized_view '{}': to_table '{}' is not an ontology-tracked table; \
-                     it would be orphaned during schema version cleanup",
-                    mv.name, to_table
-                )));
-            }
-            Ok(crate::entities::MaterializedViewDefinition {
-                name: mv.name,
-                to_table: mv.to_table,
-                select_query: mv.select_query,
-                engine: mv.engine,
-                engine_args: mv.engine_args,
-                order_by: mv.order_by,
-                populate: mv.populate,
-            })
-        })
+        .map(|mv| validate_materialized_view(mv, &all_table_names, &unversioned_table_names))
         .collect::<Result<Vec<_>, _>>()?;
 
     ontology.refreshable_materialized_views = schema
@@ -1284,6 +1257,57 @@ fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), Ont
     Ok(())
 }
 
+fn validate_materialized_view(
+    mv: MaterializedViewYaml,
+    all_table_names: &std::collections::HashSet<String>,
+    unversioned_table_names: &std::collections::HashSet<String>,
+) -> Result<crate::entities::MaterializedViewDefinition, OntologyError> {
+    match (&mv.to_table, &mv.engine) {
+        (None, None) => {
+            return Err(OntologyError::Validation(format!(
+                "materialized_view '{}': must set either `to_table` or `engine`",
+                mv.name
+            )));
+        }
+        (Some(_), Some(_)) => {
+            return Err(OntologyError::Validation(format!(
+                "materialized_view '{}': `to_table` and `engine` are mutually exclusive",
+                mv.name
+            )));
+        }
+        _ => {}
+    }
+    if let Some(ref to_table) = mv.to_table
+        && !all_table_names.contains(to_table)
+    {
+        return Err(OntologyError::Validation(format!(
+            "materialized_view '{}': to_table '{}' is not an ontology-tracked table; \
+             it would be orphaned during schema version cleanup",
+            mv.name, to_table
+        )));
+    }
+    if !mv.versioned
+        && let Some(ref to_table) = mv.to_table
+        && !unversioned_table_names.contains(to_table)
+    {
+        return Err(OntologyError::Validation(format!(
+            "materialized_view '{}': unversioned view cannot target versioned table '{}'; \
+             the target would be dropped on version rollover, orphaning the view",
+            mv.name, to_table
+        )));
+    }
+    Ok(crate::entities::MaterializedViewDefinition {
+        name: mv.name,
+        versioned: mv.versioned,
+        to_table: mv.to_table,
+        select_query: mv.select_query,
+        engine: mv.engine,
+        engine_args: mv.engine_args,
+        order_by: mv.order_by,
+        populate: mv.populate,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1795,5 +1819,61 @@ mod tests {
         );
 
         validate_etl_edges_match_variants(&ontology).expect("matching variants should load");
+    }
+
+    fn mv_yaml(name: &str, versioned: bool, to_table: Option<&str>) -> MaterializedViewYaml {
+        MaterializedViewYaml {
+            name: name.to_string(),
+            versioned,
+            to_table: to_table.map(str::to_string),
+            select_query: "SELECT 1".to_string(),
+            engine: to_table.is_none().then(|| "MergeTree".to_string()),
+            engine_args: vec![],
+            order_by: vec![],
+            populate: false,
+        }
+    }
+
+    #[test]
+    fn unversioned_mv_targeting_versioned_table_is_rejected() {
+        let all: std::collections::HashSet<String> = ["retention".to_string()].into();
+        let unversioned = std::collections::HashSet::new();
+
+        let err = validate_materialized_view(
+            mv_yaml("sink", false, Some("retention")),
+            &all,
+            &unversioned,
+        )
+        .expect_err("unversioned view must reject a versioned target");
+        assert!(matches!(err, OntologyError::Validation(_)));
+    }
+
+    #[test]
+    fn unversioned_mv_targeting_unversioned_table_loads() {
+        let all: std::collections::HashSet<String> = ["retention".to_string()].into();
+        let unversioned: std::collections::HashSet<String> = ["retention".to_string()].into();
+
+        let def = validate_materialized_view(
+            mv_yaml("sink", false, Some("retention")),
+            &all,
+            &unversioned,
+        )
+        .expect("unversioned target should load");
+        assert!(!def.versioned);
+        assert_eq!(def.to_table.as_deref(), Some("retention"));
+    }
+
+    #[test]
+    fn versioned_mv_ignores_unversioned_target_rule() {
+        let all: std::collections::HashSet<String> = ["retention".to_string()].into();
+        let unversioned = std::collections::HashSet::new();
+
+        let def = validate_materialized_view(
+            mv_yaml("sink", true, Some("retention")),
+            &all,
+            &unversioned,
+        )
+        .expect("versioned view may target a versioned table");
+        assert!(def.versioned);
     }
 }
