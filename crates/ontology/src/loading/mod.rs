@@ -1833,12 +1833,16 @@ mod tests {
         validate_etl_edges_match_variants(&ontology).expect("matching variants should load");
     }
 
-    fn mv_yaml(name: &str, versioned: bool, to_table: Option<&str>) -> MaterializedViewYaml {
+    fn mv_yaml(
+        versioned: bool,
+        to_table: Option<&str>,
+        select_query: &str,
+    ) -> MaterializedViewYaml {
         MaterializedViewYaml {
-            name: name.to_string(),
+            name: "sink".to_string(),
             versioned,
             to_table: to_table.map(str::to_string),
-            select_query: "SELECT 1".to_string(),
+            select_query: select_query.to_string(),
             engine: to_table.is_none().then(|| "MergeTree".to_string()),
             engine_args: vec![],
             order_by: vec![],
@@ -1847,72 +1851,41 @@ mod tests {
     }
 
     #[test]
-    fn unversioned_mv_targeting_versioned_table_is_rejected() {
-        let all: std::collections::HashSet<String> = ["retention".to_string()].into();
-        let unversioned = std::collections::HashSet::new();
+    fn validate_materialized_view_enforces_unversioned_rules() {
+        // "retention" is unversioned; "gl_edge" is versioned.
+        let all = ["gl_edge".to_string(), "retention".to_string()].into();
+        let unversioned = ["retention".to_string()].into();
 
-        let err = validate_materialized_view(
-            mv_yaml("sink", false, Some("retention")),
-            &all,
-            &unversioned,
-        )
-        .expect_err("unversioned view must reject a versioned target");
-        assert!(matches!(err, OntologyError::Validation(_)));
-    }
+        let cases: [(bool, Option<&str>, &str, bool); 5] = [
+            // (versioned, to_table, select_query, should_load)
+            (false, Some("retention"), "SELECT 1", true),
+            (false, Some("gl_edge"), "SELECT 1", false),
+            (true, Some("gl_edge"), "SELECT 1", true),
+            (
+                false,
+                Some("retention"),
+                "SELECT count() FROM {gl_edge}",
+                false,
+            ),
+            (
+                false,
+                Some("retention"),
+                "SELECT query_id FROM system.query_log",
+                true,
+            ),
+        ];
 
-    #[test]
-    fn unversioned_mv_targeting_unversioned_table_loads() {
-        let all: std::collections::HashSet<String> = ["retention".to_string()].into();
-        let unversioned: std::collections::HashSet<String> = ["retention".to_string()].into();
-
-        let def = validate_materialized_view(
-            mv_yaml("sink", false, Some("retention")),
-            &all,
-            &unversioned,
-        )
-        .expect("unversioned target should load");
-        assert!(!def.versioned);
-        assert_eq!(def.to_table.as_deref(), Some("retention"));
-    }
-
-    #[test]
-    fn versioned_mv_ignores_unversioned_target_rule() {
-        let all: std::collections::HashSet<String> = ["retention".to_string()].into();
-        let unversioned = std::collections::HashSet::new();
-
-        let def = validate_materialized_view(
-            mv_yaml("sink", true, Some("retention")),
-            &all,
-            &unversioned,
-        )
-        .expect("versioned view may target a versioned table");
-        assert!(def.versioned);
-    }
-
-    #[test]
-    fn unversioned_mv_referencing_versioned_placeholder_is_rejected() {
-        let all: std::collections::HashSet<String> =
-            ["gl_edge".to_string(), "retention".to_string()].into();
-        let unversioned: std::collections::HashSet<String> = ["retention".to_string()].into();
-
-        let mut mv = mv_yaml("sink", false, Some("retention"));
-        mv.select_query = "SELECT count() FROM {gl_edge}".to_string();
-
-        let err = validate_materialized_view(mv, &all, &unversioned)
-            .expect_err("versioned placeholder must be rejected");
-        assert!(matches!(err, OntologyError::Validation(_)));
-    }
-
-    #[test]
-    fn unversioned_mv_referencing_system_table_loads() {
-        let all: std::collections::HashSet<String> =
-            ["gl_edge".to_string(), "retention".to_string()].into();
-        let unversioned: std::collections::HashSet<String> = ["retention".to_string()].into();
-
-        let mut mv = mv_yaml("sink", false, Some("retention"));
-        mv.select_query = "SELECT query_id FROM system.query_log".to_string();
-
-        validate_materialized_view(mv, &all, &unversioned)
-            .expect("external system table reference should load");
+        for (versioned, to_table, select_query, should_load) in cases {
+            let result = validate_materialized_view(
+                mv_yaml(versioned, to_table, select_query),
+                &all,
+                &unversioned,
+            );
+            assert_eq!(
+                result.is_ok(),
+                should_load,
+                "versioned={versioned} to_table={to_table:?} query={select_query:?}"
+            );
+        }
     }
 }

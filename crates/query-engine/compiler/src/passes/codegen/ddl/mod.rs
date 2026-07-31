@@ -899,10 +899,10 @@ mod tests {
     }
 
     #[test]
-    fn materialized_view_prefix_resolves_table_placeholders() {
+    fn materialized_view_prefix_applies_only_to_versioned_views() {
         use super::clickhouse::emit_create_materialized_view;
 
-        let mv_def = ontology::MaterializedViewDefinition {
+        let versioned = ontology::MaterializedViewDefinition {
             name: "mv_edge_summary".into(),
             versioned: true,
             to_table: None,
@@ -915,7 +915,7 @@ mod tests {
             populate: false,
         };
         let known_tables = vec!["gl_edge".into(), "gl_project".into()];
-        let mv = build_materialized_view(&mv_def).with_prefix("v5_", &known_tables);
+        let mv = build_materialized_view(&versioned).with_prefix("v5_", &known_tables);
 
         assert_eq!(mv.name, "v5_mv_edge_summary");
         assert!(mv.select_query.contains("v5_gl_edge"));
@@ -925,11 +925,9 @@ mod tests {
         assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS v5_mv_edge_summary"));
         assert!(sql.contains("ENGINE = SummingMergeTree"));
         assert!(sql.contains("ORDER BY (traversal_path)"));
-    }
 
-    #[test]
-    fn unversioned_materialized_view_skips_name_and_to_table_prefix() {
-        let mv_def = ontology::MaterializedViewDefinition {
+        // Unversioned views generate with the empty prefix: name and TO target stay bare.
+        let unversioned = ontology::MaterializedViewDefinition {
             name: "query_log_sink".into(),
             versioned: false,
             to_table: Some("query_log_retention".into()),
@@ -939,8 +937,8 @@ mod tests {
             order_by: vec![],
             populate: false,
         };
-        let known_tables = vec!["query_log_retention".into()];
-        let mv = build_materialized_view(&mv_def).with_prefix("", &known_tables);
+        let mv =
+            build_materialized_view(&unversioned).with_prefix("", &["query_log_retention".into()]);
 
         assert_eq!(mv.name, "query_log_sink");
         assert_eq!(mv.to_table.as_deref(), Some("query_log_retention"));
