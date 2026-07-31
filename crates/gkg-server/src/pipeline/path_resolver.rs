@@ -176,8 +176,11 @@ impl PathResolver {
                 let batches = self
                     .client
                     .query(&sql)
-                    .with_setting("query_id", correlation::query_id("path-argmax"))
-                    .with_setting("log_comment", correlation::log_comment(Some("path:argmax")))
+                    .with_setting("query_id", correlation::query_id("path-argmax-id"))
+                    .with_setting(
+                        "log_comment",
+                        correlation::log_comment(Some("path:argmax-id")),
+                    )
                     .param("ids", ids)
                     .fetch_arrow()
                     .await?;
@@ -200,8 +203,11 @@ impl PathResolver {
                 let batches = self
                     .client
                     .query(&sql)
-                    .with_setting("query_id", correlation::query_id("path-argmax"))
-                    .with_setting("log_comment", correlation::log_comment(Some("path:argmax")))
+                    .with_setting("query_id", correlation::query_id("path-argmax-path"))
+                    .with_setting(
+                        "log_comment",
+                        correlation::log_comment(Some("path:argmax-path")),
+                    )
                     .param("vals", vals)
                     .fetch_arrow()
                     .await?;

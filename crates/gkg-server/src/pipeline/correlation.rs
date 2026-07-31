@@ -29,6 +29,17 @@ fn sanitize(id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use labkit::correlation::CorrelationCaptureLayer;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    fn with_correlation<T>(id: &str, f: impl FnOnce() -> T) -> T {
+        let subscriber = tracing_subscriber::registry().with(CorrelationCaptureLayer::new());
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("test", correlation_id = id);
+            let _guard = span.enter();
+            f()
+        })
+    }
 
     #[test]
     fn sanitize_accepts_clean_tokens() {
@@ -63,6 +74,32 @@ mod tests {
         assert_eq!(
             log_comment(Some("hydration:static")),
             "gkg;hydration:static"
+        );
+    }
+
+    #[test]
+    fn query_id_uses_clean_correlation_id_as_prefix() {
+        let id = with_correlation("req-abc-123", || query_id("base"));
+        assert_eq!(id, "req-abc-123-base");
+    }
+
+    #[test]
+    fn query_id_falls_back_to_ulid_for_dirty_correlation_id() {
+        let id = with_correlation("dirty/id", || query_id("base"));
+        let prefix = id.strip_suffix("-base").expect("stage suffix present");
+        assert_eq!(prefix.len(), 26);
+        assert!(prefix.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn log_comment_includes_raw_correlation_id() {
+        assert_eq!(
+            with_correlation("dirty/id", || log_comment(None)),
+            "gkg;correlation_id=dirty/id"
+        );
+        assert_eq!(
+            with_correlation("req-abc-123", || log_comment(Some("hydration:static"))),
+            "gkg;hydration:static;correlation_id=req-abc-123"
         );
     }
 }
