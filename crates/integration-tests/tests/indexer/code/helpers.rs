@@ -16,9 +16,9 @@ use gitlab_client::GitlabClient;
 use gkg_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
-    ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
-    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
-    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    ClickHouseCodeCheckpointStore, ClickHouseRepositoryStatusStore, ClickHouseStaleDataCleaner,
+    CodeIndexingPipeline, CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService,
+    RepositoryService, config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
@@ -106,6 +106,17 @@ impl CodeIndexingDeps {
         self.cache_dir.path()
     }
 
+    fn repository_status_store(&self) -> Arc<ClickHouseRepositoryStatusStore> {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let table_names =
+            CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
+        let graph_client = Arc::new(self.clickhouse_config.build_client());
+        Arc::new(ClickHouseRepositoryStatusStore::new(
+            graph_client,
+            &table_names,
+        ))
+    }
+
     pub fn code_indexing_task_handler_with_writer(
         &self,
         writer: Arc<indexer::clickhouse::ClickHouseWriter>,
@@ -139,6 +150,7 @@ impl CodeIndexingDeps {
             pipeline,
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
+            self.repository_status_store() as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
             CodeIndexingTaskRequest::subscription(),
@@ -151,6 +163,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
+            self.repository_status_store() as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
             CodeIndexingTaskRequest::subscription(),
