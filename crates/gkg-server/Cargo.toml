@@ -10,10 +10,12 @@ path = "src/main.rs"
 
 [features]
 default = []
+fips = ["aws-lc-rs/fips", "rustls/fips"]
 regenerate-protos = []
 testkit = ["gkg-analytics/testkit"]
 
 [dependencies]
+aws-lc-rs = { workspace = true }
 mimalloc = { workspace = true, features = ["secure"] }
 anyhow = { workspace = true }
 arrow = { workspace = true }

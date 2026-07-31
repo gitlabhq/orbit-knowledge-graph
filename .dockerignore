@@ -10,4 +10,5 @@ e2e/
 fixtures/
 helm/
 scripts/
+!scripts/verify-fips-build.sh
 tools/

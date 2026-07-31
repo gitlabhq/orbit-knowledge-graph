@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1.7
+FROM registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest AS builder
+
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y cmake golang-go nasm perl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY . .
+
+ARG SCCACHE_GCS_BUCKET=gl-knowledgegraph-sccache
+ENV CARGO_INCREMENTAL=0
+
+RUN --mount=type=secret,id=sccache_gcs_key \
+    --mount=type=cache,target=/root/.cache/sccache \
+    --mount=type=cache,target=/build/target \
+    SCCACHE_BIN="$(mise which sccache)" && \
+    if [ -s /run/secrets/sccache_gcs_key ]; then \
+      export SCCACHE_GCS_KEY_PATH=/run/secrets/sccache_gcs_key \
+             SCCACHE_GCS_BUCKET="${SCCACHE_GCS_BUCKET}" \
+             SCCACHE_GCS_RW_MODE=READ_WRITE \
+             RUSTC_WRAPPER="$SCCACHE_BIN"; \
+      "$SCCACHE_BIN" --start-server || true; \
+    fi && \
+    cargo build --release -p gkg-server --features fips --locked && \
+    ./scripts/verify-fips-build.sh target/release/gkg-server && \
+    if [ -s /run/secrets/sccache_gcs_key ]; then \
+      "$SCCACHE_BIN" --show-stats || true; \
+    fi && \
+    cp target/release/gkg-server /gkg-server
+
+FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
+
+ARG GKG_VERSION=dev
+ENV GKG_VERSION=$GKG_VERSION
+
+WORKDIR /app
+
+COPY --from=builder /gkg-server /usr/local/bin/gkg-server
+
+ENTRYPOINT ["gkg-server"]

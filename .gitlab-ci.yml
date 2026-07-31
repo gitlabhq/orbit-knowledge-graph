@@ -934,6 +934,19 @@ docker-build-mr:
   script:
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
+docker-build-fips-amd64:
+  extends: .docker-build
+  tags:
+    - ${RUNNER_LARGE}
+  variables:
+    ARCH: amd64
+    DOCKERFILE: Dockerfile.fips
+    IMAGE_NAME: gkg-fips
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:
   stage: build

@@ -29,9 +29,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install rustls CryptoProvider");
+    install_crypto_provider()?;
 
     let args = Args::parse();
     let config = AppConfig::load()?;
@@ -137,6 +135,20 @@ async fn main() -> anyhow::Result<()> {
     signal_task.abort();
 
     result
+}
+
+fn install_crypto_provider() -> anyhow::Result<()> {
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+
+    #[cfg(feature = "fips")]
+    {
+        anyhow::ensure!(provider.fips(), "rustls CryptoProvider is not FIPS capable");
+        aws_lc_rs::try_fips_mode().map_err(anyhow::Error::msg)?;
+    }
+
+    provider
+        .install_default()
+        .map_err(|_| anyhow::anyhow!("Failed to install rustls CryptoProvider"))
 }
 
 async fn run_webserver(

@@ -3,6 +3,7 @@
 set -e
 
 IMAGE_NAME="${IMAGE_NAME:-gkg}"
+DOCKERFILE="${DOCKERFILE:-Dockerfile}"
 
 if [ "$#" -eq 0 ]; then
   echo "Usage: $0 <tag> [tag...]"
@@ -39,6 +40,7 @@ echo "Building for ${PLATFORM}:$TAGS"
 docker buildx create --use 2>/dev/null || true
 
 docker buildx build \
+  --file "$DOCKERFILE" \
   --platform "$PLATFORM" \
   --push \
   --cache-from "type=registry,ref=${CI_REGISTRY_IMAGE}/cache/${IMAGE_NAME}:${PLATFORM##*/}" \
