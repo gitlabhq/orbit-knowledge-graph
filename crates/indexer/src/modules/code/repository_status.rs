@@ -5,15 +5,9 @@ use chrono::{DateTime, Utc};
 use rustc_hash::FxHasher;
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
-use tracing::warn;
 
 use super::config::CodeTableNames;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
-
-/// Repository -> Branch edge kind, routed to the code edge table.
-const ON_BRANCH: &str = "ON_BRANCH";
-/// Repository -> Project edge kind, routed to the default edge table.
-const IN_PROJECT: &str = "IN_PROJECT";
 
 /// Indexing lifecycle of a project x branch. The string is the only value
 /// written to `gl_repository.status`, so the column is enum-bounded.
@@ -61,7 +55,8 @@ impl RepoFailReason {
     }
 }
 
-/// One row of per-branch indexing state, latest-wins on `_version`.
+/// One row of per-branch indexing state, latest-wins on `_version`. Its `id`
+/// is shared with the matching Branch node, so a query joins the two by id.
 #[derive(Debug, Clone)]
 pub struct RepositoryStatusRecord {
     pub traversal_path: String,
@@ -76,7 +71,6 @@ pub struct RepositoryStatusRecord {
 }
 
 impl RepositoryStatusRecord {
-    /// Duration between start and completion, 0 while still indexing.
     fn duration_ms(&self) -> i64 {
         match self.completed_at {
             Some(done) => done
@@ -98,10 +92,8 @@ pub fn repository_id(project_id: i64, branch: &str) -> i64 {
 }
 
 #[derive(Debug, Error)]
-pub enum RepositoryStatusError {
-    #[error("query failed: {0}")]
-    Query(String),
-}
+#[error("query failed: {0}")]
+pub struct RepositoryStatusError(String);
 
 #[async_trait]
 pub trait RepositoryStatusStore: Send + Sync {
@@ -110,30 +102,24 @@ pub trait RepositoryStatusStore: Send + Sync {
 
 pub struct ClickHouseRepositoryStatusStore {
     client: Arc<ArrowClickHouseClient>,
-    node_table: String,
-    on_branch_edge_table: String,
-    in_project_edge_table: String,
+    table: String,
 }
 
 impl ClickHouseRepositoryStatusStore {
     pub fn new(client: Arc<ArrowClickHouseClient>, table_names: &CodeTableNames) -> Self {
         Self {
             client,
-            node_table: table_names.repository.clone(),
-            on_branch_edge_table: table_names.edge_table_for(ON_BRANCH).to_string(),
-            in_project_edge_table: table_names.edge_table_for(IN_PROJECT).to_string(),
+            table: table_names.repository.clone(),
         }
     }
+}
 
-    async fn insert_node(
-        &self,
-        record: &RepositoryStatusRecord,
-        id: i64,
-    ) -> Result<(), RepositoryStatusError> {
-        let table = &self.node_table;
+#[async_trait]
+impl RepositoryStatusStore for ClickHouseRepositoryStatusStore {
+    async fn record(&self, record: &RepositoryStatusRecord) -> Result<(), RepositoryStatusError> {
         let started_at = record.started_at.format(TIMESTAMP_FORMAT).to_string();
-        // An empty string parses to NULL, so the terminal-only `completed_at`
-        // stays null on the start row without a Nullable bind param.
+        // An empty string parses to NULL, so the start row leaves completed_at
+        // null without a Nullable bind param.
         let completed_at = record
             .completed_at
             .map(|ts| ts.format(TIMESTAMP_FORMAT).to_string())
@@ -145,17 +131,15 @@ impl ClickHouseRepositoryStatusStore {
                 INSERT INTO {table}
                 (id, traversal_path, project_id, branch, status, fail_reason, last_task_id, last_commit, started_at, completed_at, duration_ms)
                 VALUES ({{id:Int64}}, {{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{status:String}}, {{fail_reason:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{started_at:String}}, parseDateTime64BestEffortOrNull({{completed_at:String}}, 6), {{duration_ms:Int64}})
-            "#
+            "#,
+                table = self.table
             ))
-            .param("id", id)
+            .param("id", repository_id(record.project_id, &record.branch))
             .param("traversal_path", &record.traversal_path)
             .param("project_id", record.project_id)
             .param("branch", &record.branch)
             .param("status", record.status.as_str())
-            .param(
-                "fail_reason",
-                record.fail_reason.map(RepoFailReason::as_str).unwrap_or_default(),
-            )
+            .param("fail_reason", record.fail_reason.map(RepoFailReason::as_str).unwrap_or_default())
             .param("last_task_id", record.last_task_id)
             .param("last_commit", record.last_commit.as_deref().unwrap_or_default())
             .param("started_at", started_at)
@@ -163,79 +147,7 @@ impl ClickHouseRepositoryStatusStore {
             .param("duration_ms", record.duration_ms())
             .execute()
             .await
-            .map_err(|e| RepositoryStatusError::Query(e.to_string()))?;
-
-        Ok(())
-    }
-
-    /// Repository -> Branch (ON_BRANCH) into the code edge table, which carries
-    /// project_id + branch columns the default edge table lacks.
-    async fn insert_on_branch_edge(
-        &self,
-        record: &RepositoryStatusRecord,
-        id: i64,
-    ) -> Result<(), RepositoryStatusError> {
-        let table = &self.on_branch_edge_table;
-        self.client
-            .insert_query(&format!(
-                r#"
-                INSERT INTO {table}
-                (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags)
-                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{source_id:Int64}}, 'Repository', 'ON_BRANCH', {{target_id:Int64}}, 'Branch', [], [])
-            "#
-            ))
-            .param("traversal_path", &record.traversal_path)
-            .param("project_id", record.project_id)
-            .param("branch", &record.branch)
-            .param("source_id", id)
-            .param("target_id", id)
-            .execute()
-            .await
-            .map_err(|e| RepositoryStatusError::Query(e.to_string()))?;
-
-        Ok(())
-    }
-
-    /// Repository -> Project (IN_PROJECT) into the default edge table.
-    async fn insert_in_project_edge(
-        &self,
-        record: &RepositoryStatusRecord,
-        id: i64,
-    ) -> Result<(), RepositoryStatusError> {
-        let table = &self.in_project_edge_table;
-        self.client
-            .insert_query(&format!(
-                r#"
-                INSERT INTO {table}
-                (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags)
-                VALUES ({{traversal_path:String}}, {{source_id:Int64}}, 'Repository', 'IN_PROJECT', {{target_id:Int64}}, 'Project', [], [])
-            "#
-            ))
-            .param("traversal_path", &record.traversal_path)
-            .param("source_id", id)
-            .param("target_id", record.project_id)
-            .execute()
-            .await
-            .map_err(|e| RepositoryStatusError::Query(e.to_string()))?;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl RepositoryStatusStore for ClickHouseRepositoryStatusStore {
-    async fn record(&self, record: &RepositoryStatusRecord) -> Result<(), RepositoryStatusError> {
-        let id = repository_id(record.project_id, &record.branch);
-        self.insert_node(record, id).await?;
-        // Edges are idempotent (ReplacingMergeTree on the same key), so a failure
-        // here does not corrupt the node row we already wrote; log and move on.
-        if let Err(error) = self.insert_on_branch_edge(record, id).await {
-            warn!(project_id = record.project_id, %error, "failed to write Repository ON_BRANCH edge");
-        }
-        if let Err(error) = self.insert_in_project_edge(record, id).await {
-            warn!(project_id = record.project_id, %error, "failed to write Repository IN_PROJECT edge");
-        }
-        Ok(())
+            .map_err(|e| RepositoryStatusError(e.to_string()))
     }
 }
 
@@ -293,8 +205,7 @@ mod tests {
 
     #[test]
     fn repository_id_is_deterministic_and_non_negative() {
-        let cases = [(1_i64, "main"), (42, "feature/x"), (i64::MAX, "main")];
-        for (project_id, branch) in cases {
+        for (project_id, branch) in [(1_i64, "main"), (42, "feature/x"), (i64::MAX, "main")] {
             let id = repository_id(project_id, branch);
             assert!(id >= 0, "repository_id({project_id}, {branch:?}) = {id}");
             assert_eq!(id, repository_id(project_id, branch));

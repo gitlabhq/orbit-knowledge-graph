@@ -63,7 +63,7 @@ The sub-graph of source code structure and relationships — branches, directori
 _Avoid_: call graph (refers only to invocation relationships, not the full sub-graph)
 
 **Repository (Node)**:
-The per-branch code indexing status **Node** (`gl_repository`), carrying `status` and `fail_reason`. Unlike **Code Graph** nodes, a Repository row is written when indexing starts and again when it ends, so a branch that times out or fails still leaves a row behind. Shares its `id` with the matching **Branch**. Distinct from the success-only **Code Indexing Checkpoint**, which it does not replace.
+The per-branch code indexing status **Node** (`gl_repository`), carrying `status` and `fail_reason`. Unlike **Code Graph** nodes, a Repository row is written when indexing starts and again when it ends, so a branch that times out or fails still leaves a row behind. Shares its `id` with the matching **Branch**, so the two join by id. Distinct from the success-only **Code Indexing Checkpoint**, which it does not replace.
 _Avoid_: repo status table (the graph shape is a node, not a side table)
 
 **Namespace Partitioning**:

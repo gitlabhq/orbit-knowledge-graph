@@ -110,7 +110,7 @@ graph TD
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`, `User`, `Project`, `WorkItem` | `Group`, `Project`, `Branch`, `WorkItem` | A group contains a subgroup or project; a user namespace contains a project; a project contains a branch; a work item contains a child work item. |
-| `IN_PROJECT`                        | `Branch`, `Repository`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `PackageFile`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest`, `Package`, `PackageFile`, `ContainerRepository`, `Dependency` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
 | `BUILT_BY`                          | `Package`, `PackageFile` | `Pipeline` | A package or package file was built by a CI/CD pipeline (sourced from the `packages_build_infos` and `packages_package_file_build_infos` join tables). |
 | `HAS_PACKAGE_FILE`                  | `Package`      | `PackageFile`  | A package contains a package file (FK on the package file).                                             |
 | `DECLARES_DEPENDENCY`               | `Package`      | `Dependency`   | A package declares a dependency (sourced from the `packages_dependency_links` join table).              |
@@ -175,7 +175,7 @@ The Code Graph represents the structure and relationships within the source code
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
-| `Repository`          | Per-branch code indexing status, including failures that leave no code rows behind. Shares its `id` with the matching `Branch`. | `id`, `branch`, `project_id`, `status`, `fail_reason`, `last_task_id`, `last_commit`, `started_at`, `completed_at`, `duration_ms` |
+| `Repository`          | Per-branch code indexing status, including failures that leave no code rows behind. Shares its `id` with the matching `Branch`, so the two join by id. | `id`, `branch`, `project_id`, `status`, `fail_reason`, `last_task_id`, `last_commit`, `started_at`, `completed_at`, `duration_ms` |
 | `Commit`              | A Git commit, shared target for commit-related edges. | `id`, `sha`, `project_id`                                  |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
@@ -189,8 +189,6 @@ graph TD
     Branch -- CONTAINS --> Directory
     Branch -- CONTAINS --> File
     Branch -- IN_PROJECT --> Project
-    Repository -- ON_BRANCH --> Branch
-    Repository -- IN_PROJECT --> Project
     Directory -- CONTAINS --> Directory
     Directory -- CONTAINS --> File
     File -- DEFINES --> Definition
@@ -208,8 +206,8 @@ graph TD
 | Relationship | From Node | To Node | Description |
 | --- | --- | --- | --- |
 | `CONTAINS`   | `Branch`, `Directory` | `Directory`, `File` | A branch or directory lexically contains a directory or file. |
-| `IN_PROJECT` | `Branch`, `Repository` | `Project`          | A branch (or its indexing status) belongs to a project (links the Code Graph to the Namespace Graph). |
-| `ON_BRANCH`  | `Directory`, `File`, `Definition`, `ImportedSymbol`, `Repository` | `Branch` | Snapshots a code-graph node to a specific branch and commit; `Repository` carries that branch's indexing status. |
+| `IN_PROJECT` | `Branch`              | `Project`           | A branch belongs to a project (links the Code Graph to the Namespace Graph). |
+| `ON_BRANCH`  | `Directory`, `File`, `Definition`, `ImportedSymbol` | `Branch` | Snapshots a code-graph node to a specific branch and commit. |
 | `DEFINES`    | `File`, `Definition`  | `Definition`        | File-level definition or lexical nesting between two definitions (e.g. a class containing methods). Inheritance is `EXTENDS`; call sites are `CALLS`. |
 | `IMPORTS`    | `File`, `ImportedSymbol` | `ImportedSymbol`, `Definition` | Module-system import edges. Covers `File → ImportedSymbol` for the import statement itself, and `ImportedSymbol → Definition` resolution (JS/TS today). |
 | `CALLS`      | `File`, `Definition`  | `Definition`, `ImportedSymbol` | Function or method invocation. Variants: `Definition → Definition` (resolved call), `File → Definition` (top-level call outside any definition), and `Definition → ImportedSymbol` (call whose target is still an unresolved import). |

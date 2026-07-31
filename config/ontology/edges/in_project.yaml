@@ -81,12 +81,6 @@ variants:
     scope: namespace_anchor
     description: "Branch belongs to project."
 
-  - from_node: { type: Repository, id: id }
-    to_node: { type: Project, id: id }
-    fk_column: project_id
-    scope: namespace_anchor
-    description: "Repository indexing status belongs to project."
-
   - from_node: { type: Deployment, id: id }
     to_node: { type: Project, id: id }
     fk_column: project_id
