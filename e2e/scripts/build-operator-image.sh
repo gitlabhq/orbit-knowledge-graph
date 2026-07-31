@@ -30,6 +30,19 @@ WORKDIR=$(mktemp -d)
 ORIG_DIR="$(pwd)"
 trap 'cd "$ORIG_DIR"; rm -rf "$WORKDIR"' EXIT
 
+# Clean up any terminating Orbit/GitLab CRDs from previous e2e runs.
+for crd in orbits.apps.gitlab.com gitlabs.apps.gitlab.com; do
+  if kubectl get crd "$crd" >/dev/null 2>&1; then
+    log "Cleaning up CRD $crd"
+    kubectl delete crd "$crd" --wait=false 2>/dev/null || true
+    kubectl patch crd "$crd" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+    for _ in $(seq 1 30); do
+      kubectl get crd "$crd" >/dev/null 2>&1 || break
+      sleep 1
+    done
+  fi
+done
+
 log "Cloning operator branch ${OPERATOR_BRANCH}"
 git clone --depth 1 --branch "${OPERATOR_BRANCH}" "${OPERATOR_REPO}" "${WORKDIR}/operator"
 
