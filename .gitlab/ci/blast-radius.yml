@@ -1,10 +1,13 @@
-# Dependency-bump usage report (prototype).
+# Two-way dependency blast radius (prototype).
 #
-# For an MR that bumps a version in Cargo.lock, queries the Knowledge Graph
-# (Orbit) for this project's own import sites of the bumped package and posts
-# a per-file usage table as an MR comment, so a reviewer can size bump risk
-# (which crates/files touch the dependency) at a glance. Only queries this
-# project's ImportedSymbol nodes, so no cross-project visibility is needed.
+# Consumer direction: an MR that bumps a lockfile version gets a per-file
+# table of this project's own import sites of the bumped package, to size
+# bump risk at a glance. Producer direction: an MR that changes the published
+# surface (proto, Go client) gets a ranked table of downstream projects
+# importing that surface (e.g. Workhorse consumes the gkgpb Go module).
+# Published namespaces are auto-discovered from manifests (go.mod,
+# package.json, gemspec); the Ruby proto gem has no static gemspec, so it is
+# passed explicitly via --namespace.
 #
 # Setup: store a token as a masked CI/CD variable BLAST_RADIUS_GITLAB_TOKEN
 # with `api` scope (posting the MR note needs write). The token's user must
@@ -27,6 +30,10 @@ blast-radius-report:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
         - Cargo.lock
+        - Gemfile.lock
+        - go.sum
+        - "**/*.proto"
+        - clients/**/*
       allow_failure: true
   before_script:
     - test -n "${BLAST_RADIUS_GITLAB_TOKEN:-}" || (echo "Missing BLAST_RADIUS_GITLAB_TOKEN" && exit 1)
@@ -36,7 +43,8 @@ blast-radius-report:
     - |
       diff_base="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
       python3 scripts/ci/blast-radius.py "$CI_PROJECT_ID" \
-        --diff-range "${diff_base}...HEAD" > blast-radius.md
+        --diff-range "${diff_base}...HEAD" \
+        --namespace gitlab-gkg-proto > blast-radius.md
     - cat blast-radius.md
     - bash scripts/ci/blast-radius-comment.sh blast-radius.md
   artifacts:
