@@ -38,11 +38,15 @@ pub fn analyze_files(
     root_path: &str,
     sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
+    let root_gone = std::sync::atomic::AtomicBool::new(false);
     // `catch_unwind` isolates per-file panics: a malformed input that trips
     // an OXC invariant takes down that file's analysis, not the pipeline.
     let results: Vec<_> = files
         .par_iter()
-        .map(|relative_path| {
+        .filter_map(|relative_path| {
+            if root_gone.load(std::sync::atomic::Ordering::Relaxed) {
+                return None;
+            }
             let guard = sentinel.map(|s| s.file_start(relative_path));
             let t_file = std::time::Instant::now();
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -59,21 +63,37 @@ pub fn analyze_files(
             // If the sentinel killed this file while OXC was running,
             // convert whatever result we got into a timeout skip.
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
-                return (
+                return Some((
                     relative_path.clone(),
                     Err(AnalyzerError::skip(
                         FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     )),
-                );
+                ));
             }
-            (
+            if matches!(
+                &outcome,
+                Err(AnalyzerError::Fault {
+                    kind: FileFault::FileRead,
+                    ..
+                })
+            ) && !Path::new(root_path).exists()
+            {
+                if !root_gone.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    tracing::warn!(
+                        root_path,
+                        "js: repository tree removed mid-analysis, dropping remaining files"
+                    );
+                }
+                return None;
+            }
+            Some((
                 relative_path.clone(),
                 outcome.map(|mut f| {
                     f.parse_ms = parse_ms;
                     f
                 }),
-            )
+            ))
         })
         .collect();
 
