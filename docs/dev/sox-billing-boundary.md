@@ -26,7 +26,7 @@ Inside `gkg-server`, the file `crates/gkg-server/src/billing_adapter.rs`
 is the sole `Claims → BillingInputs` conversion point — every field that
 ends up in a billing event flows through this file. A small number of
 other files in `gkg-server` invoke those conversions at the call site
-(e.g. `BillingInputs::from(&claims)`) and hold references to
+(e.g. `billing_adapter::billing_inputs(&claims, …)`) and hold references to
 `BillingTracker` / `QuotaService` constructed at startup. They do not
 define what data crosses into a billing event — that logic lives only
 in `billing_adapter.rs`.

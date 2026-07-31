@@ -4,7 +4,7 @@ use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
-use gkg_billing::{BillingInputs, BillingObserver, BillingTracker};
+use gkg_billing::{BillingObserver, BillingTracker};
 use gkg_server_config::AnalyticsConfig;
 use indexer::schema::version::SCHEMA_VERSION;
 use nats_client::NatsClient;
@@ -93,7 +93,7 @@ impl QueryPipelineService {
             Box::new(OTelPipelineObserver::start()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
-                BillingInputs::from(&claims),
+                crate::billing_adapter::billing_inputs(&claims, coding_agent.clone()),
             )),
             Box::new(AnalyticsObserver::new(
                 self.analytics_tracker.clone(),

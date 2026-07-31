@@ -1,7 +1,7 @@
 //! Input shape for `BillingObserver`.
 //!
 //! `gkg-billing` does not know about `auth::Claims`. The single conversion
-//! point — `impl From<&Claims> for BillingInputs` — lives in
+//! point — `billing_adapter::billing_inputs` — lives in
 //! `crates/gkg-server/src/billing_adapter.rs`. This struct is the entire
 //! contract between auth and billing: only these fields cross the boundary.
 
@@ -18,4 +18,6 @@ pub struct BillingInputs {
     pub host_name: Option<String>,
     pub root_namespace_id: Option<i64>,
     pub deployment_type: Option<String>,
+    pub is_gitlab_team_member: Option<bool>,
+    pub coding_agent: Option<String>,
 }
