@@ -208,7 +208,7 @@ message SchemaNodeStyle {
 // ---------------------------------------------------------------------------
 
 // Request for the query DSL grammar.
-message GetQueryDslRequest {
+message GetQueryDslRequest  {
   ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
 }
 
