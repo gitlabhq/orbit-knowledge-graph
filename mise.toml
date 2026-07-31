@@ -123,27 +123,27 @@ run = "cargo build -p orbit-local && cargo nextest run --test cli --no-fail-fast
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
+run = "cargo nextest run --features \"$(./scripts/non-fips-features.sh)\" --test containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run integration tests (requires Docker and `mise colima:start`)"
 
 [tasks."test:integration:server"]
-run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
+run = "cargo nextest run --features \"$(./scripts/non-fips-features.sh)\" --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
 
 [tasks."test:integration:data"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
+run = "cargo nextest run --features \"$(./scripts/non-fips-features.sh)\" --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run data correctness integration tests"
 
 [tasks."test:integration:corpus"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(corpus_smoke)'"
+run = "cargo nextest run --features \"$(./scripts/non-fips-features.sh)\" --test containers --no-fail-fast --retries 0 --no-capture -E 'test(corpus_smoke)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run the query-corpus smoke test (every corpus query compiles + runs)"
 
 [tasks."test:integration:indexer"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"
+run = "cargo nextest run --features \"$(./scripts/non-fips-features.sh)\" --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (schema migration, engine, NATS, namespace deletion)"
 
@@ -153,7 +153,7 @@ env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (code indexing)"
 
 [tasks."test:integration:indexer:sdlc:scenario"]
-run = "SCENARIO_FILTER='{{arg(name='filter')}}' cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(scenario_indexing)'"
+run = "SCENARIO_FILTER='{{arg(name='filter')}}' cargo nextest run --features \"$(./scripts/non-fips-features.sh)\" --test containers --no-fail-fast --retries 0 --no-capture -E 'test(scenario_indexing)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run SDLC indexer scenarios matching a folder/name substring, e.g. `mise test:integration:indexer:sdlc:scenario ci/` or `... processes_jobs`"
 
@@ -167,7 +167,7 @@ description = "Check Rust formatting"
 
 [tasks."lint:code"]
 run = [
-  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings",
+  "NON_FIPS_EXCLUDED_PACKAGES=duckdb-client cargo clippy --workspace --exclude duckdb-client --all-targets --features \"$(NON_FIPS_EXCLUDED_PACKAGES=duckdb-client ./scripts/non-fips-features.sh)\" -- -D warnings",
   "cargo clippy -p duckdb-client --all-targets -- -D warnings",
 ]
 description = "Run clippy lint checks"
@@ -179,7 +179,7 @@ description = "Check for unused workspace and crate dependencies"
 [tasks."lint:code:fix"]
 run = [
   "cargo fmt",
-  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "NON_FIPS_EXCLUDED_PACKAGES=duckdb-client cargo clippy --workspace --exclude duckdb-client --all-targets --features \"$(NON_FIPS_EXCLUDED_PACKAGES=duckdb-client ./scripts/non-fips-features.sh)\" --fix --allow-dirty -- -D warnings",
   "cargo clippy -p duckdb-client --all-targets --fix --allow-dirty -- -D warnings",
   "cargo fmt",
 ]

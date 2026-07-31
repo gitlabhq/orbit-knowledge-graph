@@ -447,7 +447,8 @@ lint-check:
     - .sccache-template
     - .mr-only-rules
   script:
-    - cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings
+    # FIPS is validated by docker-build-fips-amd64 with its native toolchain.
+    - NON_FIPS_EXCLUDED_PACKAGES=duckdb-client cargo clippy --workspace --exclude duckdb-client --all-targets --features "$(NON_FIPS_EXCLUDED_PACKAGES=duckdb-client ./scripts/non-fips-features.sh)" -- -D warnings
     - cargo clippy -p duckdb-client --all-targets -- -D warnings
     - sccache --show-stats || true
 
@@ -480,6 +481,7 @@ cargo-geiger:
   script:
     - cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | while IFS= read -r pkg; do
         if [ "$pkg" = "duckdb-client" ]; then cargo geiger -p "$pkg" || true;
+        elif [ "$pkg" = "gkg-server" ]; then cargo geiger -p "$pkg" --features regenerate-protos,testkit || true;
         else cargo geiger -p "$pkg" --all-features || true; fi;
       done
   allow_failure: true
@@ -687,7 +689,7 @@ integration-test:
       wait
   script:
     # corpus-smoke runs as its own parallel job below.
-    - cargo nextest run --profile ci --all-features --test containers -E 'not test(corpus_smoke)'
+    - cargo nextest run --profile ci --features "$(./scripts/non-fips-features.sh)" --test containers -E 'not test(corpus_smoke)'
     - sccache --show-stats || true
 
 corpus-smoke-test:
@@ -711,7 +713,7 @@ corpus-smoke-test:
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers -E 'test(corpus_smoke)'
+    - cargo nextest run --profile ci --features "$(./scripts/non-fips-features.sh)" --test containers -E 'test(corpus_smoke)'
     - sccache --show-stats || true
 
 # Benchmark Stage
