@@ -47,7 +47,7 @@ for crd in orbits.apps.gitlab.com gitlabs.apps.gitlab.com; do
   $KC wait --for=condition=Established crd/"$crd" --timeout=60s 2>/dev/null || true
 done
 
-$KC rollout status deploy/gitlab-operator -n "$NS" --timeout=120s
+$KC rollout status deploy/gitlab-controller-manager -n "$NS" --timeout=120s
 
 rm -rf "$OPERATOR_DIR"
 trap - EXIT
@@ -79,7 +79,7 @@ for i in $(seq 1 30); do
 done
 if [ -z "$READY" ]; then
   log "ERROR: No GKG Deployments after 5 minutes"
-  $KC logs deploy/gitlab-operator -n "$NS" --tail=50 || true
+  $KC logs deploy/gitlab-controller-manager -n "$NS" --tail=50 || true
   exit 1
 fi
 
