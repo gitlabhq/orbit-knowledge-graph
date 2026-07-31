@@ -1405,11 +1405,21 @@ sm-e2e-spike:
           kubectl -n "e2e-${E2E_SHA}-gkg" logs deploy/gitlab-operator || true
           exit 1
         fi
-        # Wait for the webserver to be ready (not just the Deployment existing).
-        echo "==> Waiting for GKG webserver pods to be ready..."
+        # Wait for pods to be ready and the webserver health to report healthy.
+        echo "==> Waiting for GKG rollout..."
         kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-webserver --timeout=300s || true
         kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-dispatcher --timeout=120s || true
         kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-indexer-default --timeout=120s || true
+        echo "==> Waiting for GKG /ready to report healthy..."
+        for i in $(seq 1 60); do
+          HEALTH=$(kubectl -n "e2e-${E2E_SHA}-gkg" exec deploy/orbit-gkg-webserver -- wget -qO- http://localhost:8080/ready 2>/dev/null || echo '{}')
+          if echo "$HEALTH" | grep -q '"status":"ok"'; then
+            echo "==> GKG webserver is healthy"
+            break
+          fi
+          echo "  /ready: $HEALTH ($i/60)"
+          sleep 5
+        done
         echo "==> GKG pods:"
         kubectl -n "e2e-${E2E_SHA}-gkg" get pods
       fi
