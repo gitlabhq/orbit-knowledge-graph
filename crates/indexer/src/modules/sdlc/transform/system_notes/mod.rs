@@ -243,11 +243,16 @@ where
         });
     }
 
-    if !dropped_actions.is_empty() || !dropped_noteables.is_empty() {
+    if !dropped_actions.is_empty() {
         debug!(
             ?dropped_actions,
+            "system_notes: dropped notes with unrecognized action"
+        );
+    }
+    if !dropped_noteables.is_empty() {
+        debug!(
             ?dropped_noteables,
-            "system_notes: dropped notes with no ingested action"
+            "system_notes: dropped notes with unsupported noteable_type"
         );
     }
 
