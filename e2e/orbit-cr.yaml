@@ -1,0 +1,109 @@
+# Orbit CR for self-managed deployment via the GitLab Operator.
+# This is the single file a customer writes. The operator renders the GKG
+# chart from this spec, merges its defaults template, and creates all
+# Deployments, Services, Secrets, and Certificates.
+#
+# Shell variables (${NS}, ${GKG_CHART}, etc.) are substituted by envsubst
+# in deploy-operator.sh before kubectl apply.
+
+apiVersion: apps.gitlab.com/v1beta1
+kind: Orbit
+metadata:
+  name: orbit
+  namespace: ${NS}
+spec:
+  gkg:
+    version: "${GKG_CHART}"
+    values:
+      extraResources:
+        - apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: gkg-grpc-tls
+          spec:
+            secretName: gkg-grpc-tls
+            duration: 8760h
+            issuerRef:
+              name: e2e-ca
+              kind: ClusterIssuer
+            dnsNames:
+              - orbit-gkg-webserver.${NS}.svc.cluster.local
+      image:
+        repository: "${GKG_IMAGE}"
+        tag: "${GKG_TAG}"
+        pullPolicy: IfNotPresent
+      secrets:
+        perKey:
+          gitlabJwtVerifyingKey: { secretName: gkg-secrets }
+          gitlabJwtSigningKey: { secretName: gkg-secrets }
+          datalakePassword: { secretName: gkg-secrets }
+          graphPassword: { secretName: gkg-secrets }
+          graphReadPassword: { secretName: gkg-secrets }
+      webserver:
+        replicas: 1
+        logLevel: info
+        probes: { enabled: true }
+        resources:
+          requests: { cpu: 250m, memory: 512Mi }
+          limits: { cpu: "1", memory: 1Gi }
+      indexer:
+        replicas: 1
+        logLevel: info
+        probes: { enabled: true }
+        tmpSizeLimit: 5Gi
+        resources:
+          requests: { cpu: 250m, memory: 512Mi }
+          limits: { cpu: "1", memory: 1Gi }
+      healthCheck:
+        replicas: 1
+        logLevel: info
+        probes: { enabled: true }
+        targets:
+          - deployments:
+              - orbit-gkg-indexer-default
+              - orbit-gkg-webserver
+              - orbit-gkg-dispatcher
+      clickhouse:
+        datalake:
+          host: clickhouse.${CLICKHOUSE_NS}.svc.cluster.local
+          httpPort: 8123
+          database: datalake
+          user: gkg_siphon_reader
+          ssl: false
+        graph:
+          host: clickhouse.${CLICKHOUSE_NS}.svc.cluster.local
+          httpPort: 8123
+          database: gkg
+          user: gkg_writer
+          readUser: gkg_reader
+          ssl: false
+      nats:
+        url: "nats://nats.${NATS_NS}.svc.cluster.local:4222"
+        consumerName: gkg-indexer
+        fetchExpiresSecs: 5
+        tls: { enabled: false }
+      gitlab:
+        baseUrl: "http://gitlab-webservice-default.${GITLAB_NS}.svc.cluster.local:8181"
+      tls:
+        enabled: true
+        existingSecret: gkg-grpc-tls
+      schedule:
+        tasks:
+          siphon: { events_stream_name: e2e_siphon_event_stream }
+          global: { cron: "*/2 * * * * *" }
+          namespace: { cron: "*/2 * * * * *", sweep_interval_secs: 10 }
+          code-backfill: { cron: "*/5 * * * * *" }
+          table-cleanup: { cron: "0 0 3 * * *" }
+          namespace-deletion: { cron: "0 0 3 * * *" }
+          stale-edge-reconciliation: { cron: "*/10 * * * * *" }
+          migration-completion: { cron: "*/10 * * * * *" }
+      engine:
+        max_concurrent_workers: 13
+        concurrency_groups: { sdlc: 10, code: 3 }
+        topics:
+          global-handler: { concurrency_group: sdlc, max_attempts: 1, retry_interval_secs: 60 }
+          namespace-handler: { concurrency_group: sdlc, max_attempts: 1, retry_interval_secs: 60 }
+          code-indexing-task: { concurrency_group: code, max_attempts: 3, retry_interval_secs: 60 }
+        handlers:
+          code-indexing-task:
+            pipeline: { write_min_flush_rows: 1, write_buffer_age_secs: 2, write_max_flush_age_secs: 5 }

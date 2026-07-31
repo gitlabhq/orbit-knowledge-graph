@@ -53,116 +53,17 @@ rm -rf "$OPERATOR_DIR"
 trap - EXIT
 
 # --- 3. Orbit CR (the one file a customer writes) ---
-log "Applying Orbit CR"
+log "Applying Orbit CR from e2e/orbit-cr.yaml"
 
 V_FILE="${E2E_DIR}/config/versions.yaml"
-GKG_CHART=$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['chart'])")
-GKG_IMAGE="${E2E_GKG_IMAGE:-$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['image']['repository'])")}"
-GKG_TAG="${E2E_GKG_TAG:-$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['image']['tag'])")}"
+export GKG_CHART=$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['chart'])")
+export GKG_IMAGE="${E2E_GKG_IMAGE:-$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['image']['repository'])")}"
+export GKG_TAG="${E2E_GKG_TAG:-$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['image']['tag'])")}"
+export CLICKHOUSE_NS="e2e-${E2E_SHA}-clickhouse"
+export NATS_NS="e2e-${E2E_SHA}-nats"
+export GITLAB_NS="e2e-${E2E_SHA}-gitlab"
 
-$KC apply -n "$NS" -f - <<EOF
-apiVersion: apps.gitlab.com/v1beta1
-kind: Orbit
-metadata:
-  name: orbit
-  namespace: ${NS}
-spec:
-  gkg:
-    version: "${GKG_CHART}"
-    values:
-      extraResources:
-        - apiVersion: cert-manager.io/v1
-          kind: Certificate
-          metadata:
-            name: gkg-grpc-tls
-          spec:
-            secretName: gkg-grpc-tls
-            duration: 8760h
-            issuerRef:
-              name: e2e-ca
-              kind: ClusterIssuer
-            dnsNames:
-              - orbit-gkg-webserver.${NS}.svc.cluster.local
-      image:
-        repository: "${GKG_IMAGE}"
-        tag: "${GKG_TAG}"
-        pullPolicy: IfNotPresent
-      secrets:
-        perKey:
-          gitlabJwtVerifyingKey: { secretName: gkg-secrets }
-          gitlabJwtSigningKey: { secretName: gkg-secrets }
-          datalakePassword: { secretName: gkg-secrets }
-          graphPassword: { secretName: gkg-secrets }
-          graphReadPassword: { secretName: gkg-secrets }
-      webserver:
-        replicas: 1
-        logLevel: info
-        probes: { enabled: true }
-        resources:
-          requests: { cpu: 250m, memory: 512Mi }
-          limits: { cpu: "1", memory: 1Gi }
-      indexer:
-        replicas: 1
-        logLevel: info
-        probes: { enabled: true }
-        tmpSizeLimit: 5Gi
-        resources:
-          requests: { cpu: 250m, memory: 512Mi }
-          limits: { cpu: "1", memory: 1Gi }
-      healthCheck:
-        replicas: 1
-        logLevel: info
-        probes: { enabled: true }
-        targets:
-          - deployments:
-              - orbit-gkg-indexer-default
-              - orbit-gkg-webserver
-              - orbit-gkg-dispatcher
-      clickhouse:
-        datalake:
-          host: clickhouse.e2e-${E2E_SHA}-clickhouse.svc.cluster.local
-          httpPort: 8123
-          database: datalake
-          user: gkg_siphon_reader
-          ssl: false
-        graph:
-          host: clickhouse.e2e-${E2E_SHA}-clickhouse.svc.cluster.local
-          httpPort: 8123
-          database: gkg
-          user: gkg_writer
-          readUser: gkg_reader
-          ssl: false
-      nats:
-        url: "nats://nats.e2e-${E2E_SHA}-nats.svc.cluster.local:4222"
-        consumerName: gkg-indexer
-        fetchExpiresSecs: 5
-        tls: { enabled: false }
-      gitlab:
-        baseUrl: "http://gitlab-webservice-default.e2e-${E2E_SHA}-gitlab.svc.cluster.local:8181"
-      tls:
-        enabled: true
-        existingSecret: gkg-grpc-tls
-      schedule:
-        tasks:
-          siphon: { events_stream_name: e2e_siphon_event_stream }
-          global: { cron: "*/2 * * * * *" }
-          namespace: { cron: "*/2 * * * * *", sweep_interval_secs: 10 }
-          code-backfill: { cron: "*/5 * * * * *" }
-          table-cleanup: { cron: "0 0 3 * * *" }
-          namespace-deletion: { cron: "0 0 3 * * *" }
-          stale-edge-reconciliation: { cron: "*/10 * * * * *" }
-          migration-completion: { cron: "*/10 * * * * *" }
-      engine:
-        max_concurrent_workers: 13
-        concurrency_groups: { sdlc: 10, code: 3 }
-        topics:
-          global-handler: { concurrency_group: sdlc, max_attempts: 1, retry_interval_secs: 60 }
-          namespace-handler: { concurrency_group: sdlc, max_attempts: 1, retry_interval_secs: 60 }
-          code-indexing-task: { concurrency_group: code, max_attempts: 3, retry_interval_secs: 60 }
-        handlers:
-          code-indexing-task:
-            pipeline: { write_min_flush_rows: 1, write_buffer_age_secs: 2, write_max_flush_age_secs: 5 }
-EOF
+envsubst < "${E2E_DIR}/orbit-cr.yaml" | $KC apply -n "$NS" -f -
 
 # --- 4. Wait for GKG to come up ---
 log "Waiting for GKG Deployments..."
