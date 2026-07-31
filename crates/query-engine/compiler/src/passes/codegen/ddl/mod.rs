@@ -117,23 +117,12 @@ pub fn generate_refreshable_materialized_views(
         .collect()
 }
 
-/// Versioned views only, returned unprefixed. Call
-/// [`generate_graph_materialized_views_with_prefix`] to apply a schema
-/// version prefix to view names, `TO` targets, and table references inside
-/// the `SELECT` query. Unversioned views come from
-/// [`generate_unversioned_materialized_views`].
+/// Versioned views only, returned unprefixed; unversioned views come from [`generate_unversioned_materialized_views`].
 pub fn generate_graph_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     generate_graph_materialized_views_with_prefix(ontology, "")
 }
 
-/// Generates the versioned materialized view DDL with a schema-version prefix
-/// applied to view names, `TO` targets, and `{table_name}` placeholders in the
-/// `SELECT` query. Unversioned views are excluded; see
-/// [`generate_unversioned_materialized_views`].
-///
-/// The prefix is also applied to every known graph table name found inside
-/// placeholders, so `{gl_edge}` becomes `v54_gl_edge` when `prefix` is
-/// `"v54_"`.
+/// Versioned views only, prefixing view names, `TO` targets, and `{table_name}` placeholders (e.g. `{gl_edge}` becomes `v54_gl_edge`).
 pub fn generate_graph_materialized_views_with_prefix(
     ontology: &Ontology,
     prefix: &str,
@@ -148,11 +137,7 @@ pub fn generate_graph_materialized_views_with_prefix(
         .collect()
 }
 
-/// Unversioned views survive schema-version rollover, so their names and `TO`
-/// targets are never prefixed. The empty prefix resolves `{table_name}`
-/// placeholders to their bare names; ontology validation rejects placeholders
-/// that name a versioned table, so only unversioned tables or external system
-/// tables can appear here.
+/// Unversioned views, never prefixed; ontology validation restricts their placeholders to unversioned or external tables.
 pub fn generate_unversioned_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     let known_tables = collect_table_names(ontology);
 
