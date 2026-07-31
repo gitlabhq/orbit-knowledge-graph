@@ -3,39 +3,81 @@ kind: ServiceAccount
 metadata:
   name: gitlab-operator
 ---
+# Full operator RBAC: the GitLab and Orbit controllers share a ServiceAccount,
+# and both controllers' informers must be able to list/watch their resource
+# types or the cache sync times out.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: gitlab-operator-orbit
+  name: gitlab-operator-e2e
 rules:
-  - apiGroups: ["apps.gitlab.com"]
-    resources: ["orbits", "orbits/status", "orbits/finalizers"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Core resources (both controllers)
   - apiGroups: [""]
-    resources: ["secrets", "configmaps", "services", "persistentvolumeclaims"]
+    resources: ["configmaps", "persistentvolumeclaims", "secrets", "services"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Apps (both controllers)
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # GitLab + Orbit CRDs
+  - apiGroups: ["apps.gitlab.com"]
+    resources: ["gitlabs", "gitlabs/finalizers", "gitlabs/status",
+                "orbits", "orbits/finalizers", "orbits/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Batch (GitLab controller)
   - apiGroups: ["batch"]
-    resources: ["jobs"]
+    resources: ["cronjobs", "jobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Networking (both controllers)
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Discovery (GitLab controller readiness checks)
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  # Autoscaling (GitLab controller)
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Events
   - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch", "update"]
+  # Monitoring (optional, ownIfPermitted)
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["podmonitors", "servicemonitors"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # cert-manager (optional, ownIfPermitted)
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "issuers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Gateway API (optional, ownIfPermitted)
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes", "tcproutes", "gateways", "gatewayclasses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Envoy Gateway (optional, ownIfPermitted)
+  - apiGroups: ["gateway.envoyproxy.io"]
+    resources: ["envoyproxies", "envoypatchpolicies", "clienttrafficpolicies", "securitypolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Application CRD (optional, ownIfPermitted)
+  - apiGroups: ["app.k8s.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # RBAC self-check (ownIfPermitted uses SelfSubjectAccessReview)
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: gitlab-operator-orbit
+  name: gitlab-operator-e2e
 subjects:
   - kind: ServiceAccount
     name: gitlab-operator
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: gitlab-operator-orbit
+  name: gitlab-operator-e2e
   apiGroup: rbac.authorization.k8s.io
