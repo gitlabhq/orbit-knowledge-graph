@@ -5,4 +5,4 @@ DROP USER IF EXISTS gkg_siphon_reader;
 DROP ROLE IF EXISTS gkg_app;
 DROP ROLE IF EXISTS gkg_reader_app;
 DROP ROLE IF EXISTS gkg_siphon_reader_app;
-DROP DATABASE IF EXISTS gkg;
+DROP DATABASE IF EXISTS ${GRAPH_DB};
