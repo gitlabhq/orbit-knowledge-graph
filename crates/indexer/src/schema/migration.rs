@@ -675,7 +675,6 @@ async fn seed_code_scope_checkpoint(
         })
 }
 
-/// Two-step form of `CLONE AS`, which ClickHouse rejects inside Replicated databases (error 344).
 async fn clone_table(
     graph: &ArrowClickHouseClient,
     old_name: &str,
