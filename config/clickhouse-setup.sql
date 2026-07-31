@@ -1,0 +1,23 @@
+-- GKG ClickHouse setup contract. Verified against gitlab.com production 2026-07-30.
+CREATE USER IF NOT EXISTS gkg_writer IDENTIFIED WITH sha256_password BY '${GKG_WRITER_PASSWORD}' SETTINGS PROFILE default;
+ALTER USER IF EXISTS gkg_writer IDENTIFIED WITH sha256_password BY '${GKG_WRITER_PASSWORD}';
+CREATE USER IF NOT EXISTS gkg_reader IDENTIFIED WITH sha256_password BY '${GKG_READER_PASSWORD}' SETTINGS PROFILE default;
+ALTER USER IF EXISTS gkg_reader IDENTIFIED WITH sha256_password BY '${GKG_READER_PASSWORD}';
+CREATE USER IF NOT EXISTS gkg_siphon_reader IDENTIFIED WITH sha256_password BY '${GKG_SIPHON_READER_PASSWORD}' SETTINGS PROFILE default;
+ALTER USER IF EXISTS gkg_siphon_reader IDENTIFIED WITH sha256_password BY '${GKG_SIPHON_READER_PASSWORD}';
+CREATE DATABASE IF NOT EXISTS ${GRAPH_DB};
+CREATE ROLE IF NOT EXISTS gkg_app;
+GRANT SELECT, INSERT, ALTER, CREATE DATABASE, CREATE TABLE, CREATE VIEW, CREATE DICTIONARY, DROP DATABASE, DROP TABLE, DROP VIEW, DROP DICTIONARY, TRUNCATE, OPTIMIZE, dictGet ON ${GRAPH_DB}.* TO gkg_app;
+GRANT SELECT ON information_schema.* TO gkg_app;
+CREATE ROLE IF NOT EXISTS gkg_reader_app;
+GRANT SELECT, dictGet ON ${GRAPH_DB}.* TO gkg_reader_app;
+GRANT SELECT ON information_schema.* TO gkg_reader_app;
+GRANT SELECT ON system.query_log TO gkg_reader_app;
+CREATE ROLE IF NOT EXISTS gkg_siphon_reader_app;
+GRANT SELECT, dictGet ON ${DATALAKE_DB}.* TO gkg_siphon_reader_app;
+GRANT SELECT ON information_schema.tables TO gkg_siphon_reader_app;
+GRANT SELECT ON information_schema.columns TO gkg_siphon_reader_app;
+GRANT SELECT ON system.columns TO gkg_siphon_reader_app;
+GRANT gkg_app TO gkg_writer;
+GRANT gkg_reader_app TO gkg_reader;
+GRANT gkg_siphon_reader_app TO gkg_siphon_reader;
