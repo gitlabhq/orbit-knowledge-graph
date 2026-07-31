@@ -46,6 +46,14 @@ async fn seed(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
+        "INSERT INTO {} (id, note, noteable_type, noteable_id, traversal_path, internal, confidential) VALUES
+         (3000, 'internal note', 'MergeRequest', 2000, '1/100/2000/', true, true),
+         (3001, 'public note', 'MergeRequest', 2000, '1/100/2000/', false, NULL)",
+        t("gl_note")
+    ))
+    .await;
+
+    ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
          ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group', ['state:active', 'user_type:human'], ['visibility_level:public']),
          ('1/100/', 2, 'User', 'MEMBER_OF', 100, 'Group', ['state:active', 'user_type:human'], ['visibility_level:public']),
@@ -118,6 +126,7 @@ fn allow_all() -> MockRedactionService {
     svc.allow("user", &[1, 2, 3]);
     svc.allow("group", &[100]);
     svc.allow("merge_request", &[2000, 2001]);
+    svc.allow("note", &[3000, 3001]);
     svc
 }
 
@@ -283,6 +292,32 @@ async fn quoting_handles_strings_with_spaces_and_escapes(ctx: &TestContext) {
     );
 }
 
+async fn boolean_properties_render_bare(ctx: &TestContext) {
+    let output = run_pipeline(
+        ctx,
+        r#"{"query_type": "traversal",
+            "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000, 3001], "columns": ["note", "internal", "confidential"]}],
+            "limit": 10}"#,
+        &allow_all(),
+        test_security_context(),
+    )
+    .await;
+
+    let value = GoonFormatter.format(&output);
+    let s = goon_str(&value);
+
+    assert!(s.contains("internal=true"), "bool true must be bare: {s}");
+    assert!(s.contains("internal=false"), "bool false must be bare: {s}");
+    assert!(
+        s.contains("confidential=true"),
+        "Nullable(Bool) true must be bare: {s}"
+    );
+    assert!(
+        !s.contains(r#"internal="true""#) && !s.contains(r#"internal="false""#),
+        "booleans must not render as quoted strings: {s}"
+    );
+}
+
 async fn aggregation_node_grouping_lifts_unique_nodes_and_emits_rows(ctx: &TestContext) {
     let output = run_pipeline(
         ctx,
@@ -433,6 +468,7 @@ async fn goon_formatter_e2e() {
         traversal_emits_header_nodes_and_edges_sections,
         empty_result_still_emits_section_markers,
         quoting_handles_strings_with_spaces_and_escapes,
+        boolean_properties_render_bare,
         aggregation_node_grouping_lifts_unique_nodes_and_emits_rows,
         aggregation_property_grouping_emits_scalar_rows,
         ungrouped_aggregation_emits_single_row_no_group_by_line,

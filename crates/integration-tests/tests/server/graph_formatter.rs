@@ -145,11 +145,11 @@ async fn seed(ctx: &TestContext) {
 
     let giant = "A".repeat(10_000);
     ctx.execute(&format!(
-        "INSERT INTO {} (id, note, noteable_type, noteable_id, traversal_path) VALUES
-         (3000, 'Normal note', 'MergeRequest', 2000, '1/100/1000/'),
-         (3001, '{giant}', 'MergeRequest', 2001, '1/101/1001/'),
-         (3002, 'SQL injection attempt: \\'; DROP TABLE gl_user; --', 'MergeRequest', 2000, '1/100/1000/'),
-         (3003, 'Backslash\\\\quote\\\"newline\\n\\ttab', 'MergeRequest', 2000, '1/100/1000/')",
+        "INSERT INTO {} (id, note, noteable_type, noteable_id, traversal_path, internal, confidential) VALUES
+         (3000, 'Normal note', 'MergeRequest', 2000, '1/100/1000/', true, true),
+         (3001, '{giant}', 'MergeRequest', 2001, '1/101/1001/', false, NULL),
+         (3002, 'SQL injection attempt: \\'; DROP TABLE gl_user; --', 'MergeRequest', 2000, '1/100/1000/', false, NULL),
+         (3003, 'Backslash\\\\quote\\\"newline\\n\\ttab', 'MergeRequest', 2000, '1/100/1000/', false, NULL)",
         t("gl_note")
     ))
     .await;
@@ -1597,15 +1597,46 @@ async fn search_boolean_columns(ctx: &TestContext) {
 
     let n3000 = find_node(nodes, "Note", 3000);
     assert_eq!(n3000["note"].as_str().unwrap(), "Normal note");
+    assert_eq!(n3000["internal"], Value::Bool(true));
+    assert_eq!(n3000["confidential"], Value::Bool(true));
 
-    for node in nodes {
-        if let Some(conf) = node.get("confidential") {
-            assert!(
-                conf.is_string() || conf.is_null(),
-                "boolean column should be string or null, got: {conf}"
-            );
-        }
-    }
+    let n3002 = find_node(nodes, "Note", 3002);
+    assert_eq!(n3002["internal"], Value::Bool(false));
+    assert_eq!(
+        n3002.get("confidential"),
+        Some(&Value::Null),
+        "NULL Nullable(Bool) selected in the base query should be present as null"
+    );
+}
+
+async fn traversal_hydrated_boolean_columns(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["title"]},
+                {"id": "n", "entity": "Note", "columns": ["note", "internal", "confidential"]}
+            ],
+            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let nodes = value["nodes"].as_array().unwrap();
+
+    let n3000 = find_node(nodes, "Note", 3000);
+    assert_eq!(n3000["internal"], Value::Bool(true));
+    assert_eq!(n3000["confidential"], Value::Bool(true));
+
+    let n3002 = find_node(nodes, "Note", 3002);
+    assert_eq!(n3002["internal"], Value::Bool(false));
+    assert!(
+        n3002.get("confidential").is_none(),
+        "hydration drops NULL values, so the key should be absent"
+    );
 }
 
 async fn search_datetime_columns(ctx: &TestContext) {
@@ -2493,6 +2524,7 @@ async fn graph_formatter_e2e() {
         search_with_order_by,
         search_boolean_columns,
         search_nullable_columns,
+        traversal_hydrated_boolean_columns,
         traversal_single_hop_exact,
         traversal_with_filter,
         traversal_deduplicates_shared_nodes,
