@@ -3,6 +3,29 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log "E2E Setup (SHA: $E2E_SHA)"
 
+# Delete e2e namespaces older than 2 hours from previous runs whose teardown
+# was killed or skipped. The after_script teardown has a 5-minute hard timeout
+# and can be killed by the runner, leaving namespaces (and their pods) behind
+# indefinitely. Without this, the cluster accumulates stale workloads until
+# new runs cannot schedule pods.
+log "Cleaning stale e2e namespaces (older than 2 hours)"
+STALE_NS=$($KC get ns -o json 2>/dev/null | python3 -c "
+import json, sys
+from datetime import datetime, timezone, timedelta
+cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+for ns in json.load(sys.stdin).get('items', []):
+    name = ns['metadata']['name']
+    if not name.startswith('e2e-') or name == 'e2e-${E2E_SHA}-gkg':
+        continue
+    created = datetime.fromisoformat(ns['metadata']['creationTimestamp'].replace('Z', '+00:00'))
+    if created < cutoff:
+        print(name)
+" 2>/dev/null) || true
+for ns in $STALE_NS; do
+  log "  Deleting stale namespace: $ns"
+  $KC delete ns "$ns" --wait=false 2>/dev/null || true
+done
+
 # Clean cluster-scoped resources orphaned by previous e2e runs whose owning
 # namespace has been torn down. The GitLab chart 9.11.x installs cluster-scoped
 # resources (GatewayClass "gitlab-gw", ClusterRole/ClusterRoleBinding for the
