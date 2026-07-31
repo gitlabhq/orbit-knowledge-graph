@@ -1420,6 +1420,11 @@ sm-e2e-spike:
           echo "  /ready: $HEALTH ($i/60)"
           sleep 5
         done
+        # Wait for the dispatcher to complete schema migration. The Rails
+        # /api/v4/orbit/status returns "unknown" until the graph schema exists.
+        # In the standalone e2e, helmfile wait absorbs this time (~3-5 min).
+        echo "==> Waiting 120s for dispatcher schema initialization..."
+        sleep 120
         echo "==> GKG pods:"
         kubectl -n "e2e-${E2E_SHA}-gkg" get pods
       fi
