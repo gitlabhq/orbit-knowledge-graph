@@ -287,7 +287,6 @@ fn build_tombstoned_keys_table_statements(
     }
 }
 
-/// The `window_end` bound keeps post-snapshot rows out: no deleting re-created rows, no poll flap.
 fn swept_rows_predicate(table: &ReplacingMergeTreeTable, quorum_writes: bool) -> String {
     let keys = table.sort_key.join(", ");
     let keys_table = tombstoned_keys_table_name(table);
@@ -295,7 +294,7 @@ fn swept_rows_predicate(table: &ReplacingMergeTreeTable, quorum_writes: bool) ->
         "({keys}) IN (SELECT {keys} FROM {keys_table}) AND _version <= {{window_end:String}}"
     );
     if quorum_writes {
-        // Sparing the newest tombstone row caps a partially-replicated key set at under-deleting; removing it could leave an older live row newest.
+        // Keeps a lagging replica from resurrecting older live rows.
         predicate.push_str(&format!(
             " AND ({keys}, _version) NOT IN (SELECT {keys}, tombstone_version FROM {keys_table})"
         ));

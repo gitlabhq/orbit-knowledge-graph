@@ -284,9 +284,7 @@ failed table and moves on.
 
 Under `graph.quorum_writes` the key set is a replicated table and the delete
 never touches a key's newest tombstone row. A lagging replica can only delete
-too little, never bring an old row back. Cost: one leftover tombstone row per
-key, invisible to queries. Requires a `Replicated` database with
-`ReplicatedMergeTree` tables; plain engines don't replicate data.
+too little.
 
 ### Code dispatch task settings
 
