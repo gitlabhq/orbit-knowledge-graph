@@ -1,28 +1,18 @@
-# Cross-project blast-radius report (prototype).
+# Dependency-bump usage report (prototype).
 #
-# For an MR that changes exported symbols of a published package, queries the
-# Knowledge Graph (Orbit) for downstream projects importing those symbols and
-# posts a ranked consumer table as an MR comment. Two Orbit layers back the
-# report: ImportedSymbol nodes (exact usage sites, name-based match) and
-# Dependency nodes (declared version patterns). Fork/mirror noise is handled
-# heuristically: usage-fingerprint dedupe plus a star-count split, since the
-# ontology has no fork-lineage edge.
+# For an MR that bumps a version in Cargo.lock, queries the Knowledge Graph
+# (Orbit) for this project's own import sites of the bumped package and posts
+# a per-file usage table as an MR comment, so a reviewer can size bump risk
+# (which crates/files touch the dependency) at a glance. Only queries this
+# project's ImportedSymbol nodes, so no cross-project visibility is needed.
 #
-# Setup:
-#   1. Create a bot/project access token whose user has the `knowledge_graph`
-#      feature flag and read access to the consumer projects you care about;
-#      store it as a masked CI/CD variable BLAST_RADIUS_GITLAB_TOKEN with
-#      `api` scope (needed to post the MR note).
-#   2. Set BLAST_RADIUS_PACKAGE to the package name consumers import. There is
-#      no default because this repo publishes no importable package; the job
-#      fails fast when it is unset. Pass it as a pipeline variable when
-#      triggering the job manually (e.g. "@gitlab/ui" for demos).
-#   3. Optionally set BLAST_RADIUS_SYMBOLS (comma-separated) to skip git-diff
-#      symbol extraction — useful for demos and repos whose export syntax the
-#      extractor does not cover.
+# Setup: store a token as a masked CI/CD variable BLAST_RADIUS_GITLAB_TOKEN
+# with `api` scope (posting the MR note needs write). The token's user must
+# have Knowledge Graph access; a project access token bot may not — see the
+# 403 guidance in the job log if the query is rejected.
 #
-# Manual + advisory while prototyping; flip `when: manual` to on_success to
-# run on every MR.
+# Advisory while prototyping: allow_failure keeps a failed report from
+# blocking renovate MRs.
 blast-radius-report:
   stage: review
   image: registry.gitlab.com/gitlab-org/cli:v1.111.0
@@ -35,23 +25,18 @@ blast-radius-report:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      when: manual
+      changes:
+        - Cargo.lock
       allow_failure: true
   before_script:
     - test -n "${BLAST_RADIUS_GITLAB_TOKEN:-}" || (echo "Missing BLAST_RADIUS_GITLAB_TOKEN" && exit 1)
-    - test -n "${BLAST_RADIUS_PACKAGE:-}" || (echo "Missing BLAST_RADIUS_PACKAGE; this repo publishes no package, so set it as a pipeline variable when triggering the job" && exit 1)
     - apk add --no-cache bash git jq python3
     - export GITLAB_TOKEN="$BLAST_RADIUS_GITLAB_TOKEN"
   script:
     - |
-      if [ -n "${BLAST_RADIUS_SYMBOLS:-}" ]; then
-        python3 scripts/ci/blast-radius.py "$BLAST_RADIUS_PACKAGE" \
-          --symbols "$BLAST_RADIUS_SYMBOLS" > blast-radius.md
-      else
-        diff_base="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
-        python3 scripts/ci/blast-radius.py "$BLAST_RADIUS_PACKAGE" \
-          --diff-range "${diff_base}...HEAD" > blast-radius.md
-      fi
+      diff_base="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      python3 scripts/ci/blast-radius.py "$CI_PROJECT_ID" \
+        --diff-range "${diff_base}...HEAD" > blast-radius.md
     - cat blast-radius.md
     - bash scripts/ci/blast-radius-comment.sh blast-radius.md
   artifacts:
