@@ -17,7 +17,7 @@ pub(crate) mod parse;
 pub(crate) mod resolve;
 pub(crate) mod vendored;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use arrow::array::{
@@ -28,7 +28,7 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use gkg_utils::arrow::ArrowUtils;
 
@@ -216,16 +216,15 @@ where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
 {
     let mut rows = Vec::with_capacity(notes.len());
+    let mut dropped_actions = BTreeSet::new();
+    let mut dropped_noteables = BTreeSet::new();
     for n in notes {
         let Some(action) = Action::parse(&n.action) else {
-            warn!(action = %n.action, "system_notes: unknown action, dropping");
+            dropped_actions.insert(n.action.clone());
             continue;
         };
         let Some(noteable_kind) = NoteableKind::from_siphon(&n.noteable_type) else {
-            warn!(
-                noteable_type = %n.noteable_type,
-                "system_notes: unsupported noteable_type, dropping"
-            );
+            dropped_noteables.insert(n.noteable_type.clone());
             continue;
         };
         let references = parse_body(action, &n.note);
@@ -242,6 +241,14 @@ where
             action,
             references,
         });
+    }
+
+    if !dropped_actions.is_empty() || !dropped_noteables.is_empty() {
+        debug!(
+            ?dropped_actions,
+            ?dropped_noteables,
+            "system_notes: dropped notes with no ingested action"
+        );
     }
 
     build_edges(&rows, |r, default_project| resolve(r, default_project))
