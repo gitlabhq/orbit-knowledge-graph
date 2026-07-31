@@ -715,6 +715,26 @@ CREATE TABLE IF NOT EXISTS gl_project (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
+CREATE TABLE IF NOT EXISTS gl_repository (
+    id Int64 CODEC(T64, ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    project_id Int64 CODEC(T64, ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    fail_reason LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    last_task_id Int64 DEFAULT 0 CODEC(T64, ZSTD(1)),
+    last_commit String DEFAULT '' CODEC(ZSTD(1)),
+    started_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    completed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    duration_ms Int64 DEFAULT 0 CODEC(T64, ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(Delta(8), ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
+    INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, project_id, branch)
+SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+
 CREATE TABLE IF NOT EXISTS gl_runner (
     id Int64 CODEC(T64, ZSTD(1)),
     runner_type LowCardinality(String) DEFAULT '' CODEC(LZ4),

@@ -1,0 +1,117 @@
+# config/ontology/nodes/source_code/repository.yaml
+
+node_type: Repository
+domain: source_code
+description: Per-branch indexing status of a repository, including failures that leave no code rows behind.
+label: branch
+destination_table: gl_repository
+sort_key: [traversal_path, project_id, branch]
+default_columns: [branch, status, fail_reason]
+
+style:
+  size: 30
+  color: "#6366F1"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Derived ID (hash of project_id + branch name), shared with the matching Branch node."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  branch:
+    type: string
+    source: branch
+    nullable: false
+    mutable: false
+    description: "Branch name this indexing run targeted."
+
+  status:
+    type: string
+    source: status
+    nullable: false
+    mutable: true
+    selectivity: low
+    description: "Indexing lifecycle: indexing, indexed, or failed."
+
+  fail_reason:
+    type: string
+    source: fail_reason
+    nullable: false
+    mutable: true
+    selectivity: low
+    description: "Why indexing failed (e.g. timeout, fetch_error, parse_error). Empty unless status is failed."
+
+  last_task_id:
+    type: int64
+    source: last_task_id
+    nullable: false
+    mutable: true
+    description: "Task ID of the most recent indexing attempt for this branch."
+
+  last_commit:
+    type: string
+    source: last_commit
+    nullable: false
+    mutable: true
+    description: "Commit SHA of the most recent successful index, empty if unknown or never succeeded."
+
+  started_at:
+    type: timestamp
+    source: started_at
+    nullable: false
+    mutable: true
+    description: "When the most recent indexing attempt began."
+
+  completed_at:
+    type: timestamp
+    source: completed_at
+    nullable: true
+    mutable: true
+    description: "When the most recent attempt reached a terminal state, null while still indexing."
+
+  duration_ms:
+    type: int64
+    source: duration_ms
+    nullable: false
+    mutable: true
+    description: "Wall-clock duration of the most recent terminal attempt in milliseconds, 0 while still indexing."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+storage:
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: fail_reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: last_task_id, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: last_commit, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: started_at, type: "DateTime64(6, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: completed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: duration_ms, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

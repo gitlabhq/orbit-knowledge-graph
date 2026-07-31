@@ -397,6 +397,7 @@ domains:
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
       ImportedSymbol: nodes/source_code/imported_symbol.yaml
+      Repository: nodes/source_code/repository.yaml
   packages:
     description: "Entities related to packages published to the package registry."
     nodes:
