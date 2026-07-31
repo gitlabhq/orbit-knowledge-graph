@@ -195,4 +195,4 @@ local-cli-publish-npm:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
     - npm install --global npm@11.19.0
   script:
-    - ./scripts/publish-npm.sh
+    - ./scripts/release/publish-npm.sh
