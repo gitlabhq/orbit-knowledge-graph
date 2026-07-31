@@ -10,7 +10,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{Instrument, info, instrument};
+use tracing::{Instrument, debug, info, instrument};
 
 use super::auth::extract_request_context;
 use crate::analytics::AnalyticsTracker;
@@ -160,7 +160,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let ctx = extract_request_context(&request, &self.validator)?;
         ctx.record_in_current_span();
 
-        info!("Listing tools for user");
+        debug!("Listing tools for user");
 
         let tools = V2ToolRegistry::get_all_tools(&self.ontology)
             .into_iter()
@@ -571,7 +571,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let security_context =
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(traversal_path = %req.traversal_path, format = ?req.format, "Fetching graph status for user");
+        debug!(traversal_path = %req.traversal_path, format = ?req.format, "Fetching graph status for user");
 
         let response = self
             .graph_status

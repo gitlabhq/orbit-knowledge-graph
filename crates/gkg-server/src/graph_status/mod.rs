@@ -60,7 +60,7 @@ impl GraphStatusService {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
-        info!(traversal_path, "Graph status fetching");
+        debug!(traversal_path, "Graph status fetching");
 
         let input = GraphStatusInput::from_ontology(
             &self.ontology,

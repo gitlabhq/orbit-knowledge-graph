@@ -80,13 +80,23 @@ pub async fn send_query_error(
     // failure_reason() returns None for Compile (counted on the compiler
     // metric), so fall back to err.code() ("compile_error") for log readers.
     let reason = failure_reason(&error).unwrap_or_else(|| error.code());
-    error!(
-        code = error.code(),
-        failure_reason = reason,
-        client_safe,
-        error = %error,
-        "Pipeline error",
-    );
+    if client_safe {
+        warn!(
+            code = error.code(),
+            failure_reason = reason,
+            client_safe,
+            error = %error,
+            "Pipeline error",
+        );
+    } else {
+        error!(
+            code = error.code(),
+            failure_reason = reason,
+            client_safe,
+            error = %error,
+            "Pipeline error",
+        );
+    }
     let _ = tx
         .send(Ok(ExecuteQueryMessage {
             content: Some(execute_query_message::Content::Error(ExecuteQueryError {
