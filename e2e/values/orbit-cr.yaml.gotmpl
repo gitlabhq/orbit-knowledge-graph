@@ -144,9 +144,6 @@ gkg:
             write_buffer_age_secs: 2
             write_max_flush_age_secs: 5
 
-# Auto-configure the GitLab CR with knowledgeGraph wiring.
-gitlab:
-  name: gitlab
-  jwtSecretName: gitlab-knowledge-graph-jwt
-  jwtSecretKey: knowledge_graph_jwt_shared_key
-  caSecretName: gkg-grpc-ca
+# No spec.gitlab link: in the e2e, GitLab is a helmfile release, not an
+# operator-managed GitLab CR. The knowledgeGraph values are set directly
+# in values/gitlab.yaml.gotmpl.
