@@ -13,7 +13,7 @@ metadata:
 rules:
   # Core resources (both controllers)
   - apiGroups: [""]
-    resources: ["configmaps", "persistentvolumeclaims", "secrets", "services"]
+    resources: ["configmaps", "persistentvolumeclaims", "secrets", "services", "serviceaccounts"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Apps (both controllers)
   - apiGroups: ["apps"]
