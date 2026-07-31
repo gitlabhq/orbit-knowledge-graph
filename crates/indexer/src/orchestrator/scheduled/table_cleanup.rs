@@ -247,44 +247,52 @@ fn build_tombstoned_keys_table_statements(
 ) -> Vec<String> {
     let keys = table.sort_key.join(", ");
     let keys_table = tombstoned_keys_table_name(table);
-    let source = &table.name;
-    let (inner_projection, outer_projection) = if quorum_writes {
-        (
-            format!("{keys}, _version, _deleted"),
-            format!("{keys}, _version AS tombstone_version"),
-        )
-    } else {
-        (format!("{keys}, _deleted"), keys.clone())
-    };
-    let tombstoned_keys_select = format!(
-        "SELECT {outer_projection} FROM ( \
-           SELECT {inner_projection} FROM {source} \
-           WHERE _version > {{window_start:String}} AND _version <= {{window_end:String}} \
-           ORDER BY {keys}, _version DESC \
-           LIMIT 1 BY {keys} \
-         ) WHERE _deleted"
-    );
-    let scan_settings = format!(
-        "SETTINGS max_memory_usage = {MAX_STATEMENT_MEMORY_BYTES}, \
-                  max_bytes_before_external_sort = {SPILL_SORT_TO_DISK_ABOVE_BYTES}, \
-                  optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}, \
-                  send_progress_in_http_headers = 1"
-    );
+
     if quorum_writes {
+        let keys_with_tombstone_version = format!("{keys}, _version AS tombstone_version");
+        let tombstoned_keys = select_tombstoned_keys(table, &keys_with_tombstone_version);
         // Replicated databases reject CREATE AS SELECT: schema inferred EMPTY, scan runs in a quorum-acked INSERT.
         vec![
             format!(
                 "CREATE TABLE {keys_table} ENGINE = ReplicatedMergeTree ORDER BY ({keys}) \
-                 EMPTY AS {tombstoned_keys_select}"
+                 EMPTY AS {tombstoned_keys}"
             ),
-            format!("INSERT INTO {keys_table} {tombstoned_keys_select} {scan_settings}"),
+            format!(
+                "INSERT INTO {keys_table} {tombstoned_keys} {}",
+                full_table_scan_settings()
+            ),
         ]
     } else {
+        let tombstoned_keys = select_tombstoned_keys(table, &keys);
         vec![format!(
             "CREATE TABLE {keys_table} ENGINE = MergeTree ORDER BY ({keys}) \
-             AS {tombstoned_keys_select} {scan_settings}"
+             AS {tombstoned_keys} {}",
+            full_table_scan_settings()
         )]
     }
+}
+
+/// Every key whose newest in-window version is a tombstone, as `columns`.
+fn select_tombstoned_keys(table: &ReplacingMergeTreeTable, columns: &str) -> String {
+    let keys = table.sort_key.join(", ");
+    let source = &table.name;
+    format!(
+        "SELECT {columns} FROM ( \
+           SELECT {keys}, _version, _deleted FROM {source} \
+           WHERE _version > {{window_start:String}} AND _version <= {{window_end:String}} \
+           ORDER BY {keys}, _version DESC \
+           LIMIT 1 BY {keys} \
+         ) WHERE _deleted"
+    )
+}
+
+fn full_table_scan_settings() -> String {
+    format!(
+        "SETTINGS max_memory_usage = {MAX_STATEMENT_MEMORY_BYTES}, \
+                  max_bytes_before_external_sort = {SPILL_SORT_TO_DISK_ABOVE_BYTES}, \
+                  optimize_read_in_order = 1, max_execution_time = {STATEMENT_TIMEOUT_SECS}, \
+                  send_progress_in_http_headers = 1"
+    )
 }
 
 fn swept_rows_predicate(table: &ReplacingMergeTreeTable, quorum_writes: bool) -> String {
