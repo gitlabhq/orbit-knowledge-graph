@@ -77,8 +77,7 @@ impl ScheduledTask for TableCleanup {
 }
 
 impl TableCleanup {
-    /// Delete cost tracks rows scanned, not tombstones removed, so concurrency
-    /// is the only lever on how long a pass takes.
+    /// Delete cost tracks rows scanned, not rows removed, so concurrency is the only wall-clock lever.
     async fn sweep_tombstones_from_all_tables(&self) -> Result<(), TaskError> {
         let sweeps = self
             .tables
@@ -160,8 +159,7 @@ impl TableCleanup {
             .await
     }
 
-    /// `system.mutations` is not readable by the graph user, so the data itself
-    /// is the only completion signal.
+    /// `system.mutations` is not readable by the graph user; the data is the only completion signal.
     async fn wait_until_tombstoned_keys_are_gone(
         &self,
         table: &ReplacingMergeTreeTable,
