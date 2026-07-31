@@ -23,9 +23,9 @@ const REMAINING_ROWS_POLL_INTERVAL: Duration = Duration::from_secs(5);
 // ── ClickHouse settings ────────────────────────────────────
 const STATEMENT_TIMEOUT_SECS: u64 = 7200; // 2 hours
 
-const MAX_STATEMENT_MEMORY_BYTES: u64 = 8_000_000_000; // disaster guard
-const SPILL_SORT_TO_DISK_ABOVE_BYTES: u64 = 2_000_000_000; // disaster guard
-const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000; // disaster guard
+const MAX_STATEMENT_MEMORY_BYTES: u64 = 8_000_000_000; // caps build memory
+const SPILL_SORT_TO_DISK_ABOVE_BYTES: u64 = 2_000_000_000; // spill before the cap
+const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000; // avoids planner wedge
 
 #[derive(Clone)]
 struct ReplacingMergeTreeTable {
