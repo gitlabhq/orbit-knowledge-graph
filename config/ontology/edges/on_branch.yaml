@@ -13,3 +13,8 @@ variants:
     to_node: { type: Branch, id: id }
     scope: same_namespace
     description: "File exists on branch."
+
+  - from_node: { type: Repository, id: id }
+    to_node: { type: Branch, id: id }
+    scope: same_namespace
+    description: "Repository indexing status for this branch."
