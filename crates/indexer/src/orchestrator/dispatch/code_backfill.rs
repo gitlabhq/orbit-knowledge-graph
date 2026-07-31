@@ -197,7 +197,7 @@ impl CodeBackfill {
             return Ok(Vec::new());
         }
 
-        info!(
+        debug!(
             namespace_id,
             count = projects.len(),
             already_checkpointed = pending_count_before_filter - projects.len(),
