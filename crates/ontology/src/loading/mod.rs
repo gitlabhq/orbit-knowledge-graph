@@ -1296,6 +1296,18 @@ fn validate_materialized_view(
             mv.name, to_table
         )));
     }
+    if !mv.versioned
+        && let Some(table) = all_table_names
+            .iter()
+            .filter(|t| !unversioned_table_names.contains(*t))
+            .find(|t| mv.select_query.contains(&format!("{{{t}}}")))
+    {
+        return Err(OntologyError::Validation(format!(
+            "materialized_view '{}': unversioned view references versioned table placeholder '{{{}}}'; \
+             it resolves to the unprefixed name, which does not exist at runtime",
+            mv.name, table
+        )));
+    }
     Ok(crate::entities::MaterializedViewDefinition {
         name: mv.name,
         versioned: mv.versioned,
@@ -1875,5 +1887,32 @@ mod tests {
         )
         .expect("versioned view may target a versioned table");
         assert!(def.versioned);
+    }
+
+    #[test]
+    fn unversioned_mv_referencing_versioned_placeholder_is_rejected() {
+        let all: std::collections::HashSet<String> =
+            ["gl_edge".to_string(), "retention".to_string()].into();
+        let unversioned: std::collections::HashSet<String> = ["retention".to_string()].into();
+
+        let mut mv = mv_yaml("sink", false, Some("retention"));
+        mv.select_query = "SELECT count() FROM {gl_edge}".to_string();
+
+        let err = validate_materialized_view(mv, &all, &unversioned)
+            .expect_err("versioned placeholder must be rejected");
+        assert!(matches!(err, OntologyError::Validation(_)));
+    }
+
+    #[test]
+    fn unversioned_mv_referencing_system_table_loads() {
+        let all: std::collections::HashSet<String> =
+            ["gl_edge".to_string(), "retention".to_string()].into();
+        let unversioned: std::collections::HashSet<String> = ["retention".to_string()].into();
+
+        let mut mv = mv_yaml("sink", false, Some("retention"));
+        mv.select_query = "SELECT query_id FROM system.query_log".to_string();
+
+        validate_materialized_view(mv, &all, &unversioned)
+            .expect("external system table reference should load");
     }
 }

@@ -117,17 +117,19 @@ pub fn generate_refreshable_materialized_views(
         .collect()
 }
 
-/// Views are returned unprefixed. Call
+/// Versioned views only, returned unprefixed. Call
 /// [`generate_graph_materialized_views_with_prefix`] to apply a schema
 /// version prefix to view names, `TO` targets, and table references inside
-/// the `SELECT` query.
+/// the `SELECT` query. Unversioned views come from
+/// [`generate_unversioned_materialized_views`].
 pub fn generate_graph_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     generate_graph_materialized_views_with_prefix(ontology, "")
 }
 
-/// Generates all materialized view DDL with a schema-version prefix applied
-/// to view names, `TO` targets, and `{table_name}` placeholders in the
-/// `SELECT` query.
+/// Generates the versioned materialized view DDL with a schema-version prefix
+/// applied to view names, `TO` targets, and `{table_name}` placeholders in the
+/// `SELECT` query. Unversioned views are excluded; see
+/// [`generate_unversioned_materialized_views`].
 ///
 /// The prefix is also applied to every known graph table name found inside
 /// placeholders, so `{gl_edge}` becomes `v54_gl_edge` when `prefix` is
@@ -147,9 +149,10 @@ pub fn generate_graph_materialized_views_with_prefix(
 }
 
 /// Unversioned views survive schema-version rollover, so their names and `TO`
-/// targets are never prefixed. The empty prefix still resolves `{table_name}`
-/// placeholders to their bare names (an unversioned view only references
-/// unversioned tables or external system tables).
+/// targets are never prefixed. The empty prefix resolves `{table_name}`
+/// placeholders to their bare names; ontology validation rejects placeholders
+/// that name a versioned table, so only unversioned tables or external system
+/// tables can appear here.
 pub fn generate_unversioned_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     let known_tables = collect_table_names(ontology);
 
