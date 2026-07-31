@@ -26,8 +26,8 @@ method that matches how you work, then run your first query.
 
 ## Install
 
-Install the `orbit` binary directly with the one-line installer, or through
-the GitLab CLI (`glab`) if you already use it.
+Install the `orbit` binary directly with the one-line installer, from npm,
+or through the GitLab CLI (`glab`) if you already use it.
 
 On Linux, the installer uses the glibc archive by default and automatically
 selects the fully static musl archive on musl-based distributions like Alpine.
@@ -62,6 +62,26 @@ irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 |
 ```
 
 Open a new terminal, then verify:
+
+```shell
+orbit help
+```
+
+{{< /tab >}}
+
+{{< tab title="npm" >}}
+
+You can also install from npm, on any platform:
+
+```shell
+npm install -g @gitlab/orbit
+```
+
+The [`@gitlab/orbit`](https://www.npmjs.com/package/@gitlab/orbit) package
+installs the prebuilt binary for your platform. On Linux, it always uses the
+fully static musl binary, which runs on both glibc and musl distributions.
+
+Verify:
 
 ```shell
 orbit help

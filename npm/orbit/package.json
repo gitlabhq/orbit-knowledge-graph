@@ -1,0 +1,40 @@
+{
+  "name": "@gitlab/orbit",
+  "version": "0.0.0",
+  "description": "GitLab Knowledge Graph (Orbit) local CLI",
+  "keywords": [
+    "gitlab",
+    "orbit",
+    "knowledge-graph",
+    "code-intelligence"
+  ],
+  "author": "GitLab",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "homepage": "https://gitlab.com/gitlab-org/orbit/knowledge-graph",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.com/gitlab-org/orbit/knowledge-graph.git"
+  },
+  "bugs": {
+    "url": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues"
+  },
+  "bin": {
+    "orbit": "bin/orbit.js"
+  },
+  "files": [
+    "bin/orbit.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@gitlab/orbit-darwin-arm64": "0.0.0",
+    "@gitlab/orbit-darwin-x64": "0.0.0",
+    "@gitlab/orbit-linux-arm64": "0.0.0",
+    "@gitlab/orbit-linux-x64": "0.0.0",
+    "@gitlab/orbit-win32-x64": "0.0.0"
+  }
+}
