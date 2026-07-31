@@ -41,7 +41,7 @@ use futures::StreamExt;
 use opentelemetry::KeyValue;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, error, info, warn};
+use tracing::{Instrument, debug, error, info, warn};
 
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
@@ -313,11 +313,12 @@ async fn process_message(
     let topic_label = KeyValue::new("topic", topic_name.clone());
     let subject = message.envelope.subject.clone();
     let handler_count = handlers.len();
+    let attempt = message.envelope.attempt;
 
-    info!(
+    debug!(
         %subject,
         handlers = handler_count,
-        attempt = message.envelope.attempt,
+        attempt,
         "message received"
     );
 
@@ -384,6 +385,7 @@ async fn process_message(
         outcome = outcome_label,
         duration_ms = elapsed.as_millis() as u64,
         handlers = handler_count,
+        attempt,
         "message processed"
     );
 }
