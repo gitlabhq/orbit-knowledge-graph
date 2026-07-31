@@ -252,7 +252,7 @@ mod tests {
     #[tokio::test]
     async fn purge_all_clears_all_cached_repositories() {
         let (dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("repo-abc/file.rs", b"content")]);
 
         let path_1 = cache
             .extract_archive(archive_stream(archive.clone()))
@@ -312,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn extraction_dir_is_removed_when_repository_is_dropped() {
         let (dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("repo-abc/file.rs", b"content")]);
         let repo = cache
             .extract_archive(archive_stream(archive))
             .await
@@ -333,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_repositories_are_independent() {
         let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[("file.rs", b"content")]);
+        let archive = build_tar_gz(&[("repo-abc/file.rs", b"content")]);
 
         let path_1 = cache
             .extract_archive(archive_stream(archive.clone()))
