@@ -5228,6 +5228,7 @@ dependencies = [
  "tonic-prost-build",
  "toon-format",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

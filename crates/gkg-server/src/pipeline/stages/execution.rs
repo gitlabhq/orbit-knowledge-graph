@@ -11,10 +11,13 @@ use query_engine::shared::{
     ExecutionOutput, QueryExecution, QueryExecutionLog, QueryExecutionStats,
 };
 
+use crate::pipeline::correlation;
+
 struct PreparedQuery {
     sql: String,
     params: HashMap<String, gkg_utils::clickhouse::ParamValue>,
     rendered_sql: String,
+    query_id: String,
     http_settings: Vec<(String, String)>,
 }
 
@@ -47,16 +50,15 @@ impl PipelineStage for ClickHouseExecutor {
                 .map_err(PipelineError::Execution)
                 .inspect_err(|e| obs.record_error(e))?;
 
-            let log_comment = match labkit::correlation::current() {
-                Some(id) => format!("gkg;correlation_id={id}"),
-                None => "gkg".to_string(),
-            };
-            http_settings.push(("log_comment".to_string(), log_comment));
+            let query_id = correlation::query_id("base");
+            http_settings.push(("query_id".to_string(), query_id.clone()));
+            http_settings.push(("log_comment".to_string(), correlation::log_comment(None)));
 
             let prepared = PreparedQuery {
                 sql: compiled.base.sql.clone(),
                 params: compiled.base.params.clone(),
                 rendered_sql: compiled.base.render(),
+                query_id,
                 http_settings,
             };
             (prepared, compiled.base.result_context.clone())
@@ -119,7 +121,7 @@ async fn execute_query(
     let execution = QueryExecution {
         label: "base".into(),
         rendered_sql: prepared.rendered_sql.clone(),
-        query_id: String::new(),
+        query_id: prepared.query_id.clone(),
         elapsed_ms: elapsed.as_secs_f64() * 1000.0,
         stats,
         explain_plan: None,

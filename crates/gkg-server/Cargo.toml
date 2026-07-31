@@ -71,6 +71,7 @@ tonic-prost-build = { workspace = true }
 [dev-dependencies]
 gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
 tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [lints.rust]
 # workspace uses `forbid`, downgraded to `deny` so tests can manipulate env vars
