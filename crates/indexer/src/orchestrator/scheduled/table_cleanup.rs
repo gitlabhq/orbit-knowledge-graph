@@ -20,14 +20,12 @@ const TOMBSTONED_KEYS_TABLE_PREFIX: &str = "tombstone_sweep_keys";
 const CONCURRENT_TABLE_SWEEPS: usize = 4;
 const REMAINING_ROWS_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
-// ── ClickHouse statement settings ────────────────────────────────────
-/// Bounds a wedged sweep, not a normal one: prod's largest tables took 2-27min.
-const STATEMENT_TIMEOUT_SECS: u64 = 5400;
-/// Headroom for the external sort, against a measured sub-1-GiB peak.
-const MAX_STATEMENT_MEMORY_BYTES: u64 = 8_000_000_000;
-/// Spilling has to start before the memory limit kills the sort.
-const SPILL_SORT_TO_DISK_ABOVE_BYTES: u64 = 2_000_000_000;
-const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000;
+// ── ClickHouse settings ────────────────────────────────────
+const STATEMENT_TIMEOUT_SECS: u64 = 7200; // 2 hours
+
+const MAX_STATEMENT_MEMORY_BYTES: u64 = 8_000_000_000; // disaster guard
+const SPILL_SORT_TO_DISK_ABOVE_BYTES: u64 = 2_000_000_000; // disaster guard
+const MAX_KEYS_FOR_INDEX_ANALYSIS: u64 = 1_000_000; // disaster guard
 
 #[derive(Clone)]
 struct ReplacingMergeTreeTable {

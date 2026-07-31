@@ -568,15 +568,12 @@ impl Default for CodeBackfillSweepConfig {
     }
 }
 
-/// Cadence and `_version` window for the tombstone sweep.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TableCleanupConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
 
-/// The sweep keeps no cursor, so consecutive windows must overlap; tombstones
-/// falling between two windows are never swept.
 const TOMBSTONE_SWEEP_LOOKBACK_SLACK: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl TableCleanupConfig {
@@ -589,7 +586,6 @@ impl TableCleanupConfig {
 impl Default for TableCleanupConfig {
     fn default() -> Self {
         Self {
-            // Sunday 03:00 UTC leaves the background merge pool to the deletes.
             schedule: ScheduleConfiguration {
                 cron: Some("0 0 3 * * 0".into()),
             },

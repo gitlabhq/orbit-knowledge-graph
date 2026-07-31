@@ -1737,7 +1737,7 @@
       "additionalProperties": false
     },
     "TableCleanupConfig": {
-      "description": "Cadence and `_version` window for the tombstone sweep.",
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
         "cron": {
