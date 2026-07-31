@@ -400,3 +400,64 @@ fn namespace_storage_table_and_view_names() -> [String; 2] {
         t("namespace_storage_snapshot_refresh"),
     ]
 }
+
+const UNVERSIONED_VIEW_NAME: &str = "test_unversioned_probe_mv";
+
+#[tokio::test]
+async fn creates_unversioned_materialized_view() {
+    let dir = ontology_with_unversioned_view();
+    let ontology = ontology::Ontology::load_from_dir(dir.path()).unwrap();
+
+    let context = TestContext::new(&[SIPHON_SCHEMA_SQL, &GRAPH_SCHEMA_SQL]).await;
+    let client = context.create_client();
+    ensure_version_table(&client).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    create_unversioned_tables(&client, &ontology).await.unwrap();
+
+    let batches = context
+        .query(&format!(
+            "SELECT toInt64(count()) FROM system.tables \
+             WHERE database = currentDatabase() AND name = '{UNVERSIONED_VIEW_NAME}' \
+               AND engine = 'MaterializedView'"
+        ))
+        .await;
+    let count = i64::extract_column(&batches, 0).unwrap();
+    assert_eq!(count.first().copied(), Some(1));
+}
+
+fn ontology_with_unversioned_view() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    copy_dir_recursive(std::path::Path::new(env!("ONTOLOGY_DIR")), dir.path());
+
+    let schema_path = dir.path().join("schema.yaml");
+    let schema = std::fs::read_to_string(&schema_path).unwrap();
+    let block = format!(
+        "  materialized_views:\n\
+         \x20   - name: {UNVERSIONED_VIEW_NAME}\n\
+         \x20     versioned: false\n\
+         \x20     engine: MergeTree\n\
+         \x20     order_by: [dummy]\n\
+         \x20     select_query: SELECT dummy FROM system.one\n"
+    );
+    let anchor = "  gc_preserve_patterns:";
+    let patched = schema.replacen(anchor, &format!("{block}{anchor}"), 1);
+    assert_ne!(patched, schema, "settings anchor not found in schema.yaml");
+    std::fs::write(&schema_path, patched).unwrap();
+    dir
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let target = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            std::fs::create_dir_all(&target).unwrap();
+            copy_dir_recursive(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}

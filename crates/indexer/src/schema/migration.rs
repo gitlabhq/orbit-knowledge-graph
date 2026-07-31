@@ -250,7 +250,6 @@ async fn rebuild_empty_table(
         })
 }
 
-/// Creates the durable unversioned tables, then the materialized views that read into them.
 pub async fn create_unversioned_tables(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,

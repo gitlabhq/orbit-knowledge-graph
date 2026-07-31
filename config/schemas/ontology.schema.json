@@ -783,7 +783,7 @@
               },
               "versioned": {
                 "type": "boolean",
-                "description": "When true (default), the view and its to_table receive the schema-version prefix and are dropped on version rollover. When false, the view is created once and survives version churn; its to_table must be an unversioned auxiliary table. Use for durable sinks fed from external system tables."
+                "description": "Default true. When false, the view is created once, survives version rollover, and must target an unversioned auxiliary table."
               },
               "to_table": {
                 "type": "string",
