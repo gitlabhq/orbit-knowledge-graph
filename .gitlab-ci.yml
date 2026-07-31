@@ -1405,6 +1405,13 @@ sm-e2e-spike:
           kubectl -n "e2e-${E2E_SHA}-gkg" logs deploy/gitlab-operator || true
           exit 1
         fi
+        # Wait for the webserver to be ready (not just the Deployment existing).
+        echo "==> Waiting for GKG webserver pods to be ready..."
+        kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-webserver --timeout=300s || true
+        kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-dispatcher --timeout=120s || true
+        kubectl -n "e2e-${E2E_SHA}-gkg" rollout status deploy/orbit-gkg-indexer-default --timeout=120s || true
+        echo "==> GKG pods:"
+        kubectl -n "e2e-${E2E_SHA}-gkg" get pods
       fi
     - bash e2e/scripts/test.sh
   after_script:
