@@ -675,10 +675,7 @@ async fn seed_code_scope_checkpoint(
         })
 }
 
-/// Clones as `CREATE TABLE AS` + `ATTACH PARTITION ALL FROM` rather than the
-/// equivalent `CLONE AS`, which ClickHouse rejects inside Replicated databases
-/// (SUPPORT_IS_DISABLED, error 344). An interruption between the two
-/// statements leaves an empty shell that the next run repairs.
+/// Two-step form of `CLONE AS`, which ClickHouse rejects inside Replicated databases (error 344).
 async fn clone_table(
     graph: &ArrowClickHouseClient,
     old_name: &str,
