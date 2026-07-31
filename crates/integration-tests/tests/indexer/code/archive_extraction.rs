@@ -280,11 +280,11 @@ async fn stray_and_over_long_entries_do_not_fail_extraction() {
     let dir = tempfile::tempdir().unwrap();
     let long_name = format!("root/{}.ts", "a".repeat(300));
     let entries = [
-        Entry::File("root/src/app.ts", b"export function run() { return 1; }\n"),
         Entry::File(
             "f2b2f233f34e40e3f2bd5ea1453e0e8975376dcb",
             b"lfs payload outside the archive root",
         ),
+        Entry::File("root/src/app.ts", b"export function run() { return 1; }\n"),
         Entry::File(&long_name, b"export const x = 1;\n"),
     ];
     let (file_inventory, stream_reasons) = extract_via_archive_endpoint(&entries, dir.path()).await;

@@ -68,7 +68,9 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             continue;
         }
         let relative_path = entry_path.strip_prefix("/").unwrap_or(&entry_path);
-        let Some(relative_path) = strip_archive_root(relative_path, &mut archive_root) else {
+        let is_dir = entry_type == tar::EntryType::Directory;
+        let Some(relative_path) = strip_archive_root(relative_path, is_dir, &mut archive_root)
+        else {
             warn!(path = %entry_path_str, "skipping archive entry outside the root directory");
             continue;
         };
@@ -169,21 +171,33 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     Ok(crate::fs_stream::canonicalize_inventory(inventory))
 }
 
-/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
-/// root; entries outside it return `None` so the caller can skip them. Returns
+/// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry that could
+/// be the root records it; the root is a directory, so a bare top-level file
+/// (e.g. a stray LFS payload ordered first) never becomes the detected root.
+/// Entries outside the root return `None` so the caller can skip them. Returns
 /// an empty path for the root entry.
-fn strip_archive_root(path: &Path, detected_root: &mut Option<OsString>) -> Option<PathBuf> {
+fn strip_archive_root(
+    path: &Path,
+    is_dir: bool,
+    detected_root: &mut Option<OsString>,
+) -> Option<PathBuf> {
     let mut components = path.components();
     let first = match components.next() {
         Some(c) => c.as_os_str().to_os_string(),
         None => return Some(PathBuf::new()),
     };
+    let rest = components.as_path().to_path_buf();
     match detected_root {
-        None => *detected_root = Some(first),
+        None => {
+            if !is_dir && rest.as_os_str().is_empty() {
+                return None;
+            }
+            *detected_root = Some(first);
+        }
         Some(expected) if first != *expected => return None,
         _ => {}
     }
-    Some(components.as_path().to_path_buf())
+    Some(rest)
 }
 
 #[cfg(test)]
@@ -214,6 +228,7 @@ mod tests {
 
     enum Entry<'a> {
         File(&'a str, &'a [u8]),
+        Dir(&'a str),
         Symlink(&'a str, &'a str),
     }
 
@@ -227,6 +242,14 @@ mod tests {
                     h.set_mode(0o644);
                     h.set_cksum();
                     tb.append_data(&mut h, path, *content).unwrap();
+                }
+                Entry::Dir(path) => {
+                    let mut h = tar::Header::new_gnu();
+                    h.set_entry_type(tar::EntryType::Directory);
+                    h.set_size(0);
+                    h.set_mode(0o755);
+                    h.set_cksum();
+                    tb.append_data(&mut h, path, std::io::empty()).unwrap();
                 }
                 Entry::Symlink(path, target) => {
                     let mut h = tar::Header::new_gnu();
@@ -320,6 +343,29 @@ mod tests {
                 .join("f2b2f233f34e40e3f2bd5ea1453e0e8975376dcb")
                 .exists()
         );
+    }
+
+    #[test]
+    fn stray_first_entry_does_not_become_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("f2b2f233f34e40e3f2bd5ea1453e0e8975376dcb", b"lfs payload"),
+            Entry::File("root/file1.rs", b"a"),
+        ]);
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["file1.rs"]);
+    }
+
+    #[test]
+    fn directory_entry_establishes_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::Dir("root/"),
+            Entry::File("f2b2f233f34e40e3f2bd5ea1453e0e8975376dcb", b"lfs payload"),
+            Entry::File("root/file1.rs", b"a"),
+        ]);
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
+        assert_eq!(paths(&inv), vec!["file1.rs"]);
     }
 
     #[test]
