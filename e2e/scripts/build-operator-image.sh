@@ -53,6 +53,9 @@ fi
 bash scripts/retrieve_gitlab_charts.sh
 bash scripts/retrieve_orbit_charts.sh
 
+log "Charts directory contents:"
+ls -la charts/
+
 # The Dockerfile COPYs .go/pkg/mod/ as a pre-populated module cache from the
 # operator's own CI. Our shallow clone does not have it. Create an empty dir
 # so the COPY succeeds; go mod download fetches everything on the next line.
