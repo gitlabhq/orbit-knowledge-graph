@@ -1602,12 +1602,11 @@ async fn search_boolean_columns(ctx: &TestContext) {
 
     let n3002 = find_node(nodes, "Note", 3002);
     assert_eq!(n3002["internal"], Value::Bool(false));
-    if let Some(conf) = n3002.get("confidential") {
-        assert!(
-            conf.is_null(),
-            "unset Nullable(Bool) should be null: {conf}"
-        );
-    }
+    assert_eq!(
+        n3002.get("confidential"),
+        Some(&Value::Null),
+        "NULL Nullable(Bool) selected in the base query should be present as null"
+    );
 }
 
 async fn traversal_hydrated_boolean_columns(ctx: &TestContext) {
@@ -1634,6 +1633,10 @@ async fn traversal_hydrated_boolean_columns(ctx: &TestContext) {
 
     let n3002 = find_node(nodes, "Note", 3002);
     assert_eq!(n3002["internal"], Value::Bool(false));
+    assert!(
+        n3002.get("confidential").is_none(),
+        "hydration drops NULL values, so the key should be absent"
+    );
 }
 
 async fn search_datetime_columns(ctx: &TestContext) {
