@@ -5,20 +5,16 @@ metadata:
 data:
   00-create-databases.sql: |
     CREATE DATABASE IF NOT EXISTS datalake;
-    CREATE DATABASE IF NOT EXISTS gkg;
     CREATE DATABASE IF NOT EXISTS test;
 
   01-create-users.sql: |
+    -- Siphon's datalake writers: Siphon's contract, not GKG's.
     CREATE USER IF NOT EXISTS siphon IDENTIFIED BY {{ .Values.users.siphon.password | squote }};
-    CREATE USER IF NOT EXISTS gkg_siphon_reader IDENTIFIED BY {{ .Values.users.gkg_siphon_reader.password | squote }};
-    CREATE USER IF NOT EXISTS gkg_writer IDENTIFIED BY {{ .Values.users.gkg_writer.password | squote }};
-    CREATE USER IF NOT EXISTS gkg_reader IDENTIFIED BY {{ .Values.users.gkg_reader.password | squote }};
     CREATE USER IF NOT EXISTS gitlab IDENTIFIED BY {{ .Values.users.gitlab.password | squote }};
-
     GRANT ALL ON datalake.* TO siphon;
     GRANT ALL ON datalake.* TO gitlab;
-    GRANT SELECT ON datalake.* TO gkg_siphon_reader;
-    GRANT dictGet ON datalake.* TO gkg_siphon_reader;
-    GRANT ALL ON gkg.* TO gkg_writer;
-    GRANT SELECT ON gkg.* TO gkg_reader;
-    GRANT SELECT ON gkg.* TO gkg_writer;
+
+  {{- range $name, $sql := .Values.initdbScripts }}
+  {{ $name }}: |
+    {{- $sql | nindent 4 }}
+  {{- end }}

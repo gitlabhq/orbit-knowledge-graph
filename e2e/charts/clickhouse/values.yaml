@@ -8,14 +8,10 @@ password: "e2e-clickhouse-password"
 users:
   siphon:
     password: "e2e-siphon-ch-password"
-  gkg_siphon_reader:
-    password: "e2e-datalake-password"
-  gkg_writer:
-    password: "e2e-graph-password"
-  gkg_reader:
-    password: "e2e-graph-read-password"
   gitlab:
     password: "e2e-gitlab-ch-password"
+
+initdbScripts: {}
 
 persistence:
   enabled: true
