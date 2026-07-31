@@ -237,15 +237,27 @@ impl Pipeline {
             };
             stats.write_ms += write_elapsed.as_millis() as u64;
 
-            info!(
-                page = page_number,
-                rows = rows_in_page,
-                scanned_rows = page.scan_stats.scanned_rows,
-                extract_ms = page.extract_elapsed.as_millis() as u64,
-                transform_ms = transform_elapsed.as_millis() as u64,
-                write_ms = write_elapsed.as_millis() as u64,
-                "page indexed"
-            );
+            if page_number > 1 {
+                info!(
+                    page = page_number,
+                    rows = rows_in_page,
+                    scanned_rows = page.scan_stats.scanned_rows,
+                    extract_ms = page.extract_elapsed.as_millis() as u64,
+                    transform_ms = transform_elapsed.as_millis() as u64,
+                    write_ms = write_elapsed.as_millis() as u64,
+                    "page indexed"
+                );
+            } else {
+                debug!(
+                    page = page_number,
+                    rows = rows_in_page,
+                    scanned_rows = page.scan_stats.scanned_rows,
+                    extract_ms = page.extract_elapsed.as_millis() as u64,
+                    transform_ms = transform_elapsed.as_millis() as u64,
+                    write_ms = write_elapsed.as_millis() as u64,
+                    "page indexed"
+                );
+            }
 
             self.save_batch_progress(position_key, window, &cursor, &context.progress)
                 .await?;
