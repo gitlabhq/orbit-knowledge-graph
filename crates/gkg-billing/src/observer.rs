@@ -49,6 +49,24 @@ impl BillingObserver {
         }
     }
 
+    fn build_metadata(&self) -> serde_json::Value {
+        let mut metadata = json!({
+            "query_type": self.query_type,
+            "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
+            "source_type": self.inputs.source_type,
+            "coding_agent": self.inputs.coding_agent,
+            "is_gitlab_team_member": self.inputs.is_gitlab_team_member,
+        });
+        if let (serde_json::Value::Object(map), Ok(serde_json::Value::Object(m))) =
+            (&mut metadata, serde_json::to_value(&self.metrics))
+        {
+            for (k, v) in m {
+                map.entry(k).or_insert(v);
+            }
+        }
+        metadata
+    }
+
     fn build_event(&self) -> Option<BillingEvent> {
         let correlation_id = correlation_id_string();
         let Some(raw_realm) = self.inputs.realm.as_deref() else {
@@ -111,16 +129,7 @@ impl BillingObserver {
             builder = builder.deployment_type(dt.as_str());
         }
 
-        let mut metadata = json!({
-            "query_type": self.query_type,
-            "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
-        });
-        if let (serde_json::Value::Object(map), Ok(serde_json::Value::Object(m))) =
-            (&mut metadata, serde_json::to_value(&self.metrics))
-        {
-            map.extend(m);
-        }
-        builder = builder.metadata(metadata);
+        builder = builder.metadata(self.build_metadata());
 
         match builder.build() {
             Ok(event) => Some(event),
@@ -254,6 +263,8 @@ mod tests {
             root_namespace_id: Some(9970),
             deployment_type: Some(".com".into()),
             realm: Some("SaaS".into()),
+            is_gitlab_team_member: Some(true),
+            coding_agent: Some("claude-code".into()),
         }
     }
 
@@ -265,6 +276,53 @@ mod tests {
         obs.finish(42, 3);
 
         assert_eq!(tracker.count(), 1);
+    }
+
+    #[test]
+    fn metadata_carries_agent_and_source_dimensions() {
+        let mut obs = BillingObserver::new(None, test_inputs());
+        obs.set_query_type("traversal");
+
+        let metadata = obs.build_metadata();
+
+        assert_eq!(metadata["query_type"], "traversal");
+        assert_eq!(metadata["source_type"], "mcp");
+        assert_eq!(metadata["coding_agent"], "claude-code");
+        assert_eq!(metadata["is_gitlab_team_member"], true);
+    }
+
+    #[test]
+    fn metadata_agent_dimensions_null_when_absent() {
+        let inputs = BillingInputs {
+            coding_agent: None,
+            is_gitlab_team_member: None,
+            ..test_inputs()
+        };
+        let obs = BillingObserver::new(None, inputs);
+
+        let metadata = obs.build_metadata();
+
+        assert!(metadata["coding_agent"].is_null());
+        assert!(metadata["is_gitlab_team_member"].is_null());
+    }
+
+    #[test]
+    fn metrics_keys_do_not_collide_with_billing_dimensions() {
+        let billing_keys = [
+            "query_type",
+            "feature_qualified_name",
+            "source_type",
+            "coding_agent",
+            "is_gitlab_team_member",
+        ];
+        let metrics = serde_json::to_value(ExecMetrics::default()).unwrap();
+        let metrics = metrics.as_object().unwrap();
+        for key in billing_keys {
+            assert!(
+                !metrics.contains_key(key),
+                "ExecMetrics serializes `{key}`, which would shadow the billing dimension of the same name"
+            );
+        }
     }
 
     #[test]
