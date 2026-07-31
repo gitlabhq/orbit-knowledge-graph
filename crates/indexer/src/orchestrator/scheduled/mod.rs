@@ -27,7 +27,7 @@ use chrono::Utc;
 use croner::Cron;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
@@ -176,7 +176,7 @@ async fn run_task_loop(
 
         match task.run().await {
             Ok(()) => {
-                info!(task = task_name, "task completed");
+                debug!(task = task_name, "task completed");
             }
             Err(error) => {
                 warn!(task = task_name, %error, "task failed");
@@ -211,7 +211,7 @@ pub async fn run_once(
 
         match task.run().await {
             Ok(()) => {
-                info!(task = task_name, "task completed");
+                debug!(task = task_name, "task completed");
             }
             Err(error) => {
                 warn!(task = task_name, %error, "task failed");
