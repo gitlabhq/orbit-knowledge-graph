@@ -1,6 +1,11 @@
+{{ $sha := requiredEnv "E2E_SHA" }}
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
+{{ $gkgImage := env "E2E_GKG_IMAGE" | default $v.gkg.image.repository }}
+{{ $gkgTag := env "E2E_GKG_TAG" | default $v.gkg.image.tag }}
 {{ $operatorTag := env "E2E_OPERATOR_TAG" | default "3.2.1" }}
 {{ $operatorImage := env "E2E_OPERATOR_IMAGE" | default "registry.gitlab.com/gitlab-org/cloud-native/gitlab-operator" }}
 
+# --- Operator Deployment ---
 operator:
   image:
     repository: {{ $operatorImage }}
@@ -9,8 +14,156 @@ operator:
   replicas: 1
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 50m
+      memory: 128Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 250m
+      memory: 256Mi
+
+# --- Orbit CR ---
+gkg:
+  version: {{ $v.gkg.chart | quote }}
+  values:
+    extraResources:
+      - apiVersion: cert-manager.io/v1
+        kind: Certificate
+        metadata:
+          name: gkg-grpc-tls
+        spec:
+          secretName: gkg-grpc-tls
+          duration: 8760h
+          issuerRef:
+            name: e2e-ca
+            kind: ClusterIssuer
+          dnsNames:
+            - orbit-gkg-webserver.e2e-{{ $sha }}-gkg.svc.cluster.local
+
+    image:
+      repository: {{ $gkgImage }}
+      tag: {{ $gkgTag | quote }}
+      pullPolicy: IfNotPresent
+
+    secrets:
+      perKey:
+        gitlabJwtVerifyingKey:
+          secretName: "gkg-secrets"
+        gitlabJwtSigningKey:
+          secretName: "gkg-secrets"
+        datalakePassword:
+          secretName: "gkg-secrets"
+        graphPassword:
+          secretName: "gkg-secrets"
+        graphReadPassword:
+          secretName: "gkg-secrets"
+
+    webserver:
+      replicas: 1
+      logLevel: "info"
+      probes:
+        enabled: true
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1
+          memory: 1Gi
+
+    indexer:
+      replicas: 1
+      logLevel: "info"
+      probes:
+        enabled: true
+      tmpSizeLimit: "5Gi"
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1
+          memory: 1Gi
+
+    healthCheck:
+      replicas: 1
+      logLevel: "info"
+      probes:
+        enabled: true
+      targets:
+        - deployments:
+            - orbit-gkg-indexer-default
+            - orbit-gkg-webserver
+            - orbit-gkg-dispatcher
+
+    clickhouse:
+      datalake:
+        host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
+        httpPort: 8123
+        database: datalake
+        user: gkg_siphon_reader
+        ssl: false
+      graph:
+        host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
+        httpPort: 8123
+        database: gkg
+        user: gkg_writer
+        readUser: gkg_reader
+        ssl: false
+
+    nats:
+      url: "nats://nats.e2e-{{ $sha }}-nats.svc.cluster.local:4222"
+      consumerName: gkg-indexer
+      fetchExpiresSecs: 5
+      tls:
+        enabled: false
+
+    gitlab:
+      baseUrl: "http://gitlab-webservice-default.e2e-{{ $sha }}-gitlab.svc.cluster.local:8181"
+
+    tls:
+      enabled: true
+      existingSecret: "gkg-grpc-tls"
+
+    schedule:
+      tasks:
+        siphon:
+          events_stream_name: "e2e_siphon_event_stream"
+        global:
+          cron: "*/2 * * * * *"
+        namespace:
+          cron: "*/2 * * * * *"
+          sweep_interval_secs: 10
+        code-backfill:
+          cron: "*/5 * * * * *"
+        table-cleanup:
+          cron: "0 0 3 * * *"
+        namespace-deletion:
+          cron: "0 0 3 * * *"
+        stale-edge-reconciliation:
+          cron: "*/10 * * * * *"
+        migration-completion:
+          cron: "*/10 * * * * *"
+
+    engine:
+      max_concurrent_workers: 13
+      concurrency_groups:
+        sdlc: 10
+        code: 3
+      topics:
+        global-handler:
+          concurrency_group: sdlc
+          max_attempts: 1
+          retry_interval_secs: 60
+        namespace-handler:
+          concurrency_group: sdlc
+          max_attempts: 1
+          retry_interval_secs: 60
+        code-indexing-task:
+          concurrency_group: code
+          max_attempts: 3
+          retry_interval_secs: 60
+      handlers:
+        code-indexing-task:
+          pipeline:
+            write_min_flush_rows: 1
+            write_buffer_age_secs: 2
+            write_max_flush_age_secs: 5

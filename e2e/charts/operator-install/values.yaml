@@ -11,3 +11,7 @@ operator:
     limits:
       cpu: 250m
       memory: 256Mi
+
+gkg:
+  version: "1.4.3"
+  values: {}

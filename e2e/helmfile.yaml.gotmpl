@@ -142,21 +142,10 @@ releases:
       component: operator
     needs:
       - e2e-{{ $sha }}-gkg/bootstrap
-    values:
-      - values/operator-install.yaml.gotmpl
-
-  - name: orbit-cr
-    namespace: e2e-{{ $sha }}-gkg
-    chart: charts/orbit-cr
-    labels:
-      phase: operator
-      component: orbit
-    needs:
-      - e2e-{{ $sha }}-gkg/operator-install
       - e2e-{{ $sha }}-nats/nats
       - e2e-{{ $sha }}-clickhouse/clickhouse
     values:
-      - values/orbit-cr.yaml.gotmpl
+      - values/operator-install.yaml.gotmpl
 {{ else }}
   - name: gkg
     namespace: e2e-{{ $sha }}-gkg
