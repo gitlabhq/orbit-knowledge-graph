@@ -13,7 +13,6 @@ ENV CARGO_INCREMENTAL=0
 
 RUN --mount=type=secret,id=sccache_gcs_key \
     --mount=type=cache,target=/root/.cache/sccache \
-    --mount=type=cache,target=/build/target \
     SCCACHE_BIN="$(mise which sccache)" && \
     if [ -s /run/secrets/sccache_gcs_key ]; then \
       export SCCACHE_GCS_KEY_PATH=/run/secrets/sccache_gcs_key \

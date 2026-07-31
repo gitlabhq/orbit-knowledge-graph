@@ -18,6 +18,7 @@ if [ -n "${AWS_LC_FIPS_SYS_SYSTEM_DIR:-}" ]; then
   exit 1
 fi
 
+# This marker establishes provenance. Startup's try_fips_mode() is the runtime gate.
 if ! strings "$BINARY" | grep -Eq 'aws_lc_fips_[0-9_]+|aws_lc_fips_selftest_pass|AWS_LC_FIPS'; then
   echo "gkg-server does not contain an AWS-LC FIPS marker" >&2
   exit 1

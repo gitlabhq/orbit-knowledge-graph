@@ -142,6 +142,8 @@ fn install_crypto_provider() -> anyhow::Result<()> {
 
     #[cfg(feature = "fips")]
     {
+        // rustls/fips constrains TLS configuration; this additionally fails startup
+        // unless every primitive exposed by the process-wide provider is FIPS capable.
         anyhow::ensure!(provider.fips(), "rustls CryptoProvider is not FIPS capable");
         aws_lc_rs::try_fips_mode().map_err(anyhow::Error::msg)?;
     }

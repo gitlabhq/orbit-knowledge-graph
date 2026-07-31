@@ -945,7 +945,20 @@ docker-build-fips-amd64:
   rules:
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - git fetch --tags
+    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1s/^v//p')
+    - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        IMAGE_TAG="develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
+      else
+        IMAGE_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
+      fi
+      ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${IMAGE_TAG}"
 
 # Tag = Dockerfile hash; the e2e job resolves the same tag.
 e2e-robot-image:
