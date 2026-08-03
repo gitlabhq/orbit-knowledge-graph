@@ -26,13 +26,22 @@ OPERATOR_DIR=$(mktemp -d)
 trap 'rm -rf "$OPERATOR_DIR"' EXIT
 git clone --depth 1 --branch "${OPERATOR_BRANCH}" --filter=blob:none --sparse \
   "${OPERATOR_REPO}" "${OPERATOR_DIR}" 2>/dev/null
-(cd "${OPERATOR_DIR}" && git sparse-checkout set deploy/chart 2>/dev/null)
+(cd "${OPERATOR_DIR}" && git sparse-checkout set deploy/chart config/crd/bases 2>/dev/null)
+
+# Apply CRDs via kubectl (the agent SA has permissions; Helm's CRD install
+# path uses a different API call that the agent may not support).
+log "Applying CRDs"
+$KC apply -f "${OPERATOR_DIR}/config/crd/bases/"
+for crd in orbits.apps.gitlab.com gitlabs.apps.gitlab.com; do
+  $KC wait --for=condition=Established crd/"$crd" --timeout=60s 2>/dev/null || true
+done
 
 # --- 2. Deploy operator via its own Helm chart ---
 log "Installing operator via deploy chart"
 (cd "${OPERATOR_DIR}/deploy/chart" && helm dependency build 2>/dev/null)
 
 helm install gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
+  --skip-crds \
   --namespace "$NS" \
   --set watchCluster=false \
   --set manager.leaderElection.enabled=false \
