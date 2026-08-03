@@ -675,18 +675,16 @@ async fn seed_code_scope_checkpoint(
         })
 }
 
-/// ClickHouse `CLONE AS` can leave an empty shell after an interrupted attach.
 async fn clone_table(
     graph: &ArrowClickHouseClient,
     old_name: &str,
     new_name: &str,
     existing_new: &HashSet<String>,
 ) -> Result<(), MigrationError> {
-    // Drop an interrupted clone's empty shell, else the CREATE IF NOT EXISTS below skips it.
-    if existing_new.contains(new_name)
-        && count_rows(graph, new_name).await? == 0
-        && count_rows(graph, old_name).await? > 0
-    {
+    if existing_new.contains(new_name) {
+        if !is_interrupted_clone_shell(graph, old_name, new_name).await? {
+            return Ok(());
+        }
         warn!(table = %new_name, "re-cloning empty shell left by an interrupted migration");
         graph
             .execute(&format!("DROP TABLE IF EXISTS {new_name}"))
@@ -700,13 +698,30 @@ async fn clone_table(
     info!(from = %old_name, to = %new_name, "cloning table from active version");
     graph
         .execute(&format!(
-            "CREATE TABLE IF NOT EXISTS {new_name} CLONE AS {old_name}"
+            "CREATE TABLE IF NOT EXISTS {new_name} AS {old_name}"
+        ))
+        .await
+        .map_err(|e| MigrationError::Ddl {
+            table: new_name.to_string(),
+            reason: e.to_string(),
+        })?;
+    graph
+        .execute(&format!(
+            "ALTER TABLE {new_name} ATTACH PARTITION ALL FROM {old_name}"
         ))
         .await
         .map_err(|e| MigrationError::Ddl {
             table: new_name.to_string(),
             reason: e.to_string(),
         })
+}
+
+async fn is_interrupted_clone_shell(
+    graph: &ArrowClickHouseClient,
+    old_name: &str,
+    new_name: &str,
+) -> Result<bool, MigrationError> {
+    Ok(count_rows(graph, new_name).await? == 0 && count_rows(graph, old_name).await? > 0)
 }
 
 async fn create_dictionaries_and_views(
