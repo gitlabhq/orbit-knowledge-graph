@@ -47,10 +47,11 @@ helm template gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
   --set resources.limits.cpu=250m \
   --set resources.limits.memory=256Mi \
   | sed 's/--enable-leader-election/--enable-leader-election=false/' \
-  | $KC apply -n "$NS" -f -
+  > /tmp/operator-manifests.yaml
 
-# The deploy chart's RBAC does not cover Orbit resources. Bind cluster-admin
-# to the manager ServiceAccount the chart creates.
+# The deploy chart's RBAC does not cover Orbit resources. Create the
+# cluster-admin binding and webhook cert BEFORE applying the manifests
+# so the operator pod has permissions from the moment it starts.
 $KC create clusterrolebinding gitlab-operator-e2e-admin \
   --clusterrole=cluster-admin \
   --serviceaccount="${NS}:gitlab-manager" 2>/dev/null || true
@@ -64,6 +65,10 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
 $KC create secret tls webhook-server-cert -n "$NS" \
   --cert="${CERT_DIR}/tls.crt" --key="${CERT_DIR}/tls.key" 2>/dev/null || true
 rm -rf "${CERT_DIR}"
+
+# Now apply the operator manifests (RBAC and cert are already in place).
+$KC apply -n "$NS" -f /tmp/operator-manifests.yaml
+rm -f /tmp/operator-manifests.yaml
 
 # Wait for CRDs to be established.
 for crd in orbits.apps.gitlab.com gitlabs.apps.gitlab.com; do
