@@ -38,6 +38,7 @@ helm template gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
   --namespace "$NS" \
   --include-crds \
   --set cert-manager.install=false \
+  --set watchCluster=false \
   --set image.registry="registry.gitlab.com" \
   --set image.repository="gitlab-org/orbit/knowledge-graph" \
   --set image.name="operator-spike" \
