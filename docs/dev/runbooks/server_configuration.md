@@ -113,14 +113,14 @@ graph:
 
 There is no equivalent setting for the datalake. GKG writes to its own graph tables and reads everything else, so the datalake is Siphon's to configure. To make datalake reads error out on a lagging replica instead of returning stale Siphon rows, put `select_sequential_consistency` in `datalake.session_settings` yourself.
 
-The flag applies three session settings and suppresses a fourth:
+The flag applies four session settings:
 
 | Setting | Value | Reason |
 |---------|-------|--------|
 | `insert_quorum` | `auto` | Majority quorum that tracks replica count. A fixed number stops being a majority once replicas are added. |
 | `insert_quorum_parallel` | `0` | Required for `select_sequential_consistency` to take effect. Serializes quorum inserts per table. |
 | `select_sequential_consistency` | `1` | A read on a lagging replica errors instead of returning stale rows. |
-| `async_insert` | suppressed | ClickHouse rejects an async insert that also carries `insert_quorum`. |
+| `async_insert` | `0` | ClickHouse rejects an async insert that also carries `insert_quorum`, and servers since 26.x default `async_insert` on — every quorum insert would fail with `UNSUPPORTED_PARAMETER`. Client-sent async-insert settings are additionally suppressed. |
 
 Anything set in `session_settings` wins over these, so you can still pin a fixed quorum size:
 
@@ -265,7 +265,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 | Namespace sweep | `schedule.tasks.namespace-sweep.cron` | `0 0 * * * *` (hourly) | Re-dispatches every enabled namespace; backstops migration backfill and missed windows |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.namespace-code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
-| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |
+| Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * 0` (weekly, Sunday 03:00 UTC) | Sweeps tombstoned keys from every graph table |
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations |
 
@@ -274,6 +274,17 @@ dispatches every enabled namespace once (cold start) and records a checkpoint;
 every later tick queries Siphon changes since that checkpoint, however old it is.
 The hourly namespace sweep re-dispatches every enabled namespace regardless of
 recent Siphon activity, backstopping migration backfill and missed windows.
+
+The sweep has no cursor. Each run covers its cron cadence plus one day, so a
+failed or skipped run strands every tombstone older than that overlap (same for
+the first run after deploy). Nothing picks those up again — clearing them means
+replaying the statements by hand over a wider window. Alert on
+`gkg.scheduler.task.errors{task="maintenance.table_cleanup"}`; the task logs a
+failed table and moves on.
+
+Under `graph.quorum_writes` the key set is a replicated table and the delete
+never touches a key's newest tombstone row. A lagging replica can only delete
+too little.
 
 ### Code dispatch task settings
 
@@ -638,7 +649,7 @@ engine:
 schedule:
   tasks:
     table-cleanup:
-      cron: "0 0 3 * * *"
+      cron: "0 0 3 * * 0"
     namespace-deletion:
       cron: "0 0 3 * * *"
     migration-completion:

@@ -4,11 +4,12 @@ use gkg_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
 
-/// Serializing quorum inserts is what makes `select_sequential_consistency` take effect.
-const QUORUM_SESSION_SETTINGS: [(&str, &str); 3] = [
+/// Serialized inserts make `select_sequential_consistency` work; `async_insert` (on by default since 26.x) is rejected with a quorum.
+const QUORUM_SESSION_SETTINGS: [(&str, &str); 4] = [
     ("insert_quorum", "auto"),
     ("insert_quorum_parallel", "0"),
     ("select_sequential_consistency", "1"),
+    ("async_insert", "0"),
 ];
 
 pub trait ClickHouseConfigurationExt {
@@ -182,6 +183,12 @@ mod tests {
                 .get("select_sequential_consistency")
                 .map(String::as_str),
             Some("1")
+        );
+        assert_eq!(
+            settings.get("async_insert").map(String::as_str),
+            Some("0"),
+            "servers since 26.x default async_insert on, and async inserts \
+             cannot carry a quorum"
         );
     }
 
