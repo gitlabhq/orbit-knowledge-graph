@@ -3,9 +3,6 @@
 # Runs after setup.sh (namespaces exist, infra is up).
 # Uses the operator image built by build-operator-image.sh.
 #
-# Everything except the Orbit CR comes from the operator repo's own
-# deploy chart (deploy/chart/). No hand-written RBAC or Deployment.
-#
 # Temporary: goes away when the Orbit CRD ships in the published operator.
 
 set -eo pipefail
@@ -15,78 +12,90 @@ NS="e2e-${E2E_SHA}-gkg"
 OPERATOR_REPO="${E2E_OPERATOR_REPO:-https://gitlab.com/gitlab-org/cloud-native/gitlab-operator.git}"
 OPERATOR_BRANCH="${E2E_OPERATOR_BRANCH:-michaelusa/spike-orbit-crd}"
 
-# --- 1. Clone operator repo (deploy chart + CRDs) ---
-log "Cloning operator deploy chart"
-OPERATOR_DIR=$(mktemp -d)
-trap 'rm -rf "$OPERATOR_DIR"' EXIT
+# --- 1. CRDs from the operator repo ---
+log "Applying CRDs from operator repo"
+CRD_DIR=$(mktemp -d)
 git clone --depth 1 --branch "${OPERATOR_BRANCH}" --filter=blob:none --sparse \
-  "${OPERATOR_REPO}" "${OPERATOR_DIR}" 2>/dev/null
-(cd "${OPERATOR_DIR}" && git sparse-checkout set deploy/chart 2>/dev/null)
+  "${OPERATOR_REPO}" "${CRD_DIR}" 2>/dev/null
+(cd "${CRD_DIR}" && git sparse-checkout set config/crd/bases 2>/dev/null)
+$KC apply -f "${CRD_DIR}/config/crd/bases/"
+rm -rf "${CRD_DIR}"
 
-# --- 2. Deploy operator via its own Helm chart ---
-log "Rendering and applying operator manifests"
-(cd "${OPERATOR_DIR}/deploy/chart" && helm dependency build 2>/dev/null)
-
-# helm template renders the full deployment (RBAC, ServiceAccount, Deployment,
-# webhook, cert-manager resources). kubectl apply installs everything including
-# the CRDs from the chart's crds/ directory.
-# Render the operator manifests, then patch for e2e:
-# - Disable leader election (single replica, no lease RBAC)
-# - Replace the webhook cert volume with an emptyDir + init container
-#   (the deploy chart expects cert-manager to provision webhook-server-cert)
-helm template gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
-  --namespace "$NS" \
-  --include-crds \
-  --set cert-manager.install=false \
-  --set watchCluster=false \
-  --set image.registry="registry.gitlab.com" \
-  --set image.repository="gitlab-org/orbit/knowledge-graph" \
-  --set image.name="operator-spike" \
-  --set image.tag="${E2E_OPERATOR_TAG}" \
-  --set resources.requests.cpu=50m \
-  --set resources.requests.memory=128Mi \
-  --set resources.limits.cpu=250m \
-  --set resources.limits.memory=256Mi \
-  | sed 's/--enable-leader-election/--enable-leader-election=false/' \
-  > /tmp/operator-manifests.yaml
-
-# The deploy chart's RBAC does not cover Orbit resources. Create the
-# cluster-admin binding and webhook cert BEFORE applying the manifests
-# so the operator pod has permissions from the moment it starts.
-$KC create clusterrolebinding gitlab-operator-e2e-admin \
-  --clusterrole=cluster-admin \
-  --serviceaccount="${NS}:gitlab-manager" 2>/dev/null || true
-
-# The deploy chart mounts webhook-server-cert from a Secret that cert-manager
-# creates. We do not run the cert-manager issuer, so create a self-signed cert.
-CERT_DIR=$(mktemp -d)
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-  -keyout "${CERT_DIR}/tls.key" -out "${CERT_DIR}/tls.crt" \
-  -days 1 -nodes -subj "/CN=webhook" 2>/dev/null
-$KC create secret tls webhook-server-cert -n "$NS" \
-  --cert="${CERT_DIR}/tls.crt" --key="${CERT_DIR}/tls.key" 2>/dev/null || true
-rm -rf "${CERT_DIR}"
-
-# Now apply the operator manifests (RBAC and cert are already in place).
-$KC apply -n "$NS" -f /tmp/operator-manifests.yaml
-rm -f /tmp/operator-manifests.yaml
-
-# Wait for CRDs to be established.
 for crd in orbits.apps.gitlab.com gitlabs.apps.gitlab.com; do
   $KC wait --for=condition=Established crd/"$crd" --timeout=60s 2>/dev/null || true
 done
 
-$KC rollout status deploy/gitlab-controller-manager -n "$NS" --timeout=120s
+# --- 2. Operator Deployment (inline, matching the green run approach) ---
+log "Deploying operator"
+$KC apply -n "$NS" -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitlab-operator
+  namespace: ${NS}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gitlab-operator-e2e-admin
+subjects:
+  - kind: ServiceAccount
+    name: gitlab-operator
+    namespace: ${NS}
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-operator
+  namespace: ${NS}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab-operator
+  template:
+    metadata:
+      labels:
+        app: gitlab-operator
+    spec:
+      serviceAccountName: gitlab-operator
+      initContainers:
+        - name: webhook-cert
+          image: alpine/openssl:latest
+          command: ["sh", "-c", "openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /certs/tls.key -out /certs/tls.crt -days 1 -nodes -subj /CN=webhook && chmod 644 /certs/tls.key /certs/tls.crt"]
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /certs
+      containers:
+        - name: manager
+          image: "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}"
+          args: ["--enable-leader-election=false", "--metrics-secure=false"]
+          env:
+            - name: WATCH_NAMESPACE
+              value: "${NS}"
+            - name: HELM_CHARTS
+              value: /charts
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+      volumes:
+        - name: webhook-certs
+          emptyDir: {}
+EOF
 
-# The rollout completes when the container starts, but the operator needs
-# time to register controllers and start the manager (~15-30s).
+$KC rollout status deploy/gitlab-operator -n "$NS" --timeout=120s
 log "Waiting 30s for operator manager to start..."
 sleep 30
 
-rm -rf "$OPERATOR_DIR"
-trap - EXIT
-
-# --- 3. Orbit CR (the one file a customer writes) ---
+# --- 3. Orbit CR ---
 log "Applying Orbit CR from e2e/orbit-cr.yaml"
 
 V_FILE="${E2E_DIR}/config/versions.yaml"
@@ -115,12 +124,12 @@ for i in $(seq 1 60); do
     log "GKG Deployments: $READY"
     break
   fi
-  echo "  ($i/30)"
+  echo "  ($i/60)"
   sleep 10
 done
 if [ -z "$READY" ]; then
   log "ERROR: No GKG Deployments after 10 minutes"
-  $KC logs deploy/gitlab-controller-manager -n "$NS" --tail=50 || true
+  $KC logs deploy/gitlab-operator -n "$NS" --tail=50 || true
   exit 1
 fi
 
