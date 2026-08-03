@@ -97,65 +97,6 @@ pub struct ParseFullResult {
     pub phase_cpu: PhaseCpu,
 }
 
-impl ParseFullResult {
-    /// Rough heap footprint of the graph artifacts this parse contributes
-    /// (definitions, imports, references, and their owned strings). The pipeline
-    /// sums it across a repository to bound the in-memory graph. It is an
-    /// estimate — struct sizes plus the primary owned strings, not an exact
-    /// allocation count — because it only has to track growth closely enough to
-    /// shed a runaway repository before the cgroup OOM-kills the worker.
-    pub fn estimated_graph_bytes(&self) -> u64 {
-        use crate::v2::types::{DefinitionMetadata, ssa::ParseValue};
-        use std::mem::size_of;
-
-        let definitions: usize = self
-            .definitions
-            .iter()
-            .map(|d| {
-                size_of::<CanonicalDefinition>()
-                    + d.name.len()
-                    + d.fqn.as_str().len()
-                    + d.metadata.as_ref().map_or(0, |m| {
-                        size_of::<DefinitionMetadata>()
-                            + m.super_types.iter().map(String::len).sum::<usize>()
-                            + m.return_type.as_deref().map_or(0, str::len)
-                            + m.type_annotation.as_deref().map_or(0, str::len)
-                            + m.receiver_type.as_deref().map_or(0, str::len)
-                            + m.decorators.iter().map(String::len).sum::<usize>()
-                            + m.companion_of.as_deref().map_or(0, str::len)
-                    })
-            })
-            .sum();
-
-        let imports: usize = self
-            .imports
-            .iter()
-            .map(|i| {
-                size_of::<CanonicalImport>()
-                    + i.path.len()
-                    + i.name.as_deref().map_or(0, str::len)
-                    + i.alias.as_deref().map_or(0, str::len)
-                    + i.scope_fqn.as_ref().map_or(0, |f| f.as_str().len())
-            })
-            .sum();
-
-        let refs: usize = self
-            .refs
-            .iter()
-            .map(|r| {
-                size_of::<CollectedRef>()
-                    + r.name.len()
-                    + r.chain
-                        .as_ref()
-                        .map_or(0, |c| c.len() * size_of::<ExpressionStep>())
-                    + r.reaching.len() * size_of::<ParseValue>()
-            })
-            .sum();
-
-        (definitions + imports + refs) as u64
-    }
-}
-
 /// Per-thread CPU time spent in each bounded parse sub-phase of one file.
 #[derive(Clone, Copy, Default)]
 pub struct PhaseCpu {
@@ -1721,36 +1662,6 @@ mod tests {
         let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(ref_names.len(), 1);
         assert_eq!(ref_names[0], "foo");
-    }
-
-    #[test]
-    fn estimated_graph_bytes_grows_with_produced_definitions() {
-        let spec = LanguageSpec::new(
-            "test",
-            vec![
-                scope("class_definition", "Class"),
-                scope("function_definition", "Function"),
-            ],
-            vec![],
-            vec![],
-        );
-        let parse = |code: &str| {
-            spec.parse_full_collect(
-                code.as_bytes(),
-                "test.py",
-                Language::Python,
-                &Tracer::new(false),
-                Default::default(),
-            )
-            .unwrap()
-            .estimated_graph_bytes()
-        };
-
-        let one = parse("def a(): pass");
-        let many = parse("def a(): pass\ndef b(): pass\ndef c(): pass\ndef d(): pass");
-
-        assert!(one > 0);
-        assert!(many > one);
     }
 
     #[test]

@@ -70,11 +70,11 @@
               "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
-              "graph_memory_budget_bytes": null,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "max_parse_bytes": 67108864,
               "max_total_bytes": 2000000000,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
@@ -437,16 +437,6 @@
           "default": 10,
           "minimum": 0
         },
-        "graph_memory_budget_bytes": {
-          "description": "In-memory graph bytes one repository may accumulate before the pipeline\nsheds its remaining files, so a pathological generated repository can't\nOOM-kill the worker pool. Unset = derived from the container memory limit\nand worker budget. 0 = no limit.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
-        },
         "job_timeout_secs": {
           "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. Keep below `nats.ack_wait_secs`. 0 = no timeout. Defaults to 250.",
           "type": "integer",
@@ -470,6 +460,13 @@
           "type": "integer",
           "format": "uint",
           "default": 1000000,
+          "minimum": 0
+        },
+        "max_parse_bytes": {
+          "description": "Parse-candidate source bytes one repository may accept before the\npipeline sheds the rest at inventory time, so a pathological generated\nrepository can't OOM the worker pool. Shedding happens before any parse,\nso it covers every language uniformly. 0 = no limit. Defaults to 64 MiB\n(see `default_code_indexing_max_parse_bytes`).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 67108864,
           "minimum": 0
         },
         "max_total_bytes": {
@@ -581,11 +578,11 @@
             "big_indexing_slots": null,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 10,
-            "graph_memory_budget_bytes": null,
             "job_timeout_secs": 250,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
+            "max_parse_bytes": 67108864,
             "max_total_bytes": 2000000000,
             "per_file_parse_timeout_ms": 100,
             "per_file_ssa_timeout_ms": 100,
@@ -687,11 +684,11 @@
                 "big_indexing_slots": null,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 10,
-                "graph_memory_budget_bytes": null,
                 "job_timeout_secs": 250,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
+                "max_parse_bytes": 67108864,
                 "max_total_bytes": 2000000000,
                 "per_file_parse_timeout_ms": 100,
                 "per_file_ssa_timeout_ms": 100,
@@ -924,11 +921,11 @@
               "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
-              "graph_memory_budget_bytes": null,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "max_parse_bytes": 67108864,
               "max_total_bytes": 2000000000,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,

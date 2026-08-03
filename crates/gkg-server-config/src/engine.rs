@@ -264,6 +264,22 @@ fn default_code_indexing_max_total_bytes() -> u64 {
     2_000_000_000
 }
 
+/// 64 MiB of parse-candidate source per repository.
+///
+/// Arithmetic (recorded so the number has a basis, not a guess): prod code pods
+/// run 16 workers in 24 GiB, so a worker's memory share is 24 GiB / 16 = 1.5
+/// GiB. Hold a single repository's graph-and-resolution peak to about half that
+/// share (~768 MiB), leaving the other half for the tree-sitter ASTs, SSA
+/// arenas, and Arrow buffers that are live at the same time. Measured RSS is
+/// 4x source on mixed real repositories and up to ~12x on generated Go and
+/// reference-dense adversarial shapes; dividing the ~768 MiB target by the ~12x
+/// worst case gives a 64 MiB source cap. At 12x that holds peak near 768 MiB; a
+/// 4x real repository would need 192 MiB of parseable source to be capped, far
+/// above essentially every real repository, so normal indexing is untouched.
+fn default_code_indexing_max_parse_bytes() -> u64 {
+    64 * 1024 * 1024
+}
+
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
     2000
 }
@@ -329,6 +345,13 @@ pub struct CodeIndexingPipelineConfig {
     /// Defaults to 2 GB.
     #[serde(default = "default_code_indexing_max_total_bytes")]
     pub max_total_bytes: u64,
+    /// Parse-candidate source bytes one repository may accept before the
+    /// pipeline sheds the rest at inventory time, so a pathological generated
+    /// repository can't OOM the worker pool. Shedding happens before any parse,
+    /// so it covers every language uniformly. 0 = no limit. Defaults to 64 MiB
+    /// (see `default_code_indexing_max_parse_bytes`).
+    #[serde(default = "default_code_indexing_max_parse_bytes")]
+    pub max_parse_bytes: u64,
     #[serde(default)]
     pub worker_threads: usize,
     #[serde(default)]
@@ -383,12 +406,6 @@ pub struct CodeIndexingPipelineConfig {
     /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count, capped by its memory limit.
     #[serde(default)]
     pub big_indexing_slots: Option<usize>,
-    /// In-memory graph bytes one repository may accumulate before the pipeline
-    /// sheds its remaining files, so a pathological generated repository can't
-    /// OOM-kill the worker pool. Unset = derived from the container memory limit
-    /// and worker budget. 0 = no limit.
-    #[serde(default)]
-    pub graph_memory_budget_bytes: Option<u64>,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -397,6 +414,7 @@ impl Default for CodeIndexingPipelineConfig {
             max_file_size_bytes: default_code_indexing_max_file_size_bytes(),
             max_files: default_code_indexing_max_files(),
             max_total_bytes: default_code_indexing_max_total_bytes(),
+            max_parse_bytes: default_code_indexing_max_parse_bytes(),
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
@@ -415,24 +433,12 @@ impl Default for CodeIndexingPipelineConfig {
             small_repo_max_files: default_code_indexing_small_repo_max_files(),
             small_indexing_slots: None,
             big_indexing_slots: None,
-            graph_memory_budget_bytes: None,
         }
     }
 }
 
 impl CodeIndexingPipelineConfig {
     pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
-        if self.graph_memory_budget_bytes.is_none() {
-            let budget = resources.derive_code_graph_memory_budget();
-            self.graph_memory_budget_bytes = Some(budget.unwrap_or(0));
-            info!(
-                available_parallelism = resources.available_parallelism,
-                memory_limit_bytes = resources.memory_limit_bytes,
-                value = budget,
-                "derived code-indexing pipeline.graph_memory_budget_bytes"
-            );
-        }
-
         if self.small_indexing_slots.is_some() && self.big_indexing_slots.is_some() {
             return;
         }
@@ -464,12 +470,6 @@ impl CodeIndexingPipelineConfig {
 
     pub fn big_indexing_slots(&self) -> usize {
         self.big_indexing_slots.unwrap_or(0)
-    }
-
-    /// Per-repository in-memory graph ceiling, or `None` when shedding is
-    /// disabled (unset or `0`).
-    pub fn graph_memory_budget_bytes(&self) -> Option<u64> {
-        self.graph_memory_budget_bytes.filter(|&b| b > 0)
     }
 
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).

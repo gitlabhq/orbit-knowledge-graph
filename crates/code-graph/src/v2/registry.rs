@@ -189,7 +189,6 @@ mod tests {
     use super::*;
     use crate::v2::pipeline::GraphStatsCounters;
     use crate::v2::pipeline::PipelineConfig;
-    use crate::v2::pipeline::RepositoryGraphBudget;
     use std::sync::atomic::AtomicUsize;
 
     struct NoopConverter;
@@ -211,7 +210,6 @@ mod tests {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
-            graph_budget: RepositoryGraphBudget::new(None),
         })
     }
 

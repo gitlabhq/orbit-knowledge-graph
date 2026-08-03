@@ -10,7 +10,7 @@ use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
     BatchTx, Decision, FileInventoryEntry, GraphConverter, GraphStatsCounters, OnBatch, Pipeline,
-    PipelineConfig, PipelineContext, RepositoryGraphBudget,
+    PipelineConfig, PipelineContext,
 };
 
 use super::assertions::{Severity, TestSuite};
@@ -228,7 +228,6 @@ pub async fn run_yaml_suite(yaml: &str) {
                 faults: std::sync::Mutex::new(Vec::new()),
                 file_timings: std::sync::Mutex::new(Vec::new()),
                 language_timings: std::sync::Mutex::new(Vec::new()),
-                graph_budget: RepositoryGraphBudget::new(None),
             });
             let converter = LanceConverter::new();
             let (tx, rx) = crossbeam_channel::unbounded();

@@ -33,19 +33,37 @@ pub fn parseable_file_count(inventory: &[FileInventoryEntry]) -> usize {
         .count()
 }
 
-/// Select the parse candidates (loaded, language-detected, under `max_files`;
-/// `0` = unlimited) and group them by language family. Also returns the path →
-/// language map for the structural graph.
+/// Parse candidates selected by [`group_parseable_inventory`], grouped by
+/// language family, plus the path → language map for the structural graph and
+/// the count of files shed by the source-byte cap.
+pub struct ParseCandidates {
+    pub groups: FxHashMap<LanguageFamily, Vec<FamilyFileInput>>,
+    pub file_languages: FxHashMap<String, Language>,
+    /// Files dropped because accepting them would push the repository's
+    /// parse-candidate source bytes over `max_parse_bytes`.
+    pub shed_over_byte_cap: usize,
+}
+
+/// Select the parse candidates (loaded, language-detected, under `max_files` and
+/// `max_parse_bytes`; `0` = unlimited for either) and group them by language
+/// family.
+///
+/// Both caps shed at inventory time, before any file is parsed, so they cover
+/// every language uniformly and bound peak memory regardless of which pipeline a
+/// family dispatches to. The inventory is path-sorted upstream
+/// ([`gkg_utils::fs_stream::canonicalize_inventory`]), so the shed set is a
+/// stable function of the repository: the same commit sheds the same files every
+/// run.
 pub fn group_parseable_inventory(
     inventory: &[FileInventoryEntry],
     max_files: usize,
-) -> (
-    FxHashMap<LanguageFamily, Vec<FamilyFileInput>>,
-    FxHashMap<String, Language>,
-) {
+    max_parse_bytes: u64,
+) -> ParseCandidates {
     let mut groups: FxHashMap<LanguageFamily, Vec<FamilyFileInput>> = FxHashMap::default();
-    let mut parsed_file_languages = FxHashMap::default();
+    let mut file_languages = FxHashMap::default();
     let mut accepted_files = 0usize;
+    let mut accepted_bytes = 0u64;
+    let mut shed_over_byte_cap = 0usize;
 
     for entry in inventory {
         // The stream already settled parse candidacy (parsable, loaded, deduped);
@@ -59,9 +77,14 @@ pub fn group_parseable_inventory(
         if max_files > 0 && accepted_files >= max_files {
             continue;
         }
+        if max_parse_bytes > 0 && accepted_bytes >= max_parse_bytes {
+            shed_over_byte_cap += 1;
+            continue;
+        }
 
         accepted_files += 1;
-        parsed_file_languages.insert(entry.path.clone(), lang);
+        accepted_bytes += entry.size;
+        file_languages.insert(entry.path.clone(), lang);
         groups
             .entry(lang.family())
             .or_default()
@@ -71,7 +94,11 @@ pub fn group_parseable_inventory(
             });
     }
 
-    (groups, parsed_file_languages)
+    ParseCandidates {
+        groups,
+        file_languages,
+        shed_over_byte_cap,
+    }
 }
 
 pub fn build_file_inventory_graph(
@@ -98,16 +125,20 @@ mod tests {
     use super::*;
 
     fn keep(path: &str) -> FileInventoryEntry {
+        sized(path, 10)
+    }
+
+    fn sized(path: &str, size: u64) -> FileInventoryEntry {
         FileInventoryEntry {
             path: path.into(),
-            size: 10,
+            size,
             decision: Decision::Parse,
         }
     }
 
     fn grouped_count(inventory: &[FileInventoryEntry], max_files: usize) -> usize {
-        group_parseable_inventory(inventory, max_files)
-            .0
+        group_parseable_inventory(inventory, max_files, 0)
+            .groups
             .values()
             .map(Vec::len)
             .sum()
@@ -134,6 +165,63 @@ mod tests {
             1,
             "only Keep files are parse candidates"
         );
+    }
+
+    #[test]
+    fn byte_cap_sheds_candidates_past_the_ceiling() {
+        let inventory = [sized("a.py", 100), sized("b.py", 100), sized("c.py", 100)];
+
+        let candidates = group_parseable_inventory(&inventory, 0, 150);
+
+        assert_eq!(candidates.groups.values().map(Vec::len).sum::<usize>(), 2);
+        assert_eq!(candidates.shed_over_byte_cap, 1);
+        assert!(candidates.file_languages.contains_key("a.py"));
+        assert!(candidates.file_languages.contains_key("b.py"));
+        assert!(!candidates.file_languages.contains_key("c.py"));
+    }
+
+    #[test]
+    fn byte_cap_of_zero_sheds_nothing() {
+        let inventory = [sized("a.py", 1_000_000), sized("b.py", 1_000_000)];
+
+        let candidates = group_parseable_inventory(&inventory, 0, 0);
+
+        assert_eq!(candidates.groups.values().map(Vec::len).sum::<usize>(), 2);
+        assert_eq!(candidates.shed_over_byte_cap, 0);
+    }
+
+    #[test]
+    fn byte_cap_shed_set_is_deterministic_across_runs() {
+        let inventory = [
+            sized("a.py", 100),
+            sized("b.py", 100),
+            sized("c.py", 100),
+            sized("d.py", 100),
+        ];
+
+        let first = group_parseable_inventory(&inventory, 0, 250);
+        let second = group_parseable_inventory(&inventory, 0, 250);
+
+        assert_eq!(first.shed_over_byte_cap, second.shed_over_byte_cap);
+        let mut first_kept: Vec<_> = first.file_languages.keys().cloned().collect();
+        let mut second_kept: Vec<_> = second.file_languages.keys().cloned().collect();
+        first_kept.sort();
+        second_kept.sort();
+        assert_eq!(first_kept, second_kept);
+        assert_eq!(first_kept, vec!["a.py", "b.py", "c.py"]);
+    }
+
+    // The old in-parse budget never fired for JavaScript or TypeScript because
+    // those dispatch to JsPipeline, which never recorded graph bytes. Shedding at
+    // inventory time is language-agnostic, so the cap must cover them.
+    #[test]
+    fn byte_cap_covers_typescript_and_javascript() {
+        let inventory = [sized("a.ts", 100), sized("b.js", 100), sized("c.ts", 100)];
+
+        let candidates = group_parseable_inventory(&inventory, 0, 150);
+
+        assert_eq!(candidates.shed_over_byte_cap, 1);
+        assert!(!candidates.file_languages.contains_key("c.ts"));
     }
 
     fn with_decision(path: &str, decision: Decision) -> FileInventoryEntry {

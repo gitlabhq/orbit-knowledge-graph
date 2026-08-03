@@ -109,8 +109,8 @@ pub enum FileSkip {
     ParserOversize,
     ArrowOffsetOverflow,
     UnsafePath,
-    /// The repository's accumulated in-memory graph crossed the byte budget, so
-    /// the pipeline shed this file instead of letting the pod OOM.
+    /// Shed at inventory time because the repository's parse-candidate source
+    /// bytes crossed `max_parse_bytes`, bounding peak memory before any parse.
     MemoryBudget,
     Timeout(AbortPhase),
 }

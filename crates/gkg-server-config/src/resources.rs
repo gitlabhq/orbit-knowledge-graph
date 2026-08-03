@@ -11,12 +11,6 @@ pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
 /// sdlc 20 in 32 GiB — both ~1.5 GiB per worker.
 const WORKER_MEMORY_BUDGET_BYTES: u64 = 1536 * 1024 * 1024;
 
-/// Share of a worker's memory that the persisted code graph may hold before the
-/// pipeline sheds a repository's remaining files. The rest is headroom for the
-/// tree-sitter ASTs, SSA arenas, and Arrow batch buffers that are live at the
-/// same time, so the accumulating graph alone must not claim the whole share.
-const CODE_GRAPH_MEMORY_SHARE_PERCENT: u64 = 50;
-
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
 
@@ -67,17 +61,6 @@ impl ContainerResources {
             Some(bytes) => datalake_batch_size_for_memory_limit(bytes),
             None => DATALAKE_BATCH_AT_ANCHOR,
         }
-    }
-
-    /// Ceiling on the in-memory graph one repository may accumulate before the
-    /// code pipeline sheds its remaining files. Derived from the per-worker
-    /// memory share (cgroup limit / worker budget) so it scales with pod size
-    /// rather than being tuned for one deployment. `None` when the host exposes
-    /// no memory limit, which disables shedding.
-    pub fn derive_code_graph_memory_budget(&self) -> Option<u64> {
-        let workers = self.derive_worker_budget() as u64;
-        self.memory_limit_bytes
-            .map(|bytes| bytes / workers * CODE_GRAPH_MEMORY_SHARE_PERCENT / 100)
     }
 }
 
@@ -246,26 +229,6 @@ mod tests {
         assert_eq!(
             container_resources(8, None).derive_datalake_batch_size(),
             500_000
-        );
-    }
-
-    #[test]
-    fn code_graph_memory_budget_is_half_the_per_worker_share() {
-        assert_eq!(
-            container_resources(16, Some(24 * GIB)).derive_code_graph_memory_budget(),
-            Some(768 * 1024 * 1024)
-        );
-        assert_eq!(
-            container_resources(8, Some(32 * GIB)).derive_code_graph_memory_budget(),
-            Some(2 * GIB)
-        );
-    }
-
-    #[test]
-    fn code_graph_memory_budget_is_none_without_a_memory_limit() {
-        assert_eq!(
-            container_resources(16, None).derive_code_graph_memory_budget(),
-            None
         );
     }
 

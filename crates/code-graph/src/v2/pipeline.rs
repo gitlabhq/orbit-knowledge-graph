@@ -12,7 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::v2::linker::{CodeGraph, GraphEdge};
@@ -57,50 +57,6 @@ impl CancellationToken {
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
-    }
-}
-
-/// Bounds the in-memory graph one repository accumulates during the parallel
-/// parse. Once the running total crosses the ceiling, every not-yet-parsed file
-/// is shed, which stops both the graph accumulation and the concurrent parses
-/// of the rest of the repository — the two costs that OOM-kill a code worker on
-/// a pathological generated tree. Shared across the rayon workers, so it is
-/// eventually consistent: a few in-flight files past the crossing still land,
-/// bounding the overshoot by the number of concurrent parses. It lives on the
-/// repository-wide [`PipelineContext`], so all language families spawned for one
-/// repository share a single ceiling rather than getting one budget each.
-pub struct RepositoryGraphBudget {
-    ceiling: Option<u64>,
-    accumulated: AtomicU64,
-    warned: AtomicBool,
-}
-
-impl RepositoryGraphBudget {
-    pub fn new(ceiling: Option<u64>) -> Self {
-        Self {
-            ceiling,
-            accumulated: AtomicU64::new(0),
-            warned: AtomicBool::new(false),
-        }
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.ceiling
-            .is_some_and(|c| self.accumulated.load(Ordering::Relaxed) >= c)
-    }
-
-    fn record(&self, bytes: u64) {
-        if self.ceiling.is_some() {
-            self.accumulated.fetch_add(bytes, Ordering::Relaxed);
-        }
-    }
-
-    /// True for the first caller only, so a shedding repository logs one WARN
-    /// instead of one per shed file.
-    fn claim_first_warning(&self) -> bool {
-        self.warned
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
     }
 }
 
@@ -242,9 +198,6 @@ pub struct PipelineContext {
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
     pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
     pub language_timings: std::sync::Mutex<Vec<LanguageTimings>>,
-    /// One memory ceiling for the whole repository, shared across every language
-    /// family. Derived from [`PipelineConfig::graph_memory_budget`].
-    pub graph_budget: RepositoryGraphBudget,
 }
 
 impl PipelineContext {
@@ -527,6 +480,11 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
+    /// Max parse-candidate source bytes accepted for one pipeline run. Once the
+    /// accepted bytes reach this, every remaining candidate is shed at inventory
+    /// time, before any parse, so the cap bounds peak memory uniformly across
+    /// languages. 0 = no limit.
+    pub max_parse_bytes: u64,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
@@ -555,9 +513,6 @@ pub struct PipelineConfig {
     /// Called once per successfully-parsed file with its per-phase CPU time, so
     /// the consumer can record a distribution. Fires from parallel workers.
     pub on_phase_cpu: Option<PhaseCpuObserver>,
-    /// In-memory graph bytes one repository may accumulate before the parse
-    /// phase sheds its remaining files. `None` = unbounded (no shedding).
-    pub graph_memory_budget: Option<u64>,
 }
 
 /// Observer for per-file parse/walk/ssa CPU time. See [`PipelineConfig::on_phase_cpu`].
@@ -567,6 +522,7 @@ impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
             max_files: 0,
+            max_parse_bytes: 0,
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
@@ -578,7 +534,6 @@ impl Default for PipelineConfig {
             emit_file_inventory_graph: false,
             on_progress: None,
             on_phase_cpu: None,
-            graph_memory_budget: None,
         }
     }
 }
@@ -617,6 +572,10 @@ pub struct PipelineStats {
     pub files_indexed: usize,
     pub files_parsed: usize,
     pub files_skipped: usize,
+    /// Parse candidates shed at inventory time because the repository's
+    /// parse-candidate source bytes crossed `max_parse_bytes`. Reported once per
+    /// repository under the `memory_budget` skip reason.
+    pub files_shed_over_budget: usize,
     pub definitions_count: usize,
     pub imports_count: usize,
     pub references_count: usize,
@@ -745,8 +704,11 @@ impl Pipeline {
         //    CodeGraph for cross-language resolution.
         let t_discovery = std::time::Instant::now();
         let pb_discover = spinner("Preparing file inventory...");
-        let (files_by_family, parsed_file_languages) =
-            group_parseable_inventory(&file_inventory, config.max_files);
+        let candidates =
+            group_parseable_inventory(&file_inventory, config.max_files, config.max_parse_bytes);
+        let files_by_family = candidates.groups;
+        let parsed_file_languages = candidates.file_languages;
+        let files_shed_over_budget = candidates.shed_over_byte_cap;
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
@@ -759,7 +721,6 @@ impl Pipeline {
             lang_summary.join(", ")
         ));
 
-        let graph_budget = RepositoryGraphBudget::new(config.graph_memory_budget);
         let ctx = Arc::new(PipelineContext {
             config,
             tracer,
@@ -768,7 +729,6 @@ impl Pipeline {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
-            graph_budget,
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -1033,6 +993,7 @@ impl Pipeline {
                 files_indexed: files_count.into_inner(),
                 files_parsed: files_parsed.into_inner(),
                 files_skipped: files_skipped.into_inner(),
+                files_shed_over_budget,
                 definitions_count: definitions_count.into_inner(),
                 imports_count: imports_count.into_inner(),
                 references_count: 0,
@@ -1198,24 +1159,6 @@ impl FamilyPipeline {
                     pb.inc(1);
                     return None;
                 }
-                if ctx.graph_budget.is_exhausted() {
-                    if ctx.graph_budget.claim_first_warning() {
-                        tracing::warn!(
-                            root_path,
-                            budget_bytes = ctx.config.graph_memory_budget,
-                            "code graph memory budget exhausted; shedding remaining files for this repository"
-                        );
-                    }
-                    pb.inc(1);
-                    return Some(ParseOutcome::Skip(SkippedFile {
-                        path: f.path.clone(),
-                        kind: FileSkip::MemoryBudget,
-                        detail: format!(
-                            "repository graph exceeded {} bytes",
-                            ctx.config.graph_memory_budget.unwrap_or(0)
-                        ),
-                    }));
-                }
                 let lctx = &member_ctxs[&f.language];
                 let abs_path = format!("{root_path}/{}", f.path);
                 if let Some(limit) = parser_max_file_size(f.language)
@@ -1287,8 +1230,6 @@ impl FamilyPipeline {
                     }
                 };
                 let parse_ms = t_parse.elapsed().as_secs_f64() * 1000.0;
-
-                ctx.graph_budget.record(result.estimated_graph_bytes());
 
                 if let Some(cb) = &ctx.config.on_phase_cpu {
                     cb(f.language, result.phase_cpu);
@@ -1775,7 +1716,6 @@ mod tests {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
-            graph_budget: RepositoryGraphBudget::new(None),
         });
         let capture = Arc::new(TestCapture::new());
         let noop = |_: &str, _: RecordBatch| Ok(());
@@ -1885,7 +1825,7 @@ mod tests {
     }
 
     #[test]
-    fn repository_graph_budget_sheds_files_past_the_ceiling() {
+    fn memory_cap_sheds_source_bytes_past_the_ceiling() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
@@ -1905,11 +1845,8 @@ mod tests {
                     decision: Decision::Parse,
                 },
             ]),
-            // worker_threads=1 forces sequential parse, so the first file always
-            // crosses the 1-byte ceiling before the second file is considered.
             PipelineConfig {
-                worker_threads: 1,
-                graph_memory_budget: Some(1),
+                max_parse_bytes: 1,
                 ..PipelineConfig::default()
             },
             &FxHashMap::default(),
@@ -1919,16 +1856,16 @@ mod tests {
         );
 
         assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.stats.files_shed_over_budget, 1);
+        assert_eq!(result.stats.files_parsed, 1);
         assert_eq!(
-            result.skipped[0].kind,
-            crate::v2::error::FileSkip::MemoryBudget
+            result.stats.files_indexed, 2,
+            "the shed file must still appear as an unparsed File node"
         );
-        assert_eq!(result.skipped[0].path, "b.py");
     }
 
     #[test]
-    fn repository_graph_budget_of_none_sheds_nothing() {
+    fn memory_cap_of_zero_sheds_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
@@ -1949,8 +1886,7 @@ mod tests {
                 },
             ]),
             PipelineConfig {
-                worker_threads: 1,
-                graph_memory_budget: None,
+                max_parse_bytes: 0,
                 ..PipelineConfig::default()
             },
             &FxHashMap::default(),
@@ -1960,45 +1896,35 @@ mod tests {
         );
 
         assert_eq!(result.errors.len(), 0);
-        assert!(
-            result
-                .skipped
-                .iter()
-                .all(|s| s.kind != crate::v2::error::FileSkip::MemoryBudget)
-        );
+        assert_eq!(result.stats.files_shed_over_budget, 0);
     }
 
+    // The old in-parse budget never fired for TypeScript because it dispatches to
+    // JsPipeline, which never recorded graph bytes; a TS-only repository shed
+    // nothing. Shedding at inventory time is language-agnostic, so this now sheds.
     #[test]
-    fn repository_graph_budget_is_shared_across_language_families() {
+    fn memory_cap_covers_typescript() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
-        std::fs::write(root.join("a.rb"), "def g\n  2\nend\n").unwrap();
+        std::fs::write(root.join("a.ts"), "export function f() { return 1; }\n").unwrap();
+        std::fs::write(root.join("b.ts"), "export function g() { return 2; }\n").unwrap();
 
-        // One file per family means neither file would ever be shed under a
-        // per-family budget (the first file of a family is never checked against
-        // a full ceiling). max_concurrent_languages=1 runs the families
-        // sequentially, so the second family's file must observe the first
-        // family's bytes. A MemoryBudget skip appearing at all proves the budget
-        // crossed the family boundary.
         let result = Pipeline::run_with_tracer(
             root,
             Arc::from(vec![
                 FileInventoryEntry {
-                    path: "a.py".into(),
-                    size: 22,
+                    path: "a.ts".into(),
+                    size: 34,
                     decision: Decision::Parse,
                 },
                 FileInventoryEntry {
-                    path: "a.rb".into(),
-                    size: 14,
+                    path: "b.ts".into(),
+                    size: 34,
                     decision: Decision::Parse,
                 },
             ]),
             PipelineConfig {
-                worker_threads: 1,
-                max_concurrent_languages: 1,
-                graph_memory_budget: Some(1),
+                max_parse_bytes: 1,
                 ..PipelineConfig::default()
             },
             &FxHashMap::default(),
@@ -2008,12 +1934,8 @@ mod tests {
         );
 
         assert_eq!(result.errors.len(), 0);
-        let memory_skips: Vec<_> = result
-            .skipped
-            .iter()
-            .filter(|s| s.kind == crate::v2::error::FileSkip::MemoryBudget)
-            .collect();
-        assert_eq!(memory_skips.len(), 1);
+        assert_eq!(result.stats.files_shed_over_budget, 1);
+        assert_eq!(result.stats.files_parsed, 1);
     }
 
     #[test]
@@ -2468,7 +2390,6 @@ namespace MyApp {
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
             language_timings: std::sync::Mutex::new(Vec::new()),
-            graph_budget: RepositoryGraphBudget::new(None),
         });
         ctx.record_skip(
             "src/slow.rs",
