@@ -17,6 +17,7 @@ gkg-server = { path = "../gkg-server", features = ["testkit"] }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 jsonschema = { workspace = true }
+jsonwebtoken = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 named-queries = { path = "../named-queries" }
 nats-client = { workspace = true, features = ["testkit"] }
@@ -49,8 +50,10 @@ tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
+tracing-subscriber = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
 cargo_metadata = { workspace = true }

@@ -17,6 +17,7 @@ mod server {
     pub mod grpc_tls;
     pub mod health;
     pub mod hydration;
+    pub mod query_log_retention;
     pub mod redaction;
     pub mod schema_readiness;
     pub mod telemetry;

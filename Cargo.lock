@@ -6150,6 +6150,7 @@ dependencies = [
  "indexer",
  "integration-testkit",
  "jsonschema",
+ "jsonwebtoken 10.4.0",
  "labkit",
  "labkit-events",
  "named-queries",
@@ -6175,9 +6176,11 @@ dependencies = [
  "testcontainers",
  "testcontainers-modules",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tonic",
  "tower",
+ "tracing-subscriber",
  "uuid",
 ]
 
