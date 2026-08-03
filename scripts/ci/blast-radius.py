@@ -240,12 +240,10 @@ def print_producer_report(unit, own_project_id, limit, min_stars):
                 continue
             per_project[pid][unit["namespace"].rsplit("/", 1)[-1]] = int(r["usages"])
 
+    if not per_project:
+        return False
     print(f"### Consumers of `{unit['namespace']}`\n")
     print(f"Changed symbols: {format_symbols(unit['symbols'])}\n")
-    if not per_project:
-        print("No external consumers import this package or its symbols. Brand-new "
-              "API has no consumers until default branches pick it up.\n")
-        return
     if not symbol_level:
         print("No symbol-level matches (package-level imports, e.g. Go/Ruby); "
               "listing projects that import the package at all.\n")
@@ -282,20 +280,25 @@ def print_producer_report(unit, own_project_id, limit, min_stars):
     entries = sorted(deduped, key=lambda e: (-e["stars"], -e["total"]))
 
     def row(e):
-        sym_str = ", ".join(f"{k} ({v})" for k, v in sorted(e["syms"].items(), key=lambda kv: -kv[1]))
         note = f" (+{e['siblings']} likely forks/mirrors)" if e.get("siblings") else ""
-        return f"| {e['path']}{note} | {e['stars']} | {e['total']} | {sym_str} |"
+        cells = f"| {e['path']}{note} | {e['stars']} | {e['total']} |"
+        if symbol_level:
+            sym_str = ", ".join(f"{k} ({v})" for k, v in sorted(e["syms"].items(), key=lambda kv: -kv[1]))
+            cells += f" {sym_str} |"
+        return cells
 
+    header = "| Consumer project | Stars | Total usages |" + (" Symbols used |" if symbol_level else "")
+    separator = "|---|---|---|" + ("---|" if symbol_level else "")
     main_rows = [e for e in entries if e["stars"] >= min_stars]
     tail = [e for e in entries if e["stars"] < min_stars]
-    print("| Consumer project | Stars | Total usages | Symbols used |")
-    print("|---|---|---|---|")
+    print(header)
+    print(separator)
     for e in main_rows:
         print(row(e))
     if tail:
         print(f"\n<details><summary>{len(tail)} unstarred consumer(s) — likely forks, mirrors, and demos</summary>\n")
-        print("| Consumer project | Stars | Total usages | Symbols used |")
-        print("|---|---|---|---|")
+        print(header)
+        print(separator)
         for e in tail:
             print(row(e))
         print("\n</details>")
@@ -304,6 +307,7 @@ def print_producer_report(unit, own_project_id, limit, min_stars):
     if truncated:
         print("⚠️ Result truncated at query limit; radius may be larger.")
     print()
+    return True
 
 
 def print_consumer_report(package, old, new, project_id, limit, max_files):
@@ -318,6 +322,7 @@ def print_consumer_report(package, old, new, project_id, limit, max_files):
     print(f"### `{package}` {old} → {new}\n")
     print(f"{len(sites)} import site(s) across {len(per_file)} file(s); "
           f"symbols: {format_symbols(symbols)}\n")
+    print("<details><summary>Import sites by file</summary>\n")
     print("| File | Imported symbols |")
     print("|---|---|")
     ranked = sorted(per_file.items(), key=lambda kv: -len(kv[1]))
@@ -325,6 +330,7 @@ def print_consumer_report(package, old, new, project_id, limit, max_files):
         print(f"| {path} | {', '.join(sorted(set(names)))} |")
     if len(ranked) > max_files:
         print(f"\n…and {len(ranked) - max_files} more file(s).")
+    print("\n</details>")
     if truncated:
         print("\n⚠️ Import sites truncated at query limit.")
     print()
@@ -362,8 +368,13 @@ def main():
     units = attribute_symbols(changed_exports(args.repo, args.diff_range), units)
     if units:
         print("## Published surface: who consumes this change\n")
+        silent = []
         for unit in units:
-            print_producer_report(unit, args.project_id, args.limit, args.min_stars)
+            if not print_producer_report(unit, args.project_id, args.limit, args.min_stars):
+                silent.append(unit["namespace"])
+        if silent:
+            print("No external consumers import these packages or their changed symbols: "
+                  + ", ".join(f"`{n}`" for n in sorted(silent)) + ".\n")
         sections += 1
 
     if sections == 0:
