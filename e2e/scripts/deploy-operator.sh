@@ -16,14 +16,9 @@ NS="e2e-${E2E_SHA}-gkg"
 OPERATOR_REPO="${E2E_OPERATOR_REPO:-https://gitlab.com/gitlab-org/cloud-native/gitlab-operator.git}"
 OPERATOR_BRANCH="${E2E_OPERATOR_BRANCH:-michaelusa/spike-orbit-crd}"
 
-# Clean up cluster-scoped resources from previous operator deploy chart installs.
-# These survive namespace teardown and block helm install with ownership errors.
-for kind in clusterrole clusterrolebinding; do
-  for name in $($KC get "$kind" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep '^gitlab-'); do
-    log "Cleaning up $kind/$name"
-    $KC delete "$kind" "$name" --wait=false 2>/dev/null || true
-  done
-done
+# Uninstall any previous operator release (its cluster-scoped resources
+# survive namespace teardown and block helm install with ownership errors).
+helm uninstall gitlab-operator -n "$NS" --kube-context "$KCTX" 2>/dev/null || true
 
 # --- 1. Clone operator repo ---
 log "Cloning operator repo"

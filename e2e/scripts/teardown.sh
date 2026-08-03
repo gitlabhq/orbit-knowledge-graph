@@ -43,8 +43,9 @@ if [ -n "$SHA" ]; then
   echo "==> Removing helm releases for SHA $SHA..."
   cd "$E2E_DIR"
 
-  # Uninstall robot-runner if present
+  # Uninstall robot-runner and operator if present
   helm uninstall e2e-robot-runner -n "e2e-${SHA}-gkg" --kube-context "$KCTX" 2>/dev/null || true
+  helm uninstall gitlab-operator -n "e2e-${SHA}-gkg" --kube-context "$KCTX" 2>/dev/null || true
 
   # helmfile needs all env vars to parse .gotmpl; values don't matter for destroy
   E2E_SHA="$SHA" \
