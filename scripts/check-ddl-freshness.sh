@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Verify config/graph.sql and config/graph_local.sql match the ontology
-# and have the correct SCHEMA_VERSION in their headers.
+# Verify config/graph.sql, config/graph_persistent.sql, and config/graph_local.sql
+# match the ontology and have the correct SCHEMA_VERSION in their headers.
 set -euo pipefail
 
 XTASK="${1:-cargo xtask}"
@@ -37,6 +37,7 @@ check_file() {
 }
 
 check_file "$XTASK ddl --target remote" "config/graph.sql"
+check_file "$XTASK ddl --target remote-persistent" "config/graph_persistent.sql"
 check_file "$XTASK ddl --target local" "config/graph_local.sql"
 
 exit $FAILED
