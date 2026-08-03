@@ -45,6 +45,10 @@ Unknown names, missing/unknown parameters, and schema violations are rejected wi
 
 Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
 
+### Query-log retention
+
+Every query GKG runs is tagged with its request correlation ID in `query_id` and `log_comment`. Because `system.query_log` is node-local on ClickHouse Cloud and is lost on scale-down, an insert-trigger materialized view spills the fields we need into a durable table. See [Query-log retention](query_log_retention.md).
+
 ## Web Server Architecture
 
 The web server will expose endpoints for GitLab Rails to consume. This will power the following features:

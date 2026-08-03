@@ -199,24 +199,31 @@ fn remove_auxiliary_schema_settings(value: &mut serde_yaml::Value) {
         return;
     };
     retain_versioned_auxiliary_tables(settings);
+    retain_versioned_entries(settings, "materialized_views");
     settings.remove(serde_yaml::Value::String(
         "refreshable_materialized_views".to_string(),
     ));
 }
 
 fn retain_versioned_auxiliary_tables(settings: &mut serde_yaml::Mapping) {
-    let key = serde_yaml::Value::String("auxiliary_tables".to_string());
-    let Some(serde_yaml::Value::Sequence(tables)) = settings.get_mut(&key) else {
+    retain_versioned_entries(settings, "auxiliary_tables");
+}
+
+/// Drops entries flagged `versioned: false` (which default to `true`) so the
+/// versioned-source hash ignores unversioned objects, whose drift is snapshot-only.
+fn retain_versioned_entries(settings: &mut serde_yaml::Mapping, key: &str) {
+    let key = serde_yaml::Value::String(key.to_string());
+    let Some(serde_yaml::Value::Sequence(entries)) = settings.get_mut(&key) else {
         return;
     };
-    tables.retain(|table| {
-        table
+    entries.retain(|entry| {
+        entry
             .as_mapping()
             .and_then(|mapping| mapping.get(serde_yaml::Value::String("versioned".to_string())))
             .and_then(serde_yaml::Value::as_bool)
             .unwrap_or(true)
     });
-    if tables.is_empty() {
+    if entries.is_empty() {
         settings.remove(&key);
     }
 }
@@ -284,6 +291,17 @@ mod tests {
         assert_ne!(
             stable_versioned_schema_hash(first),
             stable_versioned_schema_hash(second)
+        );
+    }
+
+    #[test]
+    fn versioned_schema_hash_ignores_unversioned_views() {
+        let empty = "settings:\n  internal_column_prefix: _\n";
+        let with_unversioned = "settings:\n  internal_column_prefix: _\n  materialized_views:\n    - name: sink\n      versioned: false\n      to_table: retention\n      select_query: SELECT 1 FROM system.query_log\n";
+
+        assert_eq!(
+            stable_versioned_schema_hash(empty),
+            stable_versioned_schema_hash(with_unversioned)
         );
     }
 

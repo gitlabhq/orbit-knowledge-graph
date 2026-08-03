@@ -297,6 +297,27 @@ settings:
         - {name: compressed_bytes, type: int64}
       order_by: [logical_table, top_level_namespace, snapshot_date]
       ttl: snapshot_date + INTERVAL 400 DAY
+    # Durable copy of system.query_log rows for GKG queries. system.query_log is
+    # node-local on ClickHouse Cloud and evaporates on scale-down, so correlation
+    # data is spilled here to survive node churn. See docs/design-documents/querying/query_log_retention.md.
+    - name: query_log_retention
+      versioned: false
+      include_system_columns: false
+      engine: MergeTree
+      columns:
+        - {name: event_time, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+        - {name: query_id, type: string, codec: ["zstd(1)"]}
+        - {name: log_comment, type: string, codec: ["zstd(1)"]}
+        - {name: query_duration_ms, type: int64, codec: ["zstd(1)"]}
+        - {name: read_rows, type: int64, codec: ["zstd(1)"]}
+        - {name: read_bytes, type: int64, codec: ["zstd(1)"]}
+        - {name: result_rows, type: int64, codec: ["zstd(1)"]}
+        - {name: result_bytes, type: int64, codec: ["zstd(1)"]}
+        - {name: memory_usage, type: int64, codec: ["zstd(1)"]}
+        - {name: exception_code, type: int64, codec: ["zstd(1)"]}
+        - {name: exception, type: string, codec: ["zstd(1)"]}
+      order_by: [event_time, query_id]
+      ttl: event_time + INTERVAL 30 DAY
     - name: checkpoint
       columns:
         - {name: key, type: string, codec: ["zstd(1)"]}
@@ -336,6 +357,28 @@ settings:
         - {name: traversal_path, type: string}
       layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
+  materialized_views:
+    # Insert-trigger copy of finished GKG queries from system.query_log into the
+    # durable query_log_retention table. Unversioned so it outlives schema-version
+    # rollover; reads system.query_log directly (an external table, never prefixed).
+    - name: query_log_retention_mv
+      versioned: false
+      to_table: query_log_retention
+      select_query: >
+        SELECT
+          event_time,
+          query_id,
+          log_comment,
+          query_duration_ms,
+          read_rows,
+          read_bytes,
+          result_rows,
+          result_bytes,
+          memory_usage,
+          exception_code,
+          exception
+        FROM system.query_log
+        WHERE type = 'QueryFinish' AND log_comment LIKE 'gkg%'
   refreshable_materialized_views:
     - name: namespace_storage_snapshot_refresh
       versioned: true

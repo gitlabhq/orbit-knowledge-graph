@@ -13,3 +13,37 @@ ORDER BY (logical_table, top_level_namespace, snapshot_date)
 TTL snapshot_date + INTERVAL 400 DAY
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
+CREATE TABLE IF NOT EXISTS query_log_retention (
+    event_time DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    query_id String CODEC(ZSTD(1)),
+    log_comment String CODEC(ZSTD(1)),
+    query_duration_ms Int64 CODEC(ZSTD(1)),
+    read_rows Int64 CODEC(ZSTD(1)),
+    read_bytes Int64 CODEC(ZSTD(1)),
+    result_rows Int64 CODEC(ZSTD(1)),
+    result_bytes Int64 CODEC(ZSTD(1)),
+    memory_usage Int64 CODEC(ZSTD(1)),
+    exception_code Int64 CODEC(ZSTD(1)),
+    exception String CODEC(ZSTD(1))
+) ENGINE = MergeTree
+ORDER BY (event_time, query_id)
+TTL event_time + INTERVAL 30 DAY
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS query_log_retention_mv
+TO query_log_retention
+AS SELECT
+  event_time,
+  query_id,
+  log_comment,
+  query_duration_ms,
+  read_rows,
+  read_bytes,
+  result_rows,
+  result_bytes,
+  memory_usage,
+  exception_code,
+  exception
+FROM system.query_log WHERE type = 'QueryFinish' AND log_comment LIKE 'gkg%'
+;
+
