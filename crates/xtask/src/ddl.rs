@@ -112,18 +112,10 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
 pub fn run_persistent(ontology_path: Option<PathBuf>, diff: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
 
-    let mut generated: Vec<String> =
-        query_engine::compiler::generate_unversioned_graph_tables(&ont)
-            .iter()
-            .map(|t| format!("{};\n", query_engine::compiler::emit_create_table(t)))
-            .collect();
-
-    for mv in &query_engine::compiler::generate_unversioned_materialized_views(&ont) {
-        generated.push(format!(
-            "{};\n",
-            query_engine::compiler::emit_create_materialized_view(mv)
-        ));
-    }
+    let generated: Vec<String> = query_engine::compiler::generate_unversioned_objects(&ont)
+        .iter()
+        .map(|object| format!("{};\n", object.ddl))
+        .collect();
 
     let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
 
