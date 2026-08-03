@@ -3,6 +3,10 @@
 # Runs after setup.sh (namespaces exist, infra is up).
 # Uses the operator image built by build-operator-image.sh.
 #
+# Deploys via the operator's own deploy chart (deploy/chart/) with no
+# inline YAML or hand-written RBAC. The chart handles CRDs, RBAC,
+# webhook certs, and the operator Deployment.
+#
 # Temporary: goes away when the Orbit CRD ships in the published operator.
 
 set -eo pipefail
@@ -12,86 +16,36 @@ NS="e2e-${E2E_SHA}-gkg"
 OPERATOR_REPO="${E2E_OPERATOR_REPO:-https://gitlab.com/gitlab-org/cloud-native/gitlab-operator.git}"
 OPERATOR_BRANCH="${E2E_OPERATOR_BRANCH:-michaelusa/spike-orbit-crd}"
 
-# --- 1. CRDs from the operator repo ---
-log "Applying CRDs from operator repo"
-CRD_DIR=$(mktemp -d)
+# --- 1. Clone operator repo ---
+log "Cloning operator repo"
+OPERATOR_DIR=$(mktemp -d)
+trap 'rm -rf "$OPERATOR_DIR"' EXIT
 git clone --depth 1 --branch "${OPERATOR_BRANCH}" --filter=blob:none --sparse \
-  "${OPERATOR_REPO}" "${CRD_DIR}" 2>/dev/null
-(cd "${CRD_DIR}" && git sparse-checkout set config/crd/bases 2>/dev/null)
-$KC apply -f "${CRD_DIR}/config/crd/bases/"
-rm -rf "${CRD_DIR}"
+  "${OPERATOR_REPO}" "${OPERATOR_DIR}" 2>/dev/null
+(cd "${OPERATOR_DIR}" && git sparse-checkout set deploy/chart 2>/dev/null)
 
-for crd in orbits.apps.gitlab.com gitlabs.apps.gitlab.com; do
-  $KC wait --for=condition=Established crd/"$crd" --timeout=60s 2>/dev/null || true
-done
+# --- 2. Deploy operator via its own Helm chart ---
+log "Installing operator via deploy chart"
+(cd "${OPERATOR_DIR}/deploy/chart" && helm dependency build 2>/dev/null)
 
-# --- 2. Operator Deployment (inline, matching the green run approach) ---
-log "Deploying operator"
-$KC apply -n "$NS" -f - <<EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gitlab-operator
-  namespace: ${NS}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gitlab-operator-e2e-admin
-subjects:
-  - kind: ServiceAccount
-    name: gitlab-operator
-    namespace: ${NS}
-roleRef:
-  kind: ClusterRole
-  name: cluster-admin
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gitlab-operator
-  namespace: ${NS}
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: gitlab-operator
-  template:
-    metadata:
-      labels:
-        app: gitlab-operator
-    spec:
-      serviceAccountName: gitlab-operator
-      initContainers:
-        - name: webhook-cert
-          image: alpine/openssl:latest
-          command: ["sh", "-c", "openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -keyout /certs/tls.key -out /certs/tls.crt -days 1 -nodes -subj /CN=webhook && chmod 644 /certs/tls.key /certs/tls.crt"]
-          volumeMounts:
-            - name: webhook-certs
-              mountPath: /certs
-      containers:
-        - name: manager
-          image: "${E2E_OPERATOR_IMAGE}:${E2E_OPERATOR_TAG}"
-          args: ["--enable-leader-election=false", "--metrics-secure=false"]
-          env:
-            - name: WATCH_NAMESPACE
-              value: "${NS}"
-            - name: HELM_CHARTS
-              value: /charts
-          resources:
-            requests: { cpu: 50m, memory: 128Mi }
-            limits: { cpu: 250m, memory: 256Mi }
-          volumeMounts:
-            - name: webhook-certs
-              mountPath: /tmp/k8s-webhook-server/serving-certs
-              readOnly: true
-      volumes:
-        - name: webhook-certs
-          emptyDir: {}
-EOF
+helm install gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
+  --namespace "$NS" \
+  --set watchCluster=false \
+  --set manager.leaderElection.enabled=false \
+  --set image.registry="registry.gitlab.com" \
+  --set image.repository="gitlab-org/orbit/knowledge-graph" \
+  --set image.name="operator-spike" \
+  --set image.tag="${E2E_OPERATOR_TAG}" \
+  --set resources.requests.cpu=50m \
+  --set resources.requests.memory=128Mi \
+  --set resources.limits.cpu=250m \
+  --set resources.limits.memory=256Mi \
+  --wait --timeout=120s \
+  --kube-context "$KCTX"
 
-$KC rollout status deploy/gitlab-operator -n "$NS" --timeout=120s
+rm -rf "$OPERATOR_DIR"
+trap - EXIT
+
 log "Waiting 30s for operator manager to start..."
 sleep 30
 
@@ -129,7 +83,7 @@ for i in $(seq 1 60); do
 done
 if [ -z "$READY" ]; then
   log "ERROR: No GKG Deployments after 10 minutes"
-  $KC logs deploy/gitlab-operator -n "$NS" --tail=50 || true
+  $KC logs deploy/gitlab-controller-manager -n "$NS" --tail=50 || true
   exit 1
 fi
 

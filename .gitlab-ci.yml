@@ -1394,7 +1394,7 @@ sm-e2e-spike:
         E2E_SHA="${CI_COMMIT_SHORT_SHA}" bash e2e/scripts/dump-diagnostics.sh || true
         if [ -n "${E2E_USE_OPERATOR:-}" ]; then
           echo "==> Operator logs:"
-          kubectl -n "e2e-${E2E_SHA}-gkg" logs deploy/gitlab-operator --tail=100 2>/dev/null || true
+          kubectl -n "e2e-${E2E_SHA}-gkg" logs deploy/gitlab-controller-manager --tail=100 2>/dev/null || true
         fi
       fi
     - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
