@@ -49,6 +49,11 @@ done
 
 $KC rollout status deploy/gitlab-controller-manager -n "$NS" --timeout=120s
 
+# The rollout completes when the container starts, but the operator needs
+# time to register controllers and start the manager (~15-30s).
+log "Waiting 30s for operator manager to start..."
+sleep 30
+
 rm -rf "$OPERATOR_DIR"
 trap - EXIT
 
@@ -74,7 +79,7 @@ sed -e "s|\${NS}|${NS}|g" \
 
 # --- 4. Wait for GKG to come up ---
 log "Waiting for GKG Deployments..."
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   READY=$($KC get deploy -n "$NS" -l app.kubernetes.io/managed-by=gitlab-operator-orbit \
     -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
   if [ -n "$READY" ]; then
@@ -85,7 +90,7 @@ for i in $(seq 1 30); do
   sleep 10
 done
 if [ -z "$READY" ]; then
-  log "ERROR: No GKG Deployments after 5 minutes"
+  log "ERROR: No GKG Deployments after 10 minutes"
   $KC logs deploy/gitlab-controller-manager -n "$NS" --tail=50 || true
   exit 1
 fi
