@@ -76,6 +76,8 @@ pub(super) struct SettingsYaml {
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct MaterializedViewYaml {
     pub name: String,
+    #[serde(default = "default_true")]
+    pub versioned: bool,
     #[serde(default)]
     pub to_table: Option<String>,
     pub select_query: String,

@@ -61,10 +61,20 @@ the Indexer also creates all graph tables from the ontology DDL generator and re
 embedded version as active:
 
 The ontology may also declare auxiliary schema that does not invalidate indexed graph data:
-unversioned auxiliary tables and refreshable materialized views. The dispatcher creates
-unversioned tables and replaces refreshable views at startup only when the database active version
-matches the embedded version. During migration completion, it creates the incoming auxiliary tables
-and refreshable views before promotion and drops outgoing version-prefixed refreshable views afterward.
+unversioned auxiliary tables, standard (insert-trigger) materialized views, and refreshable
+materialized views. The dispatcher creates unversioned tables and unversioned views and replaces
+refreshable views at startup only when the database active version matches the embedded version.
+During migration completion, it creates the incoming auxiliary tables and refreshable views before
+promotion and drops outgoing version-prefixed refreshable views afterward.
+
+Standard materialized views default to `versioned: true`: the view and its `to_table` receive the
+schema-version prefix and are dropped on version rollover, so they must reference version-tracked
+tables via `{table_name}` placeholders. Setting `versioned: false` makes the view durable — it is
+created once (`CREATE MATERIALIZED VIEW IF NOT EXISTS`) alongside unversioned tables, skips the
+version prefix, and is excluded from version-completeness and dead-version GC. An unversioned view
+must target an unversioned auxiliary table; it may read from external system tables (for example
+`system.query_log`) that are not ontology-tracked and therefore not prefixed. Its DDL fingerprint
+lives in the auxiliary snapshot, so a body change requires `mise schema:snapshot`, not a version bump.
 
 `namespace_storage_snapshot` is an unversioned daily history table populated by the versioned
 `namespace_storage_snapshot_refresh` view. Its ontology-relative MiniJinja SQL template uses the

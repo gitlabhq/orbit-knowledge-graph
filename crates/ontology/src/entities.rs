@@ -93,6 +93,7 @@ pub struct EdgeTableStorage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaterializedViewDefinition {
     pub name: String,
+    pub versioned: bool,
     /// Target table for the `TO` clause. When set, the view writes into this
     /// pre-existing table. Table name uses the logical name (without prefix).
     pub to_table: Option<String>,
