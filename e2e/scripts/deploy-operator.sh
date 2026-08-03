@@ -16,11 +16,20 @@ NS="e2e-${E2E_SHA}-gkg"
 OPERATOR_REPO="${E2E_OPERATOR_REPO:-https://gitlab.com/gitlab-org/cloud-native/gitlab-operator.git}"
 OPERATOR_BRANCH="${E2E_OPERATOR_BRANCH:-michaelusa/spike-orbit-crd}"
 
-# Uninstall any previous operator release from any e2e namespace. The deploy
-# chart creates cluster-scoped ClusterRoles that survive namespace teardown
-# and block subsequent helm install with ownership errors.
+# Uninstall any previous operator release from any e2e namespace.
 for ns in $($KC get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep '^e2e-.*-gkg$'); do
   helm uninstall gitlab-operator -n "$ns" --kube-context "$KCTX" 2>/dev/null || true
+done
+
+# Delete cluster-scoped resources the operator deploy chart creates. These
+# survive namespace teardown and block subsequent helm install. Listed by
+# exact name to avoid touching other resources (e.g. the GitLab Agent's RBAC).
+OPERATOR_CHART_CLUSTER_RESOURCES="gitlab-app-role-nonroot gitlab-metrics-auth-role gitlab-metrics-reader gitlab-manager-role gitlab-manager-cluster-role gitlab-nginx-ingress gitlab-prometheus-server"
+for name in $OPERATOR_CHART_CLUSTER_RESOURCES; do
+  $KC delete clusterrole "$name" 2>/dev/null || true
+done
+for name in gitlab-app-rolebinding-nonroot gitlab-metrics-auth-rolebinding gitlab-manager-rolebinding gitlab-manager-cluster-rolebinding gitlab-nginx-ingress gitlab-prometheus-server gitlab-operator-e2e-admin; do
+  $KC delete clusterrolebinding "$name" 2>/dev/null || true
 done
 
 # --- 1. Clone operator repo ---
