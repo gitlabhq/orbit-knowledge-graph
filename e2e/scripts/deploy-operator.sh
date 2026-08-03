@@ -49,6 +49,12 @@ helm template gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
   | sed 's/--enable-leader-election/--enable-leader-election=false/' \
   | $KC apply -n "$NS" -f -
 
+# The deploy chart's RBAC does not cover Orbit resources. Bind cluster-admin
+# to the manager ServiceAccount the chart creates.
+$KC create clusterrolebinding gitlab-operator-e2e-admin \
+  --clusterrole=cluster-admin \
+  --serviceaccount="${NS}:gitlab-manager" 2>/dev/null || true
+
 # The deploy chart mounts webhook-server-cert from a Secret that cert-manager
 # creates. We do not run the cert-manager issuer, so create a self-signed cert.
 CERT_DIR=$(mktemp -d)
