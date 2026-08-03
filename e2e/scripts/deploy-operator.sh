@@ -16,9 +16,12 @@ NS="e2e-${E2E_SHA}-gkg"
 OPERATOR_REPO="${E2E_OPERATOR_REPO:-https://gitlab.com/gitlab-org/cloud-native/gitlab-operator.git}"
 OPERATOR_BRANCH="${E2E_OPERATOR_BRANCH:-michaelusa/spike-orbit-crd}"
 
-# Uninstall any previous operator release (its cluster-scoped resources
-# survive namespace teardown and block helm install with ownership errors).
-helm uninstall gitlab-operator -n "$NS" --kube-context "$KCTX" 2>/dev/null || true
+# Uninstall any previous operator release from any e2e namespace. The deploy
+# chart creates cluster-scoped ClusterRoles that survive namespace teardown
+# and block subsequent helm install with ownership errors.
+for ns in $($KC get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep '^e2e-.*-gkg$'); do
+  helm uninstall gitlab-operator -n "$ns" --kube-context "$KCTX" 2>/dev/null || true
+done
 
 # --- 1. Clone operator repo ---
 log "Cloning operator repo"
