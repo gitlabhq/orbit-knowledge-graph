@@ -10,13 +10,9 @@
 
 local catalog = import '../../../crates/gkg-observability/orbit-dashboards/gkg-metrics.json';
 
-// Rendered in two flavors; `cargo xtask dashboards` passes `--ext-str
-// flavor=...` for each (manual renders need the same flag). `com` targets
-// dashboards.gitlab.net, where GKG metrics live in the analytics-eventsdot
-// Mimir tenant and Rails metrics in per-env gitlab tenants. `dedicated`
-// targets a Dedicated tenant's Grafana, where a single Prometheus scrapes
-// both GKG and Rails, so every panel reads from the one $ORBIT_DS
-// datasource and the Mimir-only labels (cluster, env) may not exist.
+// Rendered per flavor: `com` for dashboards.gitlab.net, `dedicated` for a
+// GitLab Dedicated tenant's Grafana. `cargo xtask dashboards` passes
+// `--ext-str flavor=...`; manual jsonnet renders need the same flag.
 local FLAVOR = std.extVar('flavor');
 assert FLAVOR == 'com' || FLAVOR == 'dedicated' : 'unknown dashboard flavor `' + FLAVOR + '`';
 local IS_DEDICATED = FLAVOR == 'dedicated';
@@ -153,8 +149,8 @@ local unitFor(spec, rate=false) = (
 // split per environment (`mimir-gitlab-gprd`, `mimir-gitlab-gstg`). Keeping
 // it as a free-standing datasource picker let users select the gprd tenant
 // while querying gstg labels, producing silent "no data" panels.
-// On Dedicated there is no per-env Mimir tenant split; the one tenant
-// Prometheus scrapes Rails too, so RAILS_DS collapses into $ORBIT_DS.
+// On Dedicated the one tenant Prometheus scrapes Rails too, so RAILS_DS
+// collapses into $ORBIT_DS.
 local datasource(uid_var) = {
   type: 'prometheus',
   uid: if uid_var == 'RAILS_DS' then
@@ -752,9 +748,8 @@ local layoutItems(items) = (
 
 // ---------- Templating + dashboard shell ----------
 
-// The Dedicated flavor keeps only a generic datasource picker: the cluster
-// and rails_env variables select .com Mimir tenants that don't exist on a
-// tenant's Grafana, and their selectors are relaxed to match-anything below.
+// The cluster and rails_env pickers select .com Mimir tenants that don't
+// exist on Dedicated.
 local TEMPLATING = if IS_DEDICATED then {
   list: [
     {
@@ -840,8 +835,8 @@ local dashboard(uid, title, tags, description, items) = {
 
 // ---------- Selectors ----------
 
-// `.*` also matches series where the label is absent, which keeps the
-// dedicated selectors valid on a Prometheus that never sets cluster/env.
+// `.*` also matches series that lack the label, so the dedicated selectors
+// stay valid where cluster/env are never set.
 local CLUSTER_SEL = if IS_DEDICATED then 'cluster=~".*"' else 'cluster=~"$cluster"';
 
 local GKG_WEB_SEL = 'container="gkg-webserver", ' + CLUSTER_SEL;
