@@ -56,14 +56,21 @@ trap - EXIT
 log "Applying Orbit CR from e2e/orbit-cr.yaml"
 
 V_FILE="${E2E_DIR}/config/versions.yaml"
-export GKG_CHART=$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['chart'])")
-export GKG_IMAGE="${E2E_GKG_IMAGE:-$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['image']['repository'])")}"
-export GKG_TAG="${E2E_GKG_TAG:-$(python3 -c "import yaml; print(yaml.safe_load(open('${V_FILE}'))['gkg']['image']['tag'])")}"
-export CLICKHOUSE_NS="e2e-${E2E_SHA}-clickhouse"
-export NATS_NS="e2e-${E2E_SHA}-nats"
-export GITLAB_NS="e2e-${E2E_SHA}-gitlab"
+GKG_CHART=$(awk '/^gkg:/{found=1} found && /chart:/{print $2; exit}' "$V_FILE" | tr -d '"')
+GKG_IMAGE="${E2E_GKG_IMAGE:-$(awk '/^gkg:/{found=1} found && /repository:/{print $2; exit}' "$V_FILE")}"
+GKG_TAG="${E2E_GKG_TAG:-$(awk '/^gkg:/{found=1} found && /tag:/{print $2; exit}' "$V_FILE" | tr -d '"')}"
+CLICKHOUSE_NS="e2e-${E2E_SHA}-clickhouse"
+NATS_NS="e2e-${E2E_SHA}-nats"
+GITLAB_NS="e2e-${E2E_SHA}-gitlab"
 
-envsubst < "${E2E_DIR}/orbit-cr.yaml" | $KC apply -n "$NS" -f -
+sed -e "s|\${NS}|${NS}|g" \
+    -e "s|\${GKG_CHART}|${GKG_CHART}|g" \
+    -e "s|\${GKG_IMAGE}|${GKG_IMAGE}|g" \
+    -e "s|\${GKG_TAG}|${GKG_TAG}|g" \
+    -e "s|\${CLICKHOUSE_NS}|${CLICKHOUSE_NS}|g" \
+    -e "s|\${NATS_NS}|${NATS_NS}|g" \
+    -e "s|\${GITLAB_NS}|${GITLAB_NS}|g" \
+    "${E2E_DIR}/orbit-cr.yaml" | $KC apply -n "$NS" -f -
 
 # --- 4. Wait for GKG to come up ---
 log "Waiting for GKG Deployments..."
