@@ -30,17 +30,32 @@ log "Rendering and applying operator manifests"
 # helm template renders the full deployment (RBAC, ServiceAccount, Deployment,
 # webhook, cert-manager resources). kubectl apply installs everything including
 # the CRDs from the chart's crds/ directory.
+# Render the operator manifests, then patch for e2e:
+# - Disable leader election (single replica, no lease RBAC)
+# - Replace the webhook cert volume with an emptyDir + init container
+#   (the deploy chart expects cert-manager to provision webhook-server-cert)
 helm template gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
   --namespace "$NS" \
   --include-crds \
   --set cert-manager.install=false \
-  --set manager.image.repository="${E2E_OPERATOR_IMAGE}" \
-  --set manager.image.tag="${E2E_OPERATOR_TAG}" \
-  --set manager.resources.requests.cpu=50m \
-  --set manager.resources.requests.memory=128Mi \
-  --set manager.resources.limits.cpu=250m \
-  --set manager.resources.limits.memory=256Mi \
+  --set image.repository="${E2E_OPERATOR_IMAGE}" \
+  --set image.tag="${E2E_OPERATOR_TAG}" \
+  --set resources.requests.cpu=50m \
+  --set resources.requests.memory=128Mi \
+  --set resources.limits.cpu=250m \
+  --set resources.limits.memory=256Mi \
+  | sed 's/--enable-leader-election/--enable-leader-election=false/' \
   | $KC apply -n "$NS" -f -
+
+# The deploy chart mounts webhook-server-cert from a Secret that cert-manager
+# creates. We do not run the cert-manager issuer, so create a self-signed cert.
+CERT_DIR=$(mktemp -d)
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+  -keyout "${CERT_DIR}/tls.key" -out "${CERT_DIR}/tls.crt" \
+  -days 1 -nodes -subj "/CN=webhook" 2>/dev/null
+$KC create secret tls webhook-server-cert -n "$NS" \
+  --cert="${CERT_DIR}/tls.crt" --key="${CERT_DIR}/tls.key" 2>/dev/null || true
+rm -rf "${CERT_DIR}"
 
 # Wait for CRDs to be established.
 for crd in orbits.apps.gitlab.com gitlabs.apps.gitlab.com; do
