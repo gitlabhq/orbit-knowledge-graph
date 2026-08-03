@@ -207,4 +207,17 @@ async fn executed_query_is_captured_in_retention_table() {
         Some(1),
         "the executed base query ({correlated}) should be captured in the retention table"
     );
+
+    // A non-GKG query must be excluded by the view's `log_comment LIKE 'gkg%'` filter.
+    ctx.execute("SELECT 2 SETTINGS log_comment = 'not-gkg'")
+        .await;
+    ctx.execute("SYSTEM FLUSH LOGS").await;
+    let untagged = ctx
+        .query("SELECT toInt64(count()) FROM query_log_retention WHERE log_comment = 'not-gkg'")
+        .await;
+    assert_eq!(
+        i64::extract_column(&untagged, 0).unwrap().first().copied(),
+        Some(0),
+        "a non-GKG query must not land in the retention table"
+    );
 }
