@@ -3,6 +3,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log "E2E Setup (SHA: $E2E_SHA)"
 
+"$E2E_DIR/scripts/cleanup-stale-namespaces.sh"
+
 # Clean cluster-scoped resources orphaned by previous e2e runs whose owning
 # namespace has been torn down. The GitLab chart 9.11.x installs cluster-scoped
 # resources (GatewayClass "gitlab-gw", ClusterRole/ClusterRoleBinding for the
