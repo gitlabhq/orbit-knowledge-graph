@@ -86,15 +86,6 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
     tables
 }
 
-pub fn generate_unversioned_graph_tables(ontology: &Ontology) -> Vec<CreateTable> {
-    ontology
-        .auxiliary_tables()
-        .iter()
-        .filter(|table| !table.versioned)
-        .map(build_auxiliary_table)
-        .collect()
-}
-
 pub struct UnversionedObject {
     pub kind: &'static str,
     pub name: String,
@@ -102,12 +93,17 @@ pub struct UnversionedObject {
 }
 
 pub fn generate_unversioned_objects(ontology: &Ontology) -> Vec<UnversionedObject> {
-    let mut objects: Vec<UnversionedObject> = generate_unversioned_graph_tables(ontology)
+    let mut objects: Vec<UnversionedObject> = ontology
+        .auxiliary_tables()
         .iter()
-        .map(|table| UnversionedObject {
-            kind: "table",
-            name: table.name.clone(),
-            ddl: clickhouse::emit_create_table(table),
+        .filter(|table| !table.versioned)
+        .map(|table| {
+            let table = build_auxiliary_table(table);
+            UnversionedObject {
+                kind: "table",
+                name: table.name.clone(),
+                ddl: clickhouse::emit_create_table(&table),
+            }
         })
         .collect();
 
