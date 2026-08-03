@@ -73,7 +73,7 @@ Local HTTP process response ───────► pod /live
 ## GitLab diagnostic
 
 When the Webserver has a GitLab client, `ClusterHealthChecker` calls the internal project-info API
-with a five-second timeout and appends a `gitlab` component. A successful response or `404 Not
+with a two-second timeout and appends a `gitlab` component. A successful response or `404 Not
 Found` proves connectivity and JWT authentication, so the component is Healthy. Authentication,
 transport, server, response-decoding, and timeout failures make only that component Unhealthy; the
 error text is included in its `error` metric.

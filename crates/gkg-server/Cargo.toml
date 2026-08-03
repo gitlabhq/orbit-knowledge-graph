@@ -71,6 +71,7 @@ tonic-prost-build = { workspace = true }
 [dev-dependencies]
 gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
 tokio = { workspace = true }
+tower = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [lints.rust]

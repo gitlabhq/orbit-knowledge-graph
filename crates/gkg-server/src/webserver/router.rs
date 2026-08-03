@@ -72,3 +72,51 @@ pub fn create_router(schema_watcher: Arc<SchemaWatcher>) -> Router {
         .layer(GitlabTraceLayer::new())
         .layer(CorrelationLayer::new())
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    fn ready_watcher() -> Arc<SchemaWatcher> {
+        SchemaWatcher::for_state(SchemaState::Ready)
+    }
+
+    fn request(path: &str) -> Request<Body> {
+        Request::get(path).body(Body::empty()).unwrap()
+    }
+
+    async fn parse_response(response: axum::response::Response) -> (StatusCode, serde_json::Value) {
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let json = serde_json::from_slice(&body).unwrap();
+        (status, json)
+    }
+
+    #[tokio::test]
+    async fn live_returns_ok() {
+        let router = create_router(ready_watcher());
+
+        let (status, json) = parse_response(router.oneshot(request("/live")).await.unwrap()).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "ok");
+        assert!(json["version"].is_string());
+    }
+
+    #[tokio::test]
+    async fn ready_returns_ok_when_schema_is_ready() {
+        let router = create_router(ready_watcher());
+
+        let (status, json) = parse_response(router.oneshot(request("/ready")).await.unwrap()).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["status"], "ok");
+        assert!(json.get("unhealthy_components").is_none());
+    }
+}

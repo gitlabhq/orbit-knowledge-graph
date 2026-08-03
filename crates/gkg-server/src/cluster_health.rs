@@ -18,7 +18,7 @@ use crate::proto::{
 use crate::webserver::InfrastructureHealthClient;
 
 const GITLAB_HEALTH_CHECK_PROJECT_ID: i64 = 1;
-const GITLAB_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+const GITLAB_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct ClusterHealthChecker {
     version: String,
@@ -115,6 +115,7 @@ impl ClusterHealthChecker {
                 apply_gitlab_status(structured, ClusterStatus::Healthy, None);
             }
             Ok(Err(error)) => {
+                warn!(%error, "GitLab health check failed");
                 apply_gitlab_status(
                     structured,
                     ClusterStatus::Unhealthy,
@@ -122,6 +123,10 @@ impl ClusterHealthChecker {
                 );
             }
             Err(_) => {
+                warn!(
+                    timeout_seconds = GITLAB_HEALTH_CHECK_TIMEOUT.as_secs(),
+                    "GitLab health check timed out"
+                );
                 apply_gitlab_status(
                     structured,
                     ClusterStatus::Unhealthy,
