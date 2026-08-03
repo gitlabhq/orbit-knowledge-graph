@@ -33,10 +33,8 @@ const RAW_JWT_SECRET: &[u8] = b"test-secret-that-is-at-least-32-bytes-long";
 
 static SUBSCRIBER: Once = Once::new();
 
-// The pipeline reads the correlation id via `labkit::correlation::current()`, a
-// span-tree walk that only resolves when a `CorrelationCaptureLayer` is installed
-// process-wide. The server task is spawned, so a thread-local subscriber would not
-// cover it; install a global one once.
+// `labkit::correlation::current()` resolves only with a process-wide
+// `CorrelationCaptureLayer`; the spawned server task needs a global, not thread-local, subscriber.
 fn install_correlation_subscriber() {
     SUBSCRIBER.call_once(|| {
         tracing_subscriber::registry()
@@ -60,8 +58,7 @@ async fn start_server(config: &gkg_server_config::ClickHouseConfiguration) -> So
     drop(listener);
 
     let validator = Arc::new(JwtValidator::new(&STANDARD.encode(RAW_JWT_SECRET), 0).unwrap());
-    // The server queries the version-prefixed graph tables, mirroring how `main`
-    // wraps the ontology before wiring the pipeline.
+    // Prefixed ontology: the server queries the version-prefixed graph tables, as `main` does.
     let ontology = Arc::new(load_ontology());
     let server = GrpcServer::new(
         addr,
@@ -102,9 +99,8 @@ async fn executed_query_is_captured_in_retention_table() {
     write_schema_version(&client, *SCHEMA_VERSION)
         .await
         .unwrap();
-    // Unversioned objects are never version-prefixed, so they take the plain
-    // embedded ontology, not the prefixed one the server queries through.
-    // The insert-trigger MV only captures query_log rows written after it exists.
+    // Unprefixed embedded ontology: unversioned objects are never version-prefixed.
+    // The MV only captures query_log rows written after it exists, so create it first.
     create_unversioned_tables(&client, &ontology::Ontology::load_embedded().unwrap())
         .await
         .unwrap();
@@ -130,8 +126,7 @@ async fn executed_query_is_captured_in_retention_table() {
         })),
     };
 
-    // A bidirectional request stream so the client can answer the server's
-    // redaction round-trip (authorize everything) before the result is sent.
+    // Bidirectional stream so the client can answer the redaction round-trip.
     let (req_tx, req_rx) = tokio::sync::mpsc::channel::<ExecuteQueryMessage>(4);
     req_tx.send(request).await.unwrap();
 
@@ -180,11 +175,8 @@ async fn executed_query_is_captured_in_retention_table() {
 
     ctx.execute("SYSTEM FLUSH LOGS").await;
 
-    // The server generates a correlation id per request (propagation is off by
-    // default), so assert the retention table captured the same correlated base
-    // query system.query_log recorded, rather than a fixed id. The base query
-    // carries no stage suffix (`gkg;correlation_id=<id>`); path/hydration
-    // sub-queries add `:` suffixes, which this filter excludes.
+    // The server generates a correlation id per request, so match on the base query's
+    // comment (`gkg;correlation_id=<id>`, no stage suffix) rather than a fixed id.
     let logged = ctx
         .query(
             "SELECT log_comment FROM system.query_log \
