@@ -31,6 +31,8 @@ done
 for name in gitlab-app-rolebinding-nonroot gitlab-metrics-auth-rolebinding gitlab-manager-rolebinding gitlab-manager-cluster-rolebinding gitlab-nginx-ingress gitlab-prometheus-server gitlab-operator-e2e-admin; do
   $KC delete clusterrolebinding "$name" 2>/dev/null || true
 done
+$KC delete ingressclass gitlab-nginx 2>/dev/null || true
+$KC delete validatingwebhookconfiguration gitlab-validating-webhook-configuration 2>/dev/null || true
 
 # --- 1. Clone operator repo ---
 log "Cloning operator repo"
