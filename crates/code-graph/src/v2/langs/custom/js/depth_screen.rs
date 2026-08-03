@@ -1,5 +1,4 @@
-/// oxc aborts the process past depth 4000-8000 (release); deepest real file
-/// measured was 131. Cliff table in `git log` for 1b58c1886, knowledge-graph#1114.
+/// oxc aborts the process past depth 4000-8000; deepest real file seen was 131.
 pub(super) const MAX_NESTING_DEPTH: usize = 1000;
 
 pub(super) fn bracket_depth_upper_bound(source: &str) -> usize {

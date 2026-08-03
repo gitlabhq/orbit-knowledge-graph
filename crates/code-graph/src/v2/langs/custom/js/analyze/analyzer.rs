@@ -765,9 +765,8 @@ impl JsAnalyzer {
         })?;
         let source_type = source_type.with_jsx(source_type.is_javascript());
 
-        // Brackets only. Deep operator chains overflow the semantic builder instead
-        // and add no bracket depth, so they still get through; `CodeFilter`'s
-        // avg-line-length rule catches their compact forms. knowledge-graph#1114.
+        // Deep operator chains overflow the semantic builder without nesting
+        // brackets, so they still get through. knowledge-graph#1114.
         let nesting_depth = bracket_depth_upper_bound(source);
         if nesting_depth > MAX_NESTING_DEPTH {
             return Err(AnalyzerError::fault(
@@ -937,8 +936,7 @@ mod tests {
             .expect("nesting under the cap parses cleanly");
     }
 
-    // Child process on a rayon-sized stack: an overflow aborts uncatchably, so an
-    // in-process assertion would take the test runner down instead of failing.
+    // An overflow aborts uncatchably, so asserting in-process would kill the runner.
     #[test]
     fn deeply_nested_file_does_not_abort_the_process() {
         if std::env::var_os(DEEP_NEST_CHILD_ENV).is_some() {
