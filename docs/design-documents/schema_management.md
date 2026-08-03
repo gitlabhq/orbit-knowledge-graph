@@ -158,8 +158,9 @@ serving the wrong schema.
 
 The webserver `/ready` endpoint intentionally checks only this local schema state. The HealthCheck
 service's `/health` endpoint separately aggregates ClickHouse and Kubernetes Deployment and
-StatefulSet health. The former GitLab connectivity and JWT-auth check is intentionally dropped, not
-relocated, so that diagnostic is no longer part of readiness.
+StatefulSet health. GitLab connectivity and JWT authentication are reported separately as a
+reporting-only component on the Webserver's cluster-health responses. That diagnostic is not part
+of readiness or the HealthCheck service aggregate and cannot change the top-level cluster status.
 
 Transient ClickHouse errors during a poll keep the previous state — the watcher does not
 flap to `Pending` on a single failed read.

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -27,7 +29,7 @@ async fn live() -> Json<HealthResponse> {
     })
 }
 
-async fn ready(State(schema_watcher): State<std::sync::Arc<SchemaWatcher>>) -> impl IntoResponse {
+async fn ready(State(schema_watcher): State<Arc<SchemaWatcher>>) -> impl IntoResponse {
     let mut unhealthy_components = Vec::new();
 
     match schema_watcher.current() {
@@ -61,7 +63,7 @@ async fn ready(State(schema_watcher): State<std::sync::Arc<SchemaWatcher>>) -> i
     )
 }
 
-pub fn create_router(schema_watcher: std::sync::Arc<SchemaWatcher>) -> Router {
+pub fn create_router(schema_watcher: Arc<SchemaWatcher>) -> Router {
     Router::new()
         .route("/live", get(live))
         .route("/ready", get(ready))

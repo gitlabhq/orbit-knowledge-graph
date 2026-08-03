@@ -150,12 +150,6 @@ async fn run_webserver(
         config.jwt_clock_skew_secs,
     )?);
 
-    let cluster_health = ClusterHealthChecker::new(
-        config.health_check_url.clone(),
-        Some(config.graph.build_client()),
-    )
-    .into_arc();
-
     let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
         anyhow::anyhow!(
             "GitLab client config is required: set gitlab.base_url and provide \
@@ -166,6 +160,13 @@ async fn run_webserver(
         gitlab_client::GitlabClient::new(gitlab_client_config)
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
+
+    let cluster_health = ClusterHealthChecker::new(
+        config.health_check_url.clone(),
+        Some(config.graph.build_client()),
+        Some(gitlab_client.clone()),
+    )
+    .into_arc();
 
     let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
     resolver_registry.register(

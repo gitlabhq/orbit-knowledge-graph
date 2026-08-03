@@ -2,6 +2,8 @@ mod health_client;
 mod router;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
+
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -18,7 +20,7 @@ pub struct Server {
 impl Server {
     pub async fn bind(
         addr: SocketAddr,
-        schema_watcher: std::sync::Arc<SchemaWatcher>,
+        schema_watcher: Arc<SchemaWatcher>,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
         let router = create_router(schema_watcher);

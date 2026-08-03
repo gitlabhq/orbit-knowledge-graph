@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
@@ -26,7 +27,7 @@ async fn live() -> Json<HealthResponse> {
     })
 }
 
-async fn ready(State(serving): State<std::sync::Arc<AtomicBool>>) -> impl IntoResponse {
+async fn ready(State(serving): State<Arc<AtomicBool>>) -> impl IntoResponse {
     if !serving.load(Ordering::Relaxed) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -48,7 +49,7 @@ async fn ready(State(serving): State<std::sync::Arc<AtomicBool>>) -> impl IntoRe
     )
 }
 
-pub fn create_health_router(serving: std::sync::Arc<AtomicBool>) -> Router {
+pub fn create_health_router(serving: Arc<AtomicBool>) -> Router {
     Router::new()
         .route("/live", get(live))
         .route("/ready", get(ready))
@@ -57,7 +58,7 @@ pub fn create_health_router(serving: std::sync::Arc<AtomicBool>) -> Router {
 
 pub async fn run_health_server(
     bind_address: SocketAddr,
-    serving: std::sync::Arc<AtomicBool>,
+    serving: Arc<AtomicBool>,
 ) -> Result<(), std::io::Error> {
     let app = create_health_router(serving);
 

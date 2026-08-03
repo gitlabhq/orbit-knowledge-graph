@@ -277,7 +277,13 @@ Dispatcher use dedicated health ports (default 4202 and 4203 respectively). Thes
 report local serving state only: `/live` confirms that the process can answer HTTP, while `/ready`
 keeps a pod out of rotation until its schema gate has cleared. The HealthCheck service's `/health`
 endpoint reports ClickHouse and Kubernetes Deployment and StatefulSet health; NATS queue depth is
-reported separately by `/queue-depth`, and GitLab is not checked by that service.
+reported separately by `/queue-depth` and is consumed by KEDA. GitLab is not checked by the
+HealthCheck service.
+
+The Webserver adds a reporting-only `gitlab` component to its HTTP and gRPC cluster-health
+responses. This component checks GitLab connectivity and JWT authentication, but does not affect
+the top-level cluster status. It is not part of pod readiness or the HealthCheck service's
+`/health` aggregate.
 
 The HealthCheck service additionally exposes a read-only `/queue-depth` endpoint that connects to NATS and reports the code work-queue's pending and in-flight counts (`{ "code_pending": <n>, "code_in_flight": <n> }`) from JetStream consumer state. The stream and durable consumer names are resolved inside the application using the same versioned naming the indexer uses, so deployment charts stay naming-agnostic. This is the scaling signal consumed by KEDA for the code indexer.
 
