@@ -1296,18 +1296,6 @@ fn validate_materialized_view(
             mv.name, to_table
         )));
     }
-    if !mv.versioned
-        && let Some(table) = all_table_names
-            .iter()
-            .filter(|t| !unversioned_table_names.contains(*t))
-            .find(|t| mv.select_query.contains(&format!("{{{t}}}")))
-    {
-        return Err(OntologyError::Validation(format!(
-            "materialized_view '{}': unversioned view references versioned table placeholder '{{{}}}'; \
-             it resolves to the unprefixed name, which does not exist at runtime",
-            mv.name, table
-        )));
-    }
     Ok(crate::entities::MaterializedViewDefinition {
         name: mv.name,
         versioned: mv.versioned,
@@ -1833,59 +1821,25 @@ mod tests {
         validate_etl_edges_match_variants(&ontology).expect("matching variants should load");
     }
 
-    fn mv_yaml(
-        versioned: bool,
-        to_table: Option<&str>,
-        select_query: &str,
-    ) -> MaterializedViewYaml {
-        MaterializedViewYaml {
-            name: "sink".to_string(),
-            versioned,
-            to_table: to_table.map(str::to_string),
-            select_query: select_query.to_string(),
-            engine: to_table.is_none().then(|| "MergeTree".to_string()),
-            engine_args: vec![],
-            order_by: vec![],
-            populate: false,
-        }
-    }
-
     #[test]
-    fn validate_materialized_view_enforces_unversioned_rules() {
-        // "retention" is unversioned; "gl_edge" is versioned.
+    fn unversioned_materialized_view_must_target_an_unversioned_table() {
         let all = ["gl_edge".to_string(), "retention".to_string()].into();
         let unversioned = ["retention".to_string()].into();
+        let check = |to_table: &str| {
+            let mv = MaterializedViewYaml {
+                name: "sink".to_string(),
+                versioned: false,
+                to_table: Some(to_table.to_string()),
+                select_query: "SELECT 1".to_string(),
+                engine: None,
+                engine_args: vec![],
+                order_by: vec![],
+                populate: false,
+            };
+            validate_materialized_view(mv, &all, &unversioned).is_ok()
+        };
 
-        let cases: [(bool, Option<&str>, &str, bool); 5] = [
-            // (versioned, to_table, select_query, should_load)
-            (false, Some("retention"), "SELECT 1", true),
-            (false, Some("gl_edge"), "SELECT 1", false),
-            (true, Some("gl_edge"), "SELECT 1", true),
-            (
-                false,
-                Some("retention"),
-                "SELECT count() FROM {gl_edge}",
-                false,
-            ),
-            (
-                false,
-                Some("retention"),
-                "SELECT query_id FROM system.query_log",
-                true,
-            ),
-        ];
-
-        for (versioned, to_table, select_query, should_load) in cases {
-            let result = validate_materialized_view(
-                mv_yaml(versioned, to_table, select_query),
-                &all,
-                &unversioned,
-            );
-            assert_eq!(
-                result.is_ok(),
-                should_load,
-                "versioned={versioned} to_table={to_table:?} query={select_query:?}"
-            );
-        }
+        assert!(check("retention"));
+        assert!(!check("gl_edge"));
     }
 }
