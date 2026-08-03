@@ -434,17 +434,25 @@ fn ontology_with_unversioned_view() -> tempfile::TempDir {
 
     let schema_path = dir.path().join("schema.yaml");
     let schema = std::fs::read_to_string(&schema_path).unwrap();
-    let block = format!(
-        "  materialized_views:\n\
-         \x20   - name: {UNVERSIONED_VIEW_NAME}\n\
+    let entry = format!(
+        "    - name: {UNVERSIONED_VIEW_NAME}\n\
          \x20     versioned: false\n\
          \x20     engine: MergeTree\n\
          \x20     order_by: [dummy]\n\
          \x20     select_query: SELECT dummy FROM system.one\n"
     );
-    let anchor = "  gc_preserve_patterns:";
-    let patched = schema.replacen(anchor, &format!("{block}{anchor}"), 1);
-    assert_ne!(patched, schema, "settings anchor not found in schema.yaml");
+    // Append under an existing list, else insert a block; two blocks would be a duplicate YAML key.
+    let patched = if let Some(anchor) = schema.find("  materialized_views:\n") {
+        let insert_at = anchor + "  materialized_views:\n".len();
+        format!("{}{entry}{}", &schema[..insert_at], &schema[insert_at..])
+    } else {
+        schema.replacen(
+            "  gc_preserve_patterns:",
+            &format!("  materialized_views:\n{entry}  gc_preserve_patterns:"),
+            1,
+        )
+    };
+    assert_ne!(patched, schema, "no anchor found in schema.yaml");
     std::fs::write(&schema_path, patched).unwrap();
     dir
 }
