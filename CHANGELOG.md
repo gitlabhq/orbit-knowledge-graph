@@ -1,3 +1,31 @@
+## [0.94.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.93.0...v0.94.0) (2026-08-03)
+
+### Features
+
+* **billing:** add agent and source dimensions to billing metadata ([002bd21](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/002bd213d9d50cc4b1c0fd19e747ecd3442e1c95)) by Sharmad Nachnolkar
+* **clickhouse:** ship the ClickHouse setup contract with the app ([d2fcf21](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d2fcf21196a6db33df88f2d98b99fc74f68b483e)) by Jean-Gabriel Doyon
+* **orbit-local:** publish local CLI to npm ([09e9adb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/09e9adb3bd7914cfd2aae758e8f484196c6f9ff8)) by Aaron Algutifan
+* **query:** correlate ClickHouse queries via query_id ([14273df](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14273df085049cd762d7d93d50281f09a7682c74)) by Michael Usachenko
+* **schema:** support unversioned DDL ([4a4caa8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a4caa85fef74576d31a9cfaef9d0cb1c8695517)) by Michael Usachenko
+
+### Fixes
+
+* **code-graph:** stop JS fault storm when the repo tree vanishes mid-analysis ([c588479](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c588479398f34397b5e49df86e53e19630a1d3dd)) by michaelangeloio
+* **formatter:** return boolean properties as JSON booleans instead of strings ([735f189](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/735f1897bae44bd885a76990cdb4e1cfe1032ed8)) by Michael Angelo Rivera
+* **indexer:** aggregate system-note drop logging per block ([c15c7fd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c15c7fd6a47f0b0e40f81e27f93eefe68168c087)) by Jean-Gabriel Doyon
+* **indexer:** apply graph tombstones instead of a no-op OPTIMIZE ([fc55471](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fc55471f5b8f2e6961947f6255db16381c4631a4)) by Jean-Gabriel Doyon
+* **indexer:** clone migration tables via CREATE AS + ATTACH PARTITION ([fce731a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fce731af7af0fd3ff7214818dd7023eb3520eb8b)) by Jean-Gabriel Doyon
+
+### Other
+
+* **deps:** update rust crate anyhow to v1.0.104 ([71b6e4c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/71b6e4c73c5053b1bcd317378e9c1ab9386dc37f)) by GitLab Renovate Bot
+* **deps:** update rust crate async-trait to v0.1.91 ([7f0bad5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7f0bad5f1a636db1649e0c11ebf5424862df8883)) by GitLab Renovate Bot
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([0c5a29b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0c5a29b01a87937a5486cfa43206425d0cad6b1b)) by Orbit automation bot
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([a091633](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a091633a8669afd280422d1b2105f05801054359)) by Orbit automation bot
+* **i18n:** update ja-jp for commit 020c959e ([7e97d20](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7e97d20a9f359a1032e4ab08bdf7a54fe3badd3e)) by GitLab-Argo Bot
+* **indexer:** downgrade per-namespace backfill dispatch logs ([0df8870](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0df8870c76762965e7865b5e328e55e607680e4e)) by Jean-Gabriel Doyon
+* **indexer:** downgrade per-page and per-message index logs ([c6982ce](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6982ce65fccc90ec88ff537c5e8ed3d89c3b4a9)) by Jean-Gabriel Doyon
+
 ## [0.93.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.92.1...v0.93.0) (2026-07-30)
 
 ### Features
