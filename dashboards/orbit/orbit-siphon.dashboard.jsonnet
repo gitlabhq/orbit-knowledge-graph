@@ -22,6 +22,7 @@ o.dashboard(
   'orbit-siphon',
   'Orbit — Siphon',
   ['siphon'],
-  'Siphon producer and ClickHouse consumer metrics (analytics-eventsdot tenant).',
+  'Siphon producer and ClickHouse consumer metrics'
+  + (if o.IS_DEDICATED then '.' else ' (analytics-eventsdot tenant).'),
   items,
 )

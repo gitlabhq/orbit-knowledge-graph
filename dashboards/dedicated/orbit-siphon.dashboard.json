@@ -2,7 +2,7 @@
    "annotations": {
       "list": [ ]
    },
-   "description": "Siphon producer and ClickHouse consumer metrics (analytics-eventsdot tenant).",
+   "description": "Siphon producer and ClickHouse consumer metrics.",
    "editable": true,
    "fiscalYearStartMonth": 0,
    "graphTooltip": 1,

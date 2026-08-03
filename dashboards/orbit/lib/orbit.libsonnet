@@ -903,4 +903,5 @@ local RAILS_SEL = if IS_DEDICATED then 'env=~".*"' else 'env=~"$rails_env"';
   RAILS_SEL: RAILS_SEL,
   // Constants
   GRID_WIDTH: GRID_WIDTH,
+  IS_DEDICATED: IS_DEDICATED,
 }
