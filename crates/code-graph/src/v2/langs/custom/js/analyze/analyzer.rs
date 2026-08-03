@@ -776,6 +776,16 @@ impl JsAnalyzer {
         // past `MAX_NESTING_DEPTH` overflows the worker stack, which aborts the whole
         // process uncatchably and takes every concurrent file in the pool with it. So
         // screen depth here, before oxc ever recurses, and fault the file instead.
+        //
+        // This screens *bracket* nesting, which overflows the parser. Deep operator
+        // chains (member/binary/ternary/call/arrow) overflow the semantic builder
+        // instead of the parser, need roughly 2-4x more depth, and are NOT caught
+        // here — bracket depth does not grow along an operator spine. Their compact
+        // single-line forms are already dropped upstream by `CodeFilter`'s
+        // average-line-length rule, so only multi-line pretty-printed chains
+        // thousands deep evade both. That residual is accepted deliberately: a
+        // lexical operator-run heuristic in this hot path would be a fragile guess,
+        // worse than a documented gap. See knowledge-graph#1114.
         let nesting_depth = max_bracket_nesting_depth(source);
         if nesting_depth > MAX_NESTING_DEPTH {
             return Err(AnalyzerError::fault(
