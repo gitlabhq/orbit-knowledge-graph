@@ -9,6 +9,7 @@ use oxc::syntax::scope::ScopeFlags;
 use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use std::collections::HashMap;
 
+use super::super::depth_screen::{MAX_NESTING_DEPTH, max_bracket_nesting_depth};
 use super::super::frameworks::{
     extract_vue_options_api, is_vue_like_path, vue_default_component_def,
 };
@@ -20,12 +21,6 @@ use super::cjs::{extract_cjs_exports, extract_cjs_imports};
 use super::dataflow::extract_call_edges;
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
 use super::patterns::for_each_static_object_property;
-
-/// Files whose bracket/brace/paren nesting exceeds this are faulted before
-/// parsing. oxc overflows the 8 MiB parse-worker stack around depth 4000-8000
-/// (release) with no internal recursion limit; this leaves several times the
-/// margin below that while sitting far above any hand-written or generated source.
-const MAX_NESTING_DEPTH: usize = 1000;
 
 pub(super) type NodeId = oxc::semantic::NodeId;
 
@@ -770,22 +765,14 @@ impl JsAnalyzer {
         })?;
         let source_type = source_type.with_jsx(source_type.is_javascript());
 
-        // oxc's parser and semantic builder recurse once per nesting level with no
-        // internal recursion limit, and `stacker::maybe_grow` only checks the red
-        // zone at the call boundary (oxc never re-checks mid-descent). A file nested
-        // past `MAX_NESTING_DEPTH` overflows the worker stack, which aborts the whole
-        // process uncatchably and takes every concurrent file in the pool with it. So
-        // screen depth here, before oxc ever recurses, and fault the file instead.
-        //
-        // This screens *bracket* nesting, which overflows the parser. Deep operator
-        // chains (member/binary/ternary/call/arrow) overflow the semantic builder
-        // instead of the parser, need roughly 2-4x more depth, and are NOT caught
-        // here — bracket depth does not grow along an operator spine. Their compact
-        // single-line forms are already dropped upstream by `CodeFilter`'s
-        // average-line-length rule, so only multi-line pretty-printed chains
-        // thousands deep evade both. That residual is accepted deliberately: a
-        // lexical operator-run heuristic in this hot path would be a fragile guess,
-        // worse than a documented gap. See knowledge-graph#1114.
+        // Screens *bracket* nesting only, which is what overflows oxc's parser.
+        // Deep operator chains (member/binary/ternary/call/arrow) overflow the
+        // semantic builder instead, need ~2-4x more depth, and add no bracket
+        // depth, so they are not caught here; their compact single-line forms are
+        // already dropped upstream by `CodeFilter`'s average-line-length rule, so
+        // only multi-line chains thousands deep evade both. Residual accepted; a
+        // lexical operator-run heuristic would be a fragile guess. See
+        // knowledge-graph#1114.
         let nesting_depth = max_bracket_nesting_depth(source);
         if nesting_depth > MAX_NESTING_DEPTH {
             return Err(AnalyzerError::fault(
@@ -918,69 +905,6 @@ impl JsAnalyzer {
     }
 }
 
-/// Maximum `()`/`[]`/`{}` nesting depth in `source`, skipping brackets inside
-/// string literals and comments so a bracket-heavy string can neither inflate
-/// nor deflate the count. Template-literal bodies are skipped whole (including
-/// `${...}` interpolations) and regex literals are not detected, so their inner
-/// brackets are undercounted — acceptable because real code never nests anywhere
-/// near [`MAX_NESTING_DEPTH`], and this is only a screen against pathological
-/// input. Iterative, so it cannot itself overflow on the input it guards.
-fn max_bracket_nesting_depth(source: &str) -> usize {
-    let bytes = source.as_bytes();
-    let mut i = 0;
-    let mut depth: usize = 0;
-    let mut max_depth: usize = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' | b'[' | b'{' => {
-                depth += 1;
-                max_depth = max_depth.max(depth);
-                i += 1;
-            }
-            b')' | b']' | b'}' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-            }
-            quote @ (b'\'' | b'"' | b'`') => i = skip_string_literal(bytes, i, quote),
-            b'/' if bytes.get(i + 1) == Some(&b'/') => i = skip_to_newline(bytes, i + 2),
-            b'/' if bytes.get(i + 1) == Some(&b'*') => i = skip_block_comment(bytes, i + 2),
-            _ => i += 1,
-        }
-    }
-    max_depth
-}
-
-fn skip_string_literal(bytes: &[u8], open: usize, quote: u8) -> usize {
-    let mut i = open + 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 2,
-            b if b == quote => return i + 1,
-            _ => i += 1,
-        }
-    }
-    bytes.len()
-}
-
-fn skip_to_newline(bytes: &[u8], start: usize) -> usize {
-    let mut i = start;
-    while i < bytes.len() && bytes[i] != b'\n' {
-        i += 1;
-    }
-    i
-}
-
-fn skip_block_comment(bytes: &[u8], start: usize) -> usize {
-    let mut i = start;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-            return i + 2;
-        }
-        i += 1;
-    }
-    bytes.len()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1060,28 +984,6 @@ mod tests {
             status.success(),
             "child aborted ({status:?}): the depth screen failed to contain a stack-overflowing file"
         );
-    }
-
-    #[test]
-    fn max_bracket_nesting_depth_counts_structural_nesting() {
-        assert_eq!(max_bracket_nesting_depth("const x = 1;"), 0);
-        assert_eq!(max_bracket_nesting_depth("([{}])"), 3);
-        assert_eq!(max_bracket_nesting_depth("f(g(h()))"), 3);
-        assert_eq!(max_bracket_nesting_depth("a()b()c()"), 1);
-    }
-
-    #[test]
-    fn max_bracket_nesting_depth_skips_strings_and_comments() {
-        assert_eq!(max_bracket_nesting_depth("const s = \"(((((\";"), 0);
-        assert_eq!(max_bracket_nesting_depth("// (((((\nx"), 0);
-        assert_eq!(max_bracket_nesting_depth("/* ((( */"), 0);
-        assert_eq!(max_bracket_nesting_depth("`(((({[`"), 0);
-        assert_eq!(max_bracket_nesting_depth("\"a\\\"b\" + ("), 1);
-    }
-
-    #[test]
-    fn max_bracket_nesting_depth_ignores_closer_heavy_strings() {
-        assert_eq!(max_bracket_nesting_depth("[[[ \")))))\" ]]]"), 3);
     }
 
     #[test]
