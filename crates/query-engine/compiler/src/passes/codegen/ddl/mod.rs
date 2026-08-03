@@ -42,10 +42,10 @@ pub fn ddl_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
 
 pub fn auxiliary_schema_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
     let mut fingerprints = BTreeMap::new();
-    for table in generate_unversioned_graph_tables(ontology) {
+    for object in generate_unversioned_objects(ontology) {
         fingerprints.insert(
-            format!("table/{}", table.name),
-            ontology::migrations::sha256_hex(&clickhouse::emit_create_table(&table)),
+            format!("{}/{}", object.kind, object.name),
+            ontology::migrations::sha256_hex(&object.ddl),
         );
     }
     for (definition, view) in ontology
@@ -58,12 +58,6 @@ pub fn auxiliary_schema_fingerprints(ontology: &Ontology) -> BTreeMap<String, St
             ontology::migrations::sha256_hex(
                 &clickhouse::emit_create_refreshable_materialized_view(&view),
             ),
-        );
-    }
-    for view in generate_unversioned_materialized_views(ontology) {
-        fingerprints.insert(
-            format!("materialized_view/{}", view.name),
-            ontology::migrations::sha256_hex(&clickhouse::emit_create_materialized_view(&view)),
         );
     }
     fingerprints
@@ -101,6 +95,43 @@ pub fn generate_unversioned_graph_tables(ontology: &Ontology) -> Vec<CreateTable
         .collect()
 }
 
+/// A durable, unprefixed graph object created once at boot and never GCed. `kind` namespaces the fingerprint key (e.g. `table`, `materialized_view`).
+pub struct UnversionedObject {
+    pub kind: &'static str,
+    pub name: String,
+    pub ddl: String,
+}
+
+/// Every unversioned object, across all kinds, as emitted DDL; extend here rather than adding a parallel per-kind path.
+pub fn generate_unversioned_objects(ontology: &Ontology) -> Vec<UnversionedObject> {
+    let mut objects: Vec<UnversionedObject> = generate_unversioned_graph_tables(ontology)
+        .iter()
+        .map(|table| UnversionedObject {
+            kind: "table",
+            name: table.name.clone(),
+            ddl: clickhouse::emit_create_table(table),
+        })
+        .collect();
+
+    let known_tables = collect_table_names(ontology);
+    objects.extend(
+        ontology
+            .materialized_views()
+            .iter()
+            .filter(|mv| !mv.versioned)
+            .map(|mv| {
+                let view = build_materialized_view(mv).with_prefix("", &known_tables);
+                UnversionedObject {
+                    kind: "materialized_view",
+                    name: view.name.clone(),
+                    ddl: clickhouse::emit_create_materialized_view(&view),
+                }
+            }),
+    );
+
+    objects
+}
+
 pub fn generate_refreshable_materialized_views(
     ontology: &Ontology,
     version: u32,
@@ -117,7 +148,7 @@ pub fn generate_refreshable_materialized_views(
         .collect()
 }
 
-/// Versioned views only, returned unprefixed; unversioned views come from [`generate_unversioned_materialized_views`].
+/// Versioned views only, returned unprefixed; unversioned views come from [`generate_unversioned_objects`].
 pub fn generate_graph_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     generate_graph_materialized_views_with_prefix(ontology, "")
 }
@@ -134,18 +165,6 @@ pub fn generate_graph_materialized_views_with_prefix(
         .iter()
         .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
-        .collect()
-}
-
-/// Unversioned views, never prefixed; ontology validation restricts their placeholders to unversioned or external tables.
-pub fn generate_unversioned_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
-    let known_tables = collect_table_names(ontology);
-
-    ontology
-        .materialized_views()
-        .iter()
-        .filter(|mv| !mv.versioned)
-        .map(|mv| build_materialized_view(mv).with_prefix("", &known_tables))
         .collect()
 }
 
@@ -943,6 +962,20 @@ mod tests {
         assert_eq!(mv.name, "query_log_sink");
         assert_eq!(mv.to_table.as_deref(), Some("query_log_retention"));
         assert!(mv.select_query.contains("system.query_log"));
+    }
+
+    #[test]
+    fn unversioned_objects_tag_kind_and_emit_ddl() {
+        let objects = generate_unversioned_objects(&ontology());
+
+        // The embedded ontology's only unversioned object is the storage-snapshot table.
+        let snapshot = objects
+            .iter()
+            .find(|o| o.name == "namespace_storage_snapshot")
+            .expect("unversioned snapshot table should be generated");
+        assert_eq!(snapshot.kind, "table");
+        assert!(snapshot.ddl.contains("CREATE TABLE"));
+        assert!(objects.iter().all(|o| !o.ddl.is_empty()));
     }
 
     #[test]
