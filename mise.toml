@@ -399,7 +399,7 @@ description = "Fail if the committed metrics catalog is out of date"
 
 [tasks."dashboards"]
 run = "cargo xtask dashboards"
-description = "Regenerate dashboards/orbit/*.dashboard.json from jsonnet sources"
+description = "Regenerate dashboards/{orbit,dedicated}/*.dashboard.json from jsonnet sources"
 
 [tasks."dashboards:check"]
 run = "cargo xtask dashboards --check"
