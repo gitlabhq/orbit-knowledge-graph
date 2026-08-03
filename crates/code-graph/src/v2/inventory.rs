@@ -33,27 +33,14 @@ pub fn parseable_file_count(inventory: &[FileInventoryEntry]) -> usize {
         .count()
 }
 
-/// Parse candidates selected by [`group_parseable_inventory`], grouped by
-/// language family, plus the path → language map for the structural graph and
-/// the count of files shed by the source-byte cap.
 pub struct ParseCandidates {
     pub groups: FxHashMap<LanguageFamily, Vec<FamilyFileInput>>,
     pub file_languages: FxHashMap<String, Language>,
-    /// Files dropped because accepting them would push the repository's
-    /// parse-candidate source bytes over `max_parse_bytes`.
     pub shed_over_byte_cap: usize,
 }
 
-/// Select the parse candidates (loaded, language-detected, under `max_files` and
-/// `max_parse_bytes`; `0` = unlimited for either) and group them by language
-/// family.
-///
-/// Both caps shed at inventory time, before any file is parsed, so they cover
-/// every language uniformly and bound peak memory regardless of which pipeline a
-/// family dispatches to. The inventory is path-sorted upstream
-/// ([`gkg_utils::fs_stream::canonicalize_inventory`]), so the shed set is a
-/// stable function of the repository: the same commit sheds the same files every
-/// run.
+/// `0` disables either cap. The inventory arrives path-sorted, so the shed set is
+/// the same on every run over the same commit.
 pub fn group_parseable_inventory(
     inventory: &[FileInventoryEntry],
     max_files: usize,
@@ -211,9 +198,7 @@ mod tests {
         assert_eq!(first_kept, vec!["a.py", "b.py", "c.py"]);
     }
 
-    // The old in-parse budget never fired for JavaScript or TypeScript because
-    // those dispatch to JsPipeline, which never recorded graph bytes. Shedding at
-    // inventory time is language-agnostic, so the cap must cover them.
+    // JsPipeline never recorded graph bytes, so the old in-parse budget missed these.
     #[test]
     fn byte_cap_covers_typescript_and_javascript() {
         let inventory = [sized("a.ts", 100), sized("b.js", 100), sized("c.ts", 100)];

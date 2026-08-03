@@ -480,10 +480,7 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
-    /// Max parse-candidate source bytes accepted for one pipeline run. Once the
-    /// accepted bytes reach this, every remaining candidate is shed at inventory
-    /// time, before any parse, so the cap bounds peak memory uniformly across
-    /// languages. 0 = no limit.
+    /// Source bytes, not graph bytes. 0 = no limit.
     pub max_parse_bytes: u64,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
@@ -572,10 +569,7 @@ pub struct PipelineStats {
     pub files_indexed: usize,
     pub files_parsed: usize,
     pub files_skipped: usize,
-    /// Parse candidates shed at inventory time because the repository's
-    /// parse-candidate source bytes crossed `max_parse_bytes`. Reported once per
-    /// repository under the `memory_budget` skip reason.
-    pub files_shed_over_budget: usize,
+    pub files_shed_over_byte_cap: usize,
     pub definitions_count: usize,
     pub imports_count: usize,
     pub references_count: usize,
@@ -708,7 +702,7 @@ impl Pipeline {
             group_parseable_inventory(&file_inventory, config.max_files, config.max_parse_bytes);
         let files_by_family = candidates.groups;
         let parsed_file_languages = candidates.file_languages;
-        let files_shed_over_budget = candidates.shed_over_byte_cap;
+        let files_shed_over_byte_cap = candidates.shed_over_byte_cap;
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
@@ -993,7 +987,7 @@ impl Pipeline {
                 files_indexed: files_count.into_inner(),
                 files_parsed: files_parsed.into_inner(),
                 files_skipped: files_skipped.into_inner(),
-                files_shed_over_budget,
+                files_shed_over_byte_cap,
                 definitions_count: definitions_count.into_inner(),
                 imports_count: imports_count.into_inner(),
                 references_count: 0,
@@ -1856,7 +1850,7 @@ mod tests {
         );
 
         assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.stats.files_shed_over_budget, 1);
+        assert_eq!(result.stats.files_shed_over_byte_cap, 1);
         assert_eq!(result.stats.files_parsed, 1);
         assert_eq!(
             result.stats.files_indexed, 2,
@@ -1896,12 +1890,10 @@ mod tests {
         );
 
         assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.stats.files_shed_over_budget, 0);
+        assert_eq!(result.stats.files_shed_over_byte_cap, 0);
     }
 
-    // The old in-parse budget never fired for TypeScript because it dispatches to
-    // JsPipeline, which never recorded graph bytes; a TS-only repository shed
-    // nothing. Shedding at inventory time is language-agnostic, so this now sheds.
+    // JsPipeline never recorded graph bytes, so the old in-parse budget shed nothing here.
     #[test]
     fn memory_cap_covers_typescript() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1934,7 +1926,7 @@ mod tests {
         );
 
         assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.stats.files_shed_over_budget, 1);
+        assert_eq!(result.stats.files_shed_over_byte_cap, 1);
         assert_eq!(result.stats.files_parsed, 1);
     }
 

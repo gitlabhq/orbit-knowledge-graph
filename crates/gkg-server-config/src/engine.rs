@@ -264,18 +264,10 @@ fn default_code_indexing_max_total_bytes() -> u64 {
     2_000_000_000
 }
 
-/// 64 MiB of parse-candidate source per repository.
-///
-/// Arithmetic (recorded so the number has a basis, not a guess): prod code pods
-/// run 16 workers in 24 GiB, so a worker's memory share is 24 GiB / 16 = 1.5
-/// GiB. Hold a single repository's graph-and-resolution peak to about half that
-/// share (~768 MiB), leaving the other half for the tree-sitter ASTs, SSA
-/// arenas, and Arrow buffers that are live at the same time. Measured RSS is
-/// 4x source on mixed real repositories and up to ~12x on generated Go and
-/// reference-dense adversarial shapes; dividing the ~768 MiB target by the ~12x
-/// worst case gives a 64 MiB source cap. At 12x that holds peak near 768 MiB; a
-/// 4x real repository would need 192 MiB of parseable source to be capped, far
-/// above essentially every real repository, so normal indexing is untouched.
+/// Prod code pods run 16 workers in 24 GiB, so ~1.5 GiB each; target half of that
+/// for one repository's graph. Measured RSS runs 4x source on real repositories
+/// and ~12x on generated ones, so 768 MiB / 12x = 64 MiB. A 4x repository would
+/// need 192 MiB of parseable source to be capped, which no real one reaches.
 fn default_code_indexing_max_parse_bytes() -> u64 {
     64 * 1024 * 1024
 }
@@ -345,11 +337,7 @@ pub struct CodeIndexingPipelineConfig {
     /// Defaults to 2 GB.
     #[serde(default = "default_code_indexing_max_total_bytes")]
     pub max_total_bytes: u64,
-    /// Parse-candidate source bytes one repository may accept before the
-    /// pipeline sheds the rest at inventory time, so a pathological generated
-    /// repository can't OOM the worker pool. Shedding happens before any parse,
-    /// so it covers every language uniformly. 0 = no limit. Defaults to 64 MiB
-    /// (see `default_code_indexing_max_parse_bytes`).
+    /// Defaults to 64 MiB. 0 = no limit.
     #[serde(default = "default_code_indexing_max_parse_bytes")]
     pub max_parse_bytes: u64,
     #[serde(default)]

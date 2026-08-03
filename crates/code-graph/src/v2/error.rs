@@ -109,8 +109,7 @@ pub enum FileSkip {
     ParserOversize,
     ArrowOffsetOverflow,
     UnsafePath,
-    /// Shed at inventory time because the repository's parse-candidate source
-    /// bytes crossed `max_parse_bytes`, bounding peak memory before any parse.
+    /// Wire label predates the source-byte cap that now triggers it.
     MemoryBudget,
     Timeout(AbortPhase),
 }

@@ -567,8 +567,9 @@ impl CodeIndexingPipeline {
             .stats
             .files_parsed
             .saturating_sub(result.skipped.len() + result.faults.len());
-        let skipped_count =
-            result.stats.files_skipped + result.skipped.len() + result.stats.files_shed_over_budget;
+        let skipped_count = result.stats.files_skipped
+            + result.skipped.len()
+            + result.stats.files_shed_over_byte_cap;
 
         self.metrics
             .record_repository_source_size(result.stats.bytes_discovered);
@@ -633,14 +634,14 @@ impl CodeIndexingPipeline {
             );
         }
 
-        if result.stats.files_shed_over_budget > 0 {
+        if result.stats.files_shed_over_byte_cap > 0 {
             let reason = code_graph::v2::FileSkip::MemoryBudget.as_metric_label();
             self.metrics
-                .record_files_skipped(reason, result.stats.files_shed_over_budget as u64);
+                .record_files_skipped(reason, result.stats.files_shed_over_byte_cap as u64);
             warn!(
                 project_id = request.project_id,
                 branch = %request.branch,
-                count = result.stats.files_shed_over_budget,
+                count = result.stats.files_shed_over_byte_cap,
                 reason,
                 "code indexing shed parse candidates over the source-byte budget"
             );
