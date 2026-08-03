@@ -102,3 +102,18 @@ pub fn code_indexing_task_columns(
         .with_string("commit_sha", commit_sha)
         .with_string("traversal_path", traversal_path)
 }
+
+pub fn external_code_indexing_task_columns(
+    id: i64,
+    external_repository_id: i64,
+    ref_name: &str,
+    commit_sha: &str,
+    traversal_path: &str,
+) -> EventBuilder {
+    EventBuilder::new()
+        .with_i64("id", id)
+        .with_i64("external_repository_id", external_repository_id)
+        .with_string("ref", ref_name)
+        .with_string("commit_sha", commit_sha)
+        .with_string("traversal_path", traversal_path)
+}

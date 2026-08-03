@@ -75,7 +75,9 @@ use orchestrator::scheduled::{
     TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
-use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
+use orchestrator::siphon::{
+    CodeIndexingTaskRoute, EnabledNamespacesRoute, ExternalCodeIndexingTaskRoute, Route, Siphon,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -422,6 +424,10 @@ pub async fn run_dispatcher(
 
     let routes: Vec<Arc<dyn Route>> = vec![
         Arc::new(CodeIndexingTaskRoute::new(
+            services.nats.clone(),
+            metrics.clone(),
+        )),
+        Arc::new(ExternalCodeIndexingTaskRoute::new(
             services.nats.clone(),
             metrics.clone(),
         )),

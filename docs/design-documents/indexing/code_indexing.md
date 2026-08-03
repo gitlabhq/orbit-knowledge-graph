@@ -166,6 +166,8 @@ The `SiphonCodeIndexingTaskDispatcher` runs as a `ScheduledTask` in DispatchInde
 
 This separation lets task dispatching be stopped independently from the indexer — the handler keeps draining whatever was already dispatched, but no new work enters the pipeline.
 
+External repositories (public repos indexed without a GitLab project) follow the same two-hop model through a parallel table `gkg_siphon_stream.p_knowledge_graph_external_code_indexing_tasks`. A dedicated route emits a `CodeIndexingTaskRequest` with `source_type: "external_repository"`, the owning `external_repository_id`, and `project_id: 0`; the handler branches on `source_type` to resolve and fetch the repo through the external Rails endpoints. Because all external tasks carry `project_id: 0`, the dispatch subject and the handler's in-flight lock key on `external_repository_id` (`code.task.indexing.requested.ext-<id>.<branch>`) instead of `project_id`, so distinct external repos on the same branch do not collide. The code checkpoint table is still keyed on `(traversal_path, project_id, branch)`, so two external repos in the same namespace on the same branch still share a checkpoint identity — a residual to resolve when external indexing moves past the single-repo demo.
+
 ##### Namespace backfill dispatch
 
 When a namespace first enables Knowledge Graph indexing, its existing projects need to be indexed even though no push events have occurred yet. The `NamespaceCodeBackfillDispatcher` handles this by consuming `knowledge_graph_enabled_namespaces` CDC events from Siphon. For each newly enabled namespace it:

@@ -36,10 +36,21 @@ const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     dead_letter: true,
 };
 
-fn project_lock_key(project_id: i64, branch: &str) -> String {
+fn code_lock_key(request: &CodeIndexingTaskRequest, branch: &str) -> String {
     use base64::Engine;
     let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch);
-    format!("project.{project_id}.{encoded_branch}")
+    // External repos share project_id 0, so a project-keyed lock would serialize
+    // every external repo on a branch behind one guard. Key on the external repo
+    // id instead so distinct external repos index concurrently.
+    match (
+        request.is_external_repository(),
+        request.external_repository_id,
+    ) {
+        (true, Some(external_repository_id)) => {
+            format!("external_repository.{external_repository_id}.{encoded_branch}")
+        }
+        _ => format!("project.{}.{encoded_branch}", request.project_id),
+    }
 }
 
 pub struct CodeIndexingTaskHandler {
@@ -289,7 +300,7 @@ impl CodeIndexingTaskHandler {
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
         let project_id = request.project_id;
-        let key = project_lock_key(project_id, branch);
+        let key = code_lock_key(request, branch);
 
         let _guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
             .await
@@ -404,6 +415,20 @@ mod tests {
 
     fn test_metrics() -> CodeMetrics {
         CodeMetrics::with_meter(&crate::testkit::test_meter())
+    }
+
+    fn project_request(project_id: i64) -> CodeIndexingTaskRequest {
+        CodeIndexingTaskRequest {
+            task_id: 1,
+            project_id,
+            branch: None,
+            commit_sha: None,
+            traversal_path: String::new(),
+            dispatch_id: uuid::Uuid::nil(),
+            campaign_id: None,
+            source_type: None,
+            external_repository_id: None,
+        }
     }
 
     struct TestContext {
@@ -536,12 +561,12 @@ mod tests {
         }
 
         fn set_lock(&self, project_id: i64, branch: &str) {
-            let key = project_lock_key(project_id, branch);
+            let key = code_lock_key(&project_request(project_id), branch);
             self.mock_locks.set_lock(&key);
         }
 
         fn lock_exists(&self, project_id: i64, branch: &str) -> bool {
-            let key = project_lock_key(project_id, branch);
+            let key = code_lock_key(&project_request(project_id), branch);
             self.mock_locks.is_held(&key)
         }
     }
@@ -765,10 +790,29 @@ mod tests {
     }
 
     #[test]
-    fn project_lock_key_formats_correctly() {
+    fn code_lock_key_formats_correctly() {
         assert_eq!(
-            project_lock_key(42, "refs/heads/main"),
+            code_lock_key(&project_request(42), "refs/heads/main"),
             "project.42.cmVmcy9oZWFkcy9tYWlu"
+        );
+    }
+
+    #[test]
+    fn code_lock_key_keys_external_repos_on_external_id() {
+        let request = CodeIndexingTaskRequest {
+            task_id: 1,
+            project_id: 0,
+            branch: None,
+            commit_sha: None,
+            traversal_path: String::new(),
+            dispatch_id: uuid::Uuid::nil(),
+            campaign_id: None,
+            source_type: Some("external_repository".to_string()),
+            external_repository_id: Some(7),
+        };
+        assert_eq!(
+            code_lock_key(&request, "refs/heads/main"),
+            "external_repository.7.cmVmcy9oZWFkcy9tYWlu"
         );
     }
 }

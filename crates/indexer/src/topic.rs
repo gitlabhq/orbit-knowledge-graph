@@ -106,12 +106,19 @@ impl CodeIndexingTaskRequest {
             Some(branch) => base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch),
             None => "_".to_string(),
         };
+        // External repos all carry project_id 0, so keying the subject on
+        // project_id alone collapses distinct external repos on the same branch
+        // into one subject and NATS drops the later ones as duplicates. Key the
+        // external subject on external_repository_id instead.
+        let identity = match (self.is_external_repository(), self.external_repository_id) {
+            (true, Some(external_repository_id)) => {
+                format!("ext-{external_repository_id}")
+            }
+            _ => self.project_id.to_string(),
+        };
         Subscription::new(
             INDEXER_STREAM,
-            format!(
-                "{}.{}.{}",
-                CODE_INDEXING_TASK_SUBJECT_PREFIX, self.project_id, branch_component
-            ),
+            format!("{CODE_INDEXING_TASK_SUBJECT_PREFIX}.{identity}.{branch_component}"),
         )
     }
 }
