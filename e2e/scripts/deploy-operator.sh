@@ -21,18 +21,23 @@ for ns in $($KC get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr 
   helm uninstall gitlab-operator -n "$ns" --kube-context "$KCTX" 2>/dev/null || true
 done
 
-# Delete cluster-scoped resources the operator deploy chart creates. These
-# survive namespace teardown and block subsequent helm install. Listed by
-# exact name to avoid touching other resources (e.g. the GitLab Agent's RBAC).
-OPERATOR_CHART_CLUSTER_RESOURCES="gitlab-app-role-nonroot gitlab-metrics-auth-role gitlab-metrics-reader gitlab-manager-role gitlab-manager-cluster-role gitlab-nginx-ingress gitlab-prometheus-server"
-for name in $OPERATOR_CHART_CLUSTER_RESOURCES; do
-  $KC delete clusterrole "$name" 2>/dev/null || true
+# Delete cluster-scoped resources orphaned by the operator deploy chart.
+# Query by Helm ownership label so we only touch resources Helm created for
+# the gitlab-operator release, never infrastructure like the GitLab Agent.
+for kind in clusterrole clusterrolebinding ingressclass validatingwebhookconfiguration; do
+  ORPHANS=$($KC get "$kind" -l "app.kubernetes.io/managed-by=Helm" -o json 2>/dev/null \
+    | python3 -c "
+import json, sys
+for r in json.load(sys.stdin).get('items', []):
+    ann = r.get('metadata', {}).get('annotations', {})
+    if ann.get('meta.helm.sh/release-name') == 'gitlab-operator':
+        print(r['metadata']['name'])
+" 2>/dev/null) || true
+  for name in $ORPHANS; do
+    log "Cleaning up $kind/$name"
+    $KC delete "$kind" "$name" 2>/dev/null || true
+  done
 done
-for name in gitlab-app-rolebinding-nonroot gitlab-metrics-auth-rolebinding gitlab-manager-rolebinding gitlab-manager-cluster-rolebinding gitlab-nginx-ingress gitlab-prometheus-server gitlab-operator-e2e-admin; do
-  $KC delete clusterrolebinding "$name" 2>/dev/null || true
-done
-$KC delete ingressclass gitlab-nginx 2>/dev/null || true
-$KC delete validatingwebhookconfiguration gitlab-validating-webhook-configuration 2>/dev/null || true
 
 # --- 1. Clone operator repo ---
 log "Cloning operator repo"
