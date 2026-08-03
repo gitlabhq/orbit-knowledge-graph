@@ -4,102 +4,114 @@ use indexer::orchestrator::scheduled::table_cleanup::TableCleanup;
 use indexer::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 
-// FINAL CLEANUP needs allow_experimental_replacing_merge_with_cleanup enabled per table.
-#[tokio::test]
-async fn cleanup_succeeds_on_all_tables() {
-    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    let graph = context.config.build_client();
+fn build_tombstone_sweep_task(context: &TestContext) -> TableCleanup {
     let ontology = ontology::Ontology::load_embedded().unwrap();
-    let task = TableCleanup::new(
-        graph,
+    TableCleanup::new(
+        context.config.build_client(),
         &ontology,
         ScheduledTaskMetrics::new(),
         TableCleanupConfig::default(),
-    );
-
-    task.run().await.unwrap();
+    )
 }
 
-#[tokio::test]
-async fn cleanup_removes_soft_deleted_rows() {
-    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-
+/// Fixed past timestamps would fall outside the sweep's `_version` window.
+async fn seed_user(context: &TestContext, id: i64, hours_ago: u32, deleted: bool) {
     context
         .execute(&format!(
-            "INSERT INTO {} (id, username, _version, _deleted) VALUES \
-             (1, 'alice', '2024-01-01 00:00:00.000000', false), \
-             (2, 'bob',   '2024-01-01 00:00:00.000000', false)",
+            "INSERT INTO {} (id, username, _version, _deleted) \
+             VALUES ({id}, 'u{id}', now() - INTERVAL {hours_ago} HOUR, {deleted})",
             t("gl_user")
         ))
         .await;
+}
 
-    context
-        .execute(&format!(
-            "INSERT INTO {} (id, username, _version, _deleted) VALUES \
-             (1, 'alice', '2024-01-02 00:00:00.000000', true)",
+async fn live_user_ids(context: &TestContext) -> Vec<i64> {
+    let result = context
+        .query(&format!(
+            "SELECT id FROM {} FINAL WHERE _deleted = false ORDER BY id",
             t("gl_user")
         ))
         .await;
-
-    let graph = context.config.build_client();
-    let ontology = ontology::Ontology::load_embedded().unwrap();
-    let task = TableCleanup::new(
-        graph,
-        &ontology,
-        ScheduledTaskMetrics::new(),
-        TableCleanupConfig::default(),
-    );
-
-    task.run().await.unwrap();
-
-    let result = context
-        .query(&format!("SELECT id FROM {}", t("gl_user")))
-        .await;
-    let ids = i64::extract_column(&result, 0).unwrap();
-
-    assert_eq!(ids, vec![2], "only non-deleted user should remain");
+    i64::extract_column(&result, 0).unwrap()
 }
 
 #[tokio::test]
-async fn cleanup_removes_soft_deleted_edges() {
+async fn sweep_succeeds_on_every_table() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
 
-    context
-        .execute(&format!(
-            "INSERT INTO {} \
-             (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) \
-             VALUES \
-             ('1/', 1, 'User', 'AUTHORED', 10, 'MergeRequest', '2024-01-01 00:00:00.000000', false), \
-             ('1/', 2, 'User', 'AUTHORED', 20, 'MergeRequest', '2024-01-01 00:00:00.000000', false)",
-            t("gl_edge")
-        ))
-        .await;
+    build_tombstone_sweep_task(&context).run().await.unwrap();
+}
 
-    context
-        .execute(&format!(
-            "INSERT INTO {} \
-             (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) \
-             VALUES \
-             ('1/', 1, 'User', 'AUTHORED', 10, 'MergeRequest', '2024-01-02 00:00:00.000000', true)",
-            t("gl_edge")
-        ))
-        .await;
+#[tokio::test]
+async fn sweep_removes_a_tombstoned_row_and_its_superseded_version() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
 
-    let graph = context.config.build_client();
-    let ontology = ontology::Ontology::load_embedded().unwrap();
-    let task = TableCleanup::new(
-        graph,
-        &ontology,
-        ScheduledTaskMetrics::new(),
-        TableCleanupConfig::default(),
+    seed_user(&context, 1, 48, false).await;
+    seed_user(&context, 2, 48, false).await;
+    seed_user(&context, 1, 24, true).await;
+
+    build_tombstone_sweep_task(&context).run().await.unwrap();
+
+    assert_eq!(live_user_ids(&context).await, vec![2]);
+    let total = context
+        .query(&format!("SELECT toInt64(count()) FROM {}", t("gl_user")))
+        .await;
+    assert_eq!(
+        i64::extract_column(&total, 0).unwrap(),
+        vec![1],
+        "the tombstone must go too, not just the row it superseded"
     );
+}
 
-    task.run().await.unwrap();
+#[tokio::test]
+async fn sweep_keeps_a_row_recreated_after_its_tombstone() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    seed_user(&context, 7, 48, false).await;
+    seed_user(&context, 7, 24, true).await;
+    seed_user(&context, 7, 1, false).await;
+
+    build_tombstone_sweep_task(&context).run().await.unwrap();
+
+    assert_eq!(live_user_ids(&context).await, vec![7]);
+}
+
+#[tokio::test]
+async fn sweep_is_idempotent_across_runs() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    seed_user(&context, 1, 48, false).await;
+    seed_user(&context, 2, 48, false).await;
+    seed_user(&context, 1, 24, true).await;
+
+    build_tombstone_sweep_task(&context).run().await.unwrap();
+    build_tombstone_sweep_task(&context).run().await.unwrap();
+
+    assert_eq!(live_user_ids(&context).await, vec![2]);
+}
+
+#[tokio::test]
+async fn sweep_removes_tombstoned_edges() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    for (source_id, hours_ago, deleted) in [(1, 48, "false"), (2, 48, "false"), (1, 24, "true")] {
+        context
+            .execute(&format!(
+                "INSERT INTO {} \
+                 (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) \
+                 VALUES ('1/100/', {source_id}, 'User', 'MEMBER_OF', {source_id}0, 'Project', now() - INTERVAL {hours_ago} HOUR, {deleted})",
+                t("gl_edge")
+            ))
+            .await;
+    }
+
+    build_tombstone_sweep_task(&context).run().await.unwrap();
 
     let result = context
-        .query(&format!("SELECT source_id FROM {}", t("gl_edge")))
+        .query(&format!(
+            "SELECT source_id FROM {} FINAL WHERE _deleted = false ORDER BY source_id",
+            t("gl_edge")
+        ))
         .await;
-    let source_ids = i64::extract_column(&result, 0).unwrap();
-
-    assert_eq!(source_ids, vec![2], "only non-deleted edge should remain");
+    assert_eq!(i64::extract_column(&result, 0).unwrap(), vec![2]);
 }
