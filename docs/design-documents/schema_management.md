@@ -156,10 +156,10 @@ their `tokio::select`, and the process returns. Kubernetes restarts the pod; if 
 deployed the wrong (too-old) binary, `CrashLoopBackoff` surfaces the mistake instead of silently
 serving the wrong schema.
 
-The webserver `/ready` endpoint intentionally checks only this local schema state. ClickHouse,
-NATS, GitLab, and Kubernetes deployment health are aggregated by the HealthCheck service's
-`/health` endpoint, so an unavailable external dependency does not prevent a healthy pod from
-starting.
+The webserver `/ready` endpoint intentionally checks only this local schema state. The HealthCheck
+service's `/health` endpoint separately aggregates ClickHouse and Kubernetes Deployment and
+StatefulSet health. The former GitLab connectivity and JWT-auth check is intentionally dropped, not
+relocated, so that diagnostic is no longer part of readiness.
 
 Transient ClickHouse errors during a poll keep the previous state — the watcher does not
 flap to `Pending` on a single failed read.

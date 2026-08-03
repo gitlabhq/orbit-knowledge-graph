@@ -275,8 +275,9 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 The Webserver, Indexer, and Dispatcher expose `/live` and `/ready` endpoints. The Indexer and
 Dispatcher use dedicated health ports (default 4202 and 4203 respectively). These pod-level probes
 report local serving state only: `/live` confirms that the process can answer HTTP, while `/ready`
-keeps a pod out of rotation until its schema gate has cleared. Aggregate dependency health remains
-available from the HealthCheck service's `/health` endpoint.
+keeps a pod out of rotation until its schema gate has cleared. The HealthCheck service's `/health`
+endpoint reports ClickHouse and Kubernetes Deployment and StatefulSet health; NATS queue depth is
+reported separately by `/queue-depth`, and GitLab is not checked by that service.
 
 The HealthCheck service additionally exposes a read-only `/queue-depth` endpoint that connects to NATS and reports the code work-queue's pending and in-flight counts (`{ "code_pending": <n>, "code_in_flight": <n> }`) from JetStream consumer state. The stream and durable consumer names are resolved inside the application using the same versioned naming the indexer uses, so deployment charts stay naming-agnostic. This is the scaling signal consumed by KEDA for the code indexer.
 
