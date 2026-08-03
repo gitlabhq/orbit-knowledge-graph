@@ -33,7 +33,7 @@ use query_engine::compiler::{
     emit_create_refreshable_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
     generate_graph_tables_with_prefix, generate_refreshable_materialized_views,
-    generate_unversioned_graph_tables,
+    generate_unversioned_objects,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -254,12 +254,12 @@ pub async fn create_unversioned_tables(
     graph: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
 ) -> Result<(), MigrationError> {
-    for table in generate_unversioned_graph_tables(ontology) {
+    for object in generate_unversioned_objects(ontology) {
         graph
-            .execute(&emit_create_table(&table))
+            .execute(&object.ddl)
             .await
             .map_err(|error| MigrationError::Ddl {
-                table: table.name,
+                table: object.name,
                 reason: error.to_string(),
             })?;
     }

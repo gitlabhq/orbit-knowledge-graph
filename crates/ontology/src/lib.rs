@@ -606,7 +606,7 @@ impl Ontology {
             }
         }
 
-        for aux in &mut self.auxiliary_tables {
+        for aux in self.auxiliary_tables.iter_mut().filter(|aux| aux.versioned) {
             aux.name = format!("{prefix}{}", aux.name);
         }
 
@@ -3128,9 +3128,10 @@ properties:
         }
 
         for aux in prefixed.auxiliary_tables() {
-            assert!(
+            assert_eq!(
                 aux.name.starts_with("v1_"),
-                "auxiliary table '{}' should be prefixed",
+                aux.versioned,
+                "auxiliary table '{}' prefix should follow its versioned flag",
                 aux.name
             );
         }
@@ -3156,6 +3157,31 @@ properties:
                     "lookup dictionary '{dict}' should be prefixed"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn with_schema_version_prefix_skips_unversioned_auxiliary_tables() {
+        let prefixed = Ontology::load_embedded()
+            .expect("should load")
+            .with_schema_version_prefix("v1_");
+
+        let unversioned: Vec<&str> = prefixed
+            .auxiliary_tables()
+            .iter()
+            .filter(|aux| !aux.versioned)
+            .map(|aux| aux.name.as_str())
+            .collect();
+
+        assert!(
+            !unversioned.is_empty(),
+            "embedded ontology should declare an unversioned auxiliary table"
+        );
+        for name in unversioned {
+            assert!(
+                !name.starts_with("v1_"),
+                "unversioned auxiliary table '{name}' must keep its bare name"
+            );
         }
     }
 

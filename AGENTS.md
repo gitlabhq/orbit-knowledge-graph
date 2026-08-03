@@ -28,6 +28,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
   Seven genuinely complex nodes (Group, Project, MergeRequest, Commit, MergeRequestDiffFile, PackageFile, Finding) plus the SystemNote derived entity keep a `.sql.j2` MiniJinja template next to the YAML (all ontology SQL templates render through `ontology::sql_template`); derived pipelines are always authored SQL, since their rows are neither node properties nor edge endpoints to generate a projection from.
   New entity types start in the ontology, not in Rust.
   Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`).
+  Unversioned objects (durable tables and materialized views created once at boot, never version-prefixed or GCed) are emitted through one `generate_unversioned_objects` path in `crates/query-engine/compiler/src/passes/codegen/ddl/`; add a new unversioned kind there rather than introducing a parallel per-kind generator.
   Schema: `config/schemas/ontology.schema.json`.
 - **Agent-facing prompts are YAML.** Tool and command descriptions live as versioned YAML under `config/prompts/` (`remote/` = server, `local/` = CLI), embedded via rust-embed and build-time validated by `gkg-prompts`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.

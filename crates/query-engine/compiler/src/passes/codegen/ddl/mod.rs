@@ -42,10 +42,10 @@ pub fn ddl_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
 
 pub fn auxiliary_schema_fingerprints(ontology: &Ontology) -> BTreeMap<String, String> {
     let mut fingerprints = BTreeMap::new();
-    for table in generate_unversioned_graph_tables(ontology) {
+    for object in generate_unversioned_objects(ontology) {
         fingerprints.insert(
-            format!("table/{}", table.name),
-            ontology::migrations::sha256_hex(&clickhouse::emit_create_table(&table)),
+            format!("{}/{}", object.kind, object.name),
+            ontology::migrations::sha256_hex(&object.ddl),
         );
     }
     for (definition, view) in ontology
@@ -95,6 +95,41 @@ pub fn generate_unversioned_graph_tables(ontology: &Ontology) -> Vec<CreateTable
         .collect()
 }
 
+pub struct UnversionedObject {
+    pub kind: &'static str,
+    pub name: String,
+    pub ddl: String,
+}
+
+pub fn generate_unversioned_objects(ontology: &Ontology) -> Vec<UnversionedObject> {
+    let mut objects: Vec<UnversionedObject> = generate_unversioned_graph_tables(ontology)
+        .iter()
+        .map(|table| UnversionedObject {
+            kind: "table",
+            name: table.name.clone(),
+            ddl: clickhouse::emit_create_table(table),
+        })
+        .collect();
+
+    let known_tables = collect_table_names(ontology);
+    objects.extend(
+        ontology
+            .materialized_views()
+            .iter()
+            .filter(|mv| !mv.versioned)
+            .map(|mv| {
+                let view = build_materialized_view(mv).with_prefix("", &known_tables);
+                UnversionedObject {
+                    kind: "materialized_view",
+                    name: view.name.clone(),
+                    ddl: clickhouse::emit_create_materialized_view(&view),
+                }
+            }),
+    );
+
+    objects
+}
+
 pub fn generate_refreshable_materialized_views(
     ontology: &Ontology,
     version: u32,
@@ -111,21 +146,12 @@ pub fn generate_refreshable_materialized_views(
         .collect()
 }
 
-/// Views are returned unprefixed. Call
-/// [`generate_graph_materialized_views_with_prefix`] to apply a schema
-/// version prefix to view names, `TO` targets, and table references inside
-/// the `SELECT` query.
+/// Versioned views only, returned unprefixed; unversioned views come from [`generate_unversioned_objects`].
 pub fn generate_graph_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     generate_graph_materialized_views_with_prefix(ontology, "")
 }
 
-/// Generates all materialized view DDL with a schema-version prefix applied
-/// to view names, `TO` targets, and `{table_name}` placeholders in the
-/// `SELECT` query.
-///
-/// The prefix is also applied to every known graph table name found inside
-/// placeholders, so `{gl_edge}` becomes `v54_gl_edge` when `prefix` is
-/// `"v54_"`.
+/// Versioned views only, prefixing view names, `TO` targets, and `{table_name}` placeholders (e.g. `{gl_edge}` becomes `v54_gl_edge`).
 pub fn generate_graph_materialized_views_with_prefix(
     ontology: &Ontology,
     prefix: &str,
@@ -135,6 +161,7 @@ pub fn generate_graph_materialized_views_with_prefix(
     ontology
         .materialized_views()
         .iter()
+        .filter(|mv| mv.versioned)
         .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
         .collect()
 }
@@ -889,11 +916,12 @@ mod tests {
     }
 
     #[test]
-    fn materialized_view_prefix_resolves_table_placeholders() {
+    fn materialized_view_prefix_applies_only_to_versioned_views() {
         use super::clickhouse::emit_create_materialized_view;
 
-        let mv_def = ontology::MaterializedViewDefinition {
+        let versioned = ontology::MaterializedViewDefinition {
             name: "mv_edge_summary".into(),
+            versioned: true,
             to_table: None,
             select_query:
                 "SELECT traversal_path, count() AS cnt FROM {gl_edge} GROUP BY traversal_path"
@@ -904,7 +932,7 @@ mod tests {
             populate: false,
         };
         let known_tables = vec!["gl_edge".into(), "gl_project".into()];
-        let mv = build_materialized_view(&mv_def).with_prefix("v5_", &known_tables);
+        let mv = build_materialized_view(&versioned).with_prefix("v5_", &known_tables);
 
         assert_eq!(mv.name, "v5_mv_edge_summary");
         assert!(mv.select_query.contains("v5_gl_edge"));
@@ -914,6 +942,38 @@ mod tests {
         assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS v5_mv_edge_summary"));
         assert!(sql.contains("ENGINE = SummingMergeTree"));
         assert!(sql.contains("ORDER BY (traversal_path)"));
+
+        // Unversioned views generate with the empty prefix: name and TO target stay bare.
+        let unversioned = ontology::MaterializedViewDefinition {
+            name: "query_log_sink".into(),
+            versioned: false,
+            to_table: Some("query_log_retention".into()),
+            select_query: "SELECT query_id, log_comment FROM system.query_log".into(),
+            engine: None,
+            engine_args: vec![],
+            order_by: vec![],
+            populate: false,
+        };
+        let mv =
+            build_materialized_view(&unversioned).with_prefix("", &["query_log_retention".into()]);
+
+        assert_eq!(mv.name, "query_log_sink");
+        assert_eq!(mv.to_table.as_deref(), Some("query_log_retention"));
+        assert!(mv.select_query.contains("system.query_log"));
+    }
+
+    #[test]
+    fn unversioned_objects_tag_kind_and_emit_ddl() {
+        let objects = generate_unversioned_objects(&ontology());
+
+        // The embedded ontology's only unversioned object is the storage-snapshot table.
+        let snapshot = objects
+            .iter()
+            .find(|o| o.name == "namespace_storage_snapshot")
+            .expect("unversioned snapshot table should be generated");
+        assert_eq!(snapshot.kind, "table");
+        assert!(snapshot.ddl.contains("CREATE TABLE"));
+        assert!(objects.iter().all(|o| !o.ddl.is_empty()));
     }
 
     #[test]
