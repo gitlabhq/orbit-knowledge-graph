@@ -95,14 +95,12 @@ pub fn generate_unversioned_graph_tables(ontology: &Ontology) -> Vec<CreateTable
         .collect()
 }
 
-/// A durable, unprefixed graph object created once at boot and never GCed. `kind` namespaces the fingerprint key (e.g. `table`, `materialized_view`).
 pub struct UnversionedObject {
     pub kind: &'static str,
     pub name: String,
     pub ddl: String,
 }
 
-/// Every unversioned object, across all kinds, as emitted DDL; extend here rather than adding a parallel per-kind path.
 pub fn generate_unversioned_objects(ontology: &Ontology) -> Vec<UnversionedObject> {
     let mut objects: Vec<UnversionedObject> = generate_unversioned_graph_tables(ontology)
         .iter()
