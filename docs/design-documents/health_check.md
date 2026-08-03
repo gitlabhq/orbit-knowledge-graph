@@ -5,7 +5,7 @@
 Orbit separates local pod probes from dependency health. The Webserver, Indexer, and Dispatcher
 expose local-only liveness and readiness endpoints for Kubernetes. The HealthCheck runtime performs
 networked infrastructure checks, while the Webserver presents those results together with migration
-and GitLab diagnostics on the cluster-health API.
+and GitLab diagnostics through the `GetClusterHealth` gRPC method.
 
 ## Pod probes
 
@@ -36,19 +36,15 @@ The HealthCheck runtime's `/queue-depth` handler reads the NATS JetStream consum
 work queue. It returns pending and in-flight counts used by KEDA to scale code indexers. NATS is not
 included in the `/health` aggregate.
 
-## Cluster-health endpoints
-
-### `/api/v1/cluster_health` (HTTP)
-
-The Webserver returns a detailed component breakdown as JSON. A shared `ClusterHealthChecker`
-instance backs both this endpoint and the gRPC endpoint. Monitoring dashboards and the Orbit
-frontend status tab consume this surface.
+## Cluster-health endpoint
 
 ### `GetClusterHealth` (gRPC)
 
-The same data is available over gRPC for the Rails `GrpcClient`. It supports
-`ResponseFormat::Raw` (structured proto) and `ResponseFormat::Llm` (TOON text). Rails proxies this
-endpoint to `GET /api/v4/orbit/status`.
+The Webserver returns the detailed component breakdown through the `GetClusterHealth` gRPC method.
+It supports `ResponseFormat::Raw` (structured proto) and `ResponseFormat::Llm` (TOON text). The
+gkg-server HTTP router does not expose a cluster-health route; it registers only `/live` and
+`/ready`. Rails calls the gRPC method and exposes the result to HTTP consumers at
+`GET /api/v4/orbit/status`.
 
 ## Data flow
 
@@ -61,8 +57,11 @@ ClickHouse ─────┘                              │
                                               │
 Graph ClickHouse ── migrating version ────────┼─► ClusterHealthChecker
 GitLab ─────────── connectivity/JWT check ────┘          │
-                                                        ├─► HTTP /api/v1/cluster_health
-                                                        └─► gRPC GetClusterHealth
+                                                        ▼
+                                               gRPC GetClusterHealth
+                                                        │
+                                                        ▼
+                                          Rails GET /api/v4/orbit/status
 
 NATS JetStream ─► HealthChecker.queue_depth() ─► HealthCheck /queue-depth ─► KEDA
 
