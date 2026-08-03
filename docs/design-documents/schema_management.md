@@ -138,7 +138,7 @@ the binary, also reads the `migrating` status:
 |---|---|---|---|
 | active missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
 | active `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
-| active `==` binary | `Ready` | existing checks (`200` if all healthy) | serve traffic |
+| active `==` binary | `Ready` | `200` | serve traffic |
 | active `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
 | migrating `==` binary (active `<` binary) | `Migrating` | `503` with `schema_migrating`, `status:"migrating"` | keep polling |
 
@@ -155,6 +155,11 @@ supports, the watcher cancels the shared `CancellationToken`, the gRPC and HTTP 
 their `tokio::select`, and the process returns. Kubernetes restarts the pod; if the operator
 deployed the wrong (too-old) binary, `CrashLoopBackoff` surfaces the mistake instead of silently
 serving the wrong schema.
+
+The webserver `/ready` endpoint intentionally checks only this local schema state. ClickHouse,
+NATS, GitLab, and Kubernetes deployment health are aggregated by the HealthCheck service's
+`/health` endpoint, so an unavailable external dependency does not prevent a healthy pod from
+starting.
 
 Transient ClickHouse errors during a poll keep the previous state — the watcher does not
 flap to `Pending` on a single failed read.
@@ -311,6 +316,10 @@ If the budget (`schema.indexer_schema_wait_timeout_secs`, default `300`) is exha
 exits non-zero and Kubernetes restarts it (`CrashLoopBackoff`), which self-heals once the
 dispatcher catches up. Transient ClickHouse read errors are retried within the budget. The wait
 gate lives in `crates/indexer/src/schema/version.rs`.
+
+The indexer health server exposes this gate through `/ready`: it returns `503` until message
+processing starts and `200` afterward. It does not recheck NATS, ClickHouse, or GitLab because the
+HealthCheck service's `/health` endpoint owns aggregate dependency health.
 
 ### Write path prefix enforcement
 

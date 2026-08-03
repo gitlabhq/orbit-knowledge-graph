@@ -1,26 +1,11 @@
-use std::sync::Arc;
-use std::time::Duration;
-
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
-use clickhouse_client::ArrowClickHouseClient;
-use gitlab_client::GitlabClient;
 use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
-use tokio::time::timeout;
 
 use crate::schema_watcher::{SchemaState, SchemaWatcher};
-
-const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
-
-#[derive(Clone)]
-pub struct AppState {
-    pub graph_client: ArrowClickHouseClient,
-    pub gitlab_client: Option<Arc<GitlabClient>>,
-    pub schema_watcher: Arc<SchemaWatcher>,
-}
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -42,40 +27,14 @@ async fn live() -> Json<HealthResponse> {
     })
 }
 
-async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+async fn ready(State(schema_watcher): State<std::sync::Arc<SchemaWatcher>>) -> impl IntoResponse {
     let mut unhealthy_components = Vec::new();
 
-    match state.schema_watcher.current() {
+    match schema_watcher.current() {
         SchemaState::Ready => {}
         SchemaState::Pending => unhealthy_components.push("schema_pending"),
         SchemaState::Outdated => unhealthy_components.push("schema_outdated"),
         SchemaState::Migrating => unhealthy_components.push("schema_migrating"),
-    }
-
-    let graph_healthy = timeout(HEALTH_CHECK_TIMEOUT, state.graph_client.execute("SELECT 1"))
-        .await
-        .is_ok_and(|r| r.is_ok());
-
-    // Checks both connectivity AND auth. A 401 means the JWT secret is
-    // wrong or expired -- that's unhealthy, not just "unreachable".
-    // Only Ok and NotFound count as healthy (matches indexer behavior).
-    let gitlab_healthy = match &state.gitlab_client {
-        Some(client) => timeout(HEALTH_CHECK_TIMEOUT, client.project_info(1))
-            .await
-            .is_ok_and(|r| {
-                matches!(
-                    r,
-                    Ok(_) | Err(gitlab_client::GitlabClientError::NotFound(_))
-                )
-            }),
-        None => true,
-    };
-
-    if !graph_healthy {
-        unhealthy_components.push("clickhouse_graph");
-    }
-    if !gitlab_healthy {
-        unhealthy_components.push("gitlab");
     }
 
     let healthy = unhealthy_components.is_empty();
@@ -102,21 +61,11 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-pub fn create_router(
-    graph_client: ArrowClickHouseClient,
-    gitlab_client: Option<Arc<GitlabClient>>,
-    schema_watcher: Arc<SchemaWatcher>,
-) -> Router {
-    let state = AppState {
-        graph_client,
-        gitlab_client,
-        schema_watcher,
-    };
-
+pub fn create_router(schema_watcher: std::sync::Arc<SchemaWatcher>) -> Router {
     Router::new()
         .route("/live", get(live))
         .route("/ready", get(ready))
-        .with_state(state)
+        .with_state(schema_watcher)
         .layer(HttpMetricsLayer::new())
         .layer(GitlabTraceLayer::new())
         .layer(CorrelationLayer::new())

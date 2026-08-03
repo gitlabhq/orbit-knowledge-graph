@@ -174,8 +174,6 @@ async fn run_webserver(
     );
     info!("Content resolution enabled (GitlabClient configured)");
 
-    let graph_client = config.graph.build_client();
-
     let path_resolver = Arc::new(
         PathResolver::new(
             Arc::new(config.graph.build_client()),
@@ -185,13 +183,7 @@ async fn run_webserver(
         .await,
     );
 
-    let http_server = HttpServer::bind(
-        config.bind_address,
-        graph_client,
-        Some(gitlab_client),
-        schema_watcher,
-    )
-    .await?;
+    let http_server = HttpServer::bind(config.bind_address, schema_watcher).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
