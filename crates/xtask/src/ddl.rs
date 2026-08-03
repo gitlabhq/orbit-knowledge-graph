@@ -304,7 +304,8 @@ mod tests {
         assert!(!tables.is_empty());
         let sql = query_engine::compiler::emit_create_table(&tables[0]);
         assert!(sql.contains("CREATE TABLE"));
-        assert!(!sql.contains(" v88_"));
+        let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
+        assert!(!sql.contains(&format!(" v{schema_version}_")));
     }
 
     #[test]

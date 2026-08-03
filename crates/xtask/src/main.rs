@@ -269,7 +269,9 @@ async fn main() -> Result<()> {
             }
             DdlTarget::Local => {
                 if !prefix.is_empty() || diff.is_some() {
-                    anyhow::bail!("--prefix and --diff are only supported for --target remote");
+                    anyhow::bail!(
+                        "--prefix is only supported for --target remote; --diff is supported for --target remote and --target remote-persistent"
+                    );
                 }
                 ddl::run_local(ontology)
             }
