@@ -21,6 +21,12 @@ use super::dataflow::extract_call_edges;
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
 use super::patterns::for_each_static_object_property;
 
+/// Files whose bracket/brace/paren nesting exceeds this are faulted before
+/// parsing. oxc overflows the 8 MiB parse-worker stack around depth 4000-8000
+/// (release) with no internal recursion limit; this leaves several times the
+/// margin below that while sitting far above any hand-written or generated source.
+const MAX_NESTING_DEPTH: usize = 1000;
+
 pub(super) type NodeId = oxc::semantic::NodeId;
 
 pub(super) struct LineTable(Vec<usize>);
@@ -763,6 +769,23 @@ impl JsAnalyzer {
             )
         })?;
         let source_type = source_type.with_jsx(source_type.is_javascript());
+
+        // oxc's parser and semantic builder recurse once per nesting level with no
+        // internal recursion limit, and `stacker::maybe_grow` only checks the red
+        // zone at the call boundary (oxc never re-checks mid-descent). A file nested
+        // past `MAX_NESTING_DEPTH` overflows the worker stack, which aborts the whole
+        // process uncatchably and takes every concurrent file in the pool with it. So
+        // screen depth here, before oxc ever recurses, and fault the file instead.
+        let nesting_depth = max_bracket_nesting_depth(source);
+        if nesting_depth > MAX_NESTING_DEPTH {
+            return Err(AnalyzerError::fault(
+                FileFault::DeeplyNested,
+                format!(
+                    "{file_path}: bracket nesting depth {nesting_depth} exceeds {MAX_NESTING_DEPTH}"
+                ),
+            ));
+        }
+
         let allocator = Allocator::default();
         let parsed = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
             Parser::new(&allocator, source, source_type).parse()
@@ -885,9 +908,171 @@ impl JsAnalyzer {
     }
 }
 
+/// Maximum `()`/`[]`/`{}` nesting depth in `source`, skipping brackets inside
+/// string literals and comments so a bracket-heavy string can neither inflate
+/// nor deflate the count. Template-literal bodies are skipped whole (including
+/// `${...}` interpolations) and regex literals are not detected, so their inner
+/// brackets are undercounted — acceptable because real code never nests anywhere
+/// near [`MAX_NESTING_DEPTH`], and this is only a screen against pathological
+/// input. Iterative, so it cannot itself overflow on the input it guards.
+fn max_bracket_nesting_depth(source: &str) -> usize {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    let mut depth: usize = 0;
+    let mut max_depth: usize = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                max_depth = max_depth.max(depth);
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            quote @ (b'\'' | b'"' | b'`') => i = skip_string_literal(bytes, i, quote),
+            b'/' if bytes.get(i + 1) == Some(&b'/') => i = skip_to_newline(bytes, i + 2),
+            b'/' if bytes.get(i + 1) == Some(&b'*') => i = skip_block_comment(bytes, i + 2),
+            _ => i += 1,
+        }
+    }
+    max_depth
+}
+
+fn skip_string_literal(bytes: &[u8], open: usize, quote: u8) -> usize {
+    let mut i = open + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b if b == quote => return i + 1,
+            _ => i += 1,
+        }
+    }
+    bytes.len()
+}
+
+fn skip_to_newline(bytes: &[u8], start: usize) -> usize {
+    let mut i = start;
+    while i < bytes.len() && bytes[i] != b'\n' {
+        i += 1;
+    }
+    i
+}
+
+fn skip_block_comment(bytes: &[u8], start: usize) -> usize {
+    let mut i = start;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+            return i + 2;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::v2::error::{AnalyzerError, FileFault};
+
+    const DEEP_NEST_CHILD_ENV: &str = "GKG_CODEGRAPH_DEEP_NEST_CHILD";
+
+    fn nested_brackets(open: &str, close: &str, depth: usize) -> String {
+        format!(
+            "const x = {}1{};\n",
+            open.repeat(depth),
+            close.repeat(depth)
+        )
+    }
+
+    #[test]
+    fn deeply_nested_file_is_faulted_not_parsed() {
+        let deep = nested_brackets("[", "]", MAX_NESTING_DEPTH + 50);
+        let err = JsAnalyzer::analyze_file(&deep, "deep.js", "deep.js")
+            .expect_err("nesting past the cap must fault");
+        assert!(
+            matches!(
+                err,
+                AnalyzerError::Fault {
+                    kind: FileFault::DeeplyNested,
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+
+        let shallow = nested_brackets("[", "]", 50);
+        JsAnalyzer::analyze_file(&shallow, "ok.js", "ok.js")
+            .expect("nesting under the cap parses cleanly");
+    }
+
+    // Guards against a regression that removes or loosens the depth screen: the deep
+    // file is analyzed in a child process on the same 8 MiB stack the real rayon
+    // workers get, because a stack overflow aborts uncatchably. With the screen the
+    // child faults the file and exits 0; without it the child aborts and this fails
+    // loudly here instead of taking the whole test runner down.
+    #[test]
+    fn deeply_nested_file_does_not_abort_the_process() {
+        if std::env::var_os(DEEP_NEST_CHILD_ENV).is_some() {
+            let src = nested_brackets("(", ")", MAX_NESTING_DEPTH * 20);
+            let result = std::thread::Builder::new()
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || JsAnalyzer::analyze_file(&src, "deep.js", "deep.js"))
+                .expect("spawn parse worker")
+                .join()
+                .expect("parse worker panicked");
+            assert!(
+                matches!(
+                    result,
+                    Err(AnalyzerError::Fault {
+                        kind: FileFault::DeeplyNested,
+                        ..
+                    })
+                ),
+                "got {result:?}"
+            );
+            return;
+        }
+
+        // libtest names omit the crate segment that `module_path!` carries.
+        let module = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest);
+        let filter = format!("{module}::deeply_nested_file_does_not_abort_the_process");
+        let status = std::process::Command::new(std::env::current_exe().expect("test exe"))
+            .args(["--exact", &filter])
+            .env(DEEP_NEST_CHILD_ENV, "1")
+            .status()
+            .expect("spawn child test process");
+        assert!(
+            status.success(),
+            "child aborted ({status:?}): the depth screen failed to contain a stack-overflowing file"
+        );
+    }
+
+    #[test]
+    fn max_bracket_nesting_depth_counts_structural_nesting() {
+        assert_eq!(max_bracket_nesting_depth("const x = 1;"), 0);
+        assert_eq!(max_bracket_nesting_depth("([{}])"), 3);
+        assert_eq!(max_bracket_nesting_depth("f(g(h()))"), 3);
+        assert_eq!(max_bracket_nesting_depth("a()b()c()"), 1);
+    }
+
+    #[test]
+    fn max_bracket_nesting_depth_skips_strings_and_comments() {
+        assert_eq!(max_bracket_nesting_depth("const s = \"(((((\";"), 0);
+        assert_eq!(max_bracket_nesting_depth("// (((((\nx"), 0);
+        assert_eq!(max_bracket_nesting_depth("/* ((( */"), 0);
+        assert_eq!(max_bracket_nesting_depth("`(((({[`"), 0);
+        assert_eq!(max_bracket_nesting_depth("\"a\\\"b\" + ("), 1);
+    }
+
+    #[test]
+    fn max_bracket_nesting_depth_ignores_closer_heavy_strings() {
+        assert_eq!(max_bracket_nesting_depth("[[[ \")))))\" ]]]"), 3);
+    }
 
     #[test]
     fn js_files_allow_jsx_syntax() {
