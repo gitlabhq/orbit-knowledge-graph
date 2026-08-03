@@ -38,7 +38,9 @@ helm template gitlab-operator "${OPERATOR_DIR}/deploy/chart" \
   --namespace "$NS" \
   --include-crds \
   --set cert-manager.install=false \
-  --set image.repository="${E2E_OPERATOR_IMAGE}" \
+  --set image.registry="registry.gitlab.com" \
+  --set image.repository="gitlab-org/orbit/knowledge-graph" \
+  --set image.name="operator-spike" \
   --set image.tag="${E2E_OPERATOR_TAG}" \
   --set resources.requests.cpu=50m \
   --set resources.requests.memory=128Mi \
