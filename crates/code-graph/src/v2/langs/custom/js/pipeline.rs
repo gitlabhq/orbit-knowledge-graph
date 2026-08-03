@@ -137,6 +137,7 @@ mod tests {
     use crate::v2::langs::custom::js::extract::MAX_FILE_BYTES;
     use crate::v2::pipeline::GraphStatsCounters;
     use crate::v2::pipeline::PipelineConfig;
+    use crate::v2::pipeline::RepositoryGraphBudget;
     use crate::v2::sink::GraphConverter;
     use arrow::record_batch::RecordBatch;
     use std::sync::Mutex;
@@ -161,6 +162,7 @@ mod tests {
             faults: Mutex::new(Vec::new()),
             file_timings: Mutex::new(Vec::new()),
             language_timings: Mutex::new(Vec::new()),
+            graph_budget: RepositoryGraphBudget::new(None),
         })
     }
 
