@@ -70,6 +70,7 @@
               "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
+              "graph_memory_budget_bytes": null,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
@@ -436,6 +437,16 @@
           "default": 10,
           "minimum": 0
         },
+        "graph_memory_budget_bytes": {
+          "description": "In-memory graph bytes one repository may accumulate before the pipeline\nsheds its remaining files, so a pathological generated repository can't\nOOM-kill the worker pool. Unset = derived from the container memory limit\nand worker budget. 0 = no limit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
         "job_timeout_secs": {
           "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. Keep below `nats.ack_wait_secs`. 0 = no timeout. Defaults to 250.",
           "type": "integer",
@@ -570,6 +581,7 @@
             "big_indexing_slots": null,
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 10,
+            "graph_memory_budget_bytes": null,
             "job_timeout_secs": 250,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
@@ -675,6 +687,7 @@
                 "big_indexing_slots": null,
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 10,
+                "graph_memory_budget_bytes": null,
                 "job_timeout_secs": 250,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
@@ -911,6 +924,7 @@
               "big_indexing_slots": null,
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 10,
+              "graph_memory_budget_bytes": null,
               "job_timeout_secs": 250,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,

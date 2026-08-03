@@ -109,6 +109,9 @@ pub enum FileSkip {
     ParserOversize,
     ArrowOffsetOverflow,
     UnsafePath,
+    /// The repository's accumulated in-memory graph crossed the byte budget, so
+    /// the pipeline shed this file instead of letting the pod OOM.
+    MemoryBudget,
     Timeout(AbortPhase),
 }
 
@@ -120,6 +123,7 @@ impl FileSkip {
             Self::ParserOversize => "parser_oversize",
             Self::ArrowOffsetOverflow => "arrow_offset_overflow",
             Self::UnsafePath => "unsafe_path",
+            Self::MemoryBudget => "memory_budget",
             Self::Timeout(AbortPhase::Parse) => "timeout_parse",
             Self::Timeout(AbortPhase::Walk) => "timeout_walk",
             Self::Timeout(AbortPhase::Ssa) => "timeout_ssa",
@@ -259,6 +263,7 @@ mod tests {
             "arrow_offset_overflow"
         );
         assert_eq!(FileSkip::UnsafePath.as_metric_label(), "unsafe_path");
+        assert_eq!(FileSkip::MemoryBudget.as_metric_label(), "memory_budget");
         assert_eq!(
             FileSkip::Timeout(AbortPhase::Parse).as_metric_label(),
             "timeout_parse"

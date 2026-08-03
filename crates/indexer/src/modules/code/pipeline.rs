@@ -426,6 +426,7 @@ impl CodeIndexingPipeline {
             ),
             on_progress,
             on_phase_cpu,
+            graph_memory_budget: self.pipeline_config.graph_memory_budget_bytes(),
             ..Default::default()
         }
     }

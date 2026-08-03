@@ -12,7 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::v2::linker::{CodeGraph, GraphEdge};
@@ -57,6 +57,48 @@ impl CancellationToken {
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Bounds the in-memory graph one repository accumulates during the parallel
+/// parse. Once the running total crosses the ceiling, every not-yet-parsed file
+/// is shed, which stops both the graph accumulation and the concurrent parses
+/// of the rest of the repository — the two costs that OOM-kill a code worker on
+/// a pathological generated tree. Shared across the rayon workers, so it is
+/// eventually consistent: a few in-flight files past the crossing still land,
+/// bounding the overshoot by the number of concurrent parses.
+struct RepositoryGraphBudget {
+    ceiling: Option<u64>,
+    accumulated: AtomicU64,
+    warned: AtomicBool,
+}
+
+impl RepositoryGraphBudget {
+    fn new(ceiling: Option<u64>) -> Self {
+        Self {
+            ceiling,
+            accumulated: AtomicU64::new(0),
+            warned: AtomicBool::new(false),
+        }
+    }
+
+    fn is_exhausted(&self) -> bool {
+        self.ceiling
+            .is_some_and(|c| self.accumulated.load(Ordering::Relaxed) >= c)
+    }
+
+    fn record(&self, bytes: u64) {
+        if self.ceiling.is_some() {
+            self.accumulated.fetch_add(bytes, Ordering::Relaxed);
+        }
+    }
+
+    /// True for the first caller only, so a shedding repository logs one WARN
+    /// instead of one per shed file.
+    fn claim_first_warning(&self) -> bool {
+        self.warned
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
     }
 }
 
@@ -508,6 +550,9 @@ pub struct PipelineConfig {
     /// Called once per successfully-parsed file with its per-phase CPU time, so
     /// the consumer can record a distribution. Fires from parallel workers.
     pub on_phase_cpu: Option<PhaseCpuObserver>,
+    /// In-memory graph bytes one repository may accumulate before the parse
+    /// phase sheds its remaining files. `None` = unbounded (no shedding).
+    pub graph_memory_budget: Option<u64>,
 }
 
 /// Observer for per-file parse/walk/ssa CPU time. See [`PipelineConfig::on_phase_cpu`].
@@ -528,6 +573,7 @@ impl Default for PipelineConfig {
             emit_file_inventory_graph: false,
             on_progress: None,
             on_phase_cpu: None,
+            graph_memory_budget: None,
         }
     }
 }
@@ -1137,6 +1183,8 @@ impl FamilyPipeline {
             parse_ms: f64,
         }
 
+        let graph_budget = RepositoryGraphBudget::new(ctx.config.graph_memory_budget);
+
         let parse_outcomes: Vec<Option<ParseOutcome>> = files
             .par_iter()
             .enumerate()
@@ -1144,6 +1192,24 @@ impl FamilyPipeline {
                 if ctx.is_cancelled() {
                     pb.inc(1);
                     return None;
+                }
+                if graph_budget.is_exhausted() {
+                    if graph_budget.claim_first_warning() {
+                        tracing::warn!(
+                            root_path,
+                            budget_bytes = ctx.config.graph_memory_budget,
+                            "code graph memory budget exhausted; shedding remaining files for this repository"
+                        );
+                    }
+                    pb.inc(1);
+                    return Some(ParseOutcome::Skip(SkippedFile {
+                        path: f.path.clone(),
+                        kind: FileSkip::MemoryBudget,
+                        detail: format!(
+                            "repository graph exceeded {} bytes",
+                            ctx.config.graph_memory_budget.unwrap_or(0)
+                        ),
+                    }));
                 }
                 let lctx = &member_ctxs[&f.language];
                 let abs_path = format!("{root_path}/{}", f.path);
@@ -1216,6 +1282,8 @@ impl FamilyPipeline {
                     }
                 };
                 let parse_ms = t_parse.elapsed().as_secs_f64() * 1000.0;
+
+                graph_budget.record(result.estimated_graph_bytes());
 
                 if let Some(cb) = &ctx.config.on_phase_cpu {
                     cb(f.language, result.phase_cpu);
@@ -1808,6 +1876,90 @@ mod tests {
             result.skipped[0].kind
         );
         assert_eq!(result.skipped[0].path, "main.py");
+    }
+
+    #[test]
+    fn repository_graph_budget_sheds_files_past_the_ceiling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
+        std::fs::write(root.join("b.py"), "def g():\n    return 2\n").unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![
+                FileInventoryEntry {
+                    path: "a.py".into(),
+                    size: 22,
+                    decision: Decision::Parse,
+                },
+                FileInventoryEntry {
+                    path: "b.py".into(),
+                    size: 22,
+                    decision: Decision::Parse,
+                },
+            ]),
+            // worker_threads=1 forces sequential parse, so the first file always
+            // crosses the 1-byte ceiling before the second file is considered.
+            PipelineConfig {
+                worker_threads: 1,
+                graph_memory_budget: Some(1),
+                ..PipelineConfig::default()
+            },
+            &FxHashMap::default(),
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(
+            result.skipped[0].kind,
+            crate::v2::error::FileSkip::MemoryBudget
+        );
+        assert_eq!(result.skipped[0].path, "b.py");
+    }
+
+    #[test]
+    fn repository_graph_budget_of_none_sheds_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
+        std::fs::write(root.join("b.py"), "def g():\n    return 2\n").unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![
+                FileInventoryEntry {
+                    path: "a.py".into(),
+                    size: 22,
+                    decision: Decision::Parse,
+                },
+                FileInventoryEntry {
+                    path: "b.py".into(),
+                    size: 22,
+                    decision: Decision::Parse,
+                },
+            ]),
+            PipelineConfig {
+                worker_threads: 1,
+                graph_memory_budget: None,
+                ..PipelineConfig::default()
+            },
+            &FxHashMap::default(),
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(|_: &str, _: RecordBatch| Ok(())),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert!(
+            result
+                .skipped
+                .iter()
+                .all(|s| s.kind != crate::v2::error::FileSkip::MemoryBudget)
+        );
     }
 
     #[test]

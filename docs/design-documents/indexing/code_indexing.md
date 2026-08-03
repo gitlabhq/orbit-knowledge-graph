@@ -233,6 +233,8 @@ The indexing pipeline uses a repository inventory as the single file list. Pipel
 
 IO reads and CPU-bound parsing are bounded independently: file reads use a concurrency limit proportional to the worker thread count, while parsing uses a semaphore sized to the number of available CPU cores. This separation prevents IO-heavy repositories from starving the parser and vice versa. The pipeline outputs a graph structure consumed by the load phase. The defaults scale with the number of available cores.
 
+Alongside the per-file CPU budget (which aborts a single slow file's parse), a per-repository memory budget bounds the in-memory graph a repository may accumulate. As files parse, the pipeline sums an estimate of the graph bytes each produces (definitions, imports, references); once the running total crosses `graph_memory_budget_bytes`, every remaining file is shed as a `memory_budget` skip (`code_files_skipped_total{reason="memory_budget"}`) and the repository logs one WARN. This stops both the graph accumulation and the concurrent parses of the rest of a pathological generated tree — the two costs that otherwise OOM-kill a code-indexer worker and take its 16 in-flight repositories down with it. The ceiling is unset by default and derived from the container's memory limit divided by the worker budget (`ContainerResources::derive_code_graph_memory_budget`), so it scales with pod size; `0` disables shedding.
+
 ##### Graph data model
 
 After parsing, the analysis phase groups results by language and builds a graph containing:

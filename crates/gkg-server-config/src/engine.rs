@@ -383,6 +383,12 @@ pub struct CodeIndexingPipelineConfig {
     /// Concurrent indexing slots reserved for big repositories so small ones can't starve them. Unset = derived from the container CPU count, capped by its memory limit.
     #[serde(default)]
     pub big_indexing_slots: Option<usize>,
+    /// In-memory graph bytes one repository may accumulate before the pipeline
+    /// sheds its remaining files, so a pathological generated repository can't
+    /// OOM-kill the worker pool. Unset = derived from the container memory limit
+    /// and worker budget. 0 = no limit.
+    #[serde(default)]
+    pub graph_memory_budget_bytes: Option<u64>,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -409,12 +415,24 @@ impl Default for CodeIndexingPipelineConfig {
             small_repo_max_files: default_code_indexing_small_repo_max_files(),
             small_indexing_slots: None,
             big_indexing_slots: None,
+            graph_memory_budget_bytes: None,
         }
     }
 }
 
 impl CodeIndexingPipelineConfig {
     pub fn resolve_runtime_defaults(&mut self, resources: &ContainerResources) {
+        if self.graph_memory_budget_bytes.is_none() {
+            let budget = resources.derive_code_graph_memory_budget();
+            self.graph_memory_budget_bytes = Some(budget.unwrap_or(0));
+            info!(
+                available_parallelism = resources.available_parallelism,
+                memory_limit_bytes = resources.memory_limit_bytes,
+                value = budget,
+                "derived code-indexing pipeline.graph_memory_budget_bytes"
+            );
+        }
+
         if self.small_indexing_slots.is_some() && self.big_indexing_slots.is_some() {
             return;
         }
@@ -446,6 +464,12 @@ impl CodeIndexingPipelineConfig {
 
     pub fn big_indexing_slots(&self) -> usize {
         self.big_indexing_slots.unwrap_or(0)
+    }
+
+    /// Per-repository in-memory graph ceiling, or `None` when shedding is
+    /// disabled (unset or `0`).
+    pub fn graph_memory_budget_bytes(&self) -> Option<u64> {
+        self.graph_memory_budget_bytes.filter(|&b| b > 0)
     }
 
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
