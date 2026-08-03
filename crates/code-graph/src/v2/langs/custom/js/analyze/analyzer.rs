@@ -9,7 +9,7 @@ use oxc::syntax::scope::ScopeFlags;
 use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use std::collections::HashMap;
 
-use super::super::depth_screen::{MAX_NESTING_DEPTH, max_bracket_nesting_depth};
+use super::super::depth_screen::{MAX_NESTING_DEPTH, bracket_depth_upper_bound};
 use super::super::frameworks::{
     extract_vue_options_api, is_vue_like_path, vue_default_component_def,
 };
@@ -765,15 +765,10 @@ impl JsAnalyzer {
         })?;
         let source_type = source_type.with_jsx(source_type.is_javascript());
 
-        // Screens *bracket* nesting only, which is what overflows oxc's parser.
-        // Deep operator chains (member/binary/ternary/call/arrow) overflow the
-        // semantic builder instead, need ~2-4x more depth, and add no bracket
-        // depth, so they are not caught here; their compact single-line forms are
-        // already dropped upstream by `CodeFilter`'s average-line-length rule, so
-        // only multi-line chains thousands deep evade both. Residual accepted; a
-        // lexical operator-run heuristic would be a fragile guess. See
-        // knowledge-graph#1114.
-        let nesting_depth = max_bracket_nesting_depth(source);
+        // Brackets only. Deep operator chains overflow the semantic builder instead
+        // and add no bracket depth, so they still get through; `CodeFilter`'s
+        // avg-line-length rule catches their compact forms. knowledge-graph#1114.
+        let nesting_depth = bracket_depth_upper_bound(source);
         if nesting_depth > MAX_NESTING_DEPTH {
             return Err(AnalyzerError::fault(
                 FileFault::DeeplyNested,
@@ -942,11 +937,8 @@ mod tests {
             .expect("nesting under the cap parses cleanly");
     }
 
-    // Guards against a regression that removes or loosens the depth screen: the deep
-    // file is analyzed in a child process on the same 8 MiB stack the real rayon
-    // workers get, because a stack overflow aborts uncatchably. With the screen the
-    // child faults the file and exits 0; without it the child aborts and this fails
-    // loudly here instead of taking the whole test runner down.
+    // Child process on a rayon-sized stack: an overflow aborts uncatchably, so an
+    // in-process assertion would take the test runner down instead of failing.
     #[test]
     fn deeply_nested_file_does_not_abort_the_process() {
         if std::env::var_os(DEEP_NEST_CHILD_ENV).is_some() {

@@ -5,7 +5,7 @@ use oxc::span::SourceType;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
-use super::super::depth_screen::{MAX_NESTING_DEPTH, max_bracket_nesting_depth};
+use super::super::depth_screen::{MAX_NESTING_DEPTH, bracket_depth_upper_bound};
 
 const MAX_EVAL_MODULES: usize = 64;
 const MAX_EVAL_DEPTH: usize = 12;
@@ -99,10 +99,8 @@ fn evaluate_script_module(
     depth: usize,
 ) -> Option<EvaluatedValue> {
     let source = std::fs::read_to_string(module_path).ok()?;
-    // This reads a repository-controlled config file straight off disk, so it
-    // bypasses `CodeFilter` and hits oxc unscreened; the same depth cliff that
-    // aborts the analyzer applies. Give up on the module rather than crash.
-    if max_bracket_nesting_depth(&source) > MAX_NESTING_DEPTH {
+    // Read straight off disk, so `CodeFilter` never saw this file.
+    if bracket_depth_upper_bound(&source) > MAX_NESTING_DEPTH {
         return None;
     }
     let source_type = SourceType::from_path(module_path).ok()?;
