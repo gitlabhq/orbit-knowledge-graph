@@ -122,13 +122,47 @@ enum MigrationLedgerCommand {
     Snapshot,
 }
 
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy)]
 enum DdlTarget {
-    /// ClickHouse DDL (tables, dictionaries, materialized views).
-    #[default]
-    Remote,
-    /// DuckDB DDL (local graph tables + manifest).
+    Remote(RemoteLifecycle),
     Local,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RemoteLifecycle {
+    Versioned,
+    Persistent,
+}
+
+impl Default for DdlTarget {
+    fn default() -> Self {
+        DdlTarget::Remote(RemoteLifecycle::Versioned)
+    }
+}
+
+impl clap::ValueEnum for DdlTarget {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[
+            DdlTarget::Remote(RemoteLifecycle::Versioned),
+            DdlTarget::Remote(RemoteLifecycle::Persistent),
+            DdlTarget::Local,
+        ]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(match self {
+            DdlTarget::Remote(RemoteLifecycle::Versioned) => {
+                clap::builder::PossibleValue::new("remote")
+                    .help("Versioned ClickHouse graph (tables, dictionaries, materialized views)")
+            }
+            DdlTarget::Remote(RemoteLifecycle::Persistent) => {
+                clap::builder::PossibleValue::new("remote-persistent")
+                    .help("Durable unversioned ClickHouse objects created once at boot")
+            }
+            DdlTarget::Local => clap::builder::PossibleValue::new("local")
+                .help("DuckDB DDL (local graph tables + manifest)"),
+        })
+    }
 }
 
 #[derive(Subcommand)]
@@ -224,10 +258,20 @@ async fn main() -> Result<()> {
             prefix,
             diff,
         } => match target {
-            DdlTarget::Remote => ddl::run_remote(ontology, prefix, diff),
+            DdlTarget::Remote(RemoteLifecycle::Versioned) => {
+                ddl::run_remote(ontology, prefix, diff)
+            }
+            DdlTarget::Remote(RemoteLifecycle::Persistent) => {
+                if !prefix.is_empty() {
+                    anyhow::bail!("--prefix is only supported for --target remote");
+                }
+                ddl::run_persistent(ontology, diff)
+            }
             DdlTarget::Local => {
                 if !prefix.is_empty() || diff.is_some() {
-                    anyhow::bail!("--prefix and --diff are only supported for --target remote");
+                    anyhow::bail!(
+                        "--prefix is only supported for --target remote; --diff is supported for --target remote and --target remote-persistent"
+                    );
                 }
                 ddl::run_local(ontology)
             }

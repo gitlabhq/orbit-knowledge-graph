@@ -359,7 +359,7 @@ The Knowledge Graph `gkg-indexer` accounts for schema changes in the main ClickH
 
 The schema is explicitly defined in the ontology YAML (`config/ontology/nodes/` and `config/ontology/edges/`), specifying which tables and columns are needed for the Knowledge Graph. For some columns, additional metadata is exposed where needed, such as Integer-to-Enum mappings (for example: issue status).
 
-A CI job (`ddl-freshness-check`) detects schema drift by comparing the committed `config/graph.sql` against the DDL regenerated from the ontology. This ensures that the schema is always in sync with the ontology definition.
+A CI job (`ddl-freshness-check`) detects schema drift by comparing the committed `config/graph.sql` (versioned graph), `config/graph_persistent.sql` (durable unversioned objects), and `config/graph_local.sql` (DuckDB) against the DDL regenerated from the ontology. This ensures that the schema is always in sync with the ontology definition.
 
 The indexer uses the ontology to create the Knowledge Graph ClickHouse tables and build the indexing queries.
 
