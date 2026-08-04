@@ -32,22 +32,16 @@ pub enum Step {
     Where(Match<'static>),
     /// Navigate to the n-th match along axis. Negative n counts from end (-1 = last).
     Nth(Axis<'static>, Match<'static>, isize),
-    /// C-family declarator descent: from a declarator node, unwrap
-    /// pointer/array/parenthesized/function/reference wrappers down to the
-    /// declared-name node. See [`descend_declarator_name`].
+    /// C-family declarator descent, unwrapping wrappers to the declared name.
+    /// See [`descend_declarator_name`].
     DeclaratorName,
 }
 
-/// C-family declarator node kinds whose declared name lives one level deeper.
-///
-/// `function_declarator`/`pointer_declarator`/`array_declarator` expose the
-/// inner declarator through the `declarator` field. `reference_declarator`
-/// (`T& f()`, `T&& f()`) and `parenthesized_declarator` (`int (foo)()`) carry
-/// **no** `declarator` field — tree-sitter-cpp defines the former as
-/// `seq(choice('&','&&'), $._declarator)` — so the descent resolves them via
-/// their first named child. A pointer-return function (`void *foo()`) inserts a
-/// `pointer_declarator` and a parenthesized declarator inserts a
-/// `parenthesized_declarator`, so a fixed hop count lands on the wrong node.
+/// C-family declarator wrapper kinds a pointer/parenthesized return inserts
+/// between a definition and its name, so a fixed hop count lands on the wrong
+/// node. `reference_declarator` and `parenthesized_declarator` carry no
+/// `declarator` field (tree-sitter-cpp: `seq(choice('&','&&'), $._declarator)`),
+/// unlike the other three.
 const C_FAMILY_DECLARATOR_WRAPPERS: &[&str] = &[
     "function_declarator",
     "pointer_declarator",
@@ -56,21 +50,11 @@ const C_FAMILY_DECLARATOR_WRAPPERS: &[&str] = &[
     "parenthesized_declarator",
 ];
 
-/// From a C/C++ declarator node, descend wrapper declarators to the declared
-/// name node.
+/// Descend C/C++ declarator wrappers to the declared-name node, following the
+/// `declarator` field or, when absent, the first named child.
 ///
-/// Follows the `declarator` field through pointer/array/function wrappers and
-/// the first named non-comment child through reference/parenthesized wrappers
-/// (which carry no `declarator` field), including arbitrary function-pointer
-/// nesting. Comments are skipped because they are named nodes and could appear
-/// before the declarator (`int (/*x*/ foo)()`).
-///
-/// The node reached is the declared name. Paired with [`Emit::DeclaredName`] it
-/// yields: a plain `identifier`/`type_identifier`/`field_identifier`,
-/// `operator_name`, or `destructor_name` verbatim; a `qualified_identifier`
-/// (`Foo::bar`) verbatim so an out-of-line member keeps the class qualifier that
-/// feeds its FQN; and a conversion operator (`operator_cast`) normalized to
-/// `operator <type>`.
+/// Comments are skipped: they are named nodes that can precede the inner
+/// declarator (`int (/*x*/ foo)()`).
 fn descend_declarator_name<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>> {
     let mut cur = node.clone();
     while C_FAMILY_DECLARATOR_WRAPPERS.contains(&cur.kind().as_ref()) {
@@ -84,16 +68,14 @@ fn descend_declarator_name<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>
     Some(cur)
 }
 
-/// Text for a C/C++ declared name, normalizing a conversion operator so its
-/// parameter list and trailing qualifiers do not leak into the name.
+/// Text for a declared-name node: mostly verbatim (keeping any class qualifier
+/// that feeds an out-of-line member's FQN), but with a trailing conversion
+/// operator normalized to `operator <type>` so its parameter list does not leak
+/// into the name.
 ///
-/// A trailing `operator_cast` is normalized (`operator <type>`) at any
-/// qualifier depth: `qualified_identifier` is right-recursive in
-/// tree-sitter-cpp, so `S::I::operator int() const` nests as
-/// `qualified_identifier(S, qualified_identifier(I, operator_cast))` and the
-/// `operator_cast` is the deepest final component. The qualifier prefix is
-/// preserved (`S::I::operator int`). A `qualified_identifier` that does not end
-/// in a conversion operator (`A::B::foo`) is left verbatim.
+/// The `operator_cast` is normalized at any qualifier depth because
+/// `qualified_identifier` is right-recursive: `S::I::operator int()` nests as
+/// `qualified_identifier(S, qualified_identifier(I, operator_cast))`.
 fn declared_name_text<D: Doc>(node: &Node<'_, D>) -> Option<String> {
     if node.kind().as_ref() == "operator_cast" {
         return operator_cast_text(node);
@@ -119,12 +101,10 @@ fn trailing_operator_cast<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>>
     (cur.kind().as_ref() == "operator_cast").then_some(cur)
 }
 
-/// `operator_cast` → `operator <type>`, dropping the function declarator
-/// (`() const`) while keeping pointer/reference/cv decorations on the target
-/// type (`operator const char*`, `operator int&`). The target type spans
-/// everything up to the innermost `parameter_list`, which is the operator's own
-/// argument list even when the type itself embeds one
-/// (`operator std::function<void(int)>`).
+/// `operator_cast` → `operator <type>`, keeping pointer/reference/cv decorations
+/// (`operator const char*`) but dropping the function declarator (`() const`).
+/// The type is the text up to the operator's own `parameter_list`, so a type
+/// that embeds its own (`operator std::function<void(int)>`) is preserved.
 fn operator_cast_text<D: Doc>(node: &Node<'_, D>) -> Option<String> {
     let params = function_parameter_list(node)?;
     let text = node.text();
@@ -133,9 +113,7 @@ fn operator_cast_text<D: Doc>(node: &Node<'_, D>) -> Option<String> {
 }
 
 /// The `parameter_list` of the `abstract_function_declarator` reached by
-/// following an `operator_cast`'s `declarator` field through any
-/// pointer/reference wrappers. `abstract_reference_declarator` carries no
-/// `declarator` field, so it is followed via its first named child.
+/// descending an `operator_cast`'s abstract declarator wrappers.
 fn function_parameter_list<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>> {
     let mut cur = descend_abstract_declarator(node)?;
     while cur.kind().as_ref() != "abstract_function_declarator" {
@@ -157,10 +135,8 @@ pub enum Emit {
     Name(&'static [&'static str]),
     Children(Match<'static>),
     Const(&'static str),
-    /// Emit a C/C++ declared name, normalizing a conversion operator
-    /// (`operator_cast`) to `operator <type>` so its parameter list and
-    /// `const`/`noexcept` qualifiers do not leak into the name. Any other node
-    /// is emitted as its text. Set by [`Extract::declarator_name`].
+    /// Emit a C/C++ declared name via [`declared_name_text`]. Set by
+    /// [`Extract::declarator_name`].
     DeclaredName,
 }
 
@@ -280,10 +256,8 @@ impl Extract {
         self.push(Step::Nth(axis, m, n))
     }
 
-    /// From a C/C++ declarator node, descend wrapper declarators
-    /// (pointer/array/parenthesized/function/reference, incl. function-pointer
-    /// nesting) to the declared-name node and emit it via [`Emit::DeclaredName`].
-    /// Pair with `field("declarator")`: `field("declarator").declarator_name()`.
+    /// Descend C/C++ declarator wrappers to the declared name and emit it via
+    /// [`Emit::DeclaredName`]. Pair with `field("declarator")`.
     pub fn declarator_name(mut self) -> Self {
         self.emit = Emit::DeclaredName;
         self.push(Step::DeclaratorName)
