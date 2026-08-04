@@ -48,6 +48,7 @@ jq = "1.7"
 yq = "4.52.5"
 hyperfine = "1.20.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
+"aqua:prometheus/prometheus" = "3.5.0"
 "github:google/go-jsonnet" = "0.22.0"
 
 [tasks."hooks:install"]
@@ -396,6 +397,19 @@ description = "Regenerate crates/gkg-observability/orbit-dashboards/gkg-metrics.
 [tasks."metrics:catalog:check"]
 run = "cargo xtask metrics-catalog --check"
 description = "Fail if the committed metrics catalog is out of date"
+
+[tasks."alerts"]
+run = "cargo xtask alerts"
+description = "Regenerate the PrometheusRule manifest from docs/dev/runbooks/alerts/*.md"
+
+[tasks."alerts:check"]
+run = "cargo xtask alerts --check"
+description = "Fail if the committed alert rules are out of date"
+
+[tasks."alerts:test"]
+run = "promtool test rules gkg-alerts.tests.yaml"
+dir = "docs/dev/runbooks/alerts"
+description = "Unit-test the alert rules against synthetic series with promtool"
 
 [tasks."dashboards"]
 run = "cargo xtask dashboards"

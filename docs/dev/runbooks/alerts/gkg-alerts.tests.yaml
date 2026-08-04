@@ -1,0 +1,93 @@
+# promtool unit tests for the generated alert rules (`mise run alerts:test`).
+# Runs against the com flavor because it is plain rule-group YAML; the
+# dedicated flavor wraps the identical rules in a PrometheusRule CRD.
+rule_files:
+  - gkg-alerts.mimir.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # Security alert fires on any non-zero rate, and only in the environment
+  # with traffic: env grouping keeps gstg quiet while gprd fires.
+  - interval: 1m
+    input_series:
+      - series: 'gkg_query_engine_compiler_rejected_total{failure_reason="security", env="gprd", environment="orbit-prd", stage="main"}'
+        values: '0 0 5 10 15 20 25 30'
+      - series: 'gkg_query_engine_compiler_rejected_total{failure_reason="security", env="gstg", environment="orbit-stg", stage="main"}'
+        values: '0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: GKGAuthFilterMissing
+        exp_alerts:
+          - exp_labels:
+              severity: s2
+              team: context_systems
+              type: orbit
+              env: gprd
+              environment: orbit-prd
+              stage: main
+            exp_annotations:
+              runbook_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/alerts/GKGAuthFilterMissing.md
+              summary: A query reached the compiler without a valid security context; the compiler rejected it, but this path means authorization filtering would have been bypassed.
+
+  # Error-rate ratio: 10% errors fires, 1% stays quiet (threshold 5%).
+  - interval: 1m
+    input_series:
+      - series: 'gkg_query_pipeline_queries_total{status="ok", env="gprd", environment="orbit-prd", stage="main"}'
+        values: '0+90x20'
+      - series: 'gkg_query_pipeline_queries_total{status="execution", env="gprd", environment="orbit-prd", stage="main"}'
+        values: '0+10x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: GKGQueryingErrorRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: s3
+              team: context_systems
+              type: orbit
+              env: gprd
+              environment: orbit-prd
+              stage: main
+            exp_annotations:
+              runbook_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/alerts/GKGQueryingErrorRateHigh.md
+              summary: Aggregate query error rate across all failure modes is above 5% for 5 minutes (the availability SLI).
+
+  - interval: 1m
+    input_series:
+      - series: 'gkg_query_pipeline_queries_total{status="ok", env="gprd", environment="orbit-prd", stage="main"}'
+        values: '0+99x20'
+      - series: 'gkg_query_pipeline_queries_total{status="execution", env="gprd", environment="orbit-prd", stage="main"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: GKGQueryingErrorRateHigh
+        exp_alerts: []
+
+  # Burst alert: 20/min fires, 5/min stays quiet (threshold 10/min).
+  - interval: 1m
+    input_series:
+      - series: 'gkg_query_engine_compiler_rejected_total{failure_reason="parse", env="gprd", environment="orbit-prd", stage="main"}'
+        values: '0+20x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: GKGValidationFailedBurst
+        exp_alerts:
+          - exp_labels:
+              severity: s3
+              team: context_systems
+              type: orbit
+              env: gprd
+              environment: orbit-prd
+              stage: main
+            exp_annotations:
+              runbook_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/alerts/GKGValidationFailedBurst.md
+              summary: Sustained burst of structural validation failures, above 10 per minute; a broken client or someone probing the API.
+
+  - interval: 1m
+    input_series:
+      - series: 'gkg_query_engine_compiler_rejected_total{failure_reason="parse", env="gprd", environment="orbit-prd", stage="main"}'
+        values: '0+5x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: GKGValidationFailedBurst
+        exp_alerts: []

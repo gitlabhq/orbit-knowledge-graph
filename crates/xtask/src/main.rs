@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod alerts;
 mod dashboards;
 mod ddl;
 mod metrics_catalog;
@@ -60,6 +61,16 @@ enum Command {
         /// Diff generated DDL against an existing .sql file (remote only).
         #[arg(long, short)]
         diff: Option<std::path::PathBuf>,
+    },
+    /// Generate the Prometheus alert rules from the markdown playbooks.
+    Alerts {
+        /// Read playbooks from this directory instead of the default.
+        #[arg(short, long)]
+        dir: Option<std::path::PathBuf>,
+        /// Diff the regenerated manifest against the committed file and
+        /// return a non-zero exit if they differ.
+        #[arg(long)]
+        check: bool,
     },
     /// Generate the Orbit Grafana dashboards from the metric catalog.
     Dashboards {
@@ -290,6 +301,7 @@ async fn main() -> Result<()> {
             MigrationLedgerCommand::Snapshot => migration_ledger::snapshot(),
         },
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
+        Command::Alerts { dir, check } => alerts::run(dir, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
         Command::QueryDocs { doc, check } => query_docs::run(doc, check),
     }
