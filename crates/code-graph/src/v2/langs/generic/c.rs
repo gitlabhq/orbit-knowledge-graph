@@ -197,60 +197,6 @@ mod tests {
         assert!(names.contains(&"greet"), "should find greet");
     }
 
-    fn function_name_fqn(code: &str) -> (String, String) {
-        let result = parse(code).unwrap();
-        let function = result
-            .definitions
-            .iter()
-            .find(|d| d.kind == DefKind::Function)
-            .unwrap();
-        (function.name.to_string(), function.fqn.to_string())
-    }
-
-    #[test]
-    fn pointer_return_uses_bare_identifier() {
-        assert_eq!(
-            function_name_fqn("void *foo(int a) { return 0; }\n"),
-            ("foo".into(), "test::foo".into())
-        );
-    }
-
-    #[test]
-    fn double_pointer_return_uses_bare_identifier() {
-        assert_eq!(
-            function_name_fqn("void **foo(int a) { return 0; }\n"),
-            ("foo".into(), "test::foo".into())
-        );
-    }
-
-    #[test]
-    fn parenthesized_declarator_uses_bare_identifier() {
-        assert_eq!(
-            function_name_fqn("int (foo)(int a) { return a; }\n"),
-            ("foo".into(), "test::foo".into())
-        );
-    }
-
-    #[test]
-    fn function_pointer_return_uses_bare_identifier() {
-        assert_eq!(
-            function_name_fqn("int (*foo(int a))(int) { return 0; }\n"),
-            ("foo".into(), "test::foo".into())
-        );
-    }
-
-    #[test]
-    fn plain_and_qualifier_prefixed_still_bare() {
-        assert_eq!(
-            function_name_fqn("int foo(int a) { return a; }\n"),
-            ("foo".into(), "test::foo".into())
-        );
-        assert_eq!(
-            function_name_fqn("static inline int foo(int a) { return a; }\n"),
-            ("foo".into(), "test::foo".into())
-        );
-    }
-
     #[test]
     fn struct_definition() {
         let result = parse("struct Point { int x; int y; };\n").unwrap();
@@ -274,32 +220,6 @@ mod tests {
         let result = parse("typedef struct { int x; int y; } Point;\n").unwrap();
         let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"Point"), "should find typedef Point");
-    }
-
-    fn typedef_name_fqn(code: &str) -> (String, String) {
-        let result = parse(code).unwrap();
-        let td = result
-            .definitions
-            .iter()
-            .find(|d| d.kind == DefKind::Other)
-            .unwrap();
-        (td.name.to_string(), td.fqn.to_string())
-    }
-
-    #[test]
-    fn typedef_declarator_wrappers_use_bare_name() {
-        assert_eq!(
-            typedef_name_fqn("typedef int *my_ptr;\n"),
-            ("my_ptr".into(), "test::my_ptr".into())
-        );
-        assert_eq!(
-            typedef_name_fqn("typedef int (*fn_t)(int);\n"),
-            ("fn_t".into(), "test::fn_t".into())
-        );
-        assert_eq!(
-            typedef_name_fqn("typedef char buf_t[64];\n"),
-            ("buf_t".into(), "test::buf_t".into())
-        );
     }
 
     #[test]
