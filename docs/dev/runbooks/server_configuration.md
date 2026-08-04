@@ -27,7 +27,7 @@ The binary (`gkg-server`) runs in one of four modes via `--mode`:
 | `Webserver` | HTTP/gRPC query server | `bind_address`, `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab` |
 | `Indexer` | Consumes NATS messages and runs indexing handlers | `nats`, `engine`, `graph`, `datalake`, `gitlab`, `schedule`, `schema` |
 | `DispatchIndexing` | Runs the scheduler loop that publishes indexing requests | `nats`, `graph`, `datalake`, `schedule`, `schema` |
-| `HealthCheck` | K8s readiness/liveness probes | `health_check`, `graph`, `datalake` |
+| `HealthCheck` | Aggregate Kubernetes workload and ClickHouse health, plus NATS queue depth | `health_check`, `graph`, `datalake`, `nats` |
 
 All modes share the same configuration structure.
 
