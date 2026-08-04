@@ -32,6 +32,48 @@ pub enum Step {
     Where(Match<'static>),
     /// Navigate to the n-th match along axis. Negative n counts from end (-1 = last).
     Nth(Axis<'static>, Match<'static>, isize),
+    /// C-family declarator descent: from a declarator node, unwrap
+    /// pointer/array/parenthesized/function/reference wrappers down to the
+    /// declared-name node. See [`descend_declarator_name`].
+    DeclaratorName,
+}
+
+/// C-family declarator node kinds whose declared name lives one level deeper.
+///
+/// `function_declarator`/`pointer_declarator`/`array_declarator`/
+/// `reference_declarator` expose the inner declarator through the `declarator`
+/// field; `parenthesized_declarator` wraps it as its first named child with no
+/// field. A pointer-return function (`void *foo()`) inserts a
+/// `pointer_declarator` and a parenthesized declarator (`int (foo)()`) inserts a
+/// `parenthesized_declarator`, so a fixed hop count lands on the wrong node.
+const C_FAMILY_DECLARATOR_WRAPPERS: &[&str] = &[
+    "function_declarator",
+    "pointer_declarator",
+    "array_declarator",
+    "reference_declarator",
+    "parenthesized_declarator",
+];
+
+/// From a C/C++ declarator node, descend wrapper declarators to the declared
+/// name node.
+///
+/// Follows the `declarator` field through pointer/array/function/reference
+/// wrappers and the first named child through parenthesized wrappers (which
+/// carry no `declarator` field), including arbitrary function-pointer nesting.
+/// The first non-wrapper node reached is the declared name and is emitted
+/// verbatim: a plain `identifier`, `field_identifier`, `operator_name`, or
+/// `destructor_name`, or — for an out-of-line C++ member definition — the
+/// `qualified_identifier` (`Foo::bar`). The qualifier is kept because it
+/// encodes the member's class and feeds the definition's FQN.
+fn descend_declarator_name<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>> {
+    let mut cur = node.clone();
+    while C_FAMILY_DECLARATOR_WRAPPERS.contains(&cur.kind().as_ref()) {
+        cur = match cur.field("declarator") {
+            Some(inner) => inner,
+            None => cur.children().find(|c| c.is_named())?,
+        };
+    }
+    Some(cur)
 }
 
 #[derive(Clone)]
@@ -160,6 +202,14 @@ impl Extract {
         self.push(Step::Nth(axis, m, n))
     }
 
+    /// From a C/C++ declarator node, descend wrapper declarators
+    /// (pointer/array/parenthesized/function/reference, incl. function-pointer
+    /// nesting) to the bare declared-name node. Pair with `field("declarator")`:
+    /// `field("declarator").declarator_name()`.
+    pub fn declarator_name(self) -> Self {
+        self.push(Step::DeclaratorName)
+    }
+
     pub fn try_field(self, name: &'static str) -> Self {
         self.push(Step::Try(Axis::Field(name), Match::Any))
     }
@@ -257,6 +307,7 @@ impl Extract {
                     }
                 }
                 Step::Nth(axis, m, n) => cur = cur.nth(*axis, *m, *n)?,
+                Step::DeclaratorName => cur = descend_declarator_name(&cur)?,
                 Step::Where(m) => {
                     if !m.test(&cur) {
                         return None;
@@ -417,6 +468,89 @@ mod tests {
         assert_eq!(methods.len(), 2);
         assert!(methods[0].contains("a"));
         assert!(methods[1].contains("b"));
+    }
+
+    #[cfg(feature = "tree-sitter-c")]
+    fn c_fn_name(code: &str) -> Option<String> {
+        let root = SupportLang::C.ast_grep(code);
+        let func = root
+            .root()
+            .find(Axis::Descendant, Match::Kind("function_definition"))
+            .unwrap();
+        field("declarator").declarator_name().apply(&func)
+    }
+
+    #[cfg(feature = "tree-sitter-cpp")]
+    fn cpp_fn_name(code: &str) -> Option<String> {
+        let root = SupportLang::Cpp.ast_grep(code);
+        let func = root
+            .root()
+            .find(Axis::Descendant, Match::Kind("function_definition"))
+            .unwrap();
+        field("declarator").declarator_name().apply(&func)
+    }
+
+    #[cfg(feature = "tree-sitter-c")]
+    #[test]
+    fn declarator_name_c_shapes() {
+        assert_eq!(
+            c_fn_name("int foo(int a) { return a; }"),
+            Some("foo".into())
+        );
+        assert_eq!(
+            c_fn_name("static inline int foo(int a) { return a; }"),
+            Some("foo".into())
+        );
+        assert_eq!(
+            c_fn_name("void *foo(int a) { return 0; }"),
+            Some("foo".into())
+        );
+        assert_eq!(
+            c_fn_name("void **foo(int a) { return 0; }"),
+            Some("foo".into())
+        );
+        assert_eq!(
+            c_fn_name("int (foo)(int a) { return a; }"),
+            Some("foo".into())
+        );
+        assert_eq!(
+            c_fn_name("int (*foo(int a))(int) { return 0; }"),
+            Some("foo".into())
+        );
+        assert_eq!(
+            c_fn_name("int arr[3]; int bar() { return 0; }"),
+            Some("bar".into())
+        );
+    }
+
+    #[cfg(feature = "tree-sitter-cpp")]
+    #[test]
+    fn declarator_name_cpp_shapes() {
+        assert_eq!(
+            cpp_fn_name("void *foo(int a) { return 0; }"),
+            Some("foo".into())
+        );
+        assert_eq!(
+            cpp_fn_name("int Foo::bar(int a) { return a; }"),
+            Some("Foo::bar".into())
+        );
+        assert_eq!(
+            cpp_fn_name("int* Foo::bar(int a) { return 0; }"),
+            Some("Foo::bar".into())
+        );
+        assert_eq!(
+            cpp_fn_name("bool Foo::operator==(const Foo& o) const { return true; }"),
+            Some("Foo::operator==".into())
+        );
+        assert_eq!(cpp_fn_name("Foo::~Foo() {}"), Some("Foo::~Foo".into()));
+        assert_eq!(
+            cpp_fn_name("class Foo { public: int *bar(int a) { return 0; } };"),
+            Some("bar".into())
+        );
+        assert_eq!(
+            cpp_fn_name("template<typename T> T* Foo::get() { return 0; }"),
+            Some("Foo::get".into())
+        );
     }
 
     #[test]

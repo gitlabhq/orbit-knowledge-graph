@@ -32,7 +32,7 @@ impl DslLanguage for CppDsl {
         vec![
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
-                .name_from(field("declarator").field("declarator")),
+                .name_from(field("declarator").declarator_name()),
             scope("class_specifier", "Class")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
@@ -208,6 +208,67 @@ mod tests {
         let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"add"), "should find add");
         assert!(names.contains(&"greet"), "should find greet");
+    }
+
+    fn function_name_fqn(code: &str) -> (String, String) {
+        let result = parse(code).unwrap();
+        let function = result
+            .definitions
+            .iter()
+            .find(|d| d.kind == DefKind::Function)
+            .unwrap();
+        (function.name.to_string(), function.fqn.to_string())
+    }
+
+    #[test]
+    fn pointer_return_uses_bare_identifier() {
+        assert_eq!(
+            function_name_fqn("void *foo(int a) { return 0; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+    }
+
+    #[test]
+    fn parenthesized_declarator_uses_bare_identifier() {
+        assert_eq!(
+            function_name_fqn("int (foo)(int a) { return a; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+    }
+
+    #[test]
+    fn plain_and_qualifier_prefixed_still_bare() {
+        assert_eq!(
+            function_name_fqn("int foo(int a) { return a; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+        assert_eq!(
+            function_name_fqn("static inline int foo(int a) { return a; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+    }
+
+    // Out-of-line member definitions keep the class qualifier: it encodes
+    // membership and feeds the FQN. A pointer return must not corrupt it.
+    #[test]
+    fn qualified_method_keeps_qualifier() {
+        assert_eq!(
+            function_name_fqn("int Foo::bar(int a) { return a; }\n"),
+            ("Foo::bar".into(), "test::Foo::bar".into())
+        );
+        assert_eq!(
+            function_name_fqn("int* Foo::bar(int a) { return 0; }\n"),
+            ("Foo::bar".into(), "test::Foo::bar".into())
+        );
+    }
+
+    #[test]
+    fn operator_and_destructor_names() {
+        assert_eq!(
+            function_name_fqn("bool Foo::operator==(const Foo& o) const { return true; }\n").0,
+            "Foo::operator=="
+        );
+        assert_eq!(function_name_fqn("Foo::~Foo() {}\n").0, "Foo::~Foo");
     }
 
     #[test]

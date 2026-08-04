@@ -33,7 +33,7 @@ impl DslLanguage for CDsl {
         vec![
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
-                .name_from(field("declarator").field("declarator")),
+                .name_from(field("declarator").declarator_name()),
             scope("struct_specifier", "Struct")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
@@ -195,6 +195,60 @@ mod tests {
         let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"add"), "should find add");
         assert!(names.contains(&"greet"), "should find greet");
+    }
+
+    fn function_name_fqn(code: &str) -> (String, String) {
+        let result = parse(code).unwrap();
+        let function = result
+            .definitions
+            .iter()
+            .find(|d| d.kind == DefKind::Function)
+            .unwrap();
+        (function.name.to_string(), function.fqn.to_string())
+    }
+
+    #[test]
+    fn pointer_return_uses_bare_identifier() {
+        assert_eq!(
+            function_name_fqn("void *foo(int a) { return 0; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+    }
+
+    #[test]
+    fn double_pointer_return_uses_bare_identifier() {
+        assert_eq!(
+            function_name_fqn("void **foo(int a) { return 0; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+    }
+
+    #[test]
+    fn parenthesized_declarator_uses_bare_identifier() {
+        assert_eq!(
+            function_name_fqn("int (foo)(int a) { return a; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+    }
+
+    #[test]
+    fn function_pointer_return_uses_bare_identifier() {
+        assert_eq!(
+            function_name_fqn("int (*foo(int a))(int) { return 0; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+    }
+
+    #[test]
+    fn plain_and_qualifier_prefixed_still_bare() {
+        assert_eq!(
+            function_name_fqn("int foo(int a) { return a; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
+        assert_eq!(
+            function_name_fqn("static inline int foo(int a) { return a; }\n"),
+            ("foo".into(), "test::foo".into())
+        );
     }
 
     #[test]
