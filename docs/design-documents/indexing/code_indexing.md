@@ -192,6 +192,8 @@ The extractor records a repository file inventory from archive metadata before i
 
 Source files, manifests, lockfiles, dotfiles, unknown extensions, and resolver inputs are intentionally allowed through unless they exceed the size ceiling or look binary. Dropped files remain in the inventory and still appear as `File` nodes; they are simply never written to disk and so are never parsed. Symlinks, hardlinks, and directories bypass the byte filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
 
+The content phase also caps parse-candidate bytes per repository (`max_parse_bytes`, default 64 MiB; `0` disables it, as on the `orbit` CLI): past the cap, candidates stay bare `File` nodes with reason `skip_memory_budget`.
+
 The reason and byte volume of skipped entries are exposed via the `gkg.indexer.code.archive.entries.skipped` and `gkg.indexer.code.archive.bytes.skipped` counters so operators can quantify the disk savings per indexing run.
 
 #### Transform (call graph construction)
@@ -232,10 +234,6 @@ The indexing pipeline uses a repository inventory as the single file list. Pipel
 7. **Analysis** groups parsed results by language and builds definition, import, call, and inheritance relationships that attach to the structural file nodes.
 
 IO reads and CPU-bound parsing are bounded independently: file reads use a concurrency limit proportional to the worker thread count, while parsing uses a semaphore sized to the number of available CPU cores. This separation prevents IO-heavy repositories from starving the parser and vice versa. The pipeline outputs a graph structure consumed by the load phase. The defaults scale with the number of available cores.
-
-Alongside the per-file CPU budget (which aborts a single slow file's parse), a per-repository source-byte cap bounds peak memory. It lives in `CodeFilter`, the shared file-stream policy: as each file streams in, the filter charges its source bytes against a `max_parse_bytes` counter, but only for parse candidates (files a language detector claims). Once the cumulative parse-candidate bytes pass the cap, every further candidate is kept as an unparsed `File` node rather than parsed — the same outcome as the `max_files` cap. Because the filter runs before dispatch, the cap covers every language uniformly, including the JavaScript, TypeScript, and Rust families whose custom pipelines never observed an earlier in-parse budget. Shed files are recorded like every other filter skip: their reason (`skip_memory_budget`) is stamped onto the `File` node's `gl_file.reason`, and their per-repository count and bytes flow to the archive-entry skip metrics under `reason="memory_budget"`. The cap defaults to 64 MiB of parse-candidate source (`default_code_indexing_max_parse_bytes`); `0` disables shedding. The default's sizing — half a 1.5 GiB per-worker share divided by the worst measured ~12x RSS-to-source ratio — is recorded on that function.
-
-Because the filter runs in file-stream order, the shed set is deterministic only to the extent that order is. The Gitaly archive path (production) streams tar entries in the git tree's stable order for a given commit, so the same commit sheds the same files; the local directory-walk path (the `orbit` CLI) streams in filesystem readdir order, which is not guaranteed stable across machines, and the CLI leaves the cap at `0` (disabled).
 
 ##### Graph data model
 
