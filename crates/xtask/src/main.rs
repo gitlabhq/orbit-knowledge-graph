@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod bench;
 mod dashboards;
 mod ddl;
 mod metrics_catalog;
@@ -75,6 +76,11 @@ enum Command {
     MigrationLedger {
         #[command(subcommand)]
         command: MigrationLedgerCommand,
+    },
+    /// Benchmark tooling: replay datalake dumps and publish NATS triggers.
+    Bench {
+        #[command(subcommand)]
+        command: BenchCommand,
     },
     /// Regenerate the auto-derived tables in the query language reference doc
     /// from the ontology (currently the text-indexed properties table).
@@ -166,6 +172,14 @@ impl clap::ValueEnum for DdlTarget {
 }
 
 #[derive(Subcommand)]
+enum BenchCommand {
+    /// Rate-controlled INSERT..SELECT from staging into datalake (mock CDC).
+    ReplaySdlc(bench::replay_sdlc::Args),
+    /// Publish enrollment or code-task triggers to the Siphon NATS stream.
+    PublishTriggers(bench::publish_triggers::Args),
+}
+
+#[derive(Subcommand)]
 enum SynthCommand {
     /// Generate synthetic SDLC data to Parquet files.
     Generate {
@@ -224,6 +238,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Bench { command } => match command {
+            BenchCommand::ReplaySdlc(args) => bench::replay_sdlc::run(args).await,
+            BenchCommand::PublishTriggers(args) => bench::publish_triggers::run(args).await,
+        },
         Command::Synth { command } => match command {
             SynthCommand::Generate {
                 config,
