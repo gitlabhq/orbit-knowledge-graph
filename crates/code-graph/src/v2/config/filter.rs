@@ -4,8 +4,7 @@
 //! parsed), `ListOnly` (excluded/oversize/binary/minified: a node, no bytes), or
 //! `Drop`. Resolver inputs are never in the denylist, so they survive. A
 //! total-bytes [`Counter`] aborts an oversized repo; a parse-bytes [`Counter`]
-//! sheds parse candidates (to `ListOnly`) once their cumulative source passes
-//! the per-repo cap, bounding peak parser memory.
+//! sheds parse candidates once their cumulative source passes the per-repo cap.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -46,8 +45,7 @@ pub enum FilterSkip {
     NotUtf8,
     Minified,
     LineTooLong,
-    /// Parse candidate shed because the repository's cumulative parse-candidate
-    /// source passed the per-repo cap; still a node, just not parsed.
+    /// Cumulative parse-candidate source passed the per-repo cap.
     MemoryBudget,
     NonRegularFile,
 }
@@ -71,10 +69,9 @@ pub struct CodeFilter {
 }
 
 impl CodeFilter {
-    /// `max_file_size`, `max_total_bytes`, and `max_parse_bytes` are byte caps
-    /// (`0` = unlimited). `max_total_bytes` aborts the whole stream; `max_parse_bytes`
-    /// only sheds parse candidates past the cap. `detect_language` decides parse
-    /// candidacy (e.g. `detect_language_from_path`).
+    /// Byte caps, `0` = unlimited: `max_total_bytes` aborts the whole stream,
+    /// `max_parse_bytes` only sheds parse candidates. `detect_language` decides
+    /// parse candidacy (e.g. `detect_language_from_path`).
     pub fn new(
         max_file_size: u64,
         max_total_bytes: u64,
@@ -141,8 +138,6 @@ impl FileStreamHooks for CodeFilter {
         // A parse candidate is parsed; a non-parsable file (resolver input) is
         // loaded for resolvers but not parsed.
         if (self.detect_language)(&file.path).is_some() {
-            // Charge only parse candidates. Past the cap a candidate stays a node
-            // but is not parsed, bounding peak parser memory per repository.
             if self.parse_bytes.add(file.size).is_err() {
                 return self.record(file, FilterSkip::MemoryBudget);
             }
@@ -408,8 +403,7 @@ mod tests {
         );
     }
 
-    // JS and TS dispatch to their own pipeline, which the earlier in-parse budget
-    // never charged; the filter charges every language uniformly before dispatch.
+    // JS and TS dispatch to their own pipeline, which an in-parse budget never charged.
     #[test]
     fn parse_bytes_cap_covers_javascript_and_typescript() {
         let mut f = CodeFilter::new(0, 0, 150, detect_language_from_path);
