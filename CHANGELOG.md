@@ -1,3 +1,9 @@
+## [0.95.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.0...v0.95.1) (2026-08-04)
+
+### Other
+
+* **e2e:** auto-bump siphon, gitlab, and gkg pins to current ([06304fb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06304fbd48d2fbc29f24e9904586abad44a3b32d)) by Orbit automation bot
+
 ## [0.95.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.94.0...v0.95.0) (2026-08-04)
 
 ### Features
