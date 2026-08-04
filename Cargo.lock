@@ -14878,6 +14878,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow 58.3.0",
+ "async-nats",
  "chrono",
  "clap",
  "clickhouse",
@@ -14886,6 +14887,7 @@ dependencies = [
  "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
+ "indexer",
  "ontology",
  "parquet 58.3.0",
  "query-engine",

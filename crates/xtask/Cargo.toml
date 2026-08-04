@@ -26,6 +26,7 @@ toml = { workspace = true }
 ignored = ["toml"]
 
 [dependencies]
+async-nats = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 arrow = { workspace = true }
@@ -47,6 +48,7 @@ ontology = { path = "../ontology" }
 schemars = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+indexer = { path = "../indexer" }
 gkg-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }
 
