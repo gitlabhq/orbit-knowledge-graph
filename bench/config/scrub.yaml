@@ -1,0 +1,15 @@
+# Columns nulled or hashed at import time (PII/secrets from dumps).
+# Format: table -> list of columns to NULL.
+# Hash columns use sha256(col) instead of NULL.
+scrub:
+  siphon_users:
+    "null": [email, name]
+    hash: [username]
+  siphon_notes:
+    "null": [note]
+  siphon_merge_request_diffs:
+    "null": [st_diffs]
+  siphon_personal_access_tokens:
+    "null": [token_digest]
+  siphon_ci_runners:
+    "null": [token, token_encrypted]
