@@ -1,3 +1,4 @@
+mod bench_assumptions;
 mod clickhouse;
 mod code;
 mod common;
