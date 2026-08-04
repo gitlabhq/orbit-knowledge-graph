@@ -139,8 +139,8 @@ releases:
     labels:
       phase: pipeline
       component: gkg
-    # Deploy overlaps the GitLab boot; the webserver /ready probe still holds
-    # this release until Rails answers.
+    # Deploy overlaps the GitLab boot; GKG becomes ready when its local schema
+    # gate clears, independently of Rails readiness.
     needs:
       - e2e-{{ $sha }}-nats/nats
       - e2e-{{ $sha }}-clickhouse/clickhouse

@@ -61,7 +61,7 @@ async fn cluster_health_migrating_when_migration_active() {
     write_migrating_version(&client, 2).await.unwrap();
 
     let sidecar = start_mock_sidecar(unready_indexer_payload()).await;
-    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client));
+    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client), None);
 
     let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
 
@@ -99,7 +99,7 @@ async fn cluster_health_stays_unhealthy_when_no_migration() {
     ensure_version_table(&client).await.unwrap();
 
     let sidecar = start_mock_sidecar(unready_indexer_payload()).await;
-    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client));
+    let checker = ClusterHealthChecker::new(Some(sidecar), Some(client), None);
 
     let s = extract_structured(checker.get_cluster_health(ResponseFormat::Raw as i32).await);
 
