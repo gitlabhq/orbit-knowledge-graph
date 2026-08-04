@@ -4,8 +4,6 @@ mod router;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use clickhouse_client::ArrowClickHouseClient;
-use gitlab_client::GitlabClient;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -22,12 +20,10 @@ pub struct Server {
 impl Server {
     pub async fn bind(
         addr: SocketAddr,
-        graph_client: ArrowClickHouseClient,
-        gitlab_client: Option<Arc<GitlabClient>>,
         schema_watcher: Arc<SchemaWatcher>,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
-        let router = create_router(graph_client, gitlab_client, schema_watcher);
+        let router = create_router(schema_watcher);
         Ok(Self { listener, router })
     }
 

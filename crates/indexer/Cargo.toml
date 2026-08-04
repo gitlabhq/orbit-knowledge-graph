@@ -60,6 +60,7 @@ jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }
+tower = { workspace = true }
 
 # This crate opts into the workspace lints AND additionally denies bare `#[allow(..)]`
 # attributes. A crate-local `[lints.clippy]` table replaces (does not merge with) the

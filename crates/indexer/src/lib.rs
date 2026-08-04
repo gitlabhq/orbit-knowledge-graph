@@ -58,10 +58,9 @@ use std::time::Duration;
 use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseWriter;
 use engine::EngineBuilder;
-use engine::handler::{HandlerInitError, HandlerRegistry};
-use gitlab_client::GitlabClient;
+use engine::handler::HandlerRegistry;
 use gkg_server_config::IndexerModule;
-use health::{HealthState, run_health_server};
+use health::run_health_server;
 use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
@@ -114,30 +113,16 @@ pub async fn run(
 
     let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
 
-    let gitlab_client = config
-        .gitlab
-        .as_ref()
-        .map(|cfg| GitlabClient::new(cfg.clone()))
-        .transpose()
-        .map_err(HandlerInitError::new)?
-        .map(Arc::new);
-
     // Start the health server before waiting for schema readiness so that the
     // Kubernetes liveness probe is answered during the (potentially long) schema
     // wait phase. Readiness stays `503` until the gate clears (`serving`).
     let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let health_state = HealthState {
-        nats_client: broker.nats_client().clone(),
-        graph_client: config.graph.build_client(),
-        datalake_client: config.datalake.build_client(),
-        gitlab_client,
-        serving: serving.clone(),
-    };
+    let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
     let health_task = tokio::spawn(async move {
         tokio::select! {
-            result = run_health_server(health_bind_address, health_state) => result,
+            result = run_health_server(health_bind_address, health_serving) => result,
             _ = health_shutdown.cancelled() => Ok(()),
         }
     });
@@ -281,18 +266,12 @@ pub async fn run_dispatcher(
     // probe is answered during the (potentially long) DDL phase. Readiness stays
     // `503` until migration completes (`serving`).
     let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let health_state = HealthState {
-        nats_client: services.nats_client.clone(),
-        graph_client: config.graph.build_client(),
-        datalake_client: config.datalake.build_client(),
-        gitlab_client: None,
-        serving: serving.clone(),
-    };
+    let health_serving = serving.clone();
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
     let health_task = tokio::spawn(async move {
         tokio::select! {
-            result = run_health_server(health_bind_address, health_state) => result,
+            result = run_health_server(health_bind_address, health_serving) => result,
             _ = health_shutdown.cancelled() => Ok(()),
         }
     });
