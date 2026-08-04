@@ -1,0 +1,58 @@
+.ra-bench-base:
+  tags:
+    - saas-linux-medium-amd64
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
+  variables:
+    RUN_ID: "ra-${CI_PIPELINE_ID}"
+
+ra_bench_prepare:
+  extends: .ra-bench-base
+  stage: benchmark
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /\benable_ra_bench\b/
+      when: never
+    - when: manual
+  script:
+    - bench/scripts/labels-to-env.sh
+    - echo "Prepare step — quota check and results bucket verification"
+    - gcloud storage ls gs://gkg-ra-results/ > /dev/null 2>&1 || echo "Results bucket not accessible"
+
+ra_bench:
+  extends: .ra-bench-base
+  stage: benchmark
+  timeout: 3h
+  needs:
+    - job: ra_bench_prepare
+      artifacts: false
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /\benable_ra_bench\b/
+      when: never
+    - when: manual
+  script:
+    - source bench/scripts/labels-to-env.sh
+    - bench/scripts/provision.sh
+    - |
+      if [ -z "${RA_SKIP_IMPORT:-}" ]; then
+        PREFIX="${DUMP_PREFIX:-core-2026-06-25-1115}" bench/scripts/import-dump.sh
+      fi
+    - bench/scripts/run-all-phases.sh
+    - uv run bench/scoring/score.py "bench/results/${RUN_ID}" "${TIER:-small}"
+    - uv run bench/scoring/report.py "bench/results/${RUN_ID}" "${TIER:-small}"
+  artifacts:
+    paths:
+      - bench/results/*/report.md
+      - bench/results/*/slo_results.json
+    when: always
+
+ra_bench_cleanup:
+  extends: .ra-bench-base
+  stage: benchmark
+  needs:
+    - job: ra_bench
+      artifacts: false
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /\benable_ra_bench\b/
+      when: never
+    - when: always
+  script:
+    - bench/scripts/teardown.sh

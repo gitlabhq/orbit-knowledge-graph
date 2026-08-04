@@ -60,6 +60,7 @@ include:
   - local: .gitlab/ci/e2e-pin-bump.yml
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/comment-guard.yml
+  - local: .gitlab/ci/ra-bench.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
     file: 'templates/gcp_auth.yaml'
