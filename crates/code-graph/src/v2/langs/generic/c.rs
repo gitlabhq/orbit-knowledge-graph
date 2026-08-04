@@ -45,7 +45,7 @@ impl DslLanguage for CDsl {
                 .when(has_descendant("field_declaration_list")),
             scope("type_definition", "Typedef")
                 .def_kind(DefKind::Other)
-                .name_from(field("declarator"))
+                .name_from(field("declarator").declarator_name())
                 .no_scope(),
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
@@ -274,6 +274,32 @@ mod tests {
         let result = parse("typedef struct { int x; int y; } Point;\n").unwrap();
         let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"Point"), "should find typedef Point");
+    }
+
+    fn typedef_name_fqn(code: &str) -> (String, String) {
+        let result = parse(code).unwrap();
+        let td = result
+            .definitions
+            .iter()
+            .find(|d| d.kind == DefKind::Other)
+            .unwrap();
+        (td.name.to_string(), td.fqn.to_string())
+    }
+
+    #[test]
+    fn typedef_declarator_wrappers_use_bare_name() {
+        assert_eq!(
+            typedef_name_fqn("typedef int *my_ptr;\n"),
+            ("my_ptr".into(), "test::my_ptr".into())
+        );
+        assert_eq!(
+            typedef_name_fqn("typedef int (*fn_t)(int);\n"),
+            ("fn_t".into(), "test::fn_t".into())
+        );
+        assert_eq!(
+            typedef_name_fqn("typedef char buf_t[64];\n"),
+            ("buf_t".into(), "test::buf_t".into())
+        );
     }
 
     #[test]

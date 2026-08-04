@@ -49,7 +49,7 @@ impl DslLanguage for CppDsl {
             scope("namespace_definition", "Namespace").def_kind(DefKind::Module),
             scope("type_definition", "Typedef")
                 .def_kind(DefKind::Other)
-                .name_from(field("declarator"))
+                .name_from(field("declarator").declarator_name())
                 .no_scope(),
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
@@ -263,12 +263,34 @@ mod tests {
     }
 
     #[test]
+    fn nested_qualified_method_keeps_full_qualifier() {
+        assert_eq!(
+            function_name_fqn("int A::B::foo(int a) { return a; }\n"),
+            ("A::B::foo".into(), "test::A::B::foo".into())
+        );
+    }
+
+    #[test]
     fn operator_and_destructor_names() {
         assert_eq!(
             function_name_fqn("bool Foo::operator==(const Foo& o) const { return true; }\n").0,
             "Foo::operator=="
         );
         assert_eq!(function_name_fqn("Foo::~Foo() {}\n").0, "Foo::~Foo");
+    }
+
+    // operator_cast text spans `operator <type>() const`; the descent drops the
+    // param list and trailing qualifiers so they never reach name/fqn.
+    #[test]
+    fn conversion_operators_drop_params() {
+        assert_eq!(
+            function_name_fqn("class Foo { public: operator bool() const { return true; } };\n").0,
+            "operator bool"
+        );
+        assert_eq!(
+            function_name_fqn("Ptr::operator int() const { return 0; }\n").0,
+            "Ptr::operator int"
+        );
     }
 
     #[test]

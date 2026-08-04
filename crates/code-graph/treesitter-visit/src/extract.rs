@@ -40,11 +40,13 @@ pub enum Step {
 
 /// C-family declarator node kinds whose declared name lives one level deeper.
 ///
-/// `function_declarator`/`pointer_declarator`/`array_declarator`/
-/// `reference_declarator` expose the inner declarator through the `declarator`
-/// field; `parenthesized_declarator` wraps it as its first named child with no
-/// field. A pointer-return function (`void *foo()`) inserts a
-/// `pointer_declarator` and a parenthesized declarator (`int (foo)()`) inserts a
+/// `function_declarator`/`pointer_declarator`/`array_declarator` expose the
+/// inner declarator through the `declarator` field. `reference_declarator`
+/// (`T& f()`, `T&& f()`) and `parenthesized_declarator` (`int (foo)()`) carry
+/// **no** `declarator` field — tree-sitter-cpp defines the former as
+/// `seq(choice('&','&&'), $._declarator)` — so the descent resolves them via
+/// their first named child. A pointer-return function (`void *foo()`) inserts a
+/// `pointer_declarator` and a parenthesized declarator inserts a
 /// `parenthesized_declarator`, so a fixed hop count lands on the wrong node.
 const C_FAMILY_DECLARATOR_WRAPPERS: &[&str] = &[
     "function_declarator",
@@ -57,23 +59,58 @@ const C_FAMILY_DECLARATOR_WRAPPERS: &[&str] = &[
 /// From a C/C++ declarator node, descend wrapper declarators to the declared
 /// name node.
 ///
-/// Follows the `declarator` field through pointer/array/function/reference
-/// wrappers and the first named child through parenthesized wrappers (which
-/// carry no `declarator` field), including arbitrary function-pointer nesting.
-/// The first non-wrapper node reached is the declared name and is emitted
-/// verbatim: a plain `identifier`, `field_identifier`, `operator_name`, or
-/// `destructor_name`, or — for an out-of-line C++ member definition — the
-/// `qualified_identifier` (`Foo::bar`). The qualifier is kept because it
-/// encodes the member's class and feeds the definition's FQN.
+/// Follows the `declarator` field through pointer/array/function wrappers and
+/// the first named non-comment child through reference/parenthesized wrappers
+/// (which carry no `declarator` field), including arbitrary function-pointer
+/// nesting. Comments are skipped because they are named nodes and could appear
+/// before the declarator (`int (/*x*/ foo)()`).
+///
+/// The node reached is the declared name. Paired with [`Emit::DeclaredName`] it
+/// yields: a plain `identifier`/`type_identifier`/`field_identifier`,
+/// `operator_name`, or `destructor_name` verbatim; a `qualified_identifier`
+/// (`Foo::bar`) verbatim so an out-of-line member keeps the class qualifier that
+/// feeds its FQN; and a conversion operator (`operator_cast`) normalized to
+/// `operator <type>`.
 fn descend_declarator_name<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>> {
     let mut cur = node.clone();
     while C_FAMILY_DECLARATOR_WRAPPERS.contains(&cur.kind().as_ref()) {
         cur = match cur.field("declarator") {
             Some(inner) => inner,
-            None => cur.children().find(|c| c.is_named())?,
+            None => cur
+                .children()
+                .find(|c| c.is_named() && c.kind().as_ref() != "comment")?,
         };
     }
     Some(cur)
+}
+
+/// Text for a C/C++ declared name, normalizing a conversion operator so its
+/// parameter list and trailing qualifiers do not leak into the name.
+///
+/// `operator_cast` → `operator <type>`; a `qualified_identifier` ending in one
+/// (`Ptr::operator int() const`) → `<qualifier>::operator <type>`; anything
+/// else → its own text.
+fn declared_name_text<D: Doc>(node: &Node<'_, D>) -> Option<String> {
+    if node.kind().as_ref() == "operator_cast" {
+        return operator_cast_text(node);
+    }
+    if node.kind().as_ref() == "qualified_identifier"
+        && let Some(last) = node.children().filter(|c| c.is_named()).last()
+        && last.kind().as_ref() == "operator_cast"
+        && let Some(op) = operator_cast_text(&last)
+    {
+        let text = node.text();
+        let qualifier = &text[..last.range().start - node.range().start];
+        return Some(format!("{qualifier}{op}"));
+    }
+    Some(node.text().to_string())
+}
+
+/// `operator_cast` → `operator <type>`, dropping the `abstract_function_declarator`
+/// (`() const`) that its text otherwise includes.
+fn operator_cast_text<D: Doc>(node: &Node<'_, D>) -> Option<String> {
+    let ty = node.field("type")?;
+    Some(format!("operator {}", ty.text()))
 }
 
 #[derive(Clone)]
@@ -84,6 +121,11 @@ pub enum Emit {
     Name(&'static [&'static str]),
     Children(Match<'static>),
     Const(&'static str),
+    /// Emit a C/C++ declared name, normalizing a conversion operator
+    /// (`operator_cast`) to `operator <type>` so its parameter list and
+    /// `const`/`noexcept` qualifiers do not leak into the name. Any other node
+    /// is emitted as its text. Set by [`Extract::declarator_name`].
+    DeclaredName,
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -204,9 +246,10 @@ impl Extract {
 
     /// From a C/C++ declarator node, descend wrapper declarators
     /// (pointer/array/parenthesized/function/reference, incl. function-pointer
-    /// nesting) to the bare declared-name node. Pair with `field("declarator")`:
-    /// `field("declarator").declarator_name()`.
-    pub fn declarator_name(self) -> Self {
+    /// nesting) to the declared-name node and emit it via [`Emit::DeclaredName`].
+    /// Pair with `field("declarator")`: `field("declarator").declarator_name()`.
+    pub fn declarator_name(mut self) -> Self {
+        self.emit = Emit::DeclaredName;
         self.push(Step::DeclaratorName)
     }
 
@@ -339,6 +382,7 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
         }
         Emit::Children(_) => emit_all(mode, node).into_iter().next(),
         Emit::Const(s) => Some(s.to_string()),
+        Emit::DeclaredName => declared_name_text(node),
     }
 }
 
@@ -491,6 +535,16 @@ mod tests {
     }
 
     #[cfg(feature = "tree-sitter-c")]
+    fn c_typedef_name(code: &str) -> Option<String> {
+        let root = SupportLang::C.ast_grep(code);
+        let td = root
+            .root()
+            .find(Axis::Descendant, Match::Kind("type_definition"))
+            .unwrap();
+        field("declarator").declarator_name().apply(&td)
+    }
+
+    #[cfg(feature = "tree-sitter-c")]
     #[test]
     fn declarator_name_c_shapes() {
         assert_eq!(
@@ -521,6 +575,31 @@ mod tests {
             c_fn_name("int arr[3]; int bar() { return 0; }"),
             Some("bar".into())
         );
+        assert_eq!(
+            c_fn_name("int (/*x*/ foo)(int a) { return a; }"),
+            Some("foo".into())
+        );
+    }
+
+    #[cfg(feature = "tree-sitter-c")]
+    #[test]
+    fn declarator_name_c_typedefs() {
+        assert_eq!(
+            c_typedef_name("typedef int *my_ptr;"),
+            Some("my_ptr".into())
+        );
+        assert_eq!(
+            c_typedef_name("typedef int (*fn_t)(int);"),
+            Some("fn_t".into())
+        );
+        assert_eq!(
+            c_typedef_name("typedef char buf_t[64];"),
+            Some("buf_t".into())
+        );
+        assert_eq!(
+            c_typedef_name("typedef struct { int x; } Point;"),
+            Some("Point".into())
+        );
     }
 
     #[cfg(feature = "tree-sitter-cpp")]
@@ -550,6 +629,28 @@ mod tests {
         assert_eq!(
             cpp_fn_name("template<typename T> T* Foo::get() { return 0; }"),
             Some("Foo::get".into())
+        );
+        assert_eq!(
+            cpp_fn_name("int A::B::foo(int a) { return a; }"),
+            Some("A::B::foo".into())
+        );
+        assert_eq!(
+            cpp_fn_name("int& foo(int a) { return a; }"),
+            Some("foo".into())
+        );
+        assert_eq!(cpp_fn_name("int&& foo() { return 0; }"), Some("foo".into()));
+    }
+
+    #[cfg(feature = "tree-sitter-cpp")]
+    #[test]
+    fn declarator_name_cpp_conversion_operators() {
+        assert_eq!(
+            cpp_fn_name("class Foo { public: operator bool() const { return true; } };"),
+            Some("operator bool".into())
+        );
+        assert_eq!(
+            cpp_fn_name("Ptr::operator int() const { return 0; }"),
+            Some("Ptr::operator int".into())
         );
     }
 
