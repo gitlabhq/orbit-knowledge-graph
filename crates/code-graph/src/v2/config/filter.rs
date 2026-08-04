@@ -3,8 +3,7 @@
 //! [`Decision`]: `Parse` (source), `Load` (resolver inputs: on disk, not
 //! parsed), `ListOnly` (excluded/oversize/binary/minified: a node, no bytes), or
 //! `Drop`. Resolver inputs are never in the denylist, so they survive. A
-//! total-bytes [`Counter`] aborts an oversized repo; a parse-bytes [`Counter`]
-//! sheds parse candidates once their cumulative source passes the per-repo cap.
+//! total-bytes [`Counter`] aborts an oversized repo.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -45,7 +44,6 @@ pub enum FilterSkip {
     NotUtf8,
     Minified,
     LineTooLong,
-    /// Cumulative parse-candidate source passed the per-repo cap.
     MemoryBudget,
     NonRegularFile,
 }
@@ -69,9 +67,8 @@ pub struct CodeFilter {
 }
 
 impl CodeFilter {
-    /// Byte caps, `0` = unlimited: `max_total_bytes` aborts the whole stream,
-    /// `max_parse_bytes` only sheds parse candidates. `detect_language` decides
-    /// parse candidacy (e.g. `detect_language_from_path`).
+    /// `max_file_size` and `max_total_bytes` are byte caps (`0` = unlimited).
+    /// `detect_language` decides parse candidacy (e.g. `detect_language_from_path`).
     pub fn new(
         max_file_size: u64,
         max_total_bytes: u64,
@@ -403,7 +400,6 @@ mod tests {
         );
     }
 
-    // JS and TS dispatch to their own pipeline, which an in-parse budget never charged.
     #[test]
     fn parse_bytes_cap_covers_javascript_and_typescript() {
         let mut f = CodeFilter::new(0, 0, 150, detect_language_from_path);

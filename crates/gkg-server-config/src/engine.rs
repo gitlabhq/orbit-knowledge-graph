@@ -264,10 +264,7 @@ fn default_code_indexing_max_total_bytes() -> u64 {
     2_000_000_000
 }
 
-/// Prod code pods run 16 workers in 24 GiB, so ~1.5 GiB each; target half of that
-/// for one repository's graph. Measured RSS runs 4x source on real repositories
-/// and ~12x on generated ones, so 768 MiB / 12x = 64 MiB. A 4x repository would
-/// need 192 MiB of parseable source to be capped, which no real one reaches.
+/// Half a worker's 1.5 GiB share (prod 24 GiB / 16 workers) over the ~12x worst-case RSS:source.
 fn default_code_indexing_max_parse_bytes() -> u64 {
     64 * 1024 * 1024
 }
@@ -337,7 +334,6 @@ pub struct CodeIndexingPipelineConfig {
     /// Defaults to 2 GB.
     #[serde(default = "default_code_indexing_max_total_bytes")]
     pub max_total_bytes: u64,
-    /// Defaults to 64 MiB. 0 = no limit.
     #[serde(default = "default_code_indexing_max_parse_bytes")]
     pub max_parse_bytes: u64,
     #[serde(default)]

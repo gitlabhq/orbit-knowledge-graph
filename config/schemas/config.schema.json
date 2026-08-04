@@ -463,7 +463,6 @@
           "minimum": 0
         },
         "max_parse_bytes": {
-          "description": "Defaults to 64 MiB. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "default": 67108864,
