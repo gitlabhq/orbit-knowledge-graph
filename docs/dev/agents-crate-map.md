@@ -28,7 +28,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakerRegistry`, `CircuitBreakableError`) with observer hooks and per-service config |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
 | `gitaly-protos` | Gitaly protobuf types for gRPC repository operations |
-| `health-check` | K8s readiness/liveness probes, plus a NATS code work queue depth endpoint for autoscaling code indexer pods |
+| `health-check` | Networked aggregate health for configured Kubernetes workloads and ClickHouse, plus NATS code work queue depth for autoscaling code indexer pods |
 | `orbit-local` | Local `orbit index`, `orbit sql`, `orbit schema`, and `orbit mcp serve` (stateless stdio MCP server: `run_sql`, `get_graph_schema`, `index`; descriptions shared with the CLI via `descriptions.rs`) commands; writes the property graph to DuckDB and exposes it as raw SQL (no DSL); workspace management (`Workspace`, `GitInfo`, manifest in DuckDB). Release artifacts include glibc Linux builds plus fully static musl Linux builds for older enterprise, Alpine, scratch, and distroless environments. |
 | `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |

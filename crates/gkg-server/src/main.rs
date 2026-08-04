@@ -150,12 +150,6 @@ async fn run_webserver(
         config.jwt_clock_skew_secs,
     )?);
 
-    let cluster_health = ClusterHealthChecker::new(
-        config.health_check_url.clone(),
-        Some(config.graph.build_client()),
-    )
-    .into_arc();
-
     let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
         anyhow::anyhow!(
             "GitLab client config is required: set gitlab.base_url and provide \
@@ -167,14 +161,19 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
     );
 
+    let cluster_health = ClusterHealthChecker::new(
+        config.health_check_url.clone(),
+        Some(config.graph.build_client()),
+        Some(gitlab_client.clone()),
+    )
+    .into_arc();
+
     let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
     resolver_registry.register(
         "gitaly",
         Arc::new(content::gitaly::GitalyService::new(gitlab_client.clone())),
     );
     info!("Content resolution enabled (GitlabClient configured)");
-
-    let graph_client = config.graph.build_client();
 
     let path_resolver = Arc::new(
         PathResolver::new(
@@ -185,13 +184,7 @@ async fn run_webserver(
         .await,
     );
 
-    let http_server = HttpServer::bind(
-        config.bind_address,
-        graph_client,
-        Some(gitlab_client),
-        schema_watcher,
-    )
-    .await?;
+    let http_server = HttpServer::bind(config.bind_address, schema_watcher).await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
