@@ -14,9 +14,9 @@ const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY
 #[derive(Serialize)]
 struct AttributionPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
-    c: Option<String>,
-    u: u64,
-    q: &'a str,
+    correlation_id: Option<String>,
+    user_id: u64,
+    query: &'a str,
     versions: Versions,
 }
 
@@ -49,9 +49,9 @@ pub(crate) fn log_comment(suffix: Option<&str>) -> String {
 /// carrying correlation ID, user, DSL query, and the compiler/schema versions.
 pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
     let payload = AttributionPayload {
-        c: labkit::correlation::current(),
-        u: user_id,
-        q: query_json,
+        correlation_id: labkit::correlation::current(),
+        user_id,
+        query: query_json,
         versions: Versions {
             payload: PAYLOAD_VERSION,
             dsl: QUERY_DSL_VERSION.trim().to_string(),
@@ -160,9 +160,9 @@ mod tests {
         });
         let p = decode_base_payload(&comment);
 
-        assert_eq!(p["c"], "req-abc-123");
-        assert_eq!(p["u"], 42);
-        assert_eq!(p["q"], r#"{"query_type":"traversal"}"#);
+        assert_eq!(p["correlation_id"], "req-abc-123");
+        assert_eq!(p["user_id"], 42);
+        assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
         assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
         assert_eq!(p["versions"]["dsl"], QUERY_DSL_VERSION.trim());
         assert_eq!(
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn base_payload_omits_correlation_when_absent() {
         let p = decode_base_payload(&log_comment_base(1, "{}"));
-        assert!(p.get("c").is_none());
-        assert_eq!(p["u"], 1);
+        assert!(p.get("correlation_id").is_none());
+        assert_eq!(p["user_id"], 1);
     }
 }
