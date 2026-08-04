@@ -1472,3 +1472,51 @@ async fn disk_is_clean_after_a_timed_out_job() {
         "a dropped job must not leak its extraction dir, found: {remaining:?}"
     );
 }
+
+#[tokio::test]
+async fn cancelled_run_that_finishes_writes_no_checkpoint() {
+    let project_id: i64 = 993;
+    let traversal_path = "993/993/";
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main { void a() {} }")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let request = indexer::modules::code::IndexingRequest {
+        project_id,
+        branch: "main".to_string(),
+        traversal_path: traversal_path.to_string(),
+        task_id: 1,
+        commit_sha: Some("abc123".to_string()),
+        had_prior_checkpoint: false,
+    };
+
+    let cancel = code_graph::v2::CancellationToken::new();
+    cancel.cancel();
+    let mut observer = indexer::observer::NoOpObserver;
+    let result = deps
+        .pipeline
+        .index_project(&handler_context(), &request, &mut observer, cancel)
+        .await;
+    assert!(
+        matches!(result, Err(indexer::handler::HandlerError::Processing(_))),
+        "a cancelled run must fail with Processing so it is retried, not checkpointed"
+    );
+
+    deps.pipeline.flush().await.expect("flush");
+
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        None,
+        "a cancelled run must not write a checkpoint"
+    );
+}

@@ -14,12 +14,12 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "10.2.1-2725982756"
+  chart: "10.2.1-2729026297"
   # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "5713136e314a4ce405580ed2d93f3b629c8a0e8a"
+  ref: "866e62a9a76f1ebb3a6c5a1819dfe65aacbe9cdd"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
@@ -28,18 +28,18 @@ gitlab:
   # an empty Authorization header and silently 502.
   images:
     webservice:
-      digest: "sha256:14eb324b52087676851c87289cf16627ec8267cadad8f26821ff3e5d9fd49891"
+      digest: "sha256:c8a5f8810f799c868e6763edfafeeb718863d4c95f6ab722a073fa98585af651"
     workhorse:
-      digest: "sha256:7c048805fab2b6b238594df3acf0df1b4f58aa2e1a551d03d85b75032301a3b6"
+      digest: "sha256:4d8e06f26320c8fb789e13284f09f1988f13baab4f0693cd74f83834fe154cfa"
     sidekiq:
-      digest: "sha256:5c72b45f2909583f83ac52d347de0dcbcdd20cd4c46ee52b94f1a7536c747bf5"
+      digest: "sha256:9d14be44cd6207c4d8efc274b922d8088483bd15ae634b1263832a60439e1cf3"
     toolbox:
-      digest: "sha256:2d9dc48ccd2e4f2635079d920e1df4900598f4a5e79274c428ecb4efc554326d"
+      digest: "sha256:0acd52dd23015d8419d906fce1e834f63e5253a992b8fc0fef96eb40158e452c"
 gkg:
   chart: "1.4.3"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
-    tag: "0.93.0"
+    tag: "0.94.0"
 nats:
   chart: "2.14.2"
 postgresql:

@@ -361,10 +361,19 @@ impl CodeIndexingPipeline {
         cancel: CancellationToken,
     ) -> Result<Arc<ProjectCommit>, HandlerError> {
         let indexing_start = Instant::now();
-        let config = self.build_pipeline_config(context, cancel);
+        let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
             .build_code_graph(request, repository, indexed_at, config)
             .await?;
+
+        // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
+        if cancel.is_cancelled() {
+            commit.failed.store(true, Ordering::Release);
+            commit.release();
+            return Err(HandlerError::Processing(
+                "code indexing cancelled mid-run; not checkpointing partial graph".to_string(),
+            ));
+        }
 
         context.progress.notify_in_progress().await;
         self.metrics
