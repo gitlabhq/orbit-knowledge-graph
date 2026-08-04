@@ -1,3 +1,16 @@
+## [0.95.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.94.0...v0.95.0) (2026-08-04)
+
+### Features
+
+* **dashboards:** render a dedicated flavor for tenant Grafanas ([62b1a5e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/62b1a5e90743202d9e87653264686727144fc6ce)) by Jean-Gabriel Doyon
+* **schema:** track durable unversioned DDL in a persistent snapshot ([73db3f2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/73db3f2ec05a60603c72c5de205e8155e868c729)) by Michael Usachenko
+
+### Fixes
+
+* **code-indexer:** refuse to checkpoint a cancelled code index ([6ba9f48](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6ba9f481e43d5ca0f23b38a01e705788897f6fc7)) by Michael Usachenko
+* **e2e:** sweep stale namespaces older than 2 hours at setup ([6bcf5c8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6bcf5c85f41e45c391edd65179db5343cbb76390)) by Michael Usachenko
+* **health:** make pod readiness probes local-only ([b867b90](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b867b90921c5c951bf070df645a9d09661524013)) by Dmitry Gruzd
+
 ## [0.94.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.93.0...v0.94.0) (2026-08-03)
 
 ### Features
