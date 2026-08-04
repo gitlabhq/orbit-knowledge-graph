@@ -958,14 +958,21 @@ mod tests {
             .split_once("::")
             .map_or(module_path!(), |(_, rest)| rest);
         let filter = format!("{module}::deeply_nested_file_does_not_abort_the_process");
-        let status = std::process::Command::new(std::env::current_exe().expect("test exe"))
+        let output = std::process::Command::new(std::env::current_exe().expect("test exe"))
             .args(["--exact", &filter])
             .env(DEEP_NEST_CHILD_ENV, "1")
-            .status()
+            .output()
             .expect("spawn child test process");
+        let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
-            status.success(),
-            "child aborted ({status:?}): the depth screen failed to contain a stack-overflowing file"
+            stdout.contains("1 passed"),
+            "child ran no test, so this asserts nothing: filter {filter:?} matched nothing, \
+             most likely because the test was renamed. stdout={stdout:?}"
+        );
+        assert!(
+            output.status.success(),
+            "child aborted ({:?}): the depth screen failed to contain a stack-overflowing file",
+            output.status
         );
     }
 
