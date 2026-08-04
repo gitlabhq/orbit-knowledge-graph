@@ -12,14 +12,12 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use futures::StreamExt;
-use gkg_server_config::{NatsConfiguration, NamespaceDispatcherConfig, SiphonRouterConfig};
+use gkg_server_config::{NamespaceDispatcherConfig, NatsConfiguration, SiphonRouterConfig};
 use indexer::campaign::CampaignState;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
-use indexer::orchestrator::scheduled::{
-    NamespaceDispatcher, ScheduledTask, ScheduledTaskMetrics,
-};
+use indexer::orchestrator::scheduled::{NamespaceDispatcher, ScheduledTask, ScheduledTaskMetrics};
 use indexer::orchestrator::siphon::wire::{
     build_replication_events_for_table, enabled_namespace_columns,
 };
@@ -247,11 +245,10 @@ async fn wire_builder_enrollment_roundtrips_through_real_siphon_router() {
         ScheduledTaskMetrics::new(),
         Arc::new(CampaignState::new()),
     ));
-    let route: Arc<dyn Route> =
-        Arc::new(EnabledNamespacesRoute::new(
-            NamespaceIndexingDispatch::new(services.nats.clone()),
-            backfill,
-        ));
+    let route: Arc<dyn Route> = Arc::new(EnabledNamespacesRoute::new(
+        NamespaceIndexingDispatch::new(services.nats.clone()),
+        backfill,
+    ));
     let siphon = Siphon::new(
         services.nats.clone(),
         ScheduledTaskMetrics::new(),
