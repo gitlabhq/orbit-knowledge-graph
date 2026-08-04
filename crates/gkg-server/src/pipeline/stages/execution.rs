@@ -40,6 +40,13 @@ impl PipelineStage for ClickHouseExecutor {
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
             .inspect_err(|e| obs.record_error(e))?;
 
+        let user_id = ctx
+            .server_extensions
+            .get::<crate::auth::Claims>()
+            .map(|c| c.user_id)
+            .unwrap_or(0);
+        let log_comment = correlation::log_comment_base(user_id, &ctx.query_json);
+
         let (prepared, result_context) = {
             let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
 
@@ -52,7 +59,7 @@ impl PipelineStage for ClickHouseExecutor {
 
             let query_id = correlation::query_id("base");
             http_settings.push(("query_id".to_string(), query_id.clone()));
-            http_settings.push(("log_comment".to_string(), correlation::log_comment(None)));
+            http_settings.push(("log_comment".to_string(), log_comment));
 
             let prepared = PreparedQuery {
                 sql: compiled.base.sql.clone(),
