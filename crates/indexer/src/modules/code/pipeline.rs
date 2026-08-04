@@ -366,9 +366,7 @@ impl CodeIndexingPipeline {
             .build_code_graph(request, repository, indexed_at, config)
             .await?;
 
-        // A cancelled run yields a partial graph with no error in the result, so the fatal-error
-        // guard below can't catch it. The handler's timeout path drops this future before here;
-        // this covers any caller that instead lets a cancelled run finish.
+        // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
         if cancel.is_cancelled() {
             commit.failed.store(true, Ordering::Release);
             commit.release();
