@@ -13,13 +13,18 @@ const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY
 
 #[derive(Serialize)]
 struct AttributionPayload<'a> {
-    v: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     c: Option<String>,
     u: u64,
     q: &'a str,
+    versions: Versions,
+}
+
+#[derive(Serialize)]
+struct Versions {
+    payload: u32,
     dsl: String,
-    sv: u32,
+    schema: u32,
 }
 
 pub(crate) fn query_id(stage: &str) -> String {
@@ -44,12 +49,14 @@ pub(crate) fn log_comment(suffix: Option<&str>) -> String {
 /// carrying correlation ID, user, DSL query, and the compiler/schema versions.
 pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
     let payload = AttributionPayload {
-        v: PAYLOAD_VERSION,
         c: labkit::correlation::current(),
         u: user_id,
         q: query_json,
-        dsl: QUERY_DSL_VERSION.trim().to_string(),
-        sv: *indexer::schema::version::SCHEMA_VERSION,
+        versions: Versions {
+            payload: PAYLOAD_VERSION,
+            dsl: QUERY_DSL_VERSION.trim().to_string(),
+            schema: *indexer::schema::version::SCHEMA_VERSION,
+        },
     };
     let json = serde_json::to_vec(&payload).unwrap_or_default();
     format!("gkg;{}", STANDARD_NO_PAD.encode(json))
@@ -153,12 +160,15 @@ mod tests {
         });
         let p = decode_base_payload(&comment);
 
-        assert_eq!(p["v"], PAYLOAD_VERSION);
         assert_eq!(p["c"], "req-abc-123");
         assert_eq!(p["u"], 42);
         assert_eq!(p["q"], r#"{"query_type":"traversal"}"#);
-        assert_eq!(p["dsl"], QUERY_DSL_VERSION.trim());
-        assert_eq!(p["sv"], *indexer::schema::version::SCHEMA_VERSION);
+        assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
+        assert_eq!(p["versions"]["dsl"], QUERY_DSL_VERSION.trim());
+        assert_eq!(
+            p["versions"]["schema"],
+            *indexer::schema::version::SCHEMA_VERSION
+        );
     }
 
     #[test]
