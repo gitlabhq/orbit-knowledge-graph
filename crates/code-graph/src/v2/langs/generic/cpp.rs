@@ -293,6 +293,44 @@ mod tests {
         );
     }
 
+    // qualified_identifier is right-recursive, so the operator_cast is the
+    // deepest final component; normalize it at any qualifier depth.
+    #[test]
+    fn nested_qualified_conversion_operator() {
+        assert_eq!(
+            function_name_fqn("ns::Ptr::operator bool() const { return true; }\n"),
+            (
+                "ns::Ptr::operator bool".into(),
+                "test::ns::Ptr::operator bool".into()
+            )
+        );
+        assert_eq!(
+            function_name_fqn("S::I::operator int() const { return 0; }\n"),
+            (
+                "S::I::operator int".into(),
+                "test::S::I::operator int".into()
+            )
+        );
+    }
+
+    // operator char() and operator const char*() must not collide on one fqn:
+    // pointer/reference/cv decorations stay on the conversion type.
+    #[test]
+    fn conversion_operator_keeps_pointer_and_ref_type() {
+        assert_eq!(
+            function_name_fqn("class C { operator const char*() const { return 0; } };\n").0,
+            "operator const char*"
+        );
+        assert_eq!(
+            function_name_fqn("class C { operator int*() { return 0; } };\n").0,
+            "operator int*"
+        );
+        assert_eq!(
+            function_name_fqn("class C { operator int&() { return x; } };\n").0,
+            "operator int&"
+        );
+    }
+
     #[test]
     fn class_definition() {
         let result = parse("class Point { public: int x; int y; };\n").unwrap();

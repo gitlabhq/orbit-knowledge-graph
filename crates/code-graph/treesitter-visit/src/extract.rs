@@ -87,30 +87,66 @@ fn descend_declarator_name<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>
 /// Text for a C/C++ declared name, normalizing a conversion operator so its
 /// parameter list and trailing qualifiers do not leak into the name.
 ///
-/// `operator_cast` → `operator <type>`; a `qualified_identifier` ending in one
-/// (`Ptr::operator int() const`) → `<qualifier>::operator <type>`; anything
-/// else → its own text.
+/// A trailing `operator_cast` is normalized (`operator <type>`) at any
+/// qualifier depth: `qualified_identifier` is right-recursive in
+/// tree-sitter-cpp, so `S::I::operator int() const` nests as
+/// `qualified_identifier(S, qualified_identifier(I, operator_cast))` and the
+/// `operator_cast` is the deepest final component. The qualifier prefix is
+/// preserved (`S::I::operator int`). A `qualified_identifier` that does not end
+/// in a conversion operator (`A::B::foo`) is left verbatim.
 fn declared_name_text<D: Doc>(node: &Node<'_, D>) -> Option<String> {
     if node.kind().as_ref() == "operator_cast" {
         return operator_cast_text(node);
     }
     if node.kind().as_ref() == "qualified_identifier"
-        && let Some(last) = node.children().filter(|c| c.is_named()).last()
-        && last.kind().as_ref() == "operator_cast"
-        && let Some(op) = operator_cast_text(&last)
+        && let Some(op_cast) = trailing_operator_cast(node)
+        && let Some(op) = operator_cast_text(&op_cast)
     {
         let text = node.text();
-        let qualifier = &text[..last.range().start - node.range().start];
+        let qualifier = &text[..op_cast.range().start - node.range().start];
         return Some(format!("{qualifier}{op}"));
     }
     Some(node.text().to_string())
 }
 
-/// `operator_cast` → `operator <type>`, dropping the `abstract_function_declarator`
-/// (`() const`) that its text otherwise includes.
+/// The `operator_cast` at the end of a (possibly nested) `qualified_identifier`,
+/// or `None` if the final component is a plain name.
+fn trailing_operator_cast<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>> {
+    let mut cur = node.clone();
+    while cur.kind().as_ref() == "qualified_identifier" {
+        cur = cur.children().filter(|c| c.is_named()).last()?;
+    }
+    (cur.kind().as_ref() == "operator_cast").then_some(cur)
+}
+
+/// `operator_cast` → `operator <type>`, dropping the function declarator
+/// (`() const`) while keeping pointer/reference/cv decorations on the target
+/// type (`operator const char*`, `operator int&`). The target type spans
+/// everything up to the innermost `parameter_list`, which is the operator's own
+/// argument list even when the type itself embeds one
+/// (`operator std::function<void(int)>`).
 fn operator_cast_text<D: Doc>(node: &Node<'_, D>) -> Option<String> {
-    let ty = node.field("type")?;
-    Some(format!("operator {}", ty.text()))
+    let params = function_parameter_list(node)?;
+    let text = node.text();
+    let end = params.range().start - node.range().start;
+    Some(text[..end].trim_end().to_string())
+}
+
+/// The `parameter_list` of the `abstract_function_declarator` reached by
+/// following an `operator_cast`'s `declarator` field through any
+/// pointer/reference wrappers. `abstract_reference_declarator` carries no
+/// `declarator` field, so it is followed via its first named child.
+fn function_parameter_list<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>> {
+    let mut cur = descend_abstract_declarator(node)?;
+    while cur.kind().as_ref() != "abstract_function_declarator" {
+        cur = descend_abstract_declarator(&cur)?;
+    }
+    cur.child_of_kind("parameter_list")
+}
+
+fn descend_abstract_declarator<'r, D: Doc>(node: &Node<'r, D>) -> Option<Node<'r, D>> {
+    node.field("declarator")
+        .or_else(|| node.children().find(|c| c.is_named()))
 }
 
 #[derive(Clone)]
@@ -651,6 +687,30 @@ mod tests {
         assert_eq!(
             cpp_fn_name("Ptr::operator int() const { return 0; }"),
             Some("Ptr::operator int".into())
+        );
+        assert_eq!(
+            cpp_fn_name("S::I::operator int() const { return 0; }"),
+            Some("S::I::operator int".into())
+        );
+        assert_eq!(
+            cpp_fn_name("class C { operator const char*() const { return 0; } };"),
+            Some("operator const char*".into())
+        );
+        assert_eq!(
+            cpp_fn_name("class C { operator int*() { return 0; } };"),
+            Some("operator int*".into())
+        );
+        assert_eq!(
+            cpp_fn_name("class C { operator int&() { return x; } };"),
+            Some("operator int&".into())
+        );
+        assert_eq!(
+            cpp_fn_name("class C { operator std::string() const { return {}; } };"),
+            Some("operator std::string".into())
+        );
+        assert_eq!(
+            cpp_fn_name("class C { operator std::function<void(int)>() { return {}; } };"),
+            Some("operator std::function<void(int)>".into())
         );
     }
 
