@@ -5,7 +5,7 @@ use oxc::span::SourceType;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
-use super::super::depth_screen::{MAX_NESTING_DEPTH, bracket_depth_upper_bound};
+use crate::utils::exceeds_nesting_cap;
 
 const MAX_EVAL_MODULES: usize = 64;
 const MAX_EVAL_DEPTH: usize = 12;
@@ -100,7 +100,7 @@ fn evaluate_script_module(
 ) -> Option<EvaluatedValue> {
     let source = std::fs::read_to_string(module_path).ok()?;
     // Read straight off disk, so `CodeFilter` never saw this file.
-    if bracket_depth_upper_bound(&source) > MAX_NESTING_DEPTH {
+    if exceeds_nesting_cap(&source) {
         return None;
     }
     let source_type = SourceType::from_path(module_path).ok()?;

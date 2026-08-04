@@ -9,7 +9,6 @@ use oxc::syntax::scope::ScopeFlags;
 use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use std::collections::HashMap;
 
-use super::super::depth_screen::{MAX_NESTING_DEPTH, bracket_depth_upper_bound};
 use super::super::frameworks::{
     extract_vue_options_api, is_vue_like_path, vue_default_component_def,
 };
@@ -21,6 +20,7 @@ use super::cjs::{extract_cjs_exports, extract_cjs_imports};
 use super::dataflow::extract_call_edges;
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
 use super::patterns::for_each_static_object_property;
+use crate::utils::{MAX_NESTING_DEPTH, exceeds_nesting_cap};
 
 pub(super) type NodeId = oxc::semantic::NodeId;
 
@@ -767,13 +767,10 @@ impl JsAnalyzer {
 
         // Deep operator chains overflow the semantic builder without nesting
         // brackets, so they still get through. knowledge-graph#1114.
-        let nesting_depth = bracket_depth_upper_bound(source);
-        if nesting_depth > MAX_NESTING_DEPTH {
+        if exceeds_nesting_cap(source) {
             return Err(AnalyzerError::fault(
                 FileFault::DeeplyNested,
-                format!(
-                    "{file_path}: bracket nesting depth {nesting_depth} exceeds {MAX_NESTING_DEPTH}"
-                ),
+                format!("{file_path}: bracket nesting exceeds {MAX_NESTING_DEPTH}"),
             ));
         }
 
