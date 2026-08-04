@@ -11,7 +11,6 @@ pub fn exceeds_nesting_cap(source: &str) -> bool {
     bracket_depth_upper_bound(source) > MAX_NESTING_DEPTH
 }
 
-/// Counts every bracket byte, including inside strings and comments.
 fn bracket_depth_upper_bound(source: &str) -> usize {
     let (mut depth, mut max) = (0usize, 0usize);
     for b in source.bytes() {

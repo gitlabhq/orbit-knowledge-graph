@@ -99,7 +99,6 @@ fn evaluate_script_module(
     depth: usize,
 ) -> Option<EvaluatedValue> {
     let source = std::fs::read_to_string(module_path).ok()?;
-    // Read straight off disk, so `CodeFilter` never saw this file.
     if exceeds_nesting_cap(&source) {
         return None;
     }

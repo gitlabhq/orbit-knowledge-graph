@@ -765,8 +765,6 @@ impl JsAnalyzer {
         })?;
         let source_type = source_type.with_jsx(source_type.is_javascript());
 
-        // Deep operator chains overflow the semantic builder without nesting
-        // brackets, so they still get through. knowledge-graph#1114.
         if exceeds_nesting_cap(source) {
             return Err(AnalyzerError::fault(
                 FileFault::DeeplyNested,
@@ -933,7 +931,6 @@ mod tests {
             .expect("nesting under the cap parses cleanly");
     }
 
-    // An overflow aborts uncatchably, so asserting in-process would kill the runner.
     #[test]
     fn deeply_nested_file_does_not_abort_the_process() {
         if std::env::var_os(DEEP_NEST_CHILD_ENV).is_some() {
@@ -957,7 +954,6 @@ mod tests {
             return;
         }
 
-        // libtest names omit the crate segment that `module_path!` carries.
         let module = module_path!()
             .split_once("::")
             .map_or(module_path!(), |(_, rest)| rest);
