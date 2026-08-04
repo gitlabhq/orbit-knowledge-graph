@@ -63,6 +63,7 @@ pub struct LocalRepositoryCache {
     base_dir: PathBuf,
     max_file_size: u64,
     max_total_bytes: u64,
+    max_parse_bytes: u64,
     metrics: CodeMetrics,
 }
 
@@ -71,12 +72,14 @@ impl LocalRepositoryCache {
         base_dir: PathBuf,
         max_file_size: u64,
         max_total_bytes: u64,
+        max_parse_bytes: u64,
         metrics: CodeMetrics,
     ) -> Self {
         Self {
             base_dir,
             max_file_size,
             max_total_bytes,
+            max_parse_bytes,
             metrics,
         }
     }
@@ -109,6 +112,7 @@ impl RepositoryCache for LocalRepositoryCache {
         let mut filter = CodeFilter::new(
             self.max_file_size,
             self.max_total_bytes,
+            self.max_parse_bytes,
             detect_language_from_path,
         );
         // The blocking task owns the `TempDir` for the duration of extraction and hands it back.
@@ -162,6 +166,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             max_file_size,
             0,
+            0,
             CodeMetrics::default(),
         );
         (temp_dir, cache)
@@ -173,6 +178,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             u64::MAX,
             max_total_bytes,
+            0,
             CodeMetrics::default(),
         );
         (temp_dir, cache)
@@ -280,7 +286,7 @@ mod tests {
     async fn purge_all_recreates_missing_base_dir() {
         let temp_dir = TempDir::new().unwrap();
         let base = temp_dir.path().join("not-yet-created");
-        let cache = LocalRepositoryCache::new(base.clone(), u64::MAX, 0, CodeMetrics::default());
+        let cache = LocalRepositoryCache::new(base.clone(), u64::MAX, 0, 0, CodeMetrics::default());
 
         cache.purge_all().await.unwrap();
 

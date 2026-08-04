@@ -463,7 +463,7 @@
           "minimum": 0
         },
         "max_parse_bytes": {
-          "description": "Parse-candidate source bytes one repository may accept before the\npipeline sheds the rest at inventory time, so a pathological generated\nrepository can't OOM the worker pool. Shedding happens before any parse,\nso it covers every language uniformly. 0 = no limit. Defaults to 64 MiB\n(see `default_code_indexing_max_parse_bytes`).",
+          "description": "Defaults to 64 MiB. 0 = no limit.",
           "type": "integer",
           "format": "uint64",
           "default": 67108864,

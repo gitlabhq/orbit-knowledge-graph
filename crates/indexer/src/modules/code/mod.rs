@@ -91,6 +91,7 @@ pub async fn register_handlers(
         LocalRepositoryCache::default_dir(),
         code_indexing_task_config.pipeline.max_file_size_bytes,
         code_indexing_task_config.pipeline.max_total_bytes,
+        code_indexing_task_config.pipeline.max_parse_bytes,
         metrics.clone(),
     );
     if let Err(error) = local_cache.purge_all().await {

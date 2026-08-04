@@ -480,8 +480,6 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
-    /// Source bytes, not graph bytes. 0 = no limit.
-    pub max_parse_bytes: u64,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
@@ -519,7 +517,6 @@ impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
             max_files: 0,
-            max_parse_bytes: 0,
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
@@ -569,7 +566,6 @@ pub struct PipelineStats {
     pub files_indexed: usize,
     pub files_parsed: usize,
     pub files_skipped: usize,
-    pub files_shed_over_byte_cap: usize,
     pub definitions_count: usize,
     pub imports_count: usize,
     pub references_count: usize,
@@ -698,11 +694,8 @@ impl Pipeline {
         //    CodeGraph for cross-language resolution.
         let t_discovery = std::time::Instant::now();
         let pb_discover = spinner("Preparing file inventory...");
-        let candidates =
-            group_parseable_inventory(&file_inventory, config.max_files, config.max_parse_bytes);
-        let files_by_family = candidates.groups;
-        let parsed_file_languages = candidates.file_languages;
-        let files_shed_over_byte_cap = candidates.shed_over_byte_cap;
+        let (files_by_family, parsed_file_languages) =
+            group_parseable_inventory(&file_inventory, config.max_files);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
@@ -987,7 +980,6 @@ impl Pipeline {
                 files_indexed: files_count.into_inner(),
                 files_parsed: files_parsed.into_inner(),
                 files_skipped: files_skipped.into_inner(),
-                files_shed_over_byte_cap,
                 definitions_count: definitions_count.into_inner(),
                 imports_count: imports_count.into_inner(),
                 references_count: 0,
@@ -1816,118 +1808,6 @@ mod tests {
             result.skipped[0].kind
         );
         assert_eq!(result.skipped[0].path, "main.py");
-    }
-
-    #[test]
-    fn memory_cap_sheds_source_bytes_past_the_ceiling() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
-        std::fs::write(root.join("b.py"), "def g():\n    return 2\n").unwrap();
-
-        let result = Pipeline::run_with_tracer(
-            root,
-            Arc::from(vec![
-                FileInventoryEntry {
-                    path: "a.py".into(),
-                    size: 22,
-                    decision: Decision::Parse,
-                },
-                FileInventoryEntry {
-                    path: "b.py".into(),
-                    size: 22,
-                    decision: Decision::Parse,
-                },
-            ]),
-            PipelineConfig {
-                max_parse_bytes: 1,
-                ..PipelineConfig::default()
-            },
-            &FxHashMap::default(),
-            crate::v2::trace::Tracer::new(false),
-            Arc::new(TestCapture::new()),
-            Arc::new(|_: &str, _: RecordBatch| Ok(())),
-        );
-
-        assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.stats.files_shed_over_byte_cap, 1);
-        assert_eq!(result.stats.files_parsed, 1);
-        assert_eq!(
-            result.stats.files_indexed, 2,
-            "the shed file must still appear as an unparsed File node"
-        );
-    }
-
-    #[test]
-    fn memory_cap_of_zero_sheds_nothing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
-        std::fs::write(root.join("b.py"), "def g():\n    return 2\n").unwrap();
-
-        let result = Pipeline::run_with_tracer(
-            root,
-            Arc::from(vec![
-                FileInventoryEntry {
-                    path: "a.py".into(),
-                    size: 22,
-                    decision: Decision::Parse,
-                },
-                FileInventoryEntry {
-                    path: "b.py".into(),
-                    size: 22,
-                    decision: Decision::Parse,
-                },
-            ]),
-            PipelineConfig {
-                max_parse_bytes: 0,
-                ..PipelineConfig::default()
-            },
-            &FxHashMap::default(),
-            crate::v2::trace::Tracer::new(false),
-            Arc::new(TestCapture::new()),
-            Arc::new(|_: &str, _: RecordBatch| Ok(())),
-        );
-
-        assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.stats.files_shed_over_byte_cap, 0);
-    }
-
-    // JsPipeline never recorded graph bytes, so the old in-parse budget shed nothing here.
-    #[test]
-    fn memory_cap_covers_typescript() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        std::fs::write(root.join("a.ts"), "export function f() { return 1; }\n").unwrap();
-        std::fs::write(root.join("b.ts"), "export function g() { return 2; }\n").unwrap();
-
-        let result = Pipeline::run_with_tracer(
-            root,
-            Arc::from(vec![
-                FileInventoryEntry {
-                    path: "a.ts".into(),
-                    size: 34,
-                    decision: Decision::Parse,
-                },
-                FileInventoryEntry {
-                    path: "b.ts".into(),
-                    size: 34,
-                    decision: Decision::Parse,
-                },
-            ]),
-            PipelineConfig {
-                max_parse_bytes: 1,
-                ..PipelineConfig::default()
-            },
-            &FxHashMap::default(),
-            crate::v2::trace::Tracer::new(false),
-            Arc::new(TestCapture::new()),
-            Arc::new(|_: &str, _: RecordBatch| Ok(())),
-        );
-
-        assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.stats.files_shed_over_byte_cap, 1);
-        assert_eq!(result.stats.files_parsed, 1);
     }
 
     #[test]

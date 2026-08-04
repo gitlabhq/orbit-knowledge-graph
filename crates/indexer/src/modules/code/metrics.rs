@@ -118,12 +118,8 @@ impl CodeMetrics {
     }
 
     pub(in crate::modules::code) fn record_file_skipped(&self, reason: &'static str) {
-        self.record_files_skipped(reason, 1);
-    }
-
-    pub(in crate::modules::code) fn record_files_skipped(&self, reason: &'static str, count: u64) {
         self.files_skipped
-            .add(count, &[KeyValue::new(code::labels::REASON, reason)]);
+            .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
     }
 
     pub(in crate::modules::code) fn record_file_fault(&self, kind: &'static str) {

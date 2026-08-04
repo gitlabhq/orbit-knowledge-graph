@@ -59,6 +59,7 @@ impl GraphConverter for CapturingConverter {
 async fn extract_via_archive_endpoint(
     entries: &[Entry<'_>],
     target: &Path,
+    max_parse_bytes: u64,
 ) -> (Vec<FileInventoryEntry>, FxHashMap<String, FilterSkip>) {
     use axum::Router;
     use axum::body::Body;
@@ -99,7 +100,7 @@ async fn extract_via_archive_endpoint(
     let target = target.to_path_buf();
     let handle = tokio::runtime::Handle::current();
     let result = tokio::task::spawn_blocking(move || {
-        let mut filter = CodeFilter::new(0, 0, detect_language_from_path);
+        let mut filter = CodeFilter::new(0, 0, max_parse_bytes, detect_language_from_path);
         let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
         let inventory = extract_tar_gz(bridge, &target, &mut filter).unwrap();
         (inventory, filter.file_reasons().clone())
@@ -215,7 +216,8 @@ async fn cargo_workspace_resolves_through_archive_endpoint() {
         Entry::File("root/assets/logo.png", b"\x89PNG"),
         Entry::File("root/dist/build.zip", b"PK"),
     ];
-    let (file_inventory, stream_reasons) = extract_via_archive_endpoint(&entries, dir.path()).await;
+    let (file_inventory, stream_reasons) =
+        extract_via_archive_endpoint(&entries, dir.path(), 0).await;
 
     assert!(dir.path().join("Cargo.toml").exists());
     assert!(dir.path().join("crates/lib/Cargo.toml").exists());
@@ -242,7 +244,8 @@ async fn excluded_archive_entries_are_not_materialized_or_parsed() {
         Entry::File("root/assets/logo.png", b"\x89PNG"),
         Entry::File("root/dist/build.zip", b"PK"),
     ];
-    let (file_inventory, stream_reasons) = extract_via_archive_endpoint(&entries, dir.path()).await;
+    let (file_inventory, stream_reasons) =
+        extract_via_archive_endpoint(&entries, dir.path(), 0).await;
     let inventory_paths: Vec<_> = file_inventory.iter().map(|e| e.path.as_str()).collect();
     assert!(inventory_paths.contains(&"src/app.ts"));
     assert!(inventory_paths.contains(&"assets/logo.png"));
@@ -298,7 +301,8 @@ async fn js_tsconfig_alias_resolves_through_archive_endpoint() {
         Entry::File("root/static/banner.gif", b"GIF89a"),
         Entry::File("root/fonts/Inter.woff2", b""),
     ];
-    let (file_inventory, stream_reasons) = extract_via_archive_endpoint(&entries, dir.path()).await;
+    let (file_inventory, stream_reasons) =
+        extract_via_archive_endpoint(&entries, dir.path(), 0).await;
 
     assert!(dir.path().join("package.json").exists());
     assert!(dir.path().join("tsconfig.json").exists());
@@ -313,5 +317,34 @@ async fn js_tsconfig_alias_resolves_through_archive_endpoint() {
     assert!(
         edge_count(&run.graphs, EdgeKind::Imports) > 0,
         "no Imports edges emitted; tsconfig alias likely failed to resolve"
+    );
+}
+
+#[tokio::test]
+async fn parse_byte_cap_sheds_candidate_as_unparsed_node_with_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = b"export function kept() { return 1; }\n";
+    let shed = b"export function shed() { return 2; }\n";
+    let entries = [
+        Entry::File("root/src/a.ts", kept),
+        Entry::File("root/src/b.ts", shed),
+    ];
+    let cap = kept.len() as u64 + 1;
+    let (file_inventory, stream_reasons) =
+        extract_via_archive_endpoint(&entries, dir.path(), cap).await;
+    assert_eq!(
+        stream_reasons.get("src/b.ts"),
+        Some(&FilterSkip::MemoryBudget)
+    );
+
+    let run = run_pipeline(dir.path(), file_inventory, stream_reasons).await;
+    assert_eq!(run.files_indexed, 2);
+    assert_eq!(run.files_parsed, 1);
+    assert!(has_def(&run.graphs, "src/a.ts", "kept"));
+    assert!(!has_def(&run.graphs, "src/b.ts", "shed"));
+    assert_eq!(file_reason(&run.graphs, "src/a.ts").as_deref(), Some(""));
+    assert_eq!(
+        file_reason(&run.graphs, "src/b.ts").as_deref(),
+        Some("skip_memory_budget")
     );
 }

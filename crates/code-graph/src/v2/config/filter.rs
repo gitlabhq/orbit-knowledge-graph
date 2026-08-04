@@ -3,7 +3,9 @@
 //! [`Decision`]: `Parse` (source), `Load` (resolver inputs: on disk, not
 //! parsed), `ListOnly` (excluded/oversize/binary/minified: a node, no bytes), or
 //! `Drop`. Resolver inputs are never in the denylist, so they survive. A
-//! total-bytes [`Counter`] aborts an oversized repo.
+//! total-bytes [`Counter`] aborts an oversized repo; a parse-bytes [`Counter`]
+//! sheds parse candidates (to `ListOnly`) once their cumulative source passes
+//! the per-repo cap, bounding peak parser memory.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -44,6 +46,9 @@ pub enum FilterSkip {
     NotUtf8,
     Minified,
     LineTooLong,
+    /// Parse candidate shed because the repository's cumulative parse-candidate
+    /// source passed the per-repo cap; still a node, just not parsed.
+    MemoryBudget,
     NonRegularFile,
 }
 
@@ -59,22 +64,27 @@ pub struct SkipTally {
 pub struct CodeFilter {
     max_file_size: u64,
     total_bytes: Counter,
+    parse_bytes: Counter,
     skips: FxHashMap<FilterSkip, SkipTally>,
     detect_language: fn(&str) -> Option<Language>,
     file_reasons: FxHashMap<String, FilterSkip>,
 }
 
 impl CodeFilter {
-    /// `max_file_size` and `max_total_bytes` are byte caps (`0` = unlimited).
-    /// `detect_language` decides parse candidacy (e.g. `detect_language_from_path`).
+    /// `max_file_size`, `max_total_bytes`, and `max_parse_bytes` are byte caps
+    /// (`0` = unlimited). `max_total_bytes` aborts the whole stream; `max_parse_bytes`
+    /// only sheds parse candidates past the cap. `detect_language` decides parse
+    /// candidacy (e.g. `detect_language_from_path`).
     pub fn new(
         max_file_size: u64,
         max_total_bytes: u64,
+        max_parse_bytes: u64,
         detect_language: fn(&str) -> Option<Language>,
     ) -> Self {
         Self {
             max_file_size,
             total_bytes: Counter::new("total_bytes", max_total_bytes),
+            parse_bytes: Counter::new("parse_bytes", max_parse_bytes),
             skips: FxHashMap::default(),
             detect_language,
             file_reasons: FxHashMap::default(),
@@ -131,6 +141,11 @@ impl FileStreamHooks for CodeFilter {
         // A parse candidate is parsed; a non-parsable file (resolver input) is
         // loaded for resolvers but not parsed.
         if (self.detect_language)(&file.path).is_some() {
+            // Charge only parse candidates. Past the cap a candidate stays a node
+            // but is not parsed, bounding peak parser memory per repository.
+            if self.parse_bytes.add(file.size).is_err() {
+                return self.record(file, FilterSkip::MemoryBudget);
+            }
             Decision::Parse
         } else {
             Decision::Load
@@ -247,7 +262,7 @@ mod tests {
     }
 
     fn filter() -> CodeFilter {
-        CodeFilter::new(0, 0, detect_language_from_path)
+        CodeFilter::new(0, 0, 0, detect_language_from_path)
     }
 
     #[test]
@@ -289,7 +304,7 @@ mod tests {
 
     #[test]
     fn list_only_for_excluded_oversize_binary_minified() {
-        let mut f = CodeFilter::new(50, 0, detect_language_from_path);
+        let mut f = CodeFilter::new(50, 0, 0, detect_language_from_path);
         assert_eq!(
             f.on_header(&entry("logo.png", 10)),
             Some(Decision::ListOnly)
@@ -334,12 +349,102 @@ mod tests {
 
     #[test]
     fn total_bytes_cap_charges_every_file_then_trips() {
-        let mut f = CodeFilter::new(0, 100, detect_language_from_path);
+        let mut f = CodeFilter::new(0, 100, 0, detect_language_from_path);
         assert!(f.admit(&entry("a.png", 60)).is_ok());
         assert!(
             f.admit(&entry("b.png", 60)).is_err(),
             "excluded files still count toward the total-bytes cap"
         );
+    }
+
+    #[test]
+    fn parse_bytes_cap_sheds_candidates_past_the_ceiling() {
+        let mut f = CodeFilter::new(0, 0, 250, detect_language_from_path);
+        assert_eq!(
+            f.on_content(&entry("a.py", 100), b"x = 1\n"),
+            Decision::Parse
+        );
+        assert_eq!(
+            f.on_content(&entry("b.py", 100), b"y = 2\n"),
+            Decision::Parse
+        );
+        assert_eq!(
+            f.on_content(&entry("c.py", 100), b"z = 3\n"),
+            Decision::ListOnly,
+            "the third candidate crosses the 250-byte cap"
+        );
+        assert_eq!(
+            f.file_reasons().get("c.py"),
+            Some(&FilterSkip::MemoryBudget)
+        );
+        assert!(!f.file_reasons().contains_key("a.py"));
+    }
+
+    #[test]
+    fn parse_bytes_cap_of_zero_sheds_nothing() {
+        let mut f = CodeFilter::new(0, 0, 0, detect_language_from_path);
+        assert_eq!(
+            f.on_content(&entry("a.py", 1_000_000), b"x = 1\n"),
+            Decision::Parse
+        );
+        assert_eq!(
+            f.on_content(&entry("b.py", 1_000_000), b"y = 2\n"),
+            Decision::Parse
+        );
+        assert!(f.file_reasons().is_empty());
+    }
+
+    #[test]
+    fn parse_bytes_cap_only_charges_parse_candidates() {
+        let mut f = CodeFilter::new(0, 0, 50, detect_language_from_path);
+        assert_eq!(
+            f.on_content(&entry("Cargo.lock", 1_000), b"# lock\n"),
+            Decision::Load,
+            "resolver inputs never charge the parse-bytes cap"
+        );
+        assert_eq!(
+            f.on_content(&entry("a.py", 40), b"x = 1\n"),
+            Decision::Parse
+        );
+    }
+
+    // JS and TS dispatch to their own pipeline, which the earlier in-parse budget
+    // never charged; the filter charges every language uniformly before dispatch.
+    #[test]
+    fn parse_bytes_cap_covers_javascript_and_typescript() {
+        let mut f = CodeFilter::new(0, 0, 150, detect_language_from_path);
+        assert_eq!(
+            f.on_content(&entry("a.ts", 100), b"export const x = 1;\n"),
+            Decision::Parse
+        );
+        assert_eq!(
+            f.on_content(&entry("b.js", 100), b"export const y = 2;\n"),
+            Decision::ListOnly
+        );
+        assert_eq!(
+            f.file_reasons().get("b.js"),
+            Some(&FilterSkip::MemoryBudget)
+        );
+    }
+
+    #[test]
+    fn parse_bytes_cap_sheds_the_same_files_given_the_same_order() {
+        let charge = || {
+            let mut f = CodeFilter::new(0, 0, 250, detect_language_from_path);
+            for path in ["a.py", "b.py", "c.py", "d.py"] {
+                f.on_content(&entry(path, 100), b"x = 1\n");
+            }
+            let mut shed: Vec<String> = f
+                .file_reasons()
+                .iter()
+                .filter(|(_, r)| **r == FilterSkip::MemoryBudget)
+                .map(|(p, _)| p.clone())
+                .collect();
+            shed.sort();
+            shed
+        };
+        assert_eq!(charge(), charge());
+        assert_eq!(charge(), vec!["c.py", "d.py"]);
     }
 
     fn p(s: &str) -> std::path::PathBuf {

@@ -33,24 +33,19 @@ pub fn parseable_file_count(inventory: &[FileInventoryEntry]) -> usize {
         .count()
 }
 
-pub struct ParseCandidates {
-    pub groups: FxHashMap<LanguageFamily, Vec<FamilyFileInput>>,
-    pub file_languages: FxHashMap<String, Language>,
-    pub shed_over_byte_cap: usize,
-}
-
-/// `0` disables either cap. The inventory arrives path-sorted, so the shed set is
-/// the same on every run over the same commit.
+/// Select the parse candidates (loaded, language-detected, under `max_files`;
+/// `0` = unlimited) and group them by language family. Also returns the path →
+/// language map for the structural graph.
 pub fn group_parseable_inventory(
     inventory: &[FileInventoryEntry],
     max_files: usize,
-    max_parse_bytes: u64,
-) -> ParseCandidates {
+) -> (
+    FxHashMap<LanguageFamily, Vec<FamilyFileInput>>,
+    FxHashMap<String, Language>,
+) {
     let mut groups: FxHashMap<LanguageFamily, Vec<FamilyFileInput>> = FxHashMap::default();
-    let mut file_languages = FxHashMap::default();
+    let mut parsed_file_languages = FxHashMap::default();
     let mut accepted_files = 0usize;
-    let mut accepted_bytes = 0u64;
-    let mut shed_over_byte_cap = 0usize;
 
     for entry in inventory {
         // The stream already settled parse candidacy (parsable, loaded, deduped);
@@ -64,14 +59,9 @@ pub fn group_parseable_inventory(
         if max_files > 0 && accepted_files >= max_files {
             continue;
         }
-        if max_parse_bytes > 0 && accepted_bytes >= max_parse_bytes {
-            shed_over_byte_cap += 1;
-            continue;
-        }
 
         accepted_files += 1;
-        accepted_bytes += entry.size;
-        file_languages.insert(entry.path.clone(), lang);
+        parsed_file_languages.insert(entry.path.clone(), lang);
         groups
             .entry(lang.family())
             .or_default()
@@ -81,11 +71,7 @@ pub fn group_parseable_inventory(
             });
     }
 
-    ParseCandidates {
-        groups,
-        file_languages,
-        shed_over_byte_cap,
-    }
+    (groups, parsed_file_languages)
 }
 
 pub fn build_file_inventory_graph(
@@ -112,20 +98,16 @@ mod tests {
     use super::*;
 
     fn keep(path: &str) -> FileInventoryEntry {
-        sized(path, 10)
-    }
-
-    fn sized(path: &str, size: u64) -> FileInventoryEntry {
         FileInventoryEntry {
             path: path.into(),
-            size,
+            size: 10,
             decision: Decision::Parse,
         }
     }
 
     fn grouped_count(inventory: &[FileInventoryEntry], max_files: usize) -> usize {
-        group_parseable_inventory(inventory, max_files, 0)
-            .groups
+        group_parseable_inventory(inventory, max_files)
+            .0
             .values()
             .map(Vec::len)
             .sum()
@@ -152,61 +134,6 @@ mod tests {
             1,
             "only Keep files are parse candidates"
         );
-    }
-
-    #[test]
-    fn byte_cap_sheds_candidates_past_the_ceiling() {
-        let inventory = [sized("a.py", 100), sized("b.py", 100), sized("c.py", 100)];
-
-        let candidates = group_parseable_inventory(&inventory, 0, 150);
-
-        assert_eq!(candidates.groups.values().map(Vec::len).sum::<usize>(), 2);
-        assert_eq!(candidates.shed_over_byte_cap, 1);
-        assert!(candidates.file_languages.contains_key("a.py"));
-        assert!(candidates.file_languages.contains_key("b.py"));
-        assert!(!candidates.file_languages.contains_key("c.py"));
-    }
-
-    #[test]
-    fn byte_cap_of_zero_sheds_nothing() {
-        let inventory = [sized("a.py", 1_000_000), sized("b.py", 1_000_000)];
-
-        let candidates = group_parseable_inventory(&inventory, 0, 0);
-
-        assert_eq!(candidates.groups.values().map(Vec::len).sum::<usize>(), 2);
-        assert_eq!(candidates.shed_over_byte_cap, 0);
-    }
-
-    #[test]
-    fn byte_cap_shed_set_is_deterministic_across_runs() {
-        let inventory = [
-            sized("a.py", 100),
-            sized("b.py", 100),
-            sized("c.py", 100),
-            sized("d.py", 100),
-        ];
-
-        let first = group_parseable_inventory(&inventory, 0, 250);
-        let second = group_parseable_inventory(&inventory, 0, 250);
-
-        assert_eq!(first.shed_over_byte_cap, second.shed_over_byte_cap);
-        let mut first_kept: Vec<_> = first.file_languages.keys().cloned().collect();
-        let mut second_kept: Vec<_> = second.file_languages.keys().cloned().collect();
-        first_kept.sort();
-        second_kept.sort();
-        assert_eq!(first_kept, second_kept);
-        assert_eq!(first_kept, vec!["a.py", "b.py", "c.py"]);
-    }
-
-    // JsPipeline never recorded graph bytes, so the old in-parse budget missed these.
-    #[test]
-    fn byte_cap_covers_typescript_and_javascript() {
-        let inventory = [sized("a.ts", 100), sized("b.js", 100), sized("c.ts", 100)];
-
-        let candidates = group_parseable_inventory(&inventory, 0, 150);
-
-        assert_eq!(candidates.shed_over_byte_cap, 1);
-        assert!(!candidates.file_languages.contains_key("c.ts"));
     }
 
     fn with_decision(path: &str, decision: Decision) -> FileInventoryEntry {

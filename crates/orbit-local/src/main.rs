@@ -528,6 +528,7 @@ fn index_repo(
     let mut filter = code_graph::v2::config::CodeFilter::new(
         MAX_INDEXED_FILE_BYTES,
         0,
+        0,
         code_graph::v2::config::detect_language_from_path,
     );
     let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(

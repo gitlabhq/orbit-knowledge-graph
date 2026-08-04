@@ -69,6 +69,7 @@ impl CodeIndexingDeps {
             cache_dir.path().to_path_buf(),
             u64::MAX,
             0,
+            0,
             metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
@@ -120,6 +121,7 @@ impl CodeIndexingDeps {
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             self.cache_dir.path().to_path_buf(),
             u64::MAX,
+            0,
             0,
             self.metrics.clone(),
         ));

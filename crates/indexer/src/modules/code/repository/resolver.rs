@@ -266,6 +266,7 @@ mod tests {
             temp_dir.path().to_path_buf(),
             u64::MAX,
             0,
+            0,
             metrics,
         ));
         let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
