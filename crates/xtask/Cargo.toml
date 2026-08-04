@@ -51,6 +51,7 @@ clickhouse-client = { path = "../clickhouse-client" }
 indexer = { path = "../indexer" }
 gkg-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }
+tempfile = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }

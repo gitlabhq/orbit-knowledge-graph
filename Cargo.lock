@@ -14898,6 +14898,7 @@ dependencies = [
  "serde_yaml",
  "sqlformat",
  "tabled",
+ "tempfile",
  "tokio",
  "toml",
  "tracing",

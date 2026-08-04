@@ -177,6 +177,8 @@ enum BenchCommand {
     ReplaySdlc(bench::replay_sdlc::Args),
     /// Publish enrollment or code-task triggers to the Siphon NATS stream.
     PublishTriggers(bench::publish_triggers::Args),
+    /// QPS-stepped query load via query-profiler.
+    QueryLoad(bench::query_load::Args),
 }
 
 #[derive(Subcommand)]
@@ -241,6 +243,7 @@ async fn main() -> Result<()> {
         Command::Bench { command } => match command {
             BenchCommand::ReplaySdlc(args) => bench::replay_sdlc::run(args).await,
             BenchCommand::PublishTriggers(args) => bench::publish_triggers::run(args).await,
+            BenchCommand::QueryLoad(args) => bench::query_load::run(args).await,
         },
         Command::Synth { command } => match command {
             SynthCommand::Generate {

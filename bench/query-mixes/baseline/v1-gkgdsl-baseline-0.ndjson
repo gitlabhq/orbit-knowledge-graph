@@ -1,0 +1,5 @@
+{"dsl":{"query":{"type":"traversal","start":{"type":"Project"},"filter":{"namespace_id":9970},"limit":10}},"schema_version":71,"tags":["traversal"]}
+{"dsl":{"query":{"type":"neighbors","start":{"type":"MergeRequest","filter":{"project_id":278964,"iid":246680}},"edge_types":["AUTHORED"],"direction":"incoming","limit":5}},"schema_version":71,"tags":["neighbors"]}
+{"dsl":{"query":{"type":"traversal","start":{"type":"User","filter":{"username":"mfluharty"}},"limit":1}},"schema_version":71,"tags":["traversal","lookup"]}
+{"dsl":{"query":{"type":"traversal","start":{"type":"Group","filter":{"id":9970}},"limit":1}},"schema_version":71,"tags":["traversal","group"]}
+{"dsl":{"query":{"type":"neighbors","start":{"type":"Project","filter":{"id":278964}},"edge_types":["HAS_ISSUE"],"direction":"outgoing","limit":20}},"schema_version":71,"tags":["neighbors","issues"]}
