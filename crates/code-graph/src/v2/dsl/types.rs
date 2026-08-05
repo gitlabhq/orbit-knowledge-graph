@@ -21,9 +21,11 @@ type N<'a> = Node<'a, StrDoc<SupportLang>>;
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 /// A language-supplied definition-name computation. Given the definition node,
-/// returns the scope name, or `None` to fall through to the `Extract` pipeline.
-/// The escape hatch for names an `Extract` chain can't express (e.g. C/C++
-/// declarator descent, which lives in the language module, not the wrapper).
+/// returns the scope name, or `None` to fall back to `default_name` (dropping
+/// the definition when no `default_name` is set). When set, the hook fully
+/// replaces the `Extract` pipeline. The escape hatch for names an `Extract`
+/// chain can't express (e.g. C/C++ declarator descent, which lives in the
+/// language module, not the wrapper).
 pub type NameHookFn = fn(&N<'_>) -> Option<String>;
 
 pub trait Rule {
@@ -95,8 +97,10 @@ impl ScopeRule {
     }
 
     /// Compute the definition name with a language-supplied function instead of
-    /// an `Extract` pipeline. Takes precedence over `name_from`. Use only for
-    /// names an `Extract` chain can't express (e.g. C/C++ declarator descent).
+    /// an `Extract` pipeline. When set, the hook fully replaces `name_from`; a
+    /// `None` result falls back to `default_name`, not to the `Extract` path.
+    /// Use only for names an `Extract` chain can't express (e.g. C/C++
+    /// declarator descent).
     pub fn name_hook(mut self, hook: NameHookFn) -> Self {
         self.name_hook = Some(hook);
         self
