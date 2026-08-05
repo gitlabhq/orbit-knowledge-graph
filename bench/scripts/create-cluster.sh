@@ -72,6 +72,10 @@ spec:
     secretName: root-ca-secret
 EOF
 
+log "Installing Prometheus Operator CRDs (PodMonitor, ServiceMonitor)"
+${KC} apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.82.2/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
+${KC} apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.82.2/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml
+
 log "Waiting for root CA to be ready"
 ${KC} wait -n cert-manager certificate/root-ca \
   --for=condition=ready --timeout=60s
