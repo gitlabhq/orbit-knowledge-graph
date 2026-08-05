@@ -767,7 +767,7 @@ impl JsAnalyzer {
 
         if exceeds_nesting_cap(source) {
             return Err(AnalyzerError::fault(
-                FileFault::DeeplyNested,
+                FileFault::OxcDeeplyNested,
                 format!("{file_path}: bracket nesting exceeds {MAX_NESTING_DEPTH}"),
             ));
         }
@@ -919,7 +919,7 @@ mod tests {
             matches!(
                 err,
                 AnalyzerError::Fault {
-                    kind: FileFault::DeeplyNested,
+                    kind: FileFault::OxcDeeplyNested,
                     ..
                 }
             ),
@@ -945,7 +945,7 @@ mod tests {
                 matches!(
                     result,
                     Err(AnalyzerError::Fault {
-                        kind: FileFault::DeeplyNested,
+                        kind: FileFault::OxcDeeplyNested,
                         ..
                     })
                 ),
