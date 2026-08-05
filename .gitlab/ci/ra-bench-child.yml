@@ -1,35 +1,28 @@
-include:
-  - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
-    ref: '3.3.0'
-    file: 'templates/gcp_auth.yaml'
-
 stages:
   - prepare
   - run
   - cleanup
 
 .ra-bench-base:
-  extends: .google-oidc:auth
   tags:
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
   variables:
+    KCTX: gitlab-org/orbit/gkg-e2e-harness:e2e-harness-agent
     KUBECTL_VERSION: "1.35.2"
     HELM_VERSION: "3.20.0"
     HELMFILE_VERSION: "1.4.2"
-    RA_EPHEMERAL_CLUSTER: "1"
   before_script:
-    - !reference [.google-oidc:auth, before_script]
     - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX"
 
 ra_bench_prepare:
   extends: .ra-bench-base
   stage: prepare
   script:
     - source bench/scripts/labels-to-env.sh
-    - echo "Quota check and results bucket verification"
-    - gcloud storage ls gs://gkg-ra-results/ > /dev/null 2>&1 || echo "Results bucket not accessible"
-    - gcloud container clusters list --project gl-knowledgegraph-prj-f2eec59d --zone us-central1-a --format="table(name,status,currentNodeCount)"
+    - echo "Cluster access verified"
+    - kubectl get nodes
 
 ra_bench_run:
   extends: .ra-bench-base
@@ -47,8 +40,8 @@ ra_bench_run:
     - uv run bench/scoring/score.py "bench/results/${RUN_ID}" "${TIER:-small}"
     - uv run bench/scoring/report.py "bench/results/${RUN_ID}" "${TIER:-small}"
   after_script:
-    - !reference [.google-oidc:auth, before_script]
     - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX"
     - bench/scripts/teardown.sh || true
   artifacts:
     paths:
