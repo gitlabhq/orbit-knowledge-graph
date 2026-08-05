@@ -1,12 +1,14 @@
 # Single manual trigger that spawns a child pipeline with prepare/run/cleanup.
 # Shows as one collapsible "ra_bench" block in the pipeline UI.
 # Gate label: orbit::bench
+# Runs automatically when orbit::bench label is present. Remove the label
+# to skip. No manual play button (trigger/bridge jobs do not support it).
 ra_bench:
   stage: benchmark
   rules:
     - if: $CI_MERGE_REQUEST_LABELS !~ /\borbit::bench\b/
       when: never
-    - when: manual
+    - when: on_success
   variables:
     RUN_ID: "ra-${CI_PIPELINE_ID}"
   trigger:
