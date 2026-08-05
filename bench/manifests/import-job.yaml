@@ -29,12 +29,14 @@ spec:
           args:
             - |
               CH_URL="http://${CH_HOST}:8123"
+              CH_AUTH="user=default&password=${CH_PASSWORD}"
+              unset CH_PASSWORD
 
-              # All CH requests go through this function. Credentials stay in
-              # memory; curl errors are silenced to prevent URL+password leaks.
+              # Credentials live only in CH_AUTH. curl errors are silenced to
+              # prevent URL+credential leaks.
               ch() {
                 local db="${1:-}" query="${2:-}"
-                local params="user=default&password=${CH_PASSWORD}"
+                local params="${CH_AUTH}"
                 [ -n "${db}" ] && params="${params}&database=${db}"
                 curl -sf "${CH_URL}/?${params}" -d "${query}" 2>/dev/null
               }
@@ -74,7 +76,7 @@ spec:
                   [ -f "${part_file}" ] || continue
                   gzip -dc "${part_file}" | curl -sf \
                     -H "Content-Type: application/octet-stream" \
-                    "${CH_URL}/?user=default&password=${CH_PASSWORD}&database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
+                    "${CH_URL}/?${CH_AUTH}&database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
                     --data-binary @- 2>/dev/null || echo "  WARNING: part import failed for ${table}"
                   parts=$((parts + 1))
                 done
