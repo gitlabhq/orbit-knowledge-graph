@@ -14,7 +14,7 @@ use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
 use bytes::Bytes;
 use futures::StreamExt;
-use nats_client::NatsClient;
+use nats_client::{NatsClient, SubjectDedup};
 use parking_lot::Mutex;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
@@ -113,7 +113,12 @@ impl NatsBroker {
 
         for (stream_name, subjects) in managed_streams {
             self.inner
-                .create_or_update_stream(&stream_name, subjects, None)
+                .create_or_update_stream(
+                    &stream_name,
+                    subjects,
+                    None,
+                    SubjectDedup::CollapseDuplicates,
+                )
                 .await?;
         }
 
@@ -146,6 +151,7 @@ impl NatsBroker {
                 &NATS_VERSIONER.stream(DEAD_LETTER_STREAM),
                 vec![subject],
                 Some(DEAD_LETTER_MAX_AGE),
+                SubjectDedup::KeepAll,
             )
             .await?;
         Ok(())
