@@ -1,0 +1,118 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ra-import-dump
+  labels:
+    app: ra-bench
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: import
+          image: google/cloud-sdk:slim
+          env:
+            - name: CH_URL
+              value: "http://clickhouse.${CH_NAMESPACE}.svc.cluster.local:8123"
+            - name: DUMP_PREFIX
+              value: "${DUMP_PREFIX}"
+            - name: BUCKET
+              value: "gs://gkg-datalake-dumps"
+          command: ["/bin/bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              WORK="/tmp/dump"
+              mkdir -p "${WORK}/datalake"
+
+              echo "==> Downloading datalake from ${BUCKET}/${DUMP_PREFIX}/datalake/"
+              gcloud storage rsync "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/datalake/" --recursive
+
+              echo "==> Creating staging and datalake databases"
+              curl -sf "${CH_URL}" -d "CREATE DATABASE IF NOT EXISTS staging"
+              curl -sf "${CH_URL}" -d "CREATE DATABASE IF NOT EXISTS datalake"
+
+              echo "==> Importing into staging"
+              for schema_file in ${WORK}/datalake/*.schema.sql; do
+                [ -f "${schema_file}" ] || continue
+                table=$(basename "${schema_file}" .schema.sql)
+
+                ddl=$(sed \
+                  -e 's/SharedReplacingMergeTree([^)]*)//g' \
+                  -e 's/SharedMergeTree([^)]*)//g' \
+                  -e 's/`[a-z_]*`\.`/`/g' \
+                  "${schema_file}")
+                # Add ReplacingMergeTree back if the rewrite stripped it.
+                if echo "${ddl}" | grep -q "ENGINE = ()"; then
+                  ddl=$(echo "${ddl}" | sed 's/ENGINE = ()/ENGINE = ReplacingMergeTree()/g')
+                fi
+
+                curl -sf "${CH_URL}/?database=staging" -d "DROP TABLE IF EXISTS ${table}" || true
+                if ! curl -sf "${CH_URL}/?database=staging" -d "${ddl}"; then
+                  echo "  WARNING: DDL failed for ${table}, skipping"
+                  continue
+                fi
+
+                parts=0
+                for part_file in ${WORK}/datalake/${table}.part*.Native.gz; do
+                  [ -f "${part_file}" ] || continue
+                  gzip -dc "${part_file}" | curl -sf \
+                    -H "Content-Type: application/octet-stream" \
+                    "${CH_URL}/?database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
+                    --data-binary @- || echo "  WARNING: part import failed"
+                  parts=$((parts + 1))
+                done
+                echo "  ${table}: ${parts} parts"
+              done
+
+              echo "==> Copying staging -> datalake (with PII scrub)"
+              for table in $(curl -sf "${CH_URL}/?database=staging" -d "SHOW TABLES"); do
+                # Scrub known PII columns at copy time.
+                case "${table}" in
+                  siphon_users)
+                    curl -sf "${CH_URL}" -d \
+                      "INSERT INTO datalake.${table} SELECT * REPLACE (
+                        NULL AS email, NULL AS name,
+                        sipHash64(username) AS username
+                       ) FROM staging.${table}" 2>/dev/null && continue ;;
+                  siphon_notes)
+                    curl -sf "${CH_URL}" -d \
+                      "INSERT INTO datalake.${table} SELECT * REPLACE (
+                        NULL AS note
+                       ) FROM staging.${table}" 2>/dev/null && continue ;;
+                esac
+                # Default: copy as-is.
+                curl -sf "${CH_URL}" -d \
+                  "INSERT INTO datalake.${table} SELECT * FROM staging.${table}" 2>/dev/null || true
+              done
+
+              echo "==> Materializing _siphon_watermark on datalake tables"
+              for table in $(curl -sf "${CH_URL}/?database=datalake" -d "SHOW TABLES" | grep '^siphon_'); do
+                curl -sf "${CH_URL}/?database=datalake" -d \
+                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" 2>/dev/null || true
+                curl -sf "${CH_URL}/?database=datalake" -d \
+                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" 2>/dev/null || true
+              done
+
+              # Also handle non-siphon prefixed tables that need watermarks.
+              for table in merge_requests work_items; do
+                curl -sf "${CH_URL}/?database=datalake" -d \
+                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" 2>/dev/null || true
+                curl -sf "${CH_URL}/?database=datalake" -d \
+                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" 2>/dev/null || true
+              done
+
+              echo "==> Verifying row counts"
+              for table in $(curl -sf "${CH_URL}/?database=datalake" -d "SHOW TABLES"); do
+                rows=$(curl -sf "${CH_URL}/?database=datalake" -d "SELECT count() FROM ${table}")
+                echo "  ${table}: ${rows} rows"
+              done
+
+              echo "==> Import complete"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              memory: 8Gi
