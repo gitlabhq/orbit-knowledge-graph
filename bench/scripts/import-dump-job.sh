@@ -10,7 +10,7 @@ source "${BENCH_DIR}/scripts/lib.sh"
 CH_NAMESPACE="e2e-${RUN_ID}-clickhouse"
 JOB_NS="${CH_NAMESPACE}"
 
-# Read the CH default password from the ClickHouse StatefulSet env.
+# Read the CH default password and store it in a Secret (not in the Job spec).
 CH_PASSWORD=$($KC get statefulset clickhouse -n "${CH_NAMESPACE}" \
   -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CLICKHOUSE_PASSWORD")].value}')
 if [[ -z "${CH_PASSWORD}" ]]; then
@@ -18,10 +18,15 @@ if [[ -z "${CH_PASSWORD}" ]]; then
   exit 1
 fi
 
+$KC create secret generic ra-import-ch-auth \
+  -n "${JOB_NS}" \
+  --from-literal=password="${CH_PASSWORD}" \
+  --dry-run=client -o yaml | $KC apply -f -
+
 log "Submitting import job (dump=${DUMP_PREFIX}, ch_ns=${CH_NAMESPACE})"
 
-export CH_NAMESPACE DUMP_PREFIX CH_PASSWORD
-envsubst '${CH_NAMESPACE} ${DUMP_PREFIX} ${CH_PASSWORD}' \
+export CH_NAMESPACE DUMP_PREFIX
+envsubst '${CH_NAMESPACE} ${DUMP_PREFIX}' \
   < "${BENCH_DIR}/manifests/import-job.yaml" \
   | $KC apply -n "${JOB_NS}" -f -
 
@@ -44,4 +49,8 @@ else
 fi
 
 kill "${LOG_PID}" 2>/dev/null || true
+
+# Clean up the auth secret.
+$KC delete secret ra-import-ch-auth -n "${JOB_NS}" --ignore-not-found=true
+
 log "Import done"

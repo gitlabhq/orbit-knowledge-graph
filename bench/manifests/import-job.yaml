@@ -17,7 +17,10 @@ spec:
             - name: CH_HOST
               value: "clickhouse.${CH_NAMESPACE}.svc.cluster.local"
             - name: CH_PASSWORD
-              value: "${CH_PASSWORD}"
+              valueFrom:
+                secretKeyRef:
+                  name: ra-import-ch-auth
+                  key: password
             - name: DUMP_PREFIX
               value: "${DUMP_PREFIX}"
             - name: BUCKET
@@ -26,9 +29,15 @@ spec:
           args:
             - |
               CH_URL="http://${CH_HOST}:8123"
-              CH_AUTH="user=default&password=${CH_PASSWORD}"
-              ch() { curl -sf "${CH_URL}/?${CH_AUTH}&$1" ${2:+-d "$2"}; }
-              chq() { ch "database=$1" "$2"; }
+
+              # All CH requests go through this function. Credentials stay in
+              # memory; curl errors are silenced to prevent URL+password leaks.
+              ch() {
+                local db="${1:-}" query="${2:-}"
+                local params="user=default&password=${CH_PASSWORD}"
+                [ -n "${db}" ] && params="${params}&database=${db}"
+                curl -sf "${CH_URL}/?${params}" -d "${query}" 2>/dev/null
+              }
 
               WORK="/tmp/dump"
               mkdir -p "${WORK}/datalake"
@@ -54,8 +63,8 @@ spec:
                   ddl=$(echo "${ddl}" | sed 's/ENGINE = ()/ENGINE = ReplacingMergeTree()/g')
                 fi
 
-                chq staging "DROP TABLE IF EXISTS ${table}" || true
-                if ! chq staging "${ddl}"; then
+                ch staging "DROP TABLE IF EXISTS ${table}" || true
+                if ! ch staging "${ddl}"; then
                   echo "  WARNING: DDL failed for ${table}, skipping"
                   continue
                 fi
@@ -65,70 +74,63 @@ spec:
                   [ -f "${part_file}" ] || continue
                   gzip -dc "${part_file}" | curl -sf \
                     -H "Content-Type: application/octet-stream" \
-                    "${CH_URL}/?${CH_AUTH}&database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
-                    --data-binary @- || echo "  WARNING: part import failed"
+                    "${CH_URL}/?user=default&password=${CH_PASSWORD}&database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
+                    --data-binary @- 2>/dev/null || echo "  WARNING: part import failed for ${table}"
                   parts=$((parts + 1))
                 done
                 echo "  ${table}: ${parts} parts"
               done
 
-              echo "==> Dropping staging data after copy (defense in depth)"
               echo "==> Copying staging -> datalake (with PII scrub)"
-              for table in $(chq staging "SHOW TABLES"); do
+              for table in $(ch staging "SHOW TABLES"); do
                 case "${table}" in
                   siphon_users)
-                    chq datalake \
+                    ch datalake \
                       "INSERT INTO ${table} SELECT * REPLACE (
                         '' AS email, '' AS name, toString(sipHash64(username)) AS username
                        ) FROM staging.${table}" && continue ;;
                   siphon_notes)
-                    chq datalake \
+                    ch datalake \
                       "INSERT INTO ${table} SELECT * REPLACE ('' AS note) FROM staging.${table}" && continue ;;
                   siphon_merge_request_diffs)
-                    chq datalake \
+                    ch datalake \
                       "INSERT INTO ${table} SELECT * REPLACE ('' AS st_diffs) FROM staging.${table}" && continue ;;
                   siphon_merge_request_diff_files)
-                    chq datalake \
+                    ch datalake \
                       "INSERT INTO ${table} SELECT * REPLACE (
-                        '' AS diff, '' AS external_diff_offset, '' AS external_diff_size
-                       ) FROM staging.${table}" 2>/dev/null
-                    # Fallback if columns differ: copy without diff content columns.
-                    if [ $? -ne 0 ]; then
-                      chq datalake "INSERT INTO ${table} SELECT * FROM staging.${table}" 2>/dev/null
-                    fi
+                        '' AS diff
+                       ) FROM staging.${table}" 2>/dev/null || \
+                    ch datalake "INSERT INTO ${table} SELECT * FROM staging.${table}"
                     continue ;;
                   merge_requests)
-                    chq datalake \
+                    ch datalake \
                       "INSERT INTO ${table} SELECT * REPLACE (
                         '' AS title, '' AS description
                        ) FROM staging.${table}" && continue ;;
                   work_items)
-                    chq datalake \
+                    ch datalake \
                       "INSERT INTO ${table} SELECT * REPLACE (
                         '' AS title, '' AS description
                        ) FROM staging.${table}" && continue ;;
-                  siphon_approvals|siphon_members|siphon_issue_assignees|siphon_merge_request_assignees|siphon_merge_request_reviewers)
-                    chq datalake \
-                      "INSERT INTO ${table} SELECT * FROM staging.${table}" && continue ;;
                 esac
-                chq datalake \
-                  "INSERT INTO ${table} SELECT * FROM staging.${table}" 2>/dev/null || true
+                ch datalake \
+                  "INSERT INTO ${table} SELECT * FROM staging.${table}" || true
               done
 
-              echo "==> Dropping staging (raw unscrubbed data)"
+              echo "==> Dropping staging (unscrubbed data)"
               ch "" "DROP DATABASE IF EXISTS staging"
 
               echo "==> Materializing _siphon_watermark"
-              for table in $(chq datalake "SHOW TABLES"); do
-                chq datalake \
-                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" 2>/dev/null || true
-                chq datalake \
-                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" 2>/dev/null || true
+              for table in $(ch datalake "SHOW TABLES"); do
+                ch datalake \
+                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" || true
+                ch datalake \
+                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" || true
               done
 
-              echo "==> Verifying row counts"
-              for table in $(chq datalake "SHOW TABLES"); do
-                rows=$(chq datalake "SELECT count() FROM ${table}")
+              echo "==> Verifying row counts (no row data, counts only)"
+              for table in $(ch datalake "SHOW TABLES"); do
+                rows=$(ch datalake "SELECT count() FROM ${table}")
                 echo "  ${table}: ${rows} rows"
               done
 
