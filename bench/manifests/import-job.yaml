@@ -14,8 +14,13 @@ spec:
         - name: import
           image: google/cloud-sdk:slim
           env:
-            - name: CH_URL
-              value: "http://clickhouse.${CH_NAMESPACE}.svc.cluster.local:8123"
+            - name: CH_HOST
+              value: "clickhouse.${CH_NAMESPACE}.svc.cluster.local"
+            - name: CH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ra-import-ch-auth
+                  key: password
             - name: DUMP_PREFIX
               value: "${DUMP_PREFIX}"
             - name: BUCKET
@@ -23,15 +28,28 @@ spec:
           command: ["/bin/bash", "-euo", "pipefail", "-c"]
           args:
             - |
+              CH_URL="http://${CH_HOST}:8123"
+              CH_AUTH="user=default&password=${CH_PASSWORD}"
+              unset CH_PASSWORD
+
+              # Credentials live only in CH_AUTH. curl errors are silenced to
+              # prevent URL+credential leaks.
+              ch() {
+                local db="${1:-}" query="${2:-}"
+                local params="${CH_AUTH}"
+                [ -n "${db}" ] && params="${params}&database=${db}"
+                curl -sf "${CH_URL}/?${params}" -d "${query}" 2>/dev/null
+              }
+
               WORK="/tmp/dump"
               mkdir -p "${WORK}/datalake"
 
               echo "==> Downloading datalake from ${BUCKET}/${DUMP_PREFIX}/datalake/"
               gcloud storage rsync "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/datalake/" --recursive
 
-              echo "==> Creating staging and datalake databases"
-              curl -sf "${CH_URL}" -d "CREATE DATABASE IF NOT EXISTS staging"
-              curl -sf "${CH_URL}" -d "CREATE DATABASE IF NOT EXISTS datalake"
+              echo "==> Creating databases"
+              ch "" "CREATE DATABASE IF NOT EXISTS staging"
+              ch "" "CREATE DATABASE IF NOT EXISTS datalake"
 
               echo "==> Importing into staging"
               for schema_file in ${WORK}/datalake/*.schema.sql; do
@@ -43,13 +61,12 @@ spec:
                   -e 's/SharedMergeTree([^)]*)//g' \
                   -e 's/`[a-z_]*`\.`/`/g' \
                   "${schema_file}")
-                # Add ReplacingMergeTree back if the rewrite stripped it.
                 if echo "${ddl}" | grep -q "ENGINE = ()"; then
                   ddl=$(echo "${ddl}" | sed 's/ENGINE = ()/ENGINE = ReplacingMergeTree()/g')
                 fi
 
-                curl -sf "${CH_URL}/?database=staging" -d "DROP TABLE IF EXISTS ${table}" || true
-                if ! curl -sf "${CH_URL}/?database=staging" -d "${ddl}"; then
+                ch staging "DROP TABLE IF EXISTS ${table}" || true
+                if ! ch staging "${ddl}"; then
                   echo "  WARNING: DDL failed for ${table}, skipping"
                   continue
                 fi
@@ -59,57 +76,67 @@ spec:
                   [ -f "${part_file}" ] || continue
                   gzip -dc "${part_file}" | curl -sf \
                     -H "Content-Type: application/octet-stream" \
-                    "${CH_URL}/?database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
-                    --data-binary @- || echo "  WARNING: part import failed"
+                    "${CH_URL}/?${CH_AUTH}&database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
+                    --data-binary @- 2>/dev/null || echo "  WARNING: part import failed for ${table}"
                   parts=$((parts + 1))
                 done
                 echo "  ${table}: ${parts} parts"
               done
 
               echo "==> Copying staging -> datalake (with PII scrub)"
-              for table in $(curl -sf "${CH_URL}/?database=staging" -d "SHOW TABLES"); do
-                # Scrub known PII columns at copy time.
+              for table in $(ch staging "SHOW TABLES"); do
                 case "${table}" in
                   siphon_users)
-                    curl -sf "${CH_URL}" -d \
-                      "INSERT INTO datalake.${table} SELECT * REPLACE (
-                        NULL AS email, NULL AS name,
-                        sipHash64(username) AS username
-                       ) FROM staging.${table}" 2>/dev/null && continue ;;
+                    ch datalake \
+                      "INSERT INTO ${table} SELECT * REPLACE (
+                        '' AS email, '' AS name, toString(sipHash64(username)) AS username
+                       ) FROM staging.${table}" && continue ;;
                   siphon_notes)
-                    curl -sf "${CH_URL}" -d \
-                      "INSERT INTO datalake.${table} SELECT * REPLACE (
-                        NULL AS note
-                       ) FROM staging.${table}" 2>/dev/null && continue ;;
+                    ch datalake \
+                      "INSERT INTO ${table} SELECT * REPLACE ('' AS note) FROM staging.${table}" && continue ;;
+                  siphon_merge_request_diffs)
+                    ch datalake \
+                      "INSERT INTO ${table} SELECT * REPLACE ('' AS st_diffs) FROM staging.${table}" && continue ;;
+                  siphon_merge_request_diff_files)
+                    ch datalake \
+                      "INSERT INTO ${table} SELECT * REPLACE (
+                        '' AS diff
+                       ) FROM staging.${table}" 2>/dev/null || \
+                    ch datalake "INSERT INTO ${table} SELECT * FROM staging.${table}"
+                    continue ;;
+                  merge_requests)
+                    ch datalake \
+                      "INSERT INTO ${table} SELECT * REPLACE (
+                        '' AS title, '' AS description
+                       ) FROM staging.${table}" && continue ;;
+                  work_items)
+                    ch datalake \
+                      "INSERT INTO ${table} SELECT * REPLACE (
+                        '' AS title, '' AS description
+                       ) FROM staging.${table}" && continue ;;
                 esac
-                # Default: copy as-is.
-                curl -sf "${CH_URL}" -d \
-                  "INSERT INTO datalake.${table} SELECT * FROM staging.${table}" 2>/dev/null || true
+                ch datalake \
+                  "INSERT INTO ${table} SELECT * FROM staging.${table}" || true
               done
 
-              echo "==> Materializing _siphon_watermark on datalake tables"
-              for table in $(curl -sf "${CH_URL}/?database=datalake" -d "SHOW TABLES" | grep '^siphon_'); do
-                curl -sf "${CH_URL}/?database=datalake" -d \
-                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" 2>/dev/null || true
-                curl -sf "${CH_URL}/?database=datalake" -d \
-                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" 2>/dev/null || true
+              echo "==> Dropping staging (unscrubbed data)"
+              ch "" "DROP DATABASE IF EXISTS staging"
+
+              echo "==> Materializing _siphon_watermark"
+              for table in $(ch datalake "SHOW TABLES"); do
+                ch datalake \
+                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" || true
+                ch datalake \
+                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" || true
               done
 
-              # Also handle non-siphon prefixed tables that need watermarks.
-              for table in merge_requests work_items; do
-                curl -sf "${CH_URL}/?database=datalake" -d \
-                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" 2>/dev/null || true
-                curl -sf "${CH_URL}/?database=datalake" -d \
-                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" 2>/dev/null || true
-              done
-
-              echo "==> Verifying row counts"
-              for table in $(curl -sf "${CH_URL}/?database=datalake" -d "SHOW TABLES"); do
-                rows=$(curl -sf "${CH_URL}/?database=datalake" -d "SELECT count() FROM ${table}")
+              echo "==> Verifying row counts (no row data, counts only)"
+              for table in $(ch datalake "SHOW TABLES"); do
+                rows=$(ch datalake "SELECT count() FROM ${table}")
                 echo "  ${table}: ${rows} rows"
               done
 
-              echo "==> Import complete"
+              echo "==> Import complete. Staging dropped. Only scrubbed data in datalake."
           resources:
             requests:
               cpu: "1"

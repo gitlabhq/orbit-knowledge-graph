@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Submit an in-cluster Job that imports the datalake dump from GCS into
-# ClickHouse. Data never leaves GCP.
+# ClickHouse. Data never leaves GCP. Staging DB is dropped after copy.
 set -euo pipefail
 
 BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,6 +10,19 @@ source "${BENCH_DIR}/scripts/lib.sh"
 CH_NAMESPACE="e2e-${RUN_ID}-clickhouse"
 JOB_NS="${CH_NAMESPACE}"
 
+# Read the CH default password and store it in a Secret (not in the Job spec).
+CH_PASSWORD=$($KC get statefulset clickhouse -n "${CH_NAMESPACE}" \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CLICKHOUSE_PASSWORD")].value}')
+if [[ -z "${CH_PASSWORD}" ]]; then
+  log "ERROR: could not read CLICKHOUSE_PASSWORD from StatefulSet"
+  exit 1
+fi
+
+$KC create secret generic ra-import-ch-auth \
+  -n "${JOB_NS}" \
+  --from-literal=password="${CH_PASSWORD}" \
+  --dry-run=client -o yaml | $KC apply -f -
+
 log "Submitting import job (dump=${DUMP_PREFIX}, ch_ns=${CH_NAMESPACE})"
 
 export CH_NAMESPACE DUMP_PREFIX
@@ -17,16 +30,14 @@ envsubst '${CH_NAMESPACE} ${DUMP_PREFIX}' \
   < "${BENCH_DIR}/manifests/import-job.yaml" \
   | $KC apply -n "${JOB_NS}" -f -
 
-log "Waiting for import job to complete (this takes 15-30 min)..."
-
-# Stream logs while the job runs.
+log "Waiting for import job to start..."
 $KC wait -n "${JOB_NS}" job/ra-import-dump \
-  --for=condition=ready --timeout=30s 2>/dev/null || true
+  --for=condition=ready --timeout=60s 2>/dev/null || true
 
+log "Streaming logs (15-30 min expected)..."
 $KC logs -n "${JOB_NS}" job/ra-import-dump -f --tail=1000 2>/dev/null &
 LOG_PID=$!
 
-# Wait for completion (timeout 45 min).
 if $KC wait -n "${JOB_NS}" job/ra-import-dump \
   --for=condition=complete --timeout=2700s 2>/dev/null; then
   log "Import job completed successfully"
@@ -38,4 +49,8 @@ else
 fi
 
 kill "${LOG_PID}" 2>/dev/null || true
+
+# Clean up the auth secret.
+$KC delete secret ra-import-ch-auth -n "${JOB_NS}" --ignore-not-found=true
+
 log "Import done"
