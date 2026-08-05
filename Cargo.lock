@@ -2138,6 +2138,7 @@ dependencies = [
  "globset",
  "ignore",
  "indicatif",
+ "memchr",
  "oxc",
  "oxc_linter",
  "oxc_resolver",
