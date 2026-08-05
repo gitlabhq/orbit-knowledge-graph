@@ -32,6 +32,12 @@ ra_bench_run:
   extends: .ra-bench-base
   timeout: 3h
   needs: [ra_bench_prepare]
+  services:
+    - name: docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
   script:
     - source bench/scripts/labels-to-env.sh
     - bench/scripts/provision.sh
