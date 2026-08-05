@@ -55,55 +55,62 @@ pub(crate) fn dir_of(path: &str) -> &str {
 /// found right-to-left. Reproduces `rfind`'s non-overlapping backward match so
 /// the probe-key sequence is byte-identical to the `current.rfind(sep)` loop.
 ///
-/// `sep` is `.` for some languages and `::` for others; `separator_starts`
-/// enumerates both with a memchr-backed scan.
-fn climb_prefix_ends(fqn: &str, sep: &str) -> impl Iterator<Item = usize> {
-    let starts = separator_starts(fqn.as_bytes(), sep.as_bytes());
+/// Lazy on purpose: a def that resolves at the outermost scope stops the caller
+/// after the full-FQN probe, so no backward scan runs — restoring the old
+/// `rfind`-loop early-exit while still scanning each level at most once.
+fn climb_prefix_ends<'a>(fqn: &'a str, sep: &'a str) -> impl Iterator<Item = usize> + 'a {
+    let hay = fqn.as_bytes();
+    let starts = SeparatorStarts {
+        hay,
+        sep: sep.as_bytes(),
+        limit: hay.len(),
+    };
     std::iter::once(fqn.len()).chain(starts)
 }
 
-/// Start byte offsets of `sep` within `hay`, ordered right-to-left and
-/// non-overlapping (a match consumes its own width), matching what repeated
-/// `rfind(sep)` + truncate-to-match-start yields. For `a::::b` with `sep == "::"`
-/// this is `[3, 1]` (prefixes `a::`, `a`), not `[3, 2, 1]`.
-///
-/// 1-byte separators use `memrchr_iter`; multi-byte separators scan candidate
-/// starts of the first byte with `memrchr` and verify the full separator.
-fn separator_starts(hay: &[u8], sep: &[u8]) -> smallvec::SmallVec<[usize; 4]> {
-    let mut out = smallvec::SmallVec::new();
-    match sep {
-        [] => {}
-        [b] => out.extend(memchr::memrchr_iter(*b, hay)),
-        [first, ..] => {
-            let width = sep.len();
-            // `limit` is the truncation bound: it only moves on a confirmed
-            // match, mirroring `rfind` + `current = &current[..pos]`. Within one
-            // step, `search_end` shrinks past rejected first-byte candidates
-            // (a lone first byte, or one that would overrun `limit`) to find the
-            // rightmost full separator start `< limit`. A confirmed match sets
-            // `limit = pos`, so the next match cannot overlap it — e.g. `a::::b`
-            // climbs `3, 1`, not `3, 2, 1`.
-            let mut limit = hay.len();
-            while limit >= width {
-                let mut search_end = limit;
-                loop {
-                    let Some(pos) = memchr::memrchr(*first, &hay[..search_end]) else {
-                        return out;
-                    };
-                    if pos + width <= limit && &hay[pos..pos + width] == sep {
-                        out.push(pos);
-                        limit = pos;
-                        break;
-                    }
-                    if pos == 0 {
-                        return out;
-                    }
-                    search_end = pos;
-                }
-            }
+/// Rightmost start of `sep` whose match fits within `hay[..end]`, or `None`.
+/// Scans first-byte candidates right-to-left and verifies the full separator,
+/// so a lone first byte (e.g. a single `:` for `::`) is skipped. `width == 1`
+/// degenerates to `memrchr`: `pos + 1 <= end` always holds and the one-byte
+/// equality is trivially true, so the dot separator matches `memrchr_iter`.
+fn rightmost_fit(hay: &[u8], sep: &[u8], end: usize) -> Option<usize> {
+    let width = sep.len();
+    let mut search_end = end;
+    loop {
+        let pos = memchr::memrchr(sep[0], &hay[..search_end])?;
+        if pos + width <= end && &hay[pos..pos + width] == sep {
+            return Some(pos);
         }
+        if pos == 0 {
+            return None;
+        }
+        search_end = pos;
     }
-    out
+}
+
+/// Separator starts right-to-left, non-overlapping (a match consumes its own
+/// width), matching repeated `rfind(sep)` + truncate-to-match-start. `limit` is
+/// the truncation bound: advancing it to each confirmed `pos` prevents the next
+/// match from overlapping, so `a::::b` yields `3, 1` (prefixes `a::`, `a`), not
+/// `3, 2, 1`.
+struct SeparatorStarts<'a> {
+    hay: &'a [u8],
+    sep: &'a [u8],
+    limit: usize,
+}
+
+impl Iterator for SeparatorStarts<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        // Guards `rightmost_fit`'s `sep[0]`; an empty separator has no starts.
+        if self.sep.is_empty() {
+            return None;
+        }
+        let pos = rightmost_fit(self.hay, self.sep, self.limit)?;
+        self.limit = pos;
+        Some(pos)
+    }
 }
 
 pub(crate) struct ImportResolver<'a> {
@@ -293,10 +300,8 @@ impl<'a> ImportResolver<'a> {
         for &did in &def_ids {
             let def = &self.graph.defs[did.0 as usize];
             let fqn_str = self.graph.str(def.fqn);
-            // Single reverse pass: `climb_prefix_ends` enumerates all separator
-            // positions once, so each level appends the shrinking prefix to the
-            // constant `{sep}{name}` suffix instead of re-scanning with
-            // `rfind` and reformatting the whole key.
+            // The `{sep}{name}` suffix is invariant across the climb, so append
+            // it to the shrinking prefix rather than reformatting the whole key.
             for prefix_len in climb_prefix_ends(fqn_str, sep) {
                 let prefix = &fqn_str[..prefix_len];
                 let key = {
@@ -580,9 +585,43 @@ mod tests {
         }
     }
 
+    /// Mirrors the production probe-key build in `scope_fqn_walk`:
+    /// `push_str(prefix)` then `push_str(sep)` then `push_str(name)` per level.
+    fn composed_probe_keys(fqn: &str, sep: &str, name: &str) -> Vec<String> {
+        climb_prefix_ends(fqn, sep)
+            .map(|end| {
+                let mut key = String::new();
+                key.push_str(&fqn[..end]);
+                key.push_str(sep);
+                key.push_str(name);
+                key
+            })
+            .collect()
+    }
+
+    #[test]
+    fn composed_probe_keys_dot_separator() {
+        assert_eq!(
+            composed_probe_keys("net.http.Client", ".", "Do"),
+            ["net.http.Client.Do", "net.http.Do", "net.Do"]
+        );
+    }
+
+    #[test]
+    fn composed_probe_keys_colon_separator() {
+        assert_eq!(
+            composed_probe_keys("std::collections::HashMap", "::", "new"),
+            [
+                "std::collections::HashMap::new",
+                "std::collections::new",
+                "std::new",
+            ]
+        );
+    }
+
     #[test]
     fn climb_matches_rfind_exhaustive_small_alphabet() {
-        // Brute force every string over {a, :} up to length 8 against both
+        // Brute force every string over {a, :, .} up to length 8 against both
         // separators; the `:`-dense inputs stress overlapping `::` matches.
         fn recurse(buf: &mut String, remaining: usize) {
             if !buf.is_empty() {
