@@ -70,6 +70,8 @@ impl Rule for ScopeRule {
         &self.name
     }
 
+    /// A `name_hook` takes precedence over the `Extract`; when one is set the
+    /// `Extract` returned by `extract()` is unused.
     fn extract_name(&self, node: &N<'_>) -> Option<String> {
         match self.name_hook {
             Some(hook) => hook(node),

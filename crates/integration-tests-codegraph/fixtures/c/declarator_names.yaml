@@ -10,6 +10,8 @@ fixtures:
       int (paren_decl)(int a) { return a; }
       int (*fnptr_return(int a))(int) { return 0; }
       int (/*c*/ commented)(int a) { return a; }
+      int attributed(int a) [[deprecated]] { return a; }
+      void (__cdecl mscall)(int a) { }
   - path: types.c
     content: |
       typedef int *ptr_typedef;
@@ -72,13 +74,23 @@ tests:
       - { row_count: 1 }
       - { row: { name: "commented", fqn: "funcs::commented" } }
 
-  - name: "No function name leaks declarator punctuation"
+  - name: "Postfix attribute is unwrapped, not captured as the name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
-      RETURN d.name AS name
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::attributed'
+      RETURN d.name AS name, d.fqn AS fqn
     assert:
-      - { not: true, match: { field: name, pattern: "*[*()]*" } }
+      - { row_count: 1 }
+      - { row: { name: "attributed", fqn: "funcs::attributed" } }
+
+  - name: "MSVC call modifier before the declarator is skipped, not captured as the name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::mscall'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "mscall", fqn: "funcs::mscall" } }
 
   - name: "Pointer / function-pointer / array typedefs extract the bare name"
     query: |

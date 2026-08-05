@@ -8,6 +8,8 @@ fixtures:
       void *ptr_return(int a) { return 0; }
       int (paren_decl)(int a) { return a; }
       int &ref_return(int a) { return a; }
+      int attributed(int a) [[deprecated]] { return a; }
+      void (__cdecl mscall)(int a) { }
   - path: members.cpp
     content: |
       int Foo::bar(int a) { return a; }
@@ -66,6 +68,24 @@ tests:
       - { row_count: 1 }
       - { row: { name: "ref_return", fqn: "funcs::ref_return" } }
 
+  - name: "Postfix attribute is unwrapped, not captured as the name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::attributed'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "attributed", fqn: "funcs::attributed" } }
+
+  - name: "MSVC call modifier before the declarator is skipped, not captured as the name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::mscall'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "mscall", fqn: "funcs::mscall" } }
+
   - name: "Out-of-line member keeps its class qualifier (single level)"
     query: |
       MATCH (d:Definition)
@@ -120,11 +140,3 @@ tests:
       - { row_count: 2 }
       - { row: { name: "Ptr::operator int", fqn: "conversions::Ptr::operator int" } }
       - { row: { name: "S::I::operator int", fqn: "conversions::S::I::operator int" } }
-
-  - name: "No conversion-operator name leaks a parameter list"
-    query: |
-      MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name STARTS WITH 'operator'
-      RETURN d.name AS name
-    assert:
-      - { not: true, match: { field: name, pattern: "*(*" } }

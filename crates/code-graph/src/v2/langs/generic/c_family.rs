@@ -11,24 +11,29 @@ use treesitter_visit::{Node, SupportLang};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
-/// Declarator wrapper kinds a pointer/parenthesized/array declarator inserts
-/// between a definition and its name, so a fixed hop count lands on the wrong
-/// node. `reference_declarator` and `parenthesized_declarator` carry no
-/// `declarator` field (tree-sitter-cpp: `seq(choice('&','&&'), $._declarator)`),
-/// unlike the other three.
+/// Declarator wrapper kinds that wrap an inner declarator between a definition
+/// and its name, so a fixed hop count lands on the wrong node. `reference_`,
+/// `parenthesized_` and `attributed_declarator` carry no `declarator` field
+/// (e.g. tree-sitter-cpp: `reference_declarator` is
+/// `seq(choice('&','&&'), $._declarator)`), unlike the other three; the descent
+/// falls back to their first named child.
 const DECLARATOR_WRAPPERS: &[&str] = &[
     "function_declarator",
     "pointer_declarator",
     "array_declarator",
     "reference_declarator",
     "parenthesized_declarator",
+    "attributed_declarator",
 ];
 
+/// Named children that can precede the inner declarator in a wrapper but are not
+/// the declared name, so the first-named-child fallback must skip them: a
+/// `comment` (`int (/*x*/ foo)()`) or an MSVC `ms_call_modifier`
+/// (`void (__cdecl foo)(int)`).
+const NON_NAME_CHILDREN: &[&str] = &["comment", "ms_call_modifier"];
+
 /// Descend declarator wrappers to the declared-name node, following the
-/// `declarator` field or, when absent, the first named child.
-///
-/// Comments are skipped: they are named nodes that can precede the inner
-/// declarator (`int (/*x*/ foo)()`).
+/// `declarator` field or, when absent, the first named child that is a name.
 fn descend_declarator_name<'r>(node: &N<'r>) -> Option<N<'r>> {
     let mut cur = node.clone();
     while DECLARATOR_WRAPPERS.contains(&cur.kind().as_ref()) {
@@ -36,7 +41,7 @@ fn descend_declarator_name<'r>(node: &N<'r>) -> Option<N<'r>> {
             Some(inner) => inner,
             None => cur
                 .children()
-                .find(|c| c.is_named() && c.kind().as_ref() != "comment")?,
+                .find(|c| c.is_named() && !NON_NAME_CHILDREN.contains(&c.kind().as_ref()))?,
         };
     }
     Some(cur)
@@ -117,168 +122,4 @@ fn function_parameter_list<'r>(node: &N<'r>) -> Option<N<'r>> {
 fn descend_abstract_declarator<'r>(node: &N<'r>) -> Option<N<'r>> {
     node.field("declarator")
         .or_else(|| node.children().find(|c| c.is_named()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use treesitter_visit::tree_sitter::LanguageExt;
-    use treesitter_visit::{Axis, Match};
-
-    fn c_fn_name(code: &str) -> Option<String> {
-        let root = SupportLang::C.ast_grep(code);
-        let func = root
-            .root()
-            .find(Axis::Descendant, Match::Kind("function_definition"))
-            .unwrap();
-        c_declarator_name(&func)
-    }
-
-    fn c_typedef_name(code: &str) -> Option<String> {
-        let root = SupportLang::C.ast_grep(code);
-        let td = root
-            .root()
-            .find(Axis::Descendant, Match::Kind("type_definition"))
-            .unwrap();
-        c_declarator_name(&td)
-    }
-
-    fn cpp_fn_name(code: &str) -> Option<String> {
-        let root = SupportLang::Cpp.ast_grep(code);
-        let func = root
-            .root()
-            .find(Axis::Descendant, Match::Kind("function_definition"))
-            .unwrap();
-        cpp_declarator_name(&func)
-    }
-
-    #[test]
-    fn c_shapes() {
-        assert_eq!(
-            c_fn_name("int foo(int a) { return a; }"),
-            Some("foo".into())
-        );
-        assert_eq!(
-            c_fn_name("static inline int foo(int a) { return a; }"),
-            Some("foo".into())
-        );
-        assert_eq!(
-            c_fn_name("void *foo(int a) { return 0; }"),
-            Some("foo".into())
-        );
-        assert_eq!(
-            c_fn_name("void **foo(int a) { return 0; }"),
-            Some("foo".into())
-        );
-        assert_eq!(
-            c_fn_name("int (foo)(int a) { return a; }"),
-            Some("foo".into())
-        );
-        assert_eq!(
-            c_fn_name("int (*foo(int a))(int) { return 0; }"),
-            Some("foo".into())
-        );
-        assert_eq!(
-            c_fn_name("int arr[3]; int bar() { return 0; }"),
-            Some("bar".into())
-        );
-        assert_eq!(
-            c_fn_name("int (/*x*/ foo)(int a) { return a; }"),
-            Some("foo".into())
-        );
-    }
-
-    #[test]
-    fn c_typedefs() {
-        assert_eq!(
-            c_typedef_name("typedef int *my_ptr;"),
-            Some("my_ptr".into())
-        );
-        assert_eq!(
-            c_typedef_name("typedef int (*fn_t)(int);"),
-            Some("fn_t".into())
-        );
-        assert_eq!(
-            c_typedef_name("typedef char buf_t[64];"),
-            Some("buf_t".into())
-        );
-        assert_eq!(
-            c_typedef_name("typedef struct { int x; } Point;"),
-            Some("Point".into())
-        );
-    }
-
-    #[test]
-    fn cpp_shapes() {
-        assert_eq!(
-            cpp_fn_name("void *foo(int a) { return 0; }"),
-            Some("foo".into())
-        );
-        assert_eq!(
-            cpp_fn_name("int Foo::bar(int a) { return a; }"),
-            Some("Foo::bar".into())
-        );
-        assert_eq!(
-            cpp_fn_name("int* Foo::bar(int a) { return 0; }"),
-            Some("Foo::bar".into())
-        );
-        assert_eq!(
-            cpp_fn_name("bool Foo::operator==(const Foo& o) const { return true; }"),
-            Some("Foo::operator==".into())
-        );
-        assert_eq!(cpp_fn_name("Foo::~Foo() {}"), Some("Foo::~Foo".into()));
-        assert_eq!(
-            cpp_fn_name("class Foo { public: int *bar(int a) { return 0; } };"),
-            Some("bar".into())
-        );
-        assert_eq!(
-            cpp_fn_name("template<typename T> T* Foo::get() { return 0; }"),
-            Some("Foo::get".into())
-        );
-        assert_eq!(
-            cpp_fn_name("int A::B::foo(int a) { return a; }"),
-            Some("A::B::foo".into())
-        );
-        assert_eq!(
-            cpp_fn_name("int& foo(int a) { return a; }"),
-            Some("foo".into())
-        );
-        assert_eq!(cpp_fn_name("int&& foo() { return 0; }"), Some("foo".into()));
-    }
-
-    #[test]
-    fn cpp_conversion_operators() {
-        assert_eq!(
-            cpp_fn_name("class Foo { public: operator bool() const { return true; } };"),
-            Some("operator bool".into())
-        );
-        assert_eq!(
-            cpp_fn_name("Ptr::operator int() const { return 0; }"),
-            Some("Ptr::operator int".into())
-        );
-        assert_eq!(
-            cpp_fn_name("S::I::operator int() const { return 0; }"),
-            Some("S::I::operator int".into())
-        );
-        assert_eq!(
-            cpp_fn_name("class C { operator const char*() const { return 0; } };"),
-            Some("operator const char*".into())
-        );
-        assert_eq!(
-            cpp_fn_name("class C { operator int*() { return 0; } };"),
-            Some("operator int*".into())
-        );
-        assert_eq!(
-            cpp_fn_name("class C { operator int&() { return x; } };"),
-            Some("operator int&".into())
-        );
-        assert_eq!(
-            cpp_fn_name("class C { operator std::string() const { return {}; } };"),
-            Some("operator std::string".into())
-        );
-        assert_eq!(
-            cpp_fn_name("class C { operator std::function<void(int)>() { return {}; } };"),
-            Some("operator std::function<void(int)>".into())
-        );
-    }
 }
