@@ -1,3 +1,9 @@
+## [0.95.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.1...v0.95.2) (2026-08-05)
+
+### Fixes
+
+* **code-graph:** skip deeply nested JavaScript instead of crashing the indexer ([f8669f1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f8669f19f6359db98be9c271caf87e0ba0cc459e)) by Jean-Gabriel Doyon
+
 ## [0.95.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.0...v0.95.1) (2026-08-04)
 
 ### Other
