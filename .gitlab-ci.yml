@@ -79,6 +79,7 @@ stages:
   - security
   - test
   - benchmark
+  - ra-bench
   - ai
   - build
   - e2e
