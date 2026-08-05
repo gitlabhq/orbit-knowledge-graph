@@ -32,6 +32,8 @@ dispatcher:
     requests:
       cpu: $(tier ".gkg.dispatcher.requests.cpu")
       memory: $(tier ".gkg.dispatcher.requests.memory")
+    limits:
+      memory: $(tier ".gkg.dispatcher.limits.memory")
 
 engine:
   max_concurrent_workers: $(tier ".gkg.concurrency.max_concurrent_workers")
