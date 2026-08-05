@@ -144,6 +144,7 @@ pub enum FileFault {
     OxcPanic,
     OxcSemantic,
     AnalyzerPanic,
+    OxcDeeplyNested,
     UnknownSourceType,
     EmbeddedScriptParse,
     RustWorkspaceMissing,
@@ -158,6 +159,7 @@ impl FileFault {
             Self::OxcPanic => "oxc_panic",
             Self::OxcSemantic => "oxc_semantic",
             Self::AnalyzerPanic => "analyzer_panic",
+            Self::OxcDeeplyNested => "deeply_nested",
             Self::UnknownSourceType => "unknown_source_type",
             Self::EmbeddedScriptParse => "embedded_script_parse",
             Self::RustWorkspaceMissing => "rust_workspace_missing",
@@ -285,6 +287,10 @@ mod tests {
         assert_eq!(FileFault::OxcPanic.as_metric_label(), "oxc_panic");
         assert_eq!(FileFault::OxcSemantic.as_metric_label(), "oxc_semantic");
         assert_eq!(FileFault::AnalyzerPanic.as_metric_label(), "analyzer_panic");
+        assert_eq!(
+            FileFault::OxcDeeplyNested.as_metric_label(),
+            "deeply_nested"
+        );
         assert_eq!(
             FileFault::UnknownSourceType.as_metric_label(),
             "unknown_source_type"

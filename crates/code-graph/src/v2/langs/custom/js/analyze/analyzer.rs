@@ -20,6 +20,7 @@ use super::cjs::{extract_cjs_exports, extract_cjs_imports};
 use super::dataflow::extract_call_edges;
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
 use super::patterns::for_each_static_object_property;
+use crate::utils::{MAX_NESTING_DEPTH, exceeds_nesting_cap};
 
 pub(super) type NodeId = oxc::semantic::NodeId;
 
@@ -763,6 +764,14 @@ impl JsAnalyzer {
             )
         })?;
         let source_type = source_type.with_jsx(source_type.is_javascript());
+
+        if exceeds_nesting_cap(source) {
+            return Err(AnalyzerError::fault(
+                FileFault::OxcDeeplyNested,
+                format!("{file_path}: bracket nesting exceeds {MAX_NESTING_DEPTH}"),
+            ));
+        }
+
         let allocator = Allocator::default();
         let parsed = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
             Parser::new(&allocator, source, source_type).parse()
@@ -888,6 +897,84 @@ impl JsAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::v2::error::{AnalyzerError, FileFault};
+
+    const DEEP_NEST_CHILD_ENV: &str = "GKG_CODEGRAPH_DEEP_NEST_CHILD";
+
+    fn nested_brackets(open: &str, close: &str, depth: usize) -> String {
+        format!(
+            "const x = {}1{};\n",
+            open.repeat(depth),
+            close.repeat(depth)
+        )
+    }
+
+    #[test]
+    fn deeply_nested_file_is_faulted_not_parsed() {
+        let deep = nested_brackets("[", "]", MAX_NESTING_DEPTH + 50);
+        let err = JsAnalyzer::analyze_file(&deep, "deep.js", "deep.js")
+            .expect_err("nesting past the cap must fault");
+        assert!(
+            matches!(
+                err,
+                AnalyzerError::Fault {
+                    kind: FileFault::OxcDeeplyNested,
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+
+        let shallow = nested_brackets("[", "]", 50);
+        JsAnalyzer::analyze_file(&shallow, "ok.js", "ok.js")
+            .expect("nesting under the cap parses cleanly");
+    }
+
+    #[test]
+    fn deeply_nested_file_does_not_abort_the_process() {
+        if std::env::var_os(DEEP_NEST_CHILD_ENV).is_some() {
+            let src = nested_brackets("(", ")", MAX_NESTING_DEPTH * 20);
+            let result = std::thread::Builder::new()
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || JsAnalyzer::analyze_file(&src, "deep.js", "deep.js"))
+                .expect("spawn parse worker")
+                .join()
+                .expect("parse worker panicked");
+            assert!(
+                matches!(
+                    result,
+                    Err(AnalyzerError::Fault {
+                        kind: FileFault::OxcDeeplyNested,
+                        ..
+                    })
+                ),
+                "got {result:?}"
+            );
+            return;
+        }
+
+        let module = module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest);
+        let filter = format!("{module}::deeply_nested_file_does_not_abort_the_process");
+        let output = std::process::Command::new(std::env::current_exe().expect("test exe"))
+            .args(["--exact", &filter])
+            .env(DEEP_NEST_CHILD_ENV, "1")
+            .output()
+            .expect("spawn child test process");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("1 passed"),
+            "child ran no test, so this asserts nothing: filter {filter:?} matched nothing, \
+             most likely because the test was renamed. stdout={stdout:?}"
+        );
+        assert!(
+            output.status.success(),
+            "child aborted ({:?}): the depth screen failed to contain a stack-overflowing file",
+            output.status
+        );
+    }
 
     #[test]
     fn js_files_allow_jsx_syntax() {
