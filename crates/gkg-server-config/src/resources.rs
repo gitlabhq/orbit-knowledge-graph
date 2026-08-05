@@ -8,8 +8,7 @@ use crate::engine::{EngineConfiguration, IndexerModule};
 pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
 
 /// Calibrated on observed prod peaks: code pods hold ~2.5 GiB per in-flight
-/// indexing lane. The earlier 1.5 GiB was calibrated to reproduce the hand-tuned
-/// worker counts instead, so it derived the shape that OOMKills (#1114).
+/// indexing lane.
 const WORKER_MEMORY_BUDGET_BYTES: u64 = 2560 * 1024 * 1024;
 
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
