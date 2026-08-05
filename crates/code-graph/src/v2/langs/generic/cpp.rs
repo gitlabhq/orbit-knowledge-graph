@@ -4,6 +4,8 @@ use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::extract::{Extract, field};
 use treesitter_visit::predicate::*;
 
+use super::c_family;
+
 use crate::v2::linker::rules::{
     ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
@@ -32,7 +34,7 @@ impl DslLanguage for CppDsl {
         vec![
             scope("function_definition", "Function")
                 .def_kind(DefKind::Function)
-                .name_from(field("declarator").declarator_name()),
+                .name_hook(c_family::cpp_declarator_name),
             scope("class_specifier", "Class")
                 .def_kind(DefKind::Class)
                 .when(has_descendant("field_declaration_list")),
@@ -49,7 +51,7 @@ impl DslLanguage for CppDsl {
             scope("namespace_definition", "Namespace").def_kind(DefKind::Module),
             scope("type_definition", "Typedef")
                 .def_kind(DefKind::Other)
-                .name_from(field("declarator").declarator_name())
+                .name_hook(c_family::cpp_declarator_name)
                 .no_scope(),
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
