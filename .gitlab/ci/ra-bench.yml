@@ -1,4 +1,5 @@
 .ra-bench-base:
+  extends: .google-oidc:auth
   tags:
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
@@ -9,9 +10,8 @@
     HELMFILE_VERSION: "1.4.2"
     RA_EPHEMERAL_CLUSTER: "1"
   before_script:
+    - !reference [.google-oidc:auth, before_script]
     - bash e2e/scripts/install-ci-tools.sh
-    # OIDC GCP auth for cluster creation and GCS access.
-    - !reference [.gcp_auth, before_script]
 
 ra_bench_prepare:
   extends: .ra-bench-base
@@ -48,8 +48,8 @@ ra_bench:
     - uv run bench/scoring/score.py "bench/results/${RUN_ID}" "${TIER:-small}"
     - uv run bench/scoring/report.py "bench/results/${RUN_ID}" "${TIER:-small}"
   after_script:
+    - !reference [.google-oidc:auth, before_script]
     - bash e2e/scripts/install-ci-tools.sh
-    - !reference [.gcp_auth, before_script]
     - bench/scripts/teardown.sh || true
   artifacts:
     paths:
