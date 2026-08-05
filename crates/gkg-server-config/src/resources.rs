@@ -7,9 +7,10 @@ use crate::engine::{EngineConfiguration, IndexerModule};
 
 pub(crate) const DEFAULT_MAX_CONCURRENT_WORKERS: usize = 16;
 
-/// Calibrated on prod's hand-tuned pools: code runs 16 workers in 24 GiB and
-/// sdlc 20 in 32 GiB — both ~1.5 GiB per worker.
-const WORKER_MEMORY_BUDGET_BYTES: u64 = 1536 * 1024 * 1024;
+/// Calibrated on observed prod peaks: code pods hold ~2.5 GiB per in-flight
+/// indexing lane. The earlier 1.5 GiB was calibrated to reproduce the hand-tuned
+/// worker counts instead, so it derived the shape that OOMKills (#1114).
+const WORKER_MEMORY_BUDGET_BYTES: u64 = 2560 * 1024 * 1024;
 
 /// Preserves the historical universal-pool split (sdlc 12 / code 4 of 16 workers).
 const SDLC_WORKER_SHARE_PERCENT: usize = 75;
@@ -188,11 +189,15 @@ mod tests {
     }
 
     #[test]
-    fn worker_budget_reproduces_prod_pool_shapes() {
+    fn memory_holds_the_code_pool_below_its_cpu_count() {
         assert_eq!(
             container_resources(16, Some(24 * GIB)).derive_worker_budget(),
-            16
+            9
         );
+    }
+
+    #[test]
+    fn cpu_still_binds_the_sdlc_pool() {
         assert_eq!(
             container_resources(8, Some(32 * GIB)).derive_worker_budget(),
             8
@@ -203,7 +208,7 @@ mod tests {
     fn memory_limit_caps_the_worker_budget() {
         assert_eq!(
             container_resources(8, Some(4 * GIB)).derive_worker_budget(),
-            2
+            1
         );
         assert_eq!(container_resources(8, Some(GIB)).derive_worker_budget(), 1);
     }
@@ -294,8 +299,8 @@ mod tests {
 
         cfg.resolve_runtime_defaults(&container_resources(16, Some(6 * GIB)));
 
-        assert_eq!(cfg.max_concurrent_workers(), 4);
-        assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&3));
+        assert_eq!(cfg.max_concurrent_workers(), 2);
+        assert_eq!(cfg.concurrency_groups.get("sdlc"), Some(&1));
         assert_eq!(cfg.concurrency_groups.get("code"), Some(&1));
     }
 
@@ -304,6 +309,15 @@ mod tests {
         let slots = derive_code_indexing_slots(16);
         assert_eq!(slots.small_indexing_slots, 6);
         assert_eq!(slots.big_indexing_slots, 2);
+    }
+
+    #[test]
+    fn prod_code_pool_derives_four_indexing_lanes() {
+        let budget = container_resources(16, Some(24 * GIB)).derive_worker_budget();
+        let slots = derive_code_indexing_slots(budget);
+
+        assert_eq!(slots.small_indexing_slots, 3);
+        assert_eq!(slots.big_indexing_slots, 1);
     }
 
     #[test]
