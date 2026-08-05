@@ -4,6 +4,7 @@
     - saas-linux-medium-amd64
   image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
   variables:
+    # Gate label: orbit::bench (grep this file for the literal to update all rules).
     RUN_ID: "ra-${CI_PIPELINE_ID}"
     KUBECTL_VERSION: "1.35.2"
     HELM_VERSION: "3.20.0"
