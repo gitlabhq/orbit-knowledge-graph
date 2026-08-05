@@ -23,6 +23,12 @@ $KC create secret generic ra-import-ch-auth \
   --from-literal=password="${CH_PASSWORD}" \
   --dry-run=client -o yaml | $KC apply -f -
 
+# KSA with Workload Identity binding for GCS read access.
+COMPUTE_SA="1079327125344-compute@developer.gserviceaccount.com"
+$KC create serviceaccount ra-import-sa -n "${JOB_NS}" 2>/dev/null || true
+$KC annotate serviceaccount ra-import-sa -n "${JOB_NS}" \
+  "iam.gke.io/gcp-service-account=${COMPUTE_SA}" --overwrite 2>/dev/null
+
 log "Submitting import job (dump=${DUMP_PREFIX}, ch_ns=${CH_NAMESPACE})"
 
 sed -e "s/\${CH_NAMESPACE}/${CH_NAMESPACE}/g" \

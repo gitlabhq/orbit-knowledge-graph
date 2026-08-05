@@ -10,6 +10,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      serviceAccountName: ra-import-sa
       containers:
         - name: import
           image: google/cloud-sdk:slim
