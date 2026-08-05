@@ -12,6 +12,7 @@
     KUBECTL_VERSION: "1.35.2"
     HELM_VERSION: "3.20.0"
     HELMFILE_VERSION: "1.4.2"
+    RA_SKIP_POOL: "1"
   rules:
     - if: $CI_MERGE_REQUEST_LABELS !~ /\borbit::bench\b/
       when: never

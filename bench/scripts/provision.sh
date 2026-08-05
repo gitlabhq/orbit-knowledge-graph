@@ -12,7 +12,7 @@ if [[ "${RA_EPHEMERAL_CLUSTER:-}" == "1" ]]; then
   export KCTX
   KC="kubectl --context=${KCTX}"
   export KC
-else
+elif [[ "${RA_SKIP_POOL:-}" != "1" ]]; then
   MACHINE=$(tier ".nodes.machine")
   COUNT=$(tier ".nodes.count")
   POOL_NAME="ra-${RUN_ID}-${TIER}"
@@ -26,6 +26,8 @@ else
     --labels "ttl-hours=12,run-id=${RUN_ID}" \
     --project gl-knowledgegraph-prj-f2eec59d \
     --quiet
+else
+  log "Skipping node pool creation (RA_SKIP_POOL=1)"
 fi
 
 log "Rendering tier overlay"
