@@ -1,3 +1,7 @@
+workflow:
+  rules:
+    - when: always
+
 stages:
   - prepare
   - run
