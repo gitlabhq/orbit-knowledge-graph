@@ -23,6 +23,7 @@
 
 ra_bench_prepare:
   extends: .ra-bench-base
+  needs: []
   script:
     - source bench/scripts/labels-to-env.sh
     - echo "Cluster access verified"
