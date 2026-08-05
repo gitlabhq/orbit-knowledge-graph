@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
+use compiler::INTERNAL_COLUMN_PREFIX;
 use compiler::constants::{
     edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
 };
-use compiler::internal_column_prefix;
 use compiler::{QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
@@ -136,7 +136,7 @@ impl QueryResultRow {
         let prefix = format!("{alias}_");
         let mut props = HashMap::new();
         for (name, value) in &self.columns {
-            if name.starts_with(internal_column_prefix()) {
+            if name.starts_with(INTERNAL_COLUMN_PREFIX) {
                 continue;
             }
             if skip_prefixes.iter().any(|sp| name.starts_with(sp)) {

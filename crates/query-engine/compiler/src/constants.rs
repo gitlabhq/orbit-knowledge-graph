@@ -1,23 +1,10 @@
 // Re-export so existing `crate::constants::` paths keep working.
-pub use ontology::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
-
-/// Loaded once at startup from the embedded ontology YAML.
-pub fn internal_column_prefix() -> &'static str {
-    use std::sync::OnceLock;
-    static PREFIX: OnceLock<String> = OnceLock::new();
-    PREFIX.get_or_init(|| {
-        ontology::Ontology::load_embedded()
-            .expect("embedded ontology must load")
-            .internal_column_prefix()
-            .to_string()
-    })
-}
+pub use ontology::constants::{GL_TABLE_PREFIX, INTERNAL_COLUMN_PREFIX, TRAVERSAL_PATH_COLUMN};
 
 macro_rules! internal_col {
     ($fn_name:ident, $suffix:literal) => {
         pub fn $fn_name() -> &'static str {
-            static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            V.get_or_init(|| format!("{}{}", internal_column_prefix(), $suffix))
+            const_format::concatcp!(INTERNAL_COLUMN_PREFIX, $suffix)
         }
     };
 }
@@ -29,40 +16,24 @@ internal_col!(neighbor_type_column, "neighbor_type");
 internal_col!(relationship_type_column, "relationship_type");
 internal_col!(neighbor_is_outgoing_column, "neighbor_is_outgoing");
 
-/// Physical tables of `global` nodes (User, Runner). These skip the
-/// traversal-path security filter because they are non-namespaced hubs with
-/// no `traversal_path` to scope on. Derived from the `global` node flag.
-pub fn global_tables() -> &'static [String] {
-    use std::sync::OnceLock;
-    static TABLES: OnceLock<Vec<String>> = OnceLock::new();
-    TABLES.get_or_init(|| {
-        ontology::Ontology::load_embedded()
-            .expect("embedded ontology must load")
-            .global_tables()
-            .iter()
-            .map(|t| t.to_string())
-            .collect()
-    })
-}
-
 // _gkg_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
-    format!("{}{alias}_pk", internal_column_prefix())
+    format!("{INTERNAL_COLUMN_PREFIX}{alias}_pk")
 }
 
 pub fn redaction_id_column(alias: &str) -> String {
-    format!("{}{alias}_id", internal_column_prefix())
+    format!("{INTERNAL_COLUMN_PREFIX}{alias}_id")
 }
 
 pub(crate) fn redaction_type_column(alias: &str) -> String {
-    format!("{}{alias}_type", internal_column_prefix())
+    format!("{INTERNAL_COLUMN_PREFIX}{alias}_type")
 }
 
 /// Hidden column carrying the entity's `traversal_path` value from the base
 /// query into the hydration pipeline. Used to narrow hydration scans via
 /// `startsWith(traversal_path, tp)`, pruning granules through the primary key.
 pub fn traversal_path_column(alias: &str) -> String {
-    format!("{}{alias}_tp", internal_column_prefix())
+    format!("{INTERNAL_COLUMN_PREFIX}{alias}_tp")
 }
 
 /// Node alias used in synthetic hydration search queries.

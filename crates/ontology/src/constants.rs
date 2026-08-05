@@ -38,6 +38,10 @@ pub const DELETED_COLUMN: &str = "_deleted";
 
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 
+/// Reserved prefix for compiler-internal output columns; must match
+/// `schema.yaml`'s `settings.internal_column_prefix`.
+pub const INTERNAL_COLUMN_PREFIX: &str = "_gkg_";
+
 use std::sync::LazyLock;
 
 static EMBEDDED_ONTOLOGY: LazyLock<crate::Ontology> =
@@ -89,6 +93,14 @@ pub fn validate_ontology_constants(ontology: &crate::Ontology) {
         "edge_columns count {} doesn't match EDGE_RESERVED_COLUMNS length {}",
         ontology.edge_columns().len(),
         EDGE_RESERVED_COLUMNS.len(),
+    );
+
+    assert_eq!(
+        ontology.internal_column_prefix(),
+        INTERNAL_COLUMN_PREFIX,
+        "INTERNAL_COLUMN_PREFIX const (\"{INTERNAL_COLUMN_PREFIX}\") doesn't match \
+         embedded ontology (\"{}\") — update the const in constants.rs",
+        ontology.internal_column_prefix(),
     );
 }
 

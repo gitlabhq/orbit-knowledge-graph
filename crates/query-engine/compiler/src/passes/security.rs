@@ -27,7 +27,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::ast::{Expr, Node, Query, TableRef};
-use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
+use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
@@ -70,7 +70,7 @@ pub fn apply_security_context(
 }
 
 fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
-    let aliased_tables = collect_aliased_tables(&q.from);
+    let aliased_tables = collect_aliased_tables(&q.from, ontology);
     if !aliased_tables.is_empty() {
         let security_conds = aliased_tables.iter().map(|(alias, table)| {
             let min_role = ontology
@@ -273,8 +273,8 @@ fn path_or_filter(alias: &str, paths: &[String]) -> Expr {
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
-pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
-    collect_aliased_tables(table_ref)
+pub(crate) fn collect_node_aliases(table_ref: &TableRef, ontology: &Ontology) -> Vec<String> {
+    collect_aliased_tables(table_ref, ontology)
         .into_iter()
         .map(|(a, _)| a)
         .collect()
@@ -283,15 +283,18 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 /// Collect `(alias, table)` pairs for every scan that should receive a
 /// security filter. Returning the table lets the caller pick a per-entity
 /// minimum role before building the `startsWith(...)` predicate.
-pub(crate) fn collect_aliased_tables(table_ref: &TableRef) -> Vec<(String, String)> {
+pub(crate) fn collect_aliased_tables(
+    table_ref: &TableRef,
+    ontology: &Ontology,
+) -> Vec<(String, String)> {
     match table_ref {
-        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table) => {
+        TableRef::Scan { table, alias, .. } if should_apply_security_filter(table, ontology) => {
             vec![(alias.clone(), table.clone())]
         }
         TableRef::Scan { .. } => vec![],
         TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_aliased_tables(left);
-            aliases.extend(collect_aliased_tables(right));
+            let mut aliases = collect_aliased_tables(left, ontology);
+            aliases.extend(collect_aliased_tables(right, ontology));
             aliases
         }
         // Derived tables don't have traversal_path columns themselves.
@@ -325,7 +328,7 @@ fn apply_security_to_from(
 
 /// Handles both unprefixed (`gl_user`) and schema-version-prefixed
 /// (`v1_gl_user`) table names. CTEs like `path_cte` are excluded.
-fn should_apply_security_filter(table: &str) -> bool {
+fn should_apply_security_filter(table: &str, ontology: &Ontology) -> bool {
     let re = GL_TABLE_RE.get_or_init(|| {
         Regex::new(&format!(
             r"^(?:v\d+_)?({}.+)$",
@@ -340,7 +343,7 @@ fn should_apply_security_filter(table: &str) -> bool {
     };
 
     // Global hubs (User, Runner) are non-namespaced; names are unprefixed.
-    !global_tables().iter().any(|t| t == unprefixed)
+    !ontology.global_tables().contains(&unprefixed)
 }
 
 #[cfg(test)]
@@ -780,7 +783,7 @@ mod tests {
             Expr::eq(Expr::col("p", "id"), Expr::col("e", "source")),
         );
 
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &Ontology::new());
         assert_eq!(aliases, vec!["p", "e"]);
     }
 
@@ -794,23 +797,25 @@ mod tests {
             Expr::lit(true),
         );
 
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &Ontology::load_embedded().unwrap());
         assert_eq!(aliases, vec!["mr"]);
     }
 
     #[test]
     fn should_apply_security_filter_skips_user() {
-        assert!(!should_apply_security_filter("gl_user"));
-        assert!(should_apply_security_filter(EDGE_TABLE));
-        assert!(should_apply_security_filter("gl_project"));
-        assert!(should_apply_security_filter("gl_merge_request"));
+        let ontology = Ontology::load_embedded().unwrap();
+        assert!(!should_apply_security_filter("gl_user", &ontology));
+        assert!(should_apply_security_filter(EDGE_TABLE, &ontology));
+        assert!(should_apply_security_filter("gl_project", &ontology));
+        assert!(should_apply_security_filter("gl_merge_request", &ontology));
     }
 
     #[test]
     fn should_apply_security_filter_skips_ctes() {
-        assert!(!should_apply_security_filter("path_cte"));
-        assert!(!should_apply_security_filter("some_cte"));
-        assert!(!should_apply_security_filter("nodes"));
+        let ontology = Ontology::new();
+        assert!(!should_apply_security_filter("path_cte", &ontology));
+        assert!(!should_apply_security_filter("some_cte", &ontology));
+        assert!(!should_apply_security_filter("nodes", &ontology));
     }
 
     #[test]
@@ -826,7 +831,7 @@ mod tests {
             }],
             "hop_e0",
         );
-        let aliases = collect_node_aliases(&from);
+        let aliases = collect_node_aliases(&from, &Ontology::new());
         assert!(aliases.is_empty());
     }
 

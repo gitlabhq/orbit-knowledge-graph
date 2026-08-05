@@ -8,13 +8,13 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::*;
-use crate::constants::internal_column_prefix;
+use crate::constants::INTERNAL_COLUMN_PREFIX;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
 use gkg_utils::clickhouse::ChType;
 
 pub fn cursor_column(i: usize) -> String {
-    format!("{}cursor_{i}", internal_column_prefix())
+    format!("{INTERNAL_COLUMN_PREFIX}cursor_{i}")
 }
 
 #[derive(Serialize, Deserialize)]

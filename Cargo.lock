@@ -2232,6 +2232,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "compiler-pipeline-macros",
+ "const_format",
  "gkg-observability",
  "gkg-server-config",
  "gkg-utils",

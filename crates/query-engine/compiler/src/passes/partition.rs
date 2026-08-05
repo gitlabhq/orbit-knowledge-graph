@@ -26,19 +26,25 @@ pub fn apply_partition_pruning(
     };
     let authorized = authorized_bucket_ids(&partition.strategy, security_ctx);
     if let Node::Query(q) = node {
-        prune_query(q, partition, authorized.as_deref());
+        prune_query(q, partition, authorized.as_deref(), ontology);
     }
     Ok(())
 }
 
-fn prune_query(q: &mut Query, partition: &PartitionConfig, authorized: Option<&[Expr]>) {
+fn prune_query(
+    q: &mut Query,
+    partition: &PartitionConfig,
+    authorized: Option<&[Expr]>,
+    ontology: &Ontology,
+) {
     let strategy = &partition.strategy;
     if let Some(where_clause) = &q.where_clause {
-        let partitioned: std::collections::HashSet<String> = collect_aliased_tables(&q.from)
-            .into_iter()
-            .filter(|(_, table)| partition.is_partitioned(table))
-            .map(|(alias, _)| alias)
-            .collect();
+        let partitioned: std::collections::HashSet<String> =
+            collect_aliased_tables(&q.from, ontology)
+                .into_iter()
+                .filter(|(_, table)| partition.is_partitioned(table))
+                .map(|(alias, _)| alias)
+                .collect();
         let pinned = pinning_prefixes_by_alias(where_clause, strategy);
         let mut preds: Vec<Expr> = pinned
             .iter()
@@ -67,15 +73,15 @@ fn prune_query(q: &mut Query, partition: &PartitionConfig, authorized: Option<&[
     }
 
     for cte in &mut q.ctes {
-        prune_query(&mut cte.query, partition, authorized);
+        prune_query(&mut cte.query, partition, authorized, ontology);
     }
-    prune_query_from(&mut q.from, partition, authorized);
+    prune_query_from(&mut q.from, partition, authorized, ontology);
     // Subqueries in the WHERE (cascade/narrowing) are their own scans.
     if let Some(where_clause) = &mut q.where_clause {
-        prune_subqueries_in_expr(where_clause, partition, authorized);
+        prune_subqueries_in_expr(where_clause, partition, authorized, ontology);
     }
     for arm in &mut q.union_all {
-        prune_query(arm, partition, authorized);
+        prune_query(arm, partition, authorized, ontology);
     }
 }
 
@@ -83,40 +89,48 @@ fn prune_subqueries_in_expr(
     expr: &mut Expr,
     partition: &PartitionConfig,
     authorized: Option<&[Expr]>,
+    ontology: &Ontology,
 ) {
     match expr {
         Expr::InSelect { expr, query } => {
-            prune_subqueries_in_expr(expr, partition, authorized);
-            prune_query(query, partition, authorized);
+            prune_subqueries_in_expr(expr, partition, authorized, ontology);
+            prune_query(query, partition, authorized, ontology);
         }
         Expr::FuncCall { args, .. } => {
             for a in args {
-                prune_subqueries_in_expr(a, partition, authorized);
+                prune_subqueries_in_expr(a, partition, authorized, ontology);
             }
         }
         Expr::BinaryOp { left, right, .. } => {
-            prune_subqueries_in_expr(left, partition, authorized);
-            prune_subqueries_in_expr(right, partition, authorized);
+            prune_subqueries_in_expr(left, partition, authorized, ontology);
+            prune_subqueries_in_expr(right, partition, authorized, ontology);
         }
         Expr::UnaryOp { expr, .. } | Expr::InSubquery { expr, .. } => {
-            prune_subqueries_in_expr(expr, partition, authorized);
+            prune_subqueries_in_expr(expr, partition, authorized, ontology);
         }
-        Expr::Lambda { body, .. } => prune_subqueries_in_expr(body, partition, authorized),
+        Expr::Lambda { body, .. } => {
+            prune_subqueries_in_expr(body, partition, authorized, ontology)
+        }
         _ => {}
     }
 }
 
-fn prune_query_from(from: &mut TableRef, partition: &PartitionConfig, authorized: Option<&[Expr]>) {
+fn prune_query_from(
+    from: &mut TableRef,
+    partition: &PartitionConfig,
+    authorized: Option<&[Expr]>,
+    ontology: &Ontology,
+) {
     match from {
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            prune_query_from(left, partition, authorized);
-            prune_query_from(right, partition, authorized);
+            prune_query_from(left, partition, authorized, ontology);
+            prune_query_from(right, partition, authorized, ontology);
         }
-        TableRef::Subquery { query, .. } => prune_query(query, partition, authorized),
+        TableRef::Subquery { query, .. } => prune_query(query, partition, authorized, ontology),
         TableRef::Union { queries, .. } => {
             for q in queries {
-                prune_query(q, partition, authorized);
+                prune_query(q, partition, authorized, ontology);
             }
         }
     }

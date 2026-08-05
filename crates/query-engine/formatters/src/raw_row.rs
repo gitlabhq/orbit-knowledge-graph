@@ -1,5 +1,5 @@
 use compiler::{
-    QueryType, ResultContext, internal_column_prefix, neighbor_id_column, neighbor_type_column,
+    INTERNAL_COLUMN_PREFIX, QueryType, ResultContext, neighbor_id_column, neighbor_type_column,
     relationship_type_column,
 };
 use serde_json::{Value, json};
@@ -12,7 +12,7 @@ pub fn row_to_json(row: &QueryResultRow, ctx: &ResultContext) -> Value {
     let mut obj = serde_json::Map::new();
 
     for (name, value) in row.columns() {
-        if name.starts_with(internal_column_prefix())
+        if name.starts_with(INTERNAL_COLUMN_PREFIX)
             && name != neighbor_id_column()
             && name != neighbor_type_column()
             && name != relationship_type_column()

@@ -49,8 +49,8 @@ pub use ast::ddl;
 pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
 pub use constants::{
     EDGE_ALIAS_SUFFIXES, EDGE_DST_SUFFIX, EDGE_DST_TYPE_SUFFIX, EDGE_SRC_SUFFIX,
-    EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, HYDRATION_NODE_ALIAS, edge_kinds_column,
-    internal_column_prefix, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
+    EDGE_SRC_TYPE_SUFFIX, EDGE_TYPE_SUFFIX, HYDRATION_NODE_ALIAS, INTERNAL_COLUMN_PREFIX,
+    edge_kinds_column, neighbor_id_column, neighbor_is_outgoing_column, neighbor_type_column,
     path_column, relationship_type_column,
 };
 pub use error::{QueryError, Result};
