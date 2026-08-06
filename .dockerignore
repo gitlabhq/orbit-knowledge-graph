@@ -6,6 +6,7 @@ CHANGELOG.md
 package.json
 package-lock.json
 docs/
+!docs/dev/agents-crate-map.md
 e2e/
 fixtures/
 helm/
