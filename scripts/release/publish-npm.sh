@@ -66,7 +66,7 @@ for platform in "${PLATFORMS[@]}"; do
   cp -R "npm/orbit-$platform" "$pkg_dir"
   case "$archive" in
     *.zip)    unzip -q "$archive" "$binary" -d "$pkg_dir" ;;
-    *.tar.gz) tar -xzf "$archive" -C "$pkg_dir" "$binary" ;;
+    *.tar.gz) tar -xzf "$archive" -C "$pkg_dir" ;;
   esac
   if [ ! -f "$pkg_dir/$binary" ]; then
     echo "archive $archive did not contain $binary" >&2
