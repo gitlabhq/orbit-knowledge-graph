@@ -8,6 +8,7 @@ use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
+use super::diagnostics::{BranchEvent, BranchFailReason, BranchStatus, DiagnosticsStore};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
@@ -46,6 +47,7 @@ pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
+    diagnostics_store: Arc<dyn DiagnosticsStore>,
     metrics: CodeMetrics,
     lock_ttl: Duration,
     subscription: Subscription,
@@ -66,6 +68,7 @@ impl CodeIndexingTaskHandler {
         pipeline: Arc<CodeIndexingPipeline>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
+        diagnostics_store: Arc<dyn DiagnosticsStore>,
         metrics: CodeMetrics,
         lock_ttl: Duration,
         subscription: Subscription,
@@ -75,6 +78,7 @@ impl CodeIndexingTaskHandler {
             pipeline,
             repository_service,
             checkpoint_store,
+            diagnostics_store,
             metrics,
             lock_ttl,
             subscription,
@@ -297,6 +301,9 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
+        self.record_branch_event(request, branch, BranchStatus::Indexing, None, started_at, 0)
+            .await;
+
         let indexing_request = IndexingRequest {
             project_id,
             branch: branch.to_string(),
@@ -310,11 +317,13 @@ impl CodeIndexingTaskHandler {
         let work =
             self.pipeline
                 .index_project(context, &indexing_request, observer, cancel.clone());
+        let mut timed_out = false;
         let result = match self.pipeline.job_timeout() {
             Some(timeout) => match tokio::time::timeout(timeout, work).await {
                 Ok(result) => result,
                 Err(_) => {
                     cancel.cancel();
+                    timed_out = true;
                     warn!(
                         project_id,
                         branch = %branch,
@@ -335,12 +344,30 @@ impl CodeIndexingTaskHandler {
 
         let result = result.map(|outcome| outcome.metric_label());
 
+        let completed_at = Utc::now();
+        let duration_ms = (completed_at - started_at).num_milliseconds().max(0);
+        let (status, fail_reason) = match &result {
+            Ok(_) => (BranchStatus::Indexed, None),
+            Err(_) if timed_out => (BranchStatus::Failed, Some(BranchFailReason::Timeout)),
+            Err(e) if e.is_permanent() => (BranchStatus::Failed, Some(BranchFailReason::Permanent)),
+            Err(_) => (BranchStatus::Failed, Some(BranchFailReason::Transient)),
+        };
+        self.record_branch_event(
+            request,
+            branch,
+            status,
+            fail_reason,
+            started_at,
+            duration_ms,
+        )
+        .await;
+
         context
             .indexing_status
             .record_completion(
                 &request.traversal_path,
                 started_at,
-                Utc::now(),
+                completed_at,
                 result.as_ref().err().map(ToString::to_string),
             )
             .await;
@@ -354,6 +381,39 @@ impl CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
+    /// Best-effort: a diagnostics write failure logs and is swallowed so it
+    /// never fails the indexing task.
+    async fn record_branch_event(
+        &self,
+        request: &CodeIndexingTaskRequest,
+        branch: &str,
+        status: BranchStatus,
+        fail_reason: Option<BranchFailReason>,
+        started_at: DateTime<Utc>,
+        duration_ms: i64,
+    ) {
+        let event = BranchEvent {
+            project_id: request.project_id,
+            branch: branch.to_string(),
+            traversal_path: request.traversal_path.clone(),
+            task_id: request.task_id,
+            status,
+            fail_reason,
+            commit: request.commit_sha.clone(),
+            started_at,
+            duration_ms,
+        };
+        if let Err(e) = self.diagnostics_store.record_branch_event(&event).await {
+            warn!(
+                project_id = request.project_id,
+                task_id = request.task_id,
+                status = status.as_str(),
+                error = %e,
+                "failed to record code indexing branch event"
+            );
+        }
+    }
+
     async fn load_checkpoint(
         &self,
         request: &CodeIndexingTaskRequest,
@@ -436,10 +496,15 @@ mod tests {
                 gkg_server_config::CodeIndexingPipelineConfig::default(),
             ));
 
+            let diagnostics_store: Arc<dyn DiagnosticsStore> = Arc::new(
+                crate::modules::code::diagnostics::test_utils::MockDiagnosticsStore::new(),
+            );
+
             let handler = CodeIndexingTaskHandler::new(
                 pipeline,
                 repo_service,
                 Arc::clone(&checkpoint_store),
+                diagnostics_store,
                 metrics,
                 Duration::from_secs(60),
                 CodeIndexingTaskRequest::subscription(),

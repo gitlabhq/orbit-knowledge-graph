@@ -16,9 +16,9 @@ use gitlab_client::GitlabClient;
 use gkg_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
-    ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
-    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
-    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    ClickHouseCodeCheckpointStore, ClickHouseDiagnosticsStore, ClickHouseStaleDataCleaner,
+    CodeIndexingPipeline, CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService,
+    RepositoryService, config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
@@ -36,6 +36,7 @@ pub struct CodeIndexingDeps {
     pub pipeline: Arc<CodeIndexingPipeline>,
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
+    pub diagnostics_store: Arc<ClickHouseDiagnosticsStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: gkg_server_config::ClickHouseConfiguration,
     cache_dir: tempfile::TempDir,
@@ -56,6 +57,8 @@ impl CodeIndexingDeps {
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
         )));
+        let diagnostics_store =
+            Arc::new(ClickHouseDiagnosticsStore::new(Arc::clone(&graph_client)));
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
@@ -96,6 +99,7 @@ impl CodeIndexingDeps {
             pipeline,
             repository_service,
             checkpoint_store,
+            diagnostics_store,
             metrics,
             clickhouse_config: clickhouse.config.clone(),
             cache_dir,
@@ -139,6 +143,7 @@ impl CodeIndexingDeps {
             pipeline,
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
+            Arc::clone(&self.diagnostics_store) as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
             CodeIndexingTaskRequest::subscription(),
@@ -151,6 +156,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.pipeline),
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
+            Arc::clone(&self.diagnostics_store) as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
             CodeIndexingTaskRequest::subscription(),

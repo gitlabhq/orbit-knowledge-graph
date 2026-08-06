@@ -1,6 +1,7 @@
 mod arrow_converter;
 mod checkpoint;
 pub mod config;
+mod diagnostics;
 mod handler;
 pub mod metrics;
 pub(crate) mod observer;
@@ -26,6 +27,10 @@ use metrics::CodeMetrics;
 use repository::RepositoryResolver;
 
 pub use checkpoint::ClickHouseCodeCheckpointStore;
+pub use diagnostics::{
+    BranchEvent, BranchFailReason, BranchStatus, ClickHouseDiagnosticsStore, DiagnosticsStore,
+    TaskRef,
+};
 pub use handler::CodeIndexingTaskHandler;
 pub use pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use repository::{
@@ -82,6 +87,8 @@ pub async fn register_handlers(
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
     let checkpoint_store: Arc<dyn checkpoint::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
+    let diagnostics_store: Arc<dyn DiagnosticsStore> =
+        Arc::new(ClickHouseDiagnosticsStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
         stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
     );
@@ -124,6 +131,7 @@ pub async fn register_handlers(
         Arc::clone(&pipeline),
         Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
+        diagnostics_store,
         metrics,
         config.nats.ack_wait(),
         subscription,
