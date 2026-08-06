@@ -190,14 +190,21 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
 
 /// `HEAD` resolves to no commit on a freshly initialized repository, and
 /// gitalisk surfaces that as a raw `ambiguous argument 'HEAD'` git error,
-/// which reads as a bug rather than an empty repository (#658).
+/// which reads as a bug rather than an empty repository (#658). Requiring
+/// `symbolic-ref` to still resolve distinguishes an unborn branch from a
+/// broken or detached HEAD, so corruption keeps its original error instead
+/// of being misreported as an empty repository.
 fn repo_has_no_commits(repo_path: &Path) -> bool {
-    Command::new("git")
-        .args(["rev-parse", "--quiet", "--verify", "HEAD"])
-        .current_dir(repo_path)
-        .output()
-        .map(|out| !out.status.success())
-        .unwrap_or(false)
+    let probe = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    };
+    probe(&["symbolic-ref", "--quiet", "HEAD"])
+        && !probe(&["rev-parse", "--quiet", "--verify", "HEAD"])
 }
 
 /// Resolve the working-tree root of the repo containing `path`.
