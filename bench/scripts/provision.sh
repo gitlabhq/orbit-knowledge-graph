@@ -36,6 +36,15 @@ log "Rendering tier overlay"
 log "Deploying stack via e2e setup"
 export E2E_SHA="${RUN_ID}"
 export E2E_EXTRA_VALUES="/tmp/ra-${RUN_ID}-tier-values.yaml"
+
+# ClickHouse sizing for the bench (persistent storage, sized for dump import).
+export E2E_CH_PERSISTENCE="true"
+export E2E_CH_DISK_SIZE="$(tier '.clickhouse.storage')"
+export E2E_CH_CPU="$(tier '.clickhouse.cpu')"
+export E2E_CH_MEMORY="$(tier '.clickhouse.memory')"
+export E2E_CH_CPU_LIMIT="$(tier '.clickhouse.cpu')"
+export E2E_CH_MEMORY_LIMIT="$(tier '.clickhouse.memory')"
+
 "${E2E_DIR}/scripts/setup.sh"
 
 log "Running validation gate"

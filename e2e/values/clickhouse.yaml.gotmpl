@@ -1,8 +1,16 @@
 password: {{ requiredEnv "E2E_CH_DEFAULT_PASS" | quote }}
 
 persistence:
-  enabled: false
-  size: 20Gi
+  enabled: {{ env "E2E_CH_PERSISTENCE" | default "false" }}
+  size: {{ env "E2E_CH_DISK_SIZE" | default "20Gi" }}
+
+resources:
+  requests:
+    cpu: {{ env "E2E_CH_CPU" | default "1" }}
+    memory: {{ env "E2E_CH_MEMORY" | default "4Gi" }}
+  limits:
+    cpu: {{ env "E2E_CH_CPU_LIMIT" | default "4" }}
+    memory: {{ env "E2E_CH_MEMORY_LIMIT" | default "8Gi" }}
 
 users:
   siphon:
