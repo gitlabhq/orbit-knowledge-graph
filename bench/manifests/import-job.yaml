@@ -32,8 +32,11 @@ spec:
           args:
             - |
               CH_URL="http://${CH_HOST}:8123"
-              CH_AUTH="user=default&password=${CH_PASSWORD}"
-              unset CH_PASSWORD
+              # URL-encode the password (+ and other special chars break query strings).
+              # The gcloud image bundles python3.
+              CH_PASS_ENC=$(python3 -c "import urllib.parse,os; print(urllib.parse.quote(os.environ['CH_PASSWORD'], safe=''))")
+              CH_AUTH="user=default&password=${CH_PASS_ENC}"
+              unset CH_PASSWORD CH_PASS_ENC
 
               # Credentials live only in CH_AUTH. curl errors are silenced to
               # prevent URL+credential leaks.
