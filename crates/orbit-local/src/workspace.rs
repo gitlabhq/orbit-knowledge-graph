@@ -166,9 +166,15 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let branch = repo
         .get_current_branch()
         .context("failed to get current branch")?;
-    let commit_sha = repo
-        .get_current_commit_hash()
-        .context("failed to get current commit hash")?;
+    let commit_sha = repo.get_current_commit_hash().or_else(|e| {
+        if repo_has_no_commits(&canonical) {
+            anyhow::bail!(
+                "{} has no commits yet. Make at least one commit before indexing.",
+                canonical.display()
+            );
+        }
+        Err(e).context("failed to get current commit hash")
+    })?;
     let parent_repo_path = repo
         .parent_repo_path()
         .context("failed to resolve parent repo path")?;
@@ -180,6 +186,18 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
         commit_sha,
         parent_repo_path,
     })
+}
+
+/// `HEAD` resolves to no commit on a freshly initialized repository, and
+/// gitalisk surfaces that as a raw `ambiguous argument 'HEAD'` git error,
+/// which reads as a bug rather than an empty repository (#658).
+fn repo_has_no_commits(repo_path: &Path) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--quiet", "--verify", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .map(|out| !out.status.success())
+        .unwrap_or(false)
 }
 
 /// Resolve the working-tree root of the repo containing `path`.

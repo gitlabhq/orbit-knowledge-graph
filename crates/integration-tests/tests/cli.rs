@@ -483,6 +483,48 @@ fn schema_errors_when_db_missing() {
 }
 
 #[test]
+fn index_errors_when_path_has_no_git_repository() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let not_a_repo = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        not_a_repo.path().join("a.go"),
+        "package main\nfunc Alpha() {}\n",
+    )
+    .unwrap();
+
+    let (_, stderr, ok) = run_cmd(
+        &["index", not_a_repo.path().to_str().unwrap()],
+        data_dir.path(),
+    );
+    assert!(!ok, "index should fail when the path has no git repository");
+    assert!(
+        stderr.contains("no git repository found"),
+        "expected no-repository error: {stderr}"
+    );
+}
+
+#[test]
+fn index_errors_when_repository_has_no_commits() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let empty_repo = tempfile::TempDir::new().unwrap();
+    git(empty_repo.path(), &["init", "--quiet"]);
+
+    let (_, stderr, ok) = run_cmd(
+        &["index", empty_repo.path().to_str().unwrap()],
+        data_dir.path(),
+    );
+    assert!(!ok, "index should fail when the repository has no commits");
+    assert!(
+        stderr.contains("has no commits yet"),
+        "expected no-commits error: {stderr}"
+    );
+    assert!(
+        !stderr.contains("ambiguous argument"),
+        "raw git error should not leak: {stderr}"
+    );
+}
+
+#[test]
 fn schema_scoped_excludes_unrequested_tables() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();
@@ -623,6 +665,28 @@ fn mcp_bad_sql_is_recoverable_tool_error() {
         "missing statement index: {msg}"
     );
     assert!(msg.contains("does_not_exist"), "missing SQL preview: {msg}");
+}
+
+#[test]
+fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let not_a_repo = tempfile::TempDir::new().unwrap();
+
+    let resps = mcp_roundtrip(
+        data_dir.path(),
+        &[mcp_tool_call(
+            1,
+            "index",
+            json!({"path": not_a_repo.path()}),
+        )],
+    );
+
+    assert_eq!(resps[0]["result"]["isError"], true);
+    let msg = mcp_tool_text(&resps[0]);
+    assert!(
+        msg.contains("no git repository found"),
+        "expected no-repository error: {msg}"
+    );
 }
 
 #[test]
