@@ -250,7 +250,10 @@ impl CodeIndexingPipeline {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
+        let fetch_queued = Instant::now();
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
+        self.metrics
+            .record_slot_wait("fetch_slot_wait", fetch_queued.elapsed());
 
         let fetch_start = Instant::now();
         let repository = match self
@@ -326,7 +329,10 @@ impl CodeIndexingPipeline {
         } else {
             &self.big_indexing_slots
         };
+        let lane_queued = Instant::now();
         let _indexing_slot = acquire_indexing_lane(lane, self.pipeline_config.lane_wait()).await?;
+        self.metrics
+            .record_slot_wait("indexing_lane_wait", lane_queued.elapsed());
 
         context.progress.notify_in_progress().await;
 
@@ -531,16 +537,22 @@ impl CodeIndexingPipeline {
         let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
+        // Carry the project span onto the blocking thread so every code-graph line is
+        // attributable; without it a family event cannot be tied to a repository, and
+        // concurrent families make its start and end impossible to pair.
+        let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
-            Pipeline::run_with_tracer(
-                &repo_dir,
-                file_inventory,
-                config,
-                &stream_reasons,
-                tracer,
-                converter,
-                on_batch,
-            )
+            span.in_scope(|| {
+                Pipeline::run_with_tracer(
+                    &repo_dir,
+                    file_inventory,
+                    config,
+                    &stream_reasons,
+                    tracer,
+                    converter,
+                    on_batch,
+                )
+            })
         })
         .await;
         let result = match parsed {

@@ -199,6 +199,16 @@ impl CodeMetrics {
         }
     }
 
+    /// Time a repository spent queueing for a local slot. Charged against the same job
+    /// budget as the work itself, so without this a job that times out is indistinguishable
+    /// from one that never got to start.
+    pub(in crate::modules::code) fn record_slot_wait(&self, slot: &'static str, elapsed: Duration) {
+        self.pipeline_phase_duration.record(
+            elapsed.as_secs_f64(),
+            &[KeyValue::new(code::labels::PHASE, slot)],
+        );
+    }
+
     pub(in crate::modules::code) fn record_fetch_duration(&self, elapsed: Duration) {
         self.repository_fetch_duration
             .record(elapsed.as_secs_f64(), &[]);
