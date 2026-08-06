@@ -19,9 +19,6 @@ use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, 
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 
-/// Share of the job budget spendable on queueing; the rest is reserved for fetch and parse.
-const LANE_WAIT_BUDGET_PERCENT: u32 = 20;
-
 pub struct IndexingRequest {
     pub project_id: i64,
     pub branch: String,
@@ -209,11 +206,6 @@ impl CodeIndexingPipeline {
         self.pipeline_config.job_timeout()
     }
 
-    fn lane_wait_budget(&self) -> Option<Duration> {
-        self.job_timeout()
-            .map(|budget| budget * LANE_WAIT_BUDGET_PERCENT / 100)
-    }
-
     /// Flush all buffered writes and wait until every project they made durable has been
     /// stale-cleaned and checkpointed. For tests and shutdown; steady state relies on the
     /// size/age flush and the per-project commit tokens.
@@ -334,7 +326,8 @@ impl CodeIndexingPipeline {
         } else {
             &self.big_indexing_slots
         };
-        let _indexing_slot = acquire_within(lane, "indexing", self.lane_wait_budget()).await?;
+        let _indexing_slot =
+            acquire_within(lane, "indexing", self.pipeline_config.lane_wait()).await?;
 
         context.progress.notify_in_progress().await;
 

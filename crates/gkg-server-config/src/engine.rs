@@ -284,6 +284,9 @@ fn default_code_indexing_cross_file_resolve_timeout_ms() -> u64 {
     180_000
 }
 
+/// Share of `job_timeout_secs` that queueing for an indexing lane may consume.
+const LANE_WAIT_TIME_BUDGET_PERCENT: u32 = 20;
+
 fn default_code_indexing_job_timeout_secs() -> u64 {
     250
 }
@@ -451,6 +454,12 @@ impl CodeIndexingPipelineConfig {
     /// Hard per-job timeout, or `None` when disabled (`job_timeout_secs == 0`).
     pub fn job_timeout(&self) -> Option<Duration> {
         (self.job_timeout_secs > 0).then(|| Duration::from_secs(self.job_timeout_secs))
+    }
+
+    /// Ceiling on queueing for an indexing lane, or `None` when the job budget is disabled.
+    pub fn lane_wait(&self) -> Option<Duration> {
+        self.job_timeout()
+            .map(|budget| budget * LANE_WAIT_TIME_BUDGET_PERCENT / 100)
     }
 
     pub fn write_buffer_age(&self) -> Duration {
@@ -893,6 +902,18 @@ mod tests {
             cfg.tasks.migration_completion.schedule.cron.as_deref(),
             Some("0 */1 * * * *")
         );
+    }
+
+    #[test]
+    fn lane_wait_is_a_share_of_the_job_budget() {
+        let cfg = CodeIndexingPipelineConfig::default();
+        assert_eq!(cfg.lane_wait(), Some(Duration::from_secs(50)));
+
+        let no_budget = CodeIndexingPipelineConfig {
+            job_timeout_secs: 0,
+            ..Default::default()
+        };
+        assert_eq!(no_budget.lane_wait(), None);
     }
 
     #[test]
