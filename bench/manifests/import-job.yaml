@@ -62,10 +62,14 @@ spec:
                 [ -f "${schema_file}" ] || continue
                 table=$(basename "${schema_file}" .schema.sql)
 
-                # DDL rewrite from clickhouse-datalake-dumps bin/import.sh
+                # DDL rewrite: strip Cloud-only syntax for local ClickHouse.
+                # 1. Remove database qualifier from CREATE TABLE
+                # 2. SharedXxxMergeTree('path','replica', ver, del) -> XxxMergeTree(ver, del)
+                # 3. Bare SharedXxxMergeTree (no args) -> XxxMergeTree
+                # 4. Clean up leading comma+space after stripping path/replica
                 ddl=$(sed -E \
                   -e 's/CREATE TABLE [A-Za-z0-9_]+\./CREATE TABLE /' \
-                  -e "s/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree\('[^']*', *'[^']*'/\1MergeTree(/" \
+                  -e "s/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree\('[^']*', *'[^']*'(, *)?/\1MergeTree(/" \
                   -e 's/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree/\1MergeTree/' \
                   -e 's/MergeTree\(, */MergeTree(/' \
                   "${schema_file}")
