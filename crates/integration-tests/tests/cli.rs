@@ -292,8 +292,7 @@ fn sequential_read_consistency() {
 fn unindexable_repo_records_error_in_manifest() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = tempfile::TempDir::new().unwrap();
-    // A repo with no commits: discovery finds it (.git exists) but git_info
-    // fails resolving HEAD, so it must land as an `error` row, not vanish.
+    // A commitless repo is discovered (.git exists) but git_info fails on HEAD.
     git(repo.path(), &["init"]);
 
     let ok = orbit_cmd()

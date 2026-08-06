@@ -119,11 +119,7 @@ pub fn set_status(
     Ok(())
 }
 
-/// Best-effort `error` manifest row for a repo that could not be opened at all
-/// (git_info failed before we had a canonical path or git metadata). Keeps the
-/// failure durable instead of leaving the repo absent from the manifest.
-/// Any failure here is logged, never propagated: it must not mask the original
-/// git error the caller already recorded.
+/// Best-effort `error` manifest row for a repo git_info could not open; logged, never propagated so it can't mask the original error.
 pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     let key = dunce::canonicalize(repo_path)
         .unwrap_or_else(|_| repo_path.to_path_buf())

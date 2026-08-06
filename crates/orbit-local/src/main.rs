@@ -452,9 +452,6 @@ pub(crate) fn index_collect(
             Err(e) => {
                 tracing::error!("skipping {}: {e:#}", repo_path.display());
                 failed += 1;
-                // Record the failure so the repo is not silently absent from the
-                // manifest. git_info gave us no canonical path/project_id, so key
-                // on the raw path and derive the id from it directly.
                 workspace::record_git_info_failure(&db_path, repo_path, &e.to_string());
                 continue;
             }
@@ -595,8 +592,6 @@ fn index_repo(
     for err in &v2_result.errors {
         tracing::warn!(stage = err.stage, error = %err.error, file = %err.file_path, "pipeline error");
     }
-    // A fatal error means the task did not produce a complete graph. Fail so the
-    // caller records `error` with the reason instead of a false `indexed`.
     let fatal_count = v2_result.errors.iter().filter(|e| e.fatal).count();
     if let Some(first) = v2_result.errors.iter().find(|e| e.fatal) {
         anyhow::bail!(
