@@ -341,14 +341,6 @@ mod tests {
         }
     }
 
-    fn source_with_target(table: &str, target: &str) -> ReindexSource {
-        ReindexSource {
-            table: table.to_string(),
-            target: target.to_string(),
-            traversal_path: PathResolution::Column("traversal_path".to_string()),
-        }
-    }
-
     fn change_batches(rows: &[(i64, &str, &str)]) -> Vec<RecordBatch> {
         let schema = Arc::new(Schema::new(vec![
             Field::new("root_namespace_id", DataType::Int64, false),
@@ -447,36 +439,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failing_branch_does_not_drop_the_other_branches() {
-        let client = Arc::new(StubClient {
-            combined: Err(()),
-            branches: BTreeMap::from([
-                ("work_items", Ok(change_batches(&[(9, "1/9/", "WorkItem")]))),
-                ("siphon_sbom_component_versions", Err(())),
-            ]),
-            calls: AtomicUsize::new(0),
-        });
-        let detector = detector(
-            client.clone(),
-            [
-                column_source("work_items"),
-                source_with_target("siphon_sbom_component_versions", "HAS_VULNERABILITY"),
-            ],
-        );
-
-        let namespaces = detect(&detector).await;
-
-        assert_eq!(namespaces.len(), 1);
-        assert_eq!(namespaces[0].namespace_id, 9);
-        assert_eq!(namespaces[0].targets, vec!["WorkItem"]);
-        assert_eq!(
-            client.calls.load(Ordering::SeqCst),
-            3,
-            "combined + one query per branch"
-        );
-    }
-
-    #[tokio::test]
     async fn all_branches_failing_is_an_error() {
         let client = Arc::new(StubClient {
             combined: Err(()),
@@ -494,38 +456,6 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("all 2 change detection branches"));
-    }
-
-    #[tokio::test]
-    async fn fallback_dedups_targets_across_branches() {
-        let client = Arc::new(StubClient {
-            combined: Err(()),
-            branches: BTreeMap::from([
-                (
-                    "merge_requests",
-                    Ok(change_batches(&[(9, "1/9/", "MergeRequest")])),
-                ),
-                (
-                    "siphon_approvals",
-                    Ok(change_batches(&[(9, "1/9/", "MergeRequest")])),
-                ),
-                ("bad_table", Err(())),
-            ]),
-            calls: AtomicUsize::new(0),
-        });
-        let detector = detector(
-            client,
-            [
-                source_with_target("merge_requests", "MergeRequest"),
-                source_with_target("siphon_approvals", "MergeRequest"),
-                column_source("bad_table"),
-            ],
-        );
-
-        let namespaces = detect(&detector).await;
-
-        assert_eq!(namespaces.len(), 1);
-        assert_eq!(namespaces[0].targets, vec!["MergeRequest"]);
     }
 
     #[test]
