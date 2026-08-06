@@ -56,8 +56,8 @@ pub(crate) fn dir_of(path: &str) -> &str {
 /// the probe-key sequence is byte-identical to the `current.rfind(sep)` loop.
 ///
 /// Lazy on purpose: a def that resolves at the outermost scope stops the caller
-/// after the full-FQN probe, so no backward scan runs — restoring the old
-/// `rfind`-loop early-exit while still scanning each level at most once.
+/// after the full-FQN probe, so no backward scan runs, while still scanning each
+/// level at most once.
 fn climb_prefix_ends<'a>(fqn: &'a str, sep: &'a str) -> impl Iterator<Item = usize> + 'a {
     let hay = fqn.as_bytes();
     let starts = SeparatorStarts {
@@ -301,7 +301,7 @@ impl<'a> ImportResolver<'a> {
             let def = &self.graph.defs[did.0 as usize];
             let fqn_str = self.graph.str(def.fqn);
             // The `{sep}{name}` suffix is invariant across the climb, so append
-            // it to the shrinking prefix rather than reformatting the whole key.
+            // it to the shrinking prefix.
             for prefix_len in climb_prefix_ends(fqn_str, sep) {
                 let prefix = &fqn_str[..prefix_len];
                 let key = {
