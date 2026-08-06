@@ -28,6 +28,8 @@
 - Do not use possessive: "GitLab policies" not "GitLab's policies"
 - "GitLab Duo" not "Duo"
 - "GitLab Duo Agent Platform" not "DAP" or "Duo Agent Platform"
+- "GitLab Orbit" not "Orbit"
+- "GitLab Orbit Remote" or "GitLab Orbit Local" not "Orbit Remote" or "Orbit Local"
 - Offerings:
   - "GitLab.com" not "GitLab SaaS"
   - "GitLab Self-Managed" not "Self-managed"
