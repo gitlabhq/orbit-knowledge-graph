@@ -173,15 +173,19 @@ fn group_by_namespace(batches: &[RecordBatch]) -> Result<Vec<NamespaceDispatchRe
     let traversal_paths = String::extract_column(batches, 1).map_err(TaskError::new)?;
     let targets = String::extract_column(batches, 2).map_err(TaskError::new)?;
 
-    let mut by_namespace: BTreeMap<(i64, String), BTreeSet<String>> = BTreeMap::new();
-    for ((namespace_id, traversal_path), target) in
-        namespace_ids.into_iter().zip(traversal_paths).zip(targets)
-    {
-        by_namespace
-            .entry((namespace_id, traversal_path))
-            .or_default()
-            .insert(target);
-    }
+    let by_namespace = namespace_ids
+        .into_iter()
+        .zip(traversal_paths)
+        .zip(targets)
+        .fold(
+            BTreeMap::<(i64, String), BTreeSet<String>>::new(),
+            |mut acc, ((namespace_id, traversal_path), target)| {
+                acc.entry((namespace_id, traversal_path))
+                    .or_default()
+                    .insert(target);
+                acc
+            },
+        );
 
     Ok(by_namespace
         .into_iter()
