@@ -452,6 +452,10 @@ pub(crate) fn index_collect(
             Err(e) => {
                 tracing::error!("skipping {}: {e:#}", repo_path.display());
                 failed += 1;
+                // Record the failure so the repo is not silently absent from the
+                // manifest. git_info gave us no canonical path/project_id, so key
+                // on the raw path and derive the id from it directly.
+                workspace::record_git_info_failure(&db_path, repo_path, &e.to_string());
                 continue;
             }
         };
@@ -588,11 +592,20 @@ fn index_repo(
         on_batch,
     );
 
-    if !v2_result.errors.is_empty() {
-        for err in &v2_result.errors {
-            tracing::warn!("pipeline error: {} ({})", err.error, err.file_path);
-        }
+    for err in &v2_result.errors {
+        tracing::warn!(stage = err.stage, error = %err.error, file = %err.file_path, "pipeline error");
     }
+    // A fatal error means the task did not produce a complete graph. Fail so the
+    // caller records `error` with the reason instead of a false `indexed`.
+    let fatal_count = v2_result.errors.iter().filter(|e| e.fatal).count();
+    if let Some(first) = v2_result.errors.iter().find(|e| e.fatal) {
+        anyhow::bail!(
+            "code indexing failed during {}: {} ({fatal_count} fatal pipeline error(s))",
+            first.stage,
+            first.error
+        );
+    }
+
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
     workspace::set_status(
@@ -603,10 +616,6 @@ fn index_repo(
         None,
         Some(git),
     )?;
-
-    for err in &v2_result.errors {
-        tracing::warn!(stage = err.stage, error = %err.error, "task-level pipeline error");
-    }
 
     Ok(IndexRunResult {
         total_processing_time: start_time.elapsed(),

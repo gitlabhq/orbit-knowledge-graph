@@ -119,6 +119,35 @@ pub fn set_status(
     Ok(())
 }
 
+/// Best-effort `error` manifest row for a repo that could not be opened at all
+/// (git_info failed before we had a canonical path or git metadata). Keeps the
+/// failure durable instead of leaving the repo absent from the manifest.
+/// Any failure here is logged, never propagated: it must not mask the original
+/// git error the caller already recorded.
+pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
+    let key = dunce::canonicalize(repo_path)
+        .unwrap_or_else(|_| repo_path.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let client = match DuckDbClient::open(db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("failed to open DuckDB to record git failure for {key}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = set_status(
+        &client,
+        &key,
+        project_id_from_path(&key),
+        RepoStatus::Error,
+        Some(error),
+        None,
+    ) {
+        tracing::warn!("failed to record git failure status for {key}: {e}");
+    }
+}
+
 pub struct GitInfo {
     pub repo_path: PathBuf,
     /// Deterministic project ID derived from `repo_path`.
@@ -224,6 +253,40 @@ mod tests {
             .current_dir(path)
             .output()
             .unwrap();
+    }
+
+    const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+    #[test]
+    fn record_git_info_failure_writes_error_row() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db = tmp.path().join("graph.duckdb");
+        let client = DuckDbClient::open(&db).unwrap();
+        client.initialize_schema(LOCAL_DDL).unwrap();
+        drop(client);
+
+        let repo = tmp.path().join("unopenable");
+        std::fs::create_dir_all(&repo).unwrap();
+        record_git_info_failure(&db, &repo, "failed to get current branch");
+
+        let client = DuckDbClient::open(&db).unwrap();
+        let rows = client
+            .query_arrow("SELECT CAST(status AS VARCHAR), error_message FROM _orbit_manifest")
+            .unwrap();
+        let batch = rows.first().expect("one row");
+        assert_eq!(batch.num_rows(), 1);
+        let status = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        let msg = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        assert_eq!(status.value(0), "error");
+        assert_eq!(msg.value(0), "failed to get current branch");
     }
 
     #[test]

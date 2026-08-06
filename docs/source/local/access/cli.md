@@ -126,17 +126,21 @@ orbit list
 orbit list -F json
 ```
 
-Each row reports the repository path, branch, commit, indexing status, and
-when it was last indexed:
+Each row reports the repository path, branch, commit, indexing status, when it
+was last indexed, and an error message when the status is `error`:
 
 ```plaintext
-+------------------------+--------+------------+---------+---------------------+
-| repo_path              | branch | commit_sha | status  | last_indexed_at     |
-+------------------------+--------+------------+---------+---------------------+
-| /home/dev/workspace/kg | main   | 9606ae8... | indexed | 2026-05-18 10:14:02 |
-| /tmp/cli-test          | main   | 654f3a6... | indexed | 2026-05-18 10:13:55 |
-+------------------------+--------+------------+---------+---------------------+
++------------------------+--------+------------+---------+---------------------+---------------+
+| repo_path              | branch | commit_sha | status  | last_indexed_at     | error_message |
++------------------------+--------+------------+---------+---------------------+---------------+
+| /home/dev/workspace/kg | main   | 9606ae8... | indexed | 2026-05-18 10:14:02 |               |
+| /tmp/cli-test          | main   | 654f3a6... | indexed | 2026-05-18 10:13:55 |               |
++------------------------+--------+------------+---------+---------------------+---------------+
 ```
+
+A repository whose indexing fails is recorded with `status = error` and a
+reason in `error_message`, so a failed or unindexable repository stays visible
+here instead of silently disappearing.
 
 | Flag | Purpose |
 |------|---------|

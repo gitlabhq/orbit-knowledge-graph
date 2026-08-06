@@ -289,6 +289,39 @@ fn sequential_read_consistency() {
 }
 
 #[test]
+fn unindexable_repo_records_error_in_manifest() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = tempfile::TempDir::new().unwrap();
+    // A repo with no commits: discovery finds it (.git exists) but git_info
+    // fails resolving HEAD, so it must land as an `error` row, not vanish.
+    git(repo.path(), &["init"]);
+
+    let ok = orbit_cmd()
+        .args(["index", repo.path().to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(!ok, "indexing a commitless repo should report failure");
+
+    let manifest = orbit_sql(
+        "SELECT CAST(status AS VARCHAR) AS status, error_message FROM _orbit_manifest",
+        data_dir.path(),
+    );
+    let rows = rows(&manifest);
+    assert_eq!(rows.len(), 1, "expected one error row, got {rows:?}");
+    assert_eq!(rows[0]["status"], "error");
+    assert!(
+        rows[0]["error_message"]
+            .as_str()
+            .is_some_and(|m| !m.is_empty()),
+        "error row must carry a reason: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
 fn nested_repos_indexed_separately() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
