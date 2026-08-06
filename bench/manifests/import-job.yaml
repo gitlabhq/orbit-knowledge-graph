@@ -155,4 +155,4 @@ spec:
               cpu: "1"
               memory: 4Gi
             limits:
-              memory: 8Gi
+              memory: 16Gi
