@@ -86,18 +86,10 @@
 - Avoid semicolons, em dashes, and curly quotes.
 - For placeholder text or variables, use <your_value>.
 
-## Navigation steps
-
-- Location first, then action: "In the left sidebar, select **Settings**."
-- Be brief: "Select **Save**." not "Select **Save** for changes to take effect."
-- Start optional steps with "Optional."
-- For the UI, use: top bar, left sidebar, right sidebar, and details panel.
-
 ## Tables
 
 - The Description column should be on the right.
 - Use sentence case for headers.
-- Use these shortcodes for feature tables: {{< yes >}} and {{< no >}}.
 
 ## Alerts
 
