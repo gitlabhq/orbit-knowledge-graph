@@ -326,8 +326,7 @@ impl CodeIndexingPipeline {
         } else {
             &self.big_indexing_slots
         };
-        let _indexing_slot =
-            acquire_within(lane, "indexing", self.pipeline_config.lane_wait()).await?;
+        let _indexing_slot = acquire_indexing_lane(lane, self.pipeline_config.lane_wait()).await?;
 
         context.progress.notify_in_progress().await;
 
@@ -666,18 +665,17 @@ fn sem(n: usize) -> Option<Arc<Semaphore>> {
 }
 
 /// A full lane says nothing about the project, so giving up requeues instead of failing the job.
-async fn acquire_within(
-    slots: &Option<Arc<Semaphore>>,
-    name: &str,
+async fn acquire_indexing_lane(
+    lane: &Option<Arc<Semaphore>>,
     budget: Option<Duration>,
 ) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
     let Some(budget) = budget else {
-        return acquire(slots, name).await;
+        return acquire(lane, "indexing").await;
     };
-    match tokio::time::timeout(budget, acquire(slots, name)).await {
+    match tokio::time::timeout(budget, acquire(lane, "indexing")).await {
         Ok(result) => result,
         Err(_) => Err(HandlerError::Backpressure(format!(
-            "no {name} slot within {}s",
+            "no indexing lane within {}s",
             budget.as_secs()
         ))),
     }
@@ -866,7 +864,7 @@ mod tests {
         let slots = sem(1);
         let _held = acquire(&slots, "indexing").await.unwrap();
 
-        let error = acquire_within(&slots, "indexing", Some(Duration::from_secs(50)))
+        let error = acquire_indexing_lane(&slots, Some(Duration::from_secs(50)))
             .await
             .expect_err("a saturated lane must not hand out a permit");
 
@@ -878,7 +876,7 @@ mod tests {
     async fn lane_permit_is_returned_when_one_is_free() {
         let slots = sem(1);
 
-        let permit = acquire_within(&slots, "indexing", Some(Duration::from_secs(50)))
+        let permit = acquire_indexing_lane(&slots, Some(Duration::from_secs(50)))
             .await
             .unwrap();
 
@@ -894,7 +892,7 @@ mod tests {
             drop(held);
         });
 
-        let permit = acquire_within(&slots, "indexing", None)
+        let permit = acquire_indexing_lane(&slots, None)
             .await
             .expect("an unbounded wait must outlast any delay");
 
