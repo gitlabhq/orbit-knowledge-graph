@@ -67,11 +67,13 @@ spec:
                 # 2. SharedXxxMergeTree('path','replica', ver, del) -> XxxMergeTree(ver, del)
                 # 3. Bare SharedXxxMergeTree (no args) -> XxxMergeTree
                 # 4. Clean up leading comma+space after stripping path/replica
+                # 5. Strip database qualifier from dictionary references in DEFAULT exprs
                 ddl=$(sed -E \
                   -e 's/CREATE TABLE [A-Za-z0-9_]+\./CREATE TABLE /' \
                   -e "s/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree\('[^']*', *'[^']*'(, *)?/\1MergeTree(/" \
                   -e 's/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree/\1MergeTree/' \
                   -e 's/MergeTree\(, */MergeTree(/' \
+                  -e "s/gitlab_clickhouse_main_production\./datalake./g" \
                   "${schema_file}")
 
                 ch staging "DROP TABLE IF EXISTS ${table}" || true
