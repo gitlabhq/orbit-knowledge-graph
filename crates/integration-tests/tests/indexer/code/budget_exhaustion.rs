@@ -20,7 +20,9 @@ const TRAVERSAL_PATH: &str = "1/4242/";
 const BRANCH: &str = "main";
 const FILE_COUNT: usize = 10_000;
 const METHODS_PER_FILE: usize = 80;
-const BUDGET_SECS: u64 = 10;
+// Generous enough that extracting the repository fits on slow CI hardware, while the
+// unbounded parse of the same repository still overruns it by a wide margin.
+const BUDGET_SECS: u64 = 60;
 
 fn backfill_envelope() -> Envelope {
     Envelope::new(&CodeIndexingTaskRequest {

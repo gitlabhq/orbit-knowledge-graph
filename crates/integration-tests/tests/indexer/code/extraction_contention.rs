@@ -19,6 +19,7 @@ const VICTIM_FILES: usize = 12_000;
 const LOAD_FILES: usize = 3_000;
 const LOAD_METHODS: usize = 80;
 const REPS: usize = 5;
+const NARROW_DIVISOR: usize = 4;
 const MIN_SLOWDOWN: f64 = 1.3;
 
 fn envelope(project_id: i64) -> Envelope {
@@ -137,8 +138,16 @@ async fn a_concurrent_parse_stretches_extraction_through_the_handler() {
 
 #[tokio::test]
 async fn narrowing_the_parse_relieves_extraction() {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    // Below this there is no width to give back, so the comparison would be vacuous.
+    if cores < NARROW_DIVISOR * 2 {
+        println!("skipping: {cores} cores leaves nothing to narrow");
+        return;
+    }
     let wide = slowdown_at_parse_width(0).await;
-    let narrow = slowdown_at_parse_width(4).await;
+    let narrow = slowdown_at_parse_width(cores / NARROW_DIVISOR).await;
     assert!(
         narrow < wide,
         "narrowing the parse must leave extraction less starved; wide={wide:.2}x narrow={narrow:.2}x"
