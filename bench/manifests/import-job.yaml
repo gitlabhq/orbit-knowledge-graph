@@ -32,124 +32,43 @@ spec:
           args:
             - |
               CH_URL="http://${CH_HOST}:8123"
-              # URL-encode the password (+ and other special chars break query strings).
-              # The gcloud image bundles python3.
               CH_PASS_ENC=$(python3 -c "import urllib.parse,os; print(urllib.parse.quote(os.environ['CH_PASSWORD'], safe=''))")
               CH_AUTH="user=default&password=${CH_PASS_ENC}"
               unset CH_PASSWORD CH_PASS_ENC
 
-              # Credentials live only in CH_AUTH. curl errors are silenced to
-              # prevent URL+credential leaks.
-              ch() {
-                local db="${1:-}" query="${2:-}"
-                local params="${CH_AUTH}"
-                [ -n "${db}" ] && params="${params}&database=${db}"
-                curl -sf "${CH_URL}/?${params}" -d "${query}" 2>/dev/null
-              }
-
-              WORK="/tmp/dump"
-              mkdir -p "${WORK}/datalake"
+              WORK="/tmp/dump/datalake"
+              mkdir -p "${WORK}"
 
               echo "==> Downloading datalake from ${BUCKET}/${DUMP_PREFIX}/datalake/"
-              gsutil -m rsync -r "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/datalake/"
+              gsutil -m rsync -r "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/"
 
-              echo "==> Creating databases"
-              ch "" "CREATE DATABASE IF NOT EXISTS staging"
-              ch "" "CREATE DATABASE IF NOT EXISTS datalake"
-
-              echo "==> Importing into staging"
-              for schema_file in ${WORK}/datalake/*.schema.sql; do
-                [ -f "${schema_file}" ] || continue
-                table=$(basename "${schema_file}" .schema.sql)
-
-                # DDL rewrite: strip Cloud-only syntax for local ClickHouse.
-                # 1. Remove database qualifier from CREATE TABLE
-                # 2. SharedXxxMergeTree('path','replica', ver, del) -> XxxMergeTree(ver, del)
-                # 3. Bare SharedXxxMergeTree (no args) -> XxxMergeTree
-                # 4. Clean up leading comma+space after stripping path/replica
-                # 5. Strip database qualifier from dictionary references in DEFAULT exprs
-                ddl=$(sed -E \
-                  -e 's/CREATE TABLE [A-Za-z0-9_]+\./CREATE TABLE /' \
-                  -e "s/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree\('[^']*', *'[^']*'(, *)?/\1MergeTree(/" \
-                  -e 's/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree/\1MergeTree/' \
-                  -e 's/MergeTree\(, */MergeTree(/' \
-                  -e "s/gitlab_clickhouse_main_production\./datalake./g" \
-                  "${schema_file}")
-
-                ch staging "DROP TABLE IF EXISTS ${table}" || true
-                ch datalake "DROP TABLE IF EXISTS ${table}" || true
-                if ! ch staging "${ddl}"; then
-                  echo "  WARNING: DDL failed for ${table} in staging, skipping"
-                  continue
-                fi
-                ch datalake "${ddl}" || echo "  WARNING: DDL failed for ${table} in datalake"
-
-                parts=0
-                for part_file in ${WORK}/datalake/${table}.part*.Native.gz; do
-                  [ -f "${part_file}" ] || continue
-                  gzip -dc "${part_file}" | curl -sf \
+              echo "==> Inserting into existing Siphon-created tables (no DDL)"
+              # Siphon creates the datalake tables with correct schemas during
+              # setup.sh (via sync-cdc-tables.sh + the consumer helm chart).
+              # We skip DDL entirely and INSERT the dump's Native-format data
+              # into those existing tables. input_format_skip_unknown_fields
+              # handles column mismatches between the dump and current schema.
+              for sf in ${WORK}/*.schema.sql; do
+                [ -f "${sf}" ] || continue
+                t=$(basename "${sf}" .schema.sql)
+                p=0
+                for pf in ${WORK}/${t}.part*.Native.gz; do
+                  [ -f "${pf}" ] || continue
+                  gzip -dc "${pf}" | curl -sf \
                     -H "Content-Type: application/octet-stream" \
-                    "${CH_URL}/?${CH_AUTH}&database=staging&query=INSERT+INTO+${table}+FORMAT+Native" \
-                    --data-binary @- 2>/dev/null || echo "  WARNING: part import failed for ${table}"
-                  parts=$((parts + 1))
+                    "${CH_URL}/?${CH_AUTH}&database=datalake&query=INSERT+INTO+${t}+FORMAT+Native&input_format_skip_unknown_fields=1" \
+                    --data-binary @- 2>/dev/null || echo "  WARN: ${t} part ${p}"
+                  p=$((p+1))
                 done
-                echo "  ${table}: ${parts} parts"
-              done
-
-              echo "==> Copying staging -> datalake (with PII scrub)"
-              for table in $(ch staging "SHOW TABLES"); do
-                case "${table}" in
-                  siphon_users)
-                    ch datalake \
-                      "INSERT INTO ${table} SELECT * REPLACE (
-                        '' AS email, '' AS name, toString(sipHash64(username)) AS username
-                       ) FROM staging.${table}" && continue ;;
-                  siphon_notes)
-                    ch datalake \
-                      "INSERT INTO ${table} SELECT * REPLACE ('' AS note) FROM staging.${table}" && continue ;;
-                  siphon_merge_request_diffs)
-                    ch datalake \
-                      "INSERT INTO ${table} SELECT * REPLACE ('' AS st_diffs) FROM staging.${table}" && continue ;;
-                  siphon_merge_request_diff_files)
-                    ch datalake \
-                      "INSERT INTO ${table} SELECT * REPLACE (
-                        '' AS diff
-                       ) FROM staging.${table}" 2>/dev/null || \
-                    ch datalake "INSERT INTO ${table} SELECT * FROM staging.${table}"
-                    continue ;;
-                  merge_requests)
-                    ch datalake \
-                      "INSERT INTO ${table} SELECT * REPLACE (
-                        '' AS title, '' AS description
-                       ) FROM staging.${table}" && continue ;;
-                  work_items)
-                    ch datalake \
-                      "INSERT INTO ${table} SELECT * REPLACE (
-                        '' AS title, '' AS description
-                       ) FROM staging.${table}" && continue ;;
-                esac
-                ch datalake \
-                  "INSERT INTO ${table} SELECT * FROM staging.${table}" || true
-              done
-
-              echo "==> Dropping staging (unscrubbed data)"
-              ch "" "DROP DATABASE IF EXISTS staging"
-
-              echo "==> Materializing _siphon_watermark"
-              for table in $(ch datalake "SHOW TABLES"); do
-                ch datalake \
-                  "ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS _siphon_watermark DateTime64(6,'UTC') DEFAULT now64(6,'UTC')" || true
-                ch datalake \
-                  "ALTER TABLE ${table} MATERIALIZE COLUMN _siphon_watermark" || true
+                [ ${p} -gt 0 ] && echo "  ${t}: ${p} parts"
               done
 
               echo "==> Verifying row counts (no row data, counts only)"
-              for table in $(ch datalake "SHOW TABLES"); do
-                rows=$(ch datalake "SELECT count() FROM ${table}")
-                echo "  ${table}: ${rows} rows"
-              done
+              curl -s "${CH_URL}/?${CH_AUTH}&database=datalake" \
+                -d "SELECT name, total_rows FROM system.tables WHERE database='datalake' AND total_rows > 0 ORDER BY total_rows DESC FORMAT TSV" \
+                2>/dev/null
 
-              echo "==> Import complete. Staging dropped. Only scrubbed data in datalake."
+              echo "==> Import complete."
           resources:
             requests:
               cpu: "1"
