@@ -13,3 +13,30 @@ ORDER BY (logical_table, top_level_namespace, snapshot_date)
 TTL snapshot_date + INTERVAL 400 DAY
 SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
 
+CREATE TABLE IF NOT EXISTS code_indexing_branch_events (
+    project_id Int64 CODEC(ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    traversal_path String CODEC(ZSTD(1)),
+    task_id Int64 CODEC(ZSTD(1)),
+    status String,
+    fail_reason String DEFAULT '',
+    commit String DEFAULT '',
+    started_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
+    duration_ms Int64 DEFAULT 0
+) ENGINE = MergeTree
+ORDER BY (project_id, branch, started_at)
+TTL started_at + INTERVAL 90 DAY
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS code_indexing_file_events (
+    project_id Int64 CODEC(ZSTD(1)),
+    branch String CODEC(ZSTD(1)),
+    task_id Int64 CODEC(ZSTD(1)),
+    path String CODEC(ZSTD(1)),
+    reason String,
+    occurred_at DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1))
+) ENGINE = MergeTree
+ORDER BY (project_id, branch, task_id, path)
+TTL occurred_at + INTERVAL 90 DAY
+SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+

@@ -297,6 +297,39 @@ settings:
         - {name: compressed_bytes, type: int64}
       order_by: [logical_table, top_level_namespace, snapshot_date]
       ttl: snapshot_date + INTERVAL 400 DAY
+    # Diagnostic event logs for code indexing. Unversioned so history outlives
+    # re-indexes and schema-version GC (like namespace_storage_snapshot). Both
+    # are append-only; status and reason strings come from a Rust enum with a
+    # single producer, so nothing unbounded reaches the query surface.
+    - name: code_indexing_branch_events
+      versioned: false
+      include_system_columns: false
+      engine: MergeTree
+      columns:
+        - {name: project_id, type: int64, codec: ["zstd(1)"]}
+        - {name: branch, type: string, codec: ["zstd(1)"]}
+        - {name: traversal_path, type: string, codec: ["zstd(1)"]}
+        - {name: task_id, type: int64, codec: ["zstd(1)"]}
+        - {name: status, type: string}
+        - {name: fail_reason, type: string, default: "''"}
+        - {name: commit, type: string, default: "''"}
+        - {name: started_at, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+        - {name: duration_ms, type: int64, default: "0"}
+      order_by: [project_id, branch, started_at]
+      ttl: started_at + INTERVAL 90 DAY
+    - name: code_indexing_file_events
+      versioned: false
+      include_system_columns: false
+      engine: MergeTree
+      columns:
+        - {name: project_id, type: int64, codec: ["zstd(1)"]}
+        - {name: branch, type: string, codec: ["zstd(1)"]}
+        - {name: task_id, type: int64, codec: ["zstd(1)"]}
+        - {name: path, type: string, codec: ["zstd(1)"]}
+        - {name: reason, type: string}
+        - {name: occurred_at, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
+      order_by: [project_id, branch, task_id, path]
+      ttl: occurred_at + INTERVAL 90 DAY
     - name: checkpoint
       columns:
         - {name: key, type: string, codec: ["zstd(1)"]}
