@@ -127,6 +127,17 @@
       "domain": "resilience.circuit_breaker"
     },
     {
+      "otel_name": "gkg.circuit_breaker.state",
+      "prom_name": "gkg_circuit_breaker_state",
+      "description": "Current circuit-breaker state per service: 0 closed, 1 half-open, 2 open. Pre-registered at closed on startup so alerts can match on the value rather than on transition rates.",
+      "kind": "gauge",
+      "labels": [
+        "service"
+      ],
+      "stability": "stable",
+      "domain": "resilience.circuit_breaker"
+    },
+    {
       "otel_name": "gkg.circuit_breaker.state.transitions",
       "prom_name": "gkg_circuit_breaker_state_transitions_total",
       "description": "Circuit-breaker state transitions, labelled by service and direction.",

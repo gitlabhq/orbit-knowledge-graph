@@ -6262,7 +6262,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Circuit-breaker state transitions, labelled by service and direction.",
+               "description": "Current circuit-breaker state per service: 0 closed, 1 half-open, 2 open. Pre-registered at closed on startup so alerts can match on the value rather than on transition rates.",
                "fieldConfig": {
                   "defaults": {
                      "custom": {
@@ -6300,6 +6300,57 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
+                     "expr": "sum by (service) (gkg_circuit_breaker_state{container=~\"gkg-.*\", cluster=~\"$cluster\"})",
+                     "legendFormat": "{{service}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_circuit_breaker_state",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Circuit-breaker state transitions, labelled by service and direction.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 358
+               },
+               "id": 124,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
                      "expr": "sum by (service, from, to) (rate(gkg_circuit_breaker_state_transitions_total{container=~\"gkg-.*\", cluster=~\"$cluster\"}[5m]))",
                      "legendFormat": "{{service}} / {{from}} / {{to}}",
                      "refId": "A"
@@ -6318,9 +6369,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 358
+            "y": 366
          },
-         "id": 124,
+         "id": 125,
          "panels": [ ],
          "title": "Rails KG — request (reference)",
          "type": "row"
@@ -6346,9 +6397,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 359
+            "y": 367
          },
-         "id": 125,
+         "id": 126,
          "options": {
             "legend": {
                "calcs": [
@@ -6415,9 +6466,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 359
+            "y": 367
          },
-         "id": 126,
+         "id": 127,
          "options": {
             "legend": {
                "calcs": [
@@ -6466,9 +6517,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 359
+            "y": 367
          },
-         "id": 127,
+         "id": 128,
          "options": {
             "legend": {
                "calcs": [
@@ -6517,9 +6568,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 367
+            "y": 375
          },
-         "id": 128,
+         "id": 129,
          "options": {
             "legend": {
                "calcs": [
@@ -6586,9 +6637,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 367
+            "y": 375
          },
-         "id": 129,
+         "id": 130,
          "options": {
             "legend": {
                "calcs": [
@@ -6637,9 +6688,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 367
+            "y": 375
          },
-         "id": 130,
+         "id": 131,
          "options": {
             "legend": {
                "calcs": [
@@ -6706,9 +6757,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 375
+            "y": 383
          },
-         "id": 131,
+         "id": 132,
          "options": {
             "legend": {
                "calcs": [
@@ -6757,9 +6808,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 375
+            "y": 383
          },
-         "id": 132,
+         "id": 133,
          "options": {
             "legend": {
                "calcs": [
@@ -6826,9 +6877,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 375
+            "y": 383
          },
-         "id": 133,
+         "id": 134,
          "options": {
             "legend": {
                "calcs": [
@@ -6877,9 +6928,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 383
+            "y": 391
          },
-         "id": 134,
+         "id": 135,
          "options": {
             "legend": {
                "calcs": [
@@ -6946,9 +6997,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 383
+            "y": 391
          },
-         "id": 135,
+         "id": 136,
          "options": {
             "legend": {
                "calcs": [
@@ -6997,9 +7048,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 383
+            "y": 391
          },
-         "id": 136,
+         "id": 137,
          "options": {
             "legend": {
                "calcs": [
@@ -7066,9 +7117,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 391
+            "y": 399
          },
-         "id": 137,
+         "id": 138,
          "options": {
             "legend": {
                "calcs": [
@@ -7102,9 +7153,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 399
+            "y": 407
          },
-         "id": 138,
+         "id": 139,
          "panels": [ ],
          "title": "Rails KG — traversal (reference)",
          "type": "row"
@@ -7130,9 +7181,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 400
+            "y": 408
          },
-         "id": 139,
+         "id": 140,
          "options": {
             "legend": {
                "calcs": [
@@ -7199,9 +7250,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 400
+            "y": 408
          },
-         "id": 140,
+         "id": 141,
          "options": {
             "legend": {
                "calcs": [
@@ -7250,9 +7301,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 400
+            "y": 408
          },
-         "id": 141,
+         "id": 142,
          "options": {
             "legend": {
                "calcs": [
@@ -7319,9 +7370,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 408
+            "y": 416
          },
-         "id": 142,
+         "id": 143,
          "options": {
             "legend": {
                "calcs": [
@@ -7370,9 +7421,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 408
+            "y": 416
          },
-         "id": 143,
+         "id": 144,
          "options": {
             "legend": {
                "calcs": [
@@ -7421,9 +7472,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 408
+            "y": 416
          },
-         "id": 144,
+         "id": 145,
          "options": {
             "legend": {
                "calcs": [

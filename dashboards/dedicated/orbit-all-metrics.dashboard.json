@@ -7687,7 +7687,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Circuit-breaker state transitions, labelled by service and direction.",
+         "description": "Current circuit-breaker state per service: 0 closed, 1 half-open, 2 open. Pre-registered at closed on startup so alerts can match on the value rather than on transition rates.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -7725,6 +7725,57 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
+               "expr": "sum by (service) (gkg_circuit_breaker_state{container=~\"gkg-.*\", cluster=~\".*\"})",
+               "legendFormat": "{{service}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_circuit_breaker_state",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Circuit-breaker state transitions, labelled by service and direction.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 415
+         },
+         "id": 150,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
                "expr": "sum by (service, from, to) (rate(gkg_circuit_breaker_state_transitions_total{container=~\"gkg-.*\", cluster=~\".*\"}[5m]))",
                "legendFormat": "{{service}} / {{from}} / {{to}}",
                "refId": "A"
@@ -7739,9 +7790,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 415
+            "y": 423
          },
-         "id": 150,
+         "id": 151,
          "panels": [ ],
          "title": "Siphon producers",
          "type": "row"
@@ -7767,9 +7818,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 416
+            "y": 424
          },
-         "id": 151,
+         "id": 152,
          "options": {
             "legend": {
                "calcs": [
@@ -7803,9 +7854,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 424
+            "y": 432
          },
-         "id": 152,
+         "id": 153,
          "panels": [ ],
          "title": "Siphon ClickHouse consumers",
          "type": "row"
@@ -7831,9 +7882,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 425
+            "y": 433
          },
-         "id": 153,
+         "id": 154,
          "options": {
             "legend": {
                "calcs": [
@@ -7867,9 +7918,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 433
+            "y": 441
          },
-         "id": 154,
+         "id": 155,
          "panels": [ ],
          "title": "NATS JetStream + varz",
          "type": "row"
@@ -7895,9 +7946,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 434
+            "y": 442
          },
-         "id": 155,
+         "id": 156,
          "options": {
             "legend": {
                "calcs": [
@@ -7946,9 +7997,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 434
+            "y": 442
          },
-         "id": 156,
+         "id": 157,
          "options": {
             "legend": {
                "calcs": [
@@ -7997,9 +8048,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 434
+            "y": 442
          },
-         "id": 157,
+         "id": 158,
          "options": {
             "legend": {
                "calcs": [
@@ -8048,9 +8099,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 442
+            "y": 450
          },
-         "id": 158,
+         "id": 159,
          "options": {
             "legend": {
                "calcs": [
@@ -8099,9 +8150,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 442
+            "y": 450
          },
-         "id": 159,
+         "id": 160,
          "options": {
             "legend": {
                "calcs": [
@@ -8150,9 +8201,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 442
+            "y": 450
          },
-         "id": 160,
+         "id": 161,
          "options": {
             "legend": {
                "calcs": [
@@ -8201,9 +8252,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 450
+            "y": 458
          },
-         "id": 161,
+         "id": 162,
          "options": {
             "legend": {
                "calcs": [
@@ -8252,9 +8303,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 450
+            "y": 458
          },
-         "id": 162,
+         "id": 163,
          "options": {
             "legend": {
                "calcs": [
@@ -8303,9 +8354,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 450
+            "y": 458
          },
-         "id": 163,
+         "id": 164,
          "options": {
             "legend": {
                "calcs": [
@@ -8354,9 +8405,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 458
+            "y": 466
          },
-         "id": 164,
+         "id": 165,
          "options": {
             "legend": {
                "calcs": [
@@ -8390,9 +8441,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 466
+            "y": 474
          },
-         "id": 165,
+         "id": 166,
          "panels": [ ],
          "title": "Rails KG request path",
          "type": "row"
@@ -8418,9 +8469,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 467
+            "y": 475
          },
-         "id": 166,
+         "id": 167,
          "options": {
             "legend": {
                "calcs": [
@@ -8487,9 +8538,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 467
+            "y": 475
          },
-         "id": 167,
+         "id": 168,
          "options": {
             "legend": {
                "calcs": [
@@ -8538,9 +8589,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 467
+            "y": 475
          },
-         "id": 168,
+         "id": 169,
          "options": {
             "legend": {
                "calcs": [
@@ -8589,9 +8640,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 475
+            "y": 483
          },
-         "id": 169,
+         "id": 170,
          "options": {
             "legend": {
                "calcs": [
@@ -8658,9 +8709,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 475
+            "y": 483
          },
-         "id": 170,
+         "id": 171,
          "options": {
             "legend": {
                "calcs": [
@@ -8709,9 +8760,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 475
+            "y": 483
          },
-         "id": 171,
+         "id": 172,
          "options": {
             "legend": {
                "calcs": [
@@ -8778,9 +8829,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 483
+            "y": 491
          },
-         "id": 172,
+         "id": 173,
          "options": {
             "legend": {
                "calcs": [
@@ -8829,9 +8880,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 483
+            "y": 491
          },
-         "id": 173,
+         "id": 174,
          "options": {
             "legend": {
                "calcs": [
@@ -8898,9 +8949,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 483
+            "y": 491
          },
-         "id": 174,
+         "id": 175,
          "options": {
             "legend": {
                "calcs": [
@@ -8949,9 +9000,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 491
+            "y": 499
          },
-         "id": 175,
+         "id": 176,
          "options": {
             "legend": {
                "calcs": [
@@ -9018,9 +9069,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 491
+            "y": 499
          },
-         "id": 176,
+         "id": 177,
          "options": {
             "legend": {
                "calcs": [
@@ -9069,9 +9120,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 491
+            "y": 499
          },
-         "id": 177,
+         "id": 178,
          "options": {
             "legend": {
                "calcs": [
@@ -9138,9 +9189,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 499
+            "y": 507
          },
-         "id": 178,
+         "id": 179,
          "options": {
             "legend": {
                "calcs": [
@@ -9174,9 +9225,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 507
+            "y": 515
          },
-         "id": 179,
+         "id": 180,
          "panels": [ ],
          "title": "Rails KG traversal compaction",
          "type": "row"
@@ -9202,9 +9253,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 508
+            "y": 516
          },
-         "id": 180,
+         "id": 181,
          "options": {
             "legend": {
                "calcs": [
@@ -9271,9 +9322,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 508
+            "y": 516
          },
-         "id": 181,
+         "id": 182,
          "options": {
             "legend": {
                "calcs": [
@@ -9322,9 +9373,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 508
+            "y": 516
          },
-         "id": 182,
+         "id": 183,
          "options": {
             "legend": {
                "calcs": [
@@ -9391,9 +9442,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 516
+            "y": 524
          },
-         "id": 183,
+         "id": 184,
          "options": {
             "legend": {
                "calcs": [
@@ -9442,9 +9493,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 516
+            "y": 524
          },
-         "id": 184,
+         "id": 185,
          "options": {
             "legend": {
                "calcs": [
@@ -9493,9 +9544,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 516
+            "y": 524
          },
-         "id": 185,
+         "id": 186,
          "options": {
             "legend": {
                "calcs": [
