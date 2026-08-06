@@ -13,7 +13,7 @@ spec:
       serviceAccountName: ra-import-sa
       containers:
         - name: import
-          image: google/cloud-sdk:slim
+          image: google/cloud-sdk:latest
           env:
             - name: CH_HOST
               value: "clickhouse.${CH_NAMESPACE}.svc.cluster.local"
