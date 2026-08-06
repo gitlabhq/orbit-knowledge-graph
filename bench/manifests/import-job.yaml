@@ -36,21 +36,41 @@ spec:
               CH_AUTH="user=default&password=${CH_PASS_ENC}"
               unset CH_PASSWORD CH_PASS_ENC
 
+              ch() {
+                local db="${1:-}" query="${2:-}"
+                local params="${CH_AUTH}"
+                [ -n "${db}" ] && params="${params}&database=${db}"
+                curl -sf "${CH_URL}/?${params}" -d "${query}" 2>/dev/null
+              }
+
+              rewrite_ddl() {
+                sed -E \
+                  -e 's/CREATE TABLE [A-Za-z0-9_]+\./CREATE TABLE /' \
+                  -e "s/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree\('[^']*', *'[^']*'(, *)?/\1MergeTree(/" \
+                  -e 's/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree/\1MergeTree/' \
+                  -e 's/MergeTree\(, */MergeTree(/' \
+                  -e '/dictGetOrDefault/s/DEFAULT .*/,/' \
+                  "$1"
+              }
+
               WORK="/tmp/dump/datalake"
               mkdir -p "${WORK}"
 
               echo "==> Downloading datalake from ${BUCKET}/${DUMP_PREFIX}/datalake/"
               gsutil -m rsync -r "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/"
 
-              echo "==> Inserting into existing Siphon-created tables (no DDL)"
-              # Siphon creates the datalake tables with correct schemas during
-              # setup.sh (via sync-cdc-tables.sh + the consumer helm chart).
-              # We skip DDL entirely and INSERT the dump's Native-format data
-              # into those existing tables. input_format_skip_unknown_fields
-              # handles column mismatches between the dump and current schema.
+              echo "==> Creating tables and importing data"
               for sf in ${WORK}/*.schema.sql; do
                 [ -f "${sf}" ] || continue
                 t=$(basename "${sf}" .schema.sql)
+
+                ddl=$(rewrite_ddl "${sf}")
+                ch datalake "DROP TABLE IF EXISTS ${t}" || true
+                if ! ch datalake "${ddl}"; then
+                  echo "  SKIP: ${t} (DDL failed)"
+                  continue
+                fi
+
                 p=0
                 for pf in ${WORK}/${t}.part*.Native.gz; do
                   [ -f "${pf}" ] || continue
