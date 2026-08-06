@@ -1,82 +1,100 @@
 #!/usr/bin/env bash
+# Submit a phase Job to the cluster and wait for completion.
+# All bench computation runs inside the cluster; the CI runner
+# only submits, streams logs, and copies results out.
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 PHASE="${1:?usage: run-phase.sh <phase>}"
 RUN_DIR="${BENCH_DIR}/results/${RUN_ID}"
 mkdir -p "${RUN_DIR}"
 
+: "${XTASK_IMAGE:?set XTASK_IMAGE to the bench container image}"
+: "${SIPHON_STREAM:=e2e_siphon_event_stream}"
+: "${SCHEMA_VERSION:=88}"
 : "${RATE:=$(tier '.workload.steady_rows_per_sec')}"
-: "${DURATION:=1800}"
-: "${MIX:=${BENCH_DIR}/query-mixes/baseline}"
+: "${DURATION:=300}"
 : "${QPS_LADDER:=$(tier '.workload.qps_ladder | join(",")')}"
-: "${MANIFEST:=${RUN_DIR}/manifest.tsv}"
-: "${NS_FILE:=${RUN_DIR}/namespace_ids.txt}"
-: "${PROJ_FILE:=${RUN_DIR}/project_ids.txt}"
+
+NS_NATS="e2e-${RUN_ID}-nats"
+NS_CH="e2e-${RUN_ID}-clickhouse"
+NS_GKG="e2e-${RUN_ID}-gkg"
+JOB_NS="${NS_GKG}"
+
+# CH password from the StatefulSet (same pattern as import-dump-job.sh).
+CH_PASSWORD=$($KC get statefulset clickhouse -n "${NS_CH}" \
+  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CLICKHOUSE_PASSWORD")].value}')
+
+$KC create secret generic ra-phase-ch-auth \
+  -n "${JOB_NS}" \
+  --from-literal=password="${CH_PASSWORD}" \
+  --dry-run=client -o yaml | $KC apply -f -
+
+# Upload config files (namespace_ids, manifest) as a ConfigMap.
+CONFIG_ARGS=()
+if [[ -f "${RUN_DIR}/namespace_ids.txt" ]]; then
+  CONFIG_ARGS+=(--from-file=namespace_ids.txt="${RUN_DIR}/namespace_ids.txt")
+fi
+if [[ -f "${RUN_DIR}/manifest.tsv" ]]; then
+  CONFIG_ARGS+=(--from-file=manifest.tsv="${RUN_DIR}/manifest.tsv")
+fi
+if [[ ${#CONFIG_ARGS[@]} -gt 0 ]]; then
+  $KC create configmap ra-phase-config -n "${JOB_NS}" \
+    "${CONFIG_ARGS[@]}" \
+    --dry-run=client -o yaml | $KC apply -f -
+fi
+
+# Delete any previous phase Job with the same name.
+$KC delete job "ra-phase-${PHASE}" -n "${JOB_NS}" --ignore-not-found=true 2>/dev/null
+
+log "Submitting phase ${PHASE} job"
 
 T_START=$(date -u +%s)
-log "Phase ${PHASE} start (${T_START})"
 
-case "${PHASE}" in
-  p1)
-    log "P1: SDLC backfill via enrollment trigger"
-    cargo xtask bench publish-triggers \
-      --stream "${SIPHON_STREAM:-e2e_siphon_event_stream}" \
-      --nats-url "${NATS_URL:-nats://localhost:4222}" \
-      --kind enrollment --ids "${NS_FILE}"
-    log "Waiting for backfill to drain..."
-    sleep 60
-    ;;
-  p2)
-    log "P2: code backfill via code-task triggers"
-    cargo xtask bench publish-triggers \
-      --stream "${SIPHON_STREAM:-e2e_siphon_event_stream}" \
-      --nats-url "${NATS_URL:-nats://localhost:4222}" \
-      --kind code-task --ids "${PROJ_FILE}"
-    log "Waiting for code queue to drain..."
-    sleep 120
-    ;;
-  p3a)
-    log "P3a: steady-state SDLC replay (GKG isolated, ${RATE} rows/s, ${DURATION}s)"
-    cargo xtask bench replay-sdlc \
-      --rate "${RATE}" --duration-secs "${DURATION}" \
-      --manifest "${MANIFEST}" \
-      --ch-url "${CH_URL:-http://localhost:8123}" \
-      --results "${RUN_DIR}/p3a-replay-results.json"
-    ;;
-  p3b)
-    log "P3b: steady-state via PG replay (full DIP, ${RATE} rows/s, ${DURATION}s)"
-    cargo xtask bench replay-pg \
-      --rate "${RATE}" --duration-secs "${DURATION}" \
-      --pg-url "${PG_URL:?PG_URL required for P3b}" \
-      --ch-url "${CH_URL:-http://localhost:8123}" \
-      --results "${RUN_DIR}/p3b-replay-results.json"
-    ;;
-  p4)
-    log "P4: query ladder (QPS: ${QPS_LADDER})"
-    cargo xtask bench query-load \
-      --mix "${MIX}" --qps "${QPS_LADDER}" \
-      --duration-per-step-secs 60 \
-      --ch-url "${CH_URL:-http://localhost:8123}" \
-      --schema-version "${SCHEMA_VERSION:?set SCHEMA_VERSION}" \
-      --results "${RUN_DIR}/p4-query-results.json"
-    ;;
-  p5)
-    log "P5: mixed (P3a + P4 concurrent)"
-    PHASE=p3a "${BASH_SOURCE[0]}" p3a &
-    PID_P3=$!
-    PHASE=p4 "${BASH_SOURCE[0]}" p4 &
-    PID_P4=$!
-    wait "${PID_P3}" "${PID_P4}"
-    ;;
-  *)
-    log "Unknown phase: ${PHASE}"
-    exit 1
-    ;;
-esac
+export PHASE XTASK_IMAGE SIPHON_STREAM SCHEMA_VERSION
+export NATS_NAMESPACE="${NS_NATS}" CH_NAMESPACE="${NS_CH}"
+export RATE DURATION QPS_LADDER STEP_DURATION="${DURATION}"
+
+sed -e "s|\${PHASE}|${PHASE}|g" \
+    -e "s|\${XTASK_IMAGE}|${XTASK_IMAGE}|g" \
+    -e "s|\${NATS_NAMESPACE}|${NS_NATS}|g" \
+    -e "s|\${CH_NAMESPACE}|${NS_CH}|g" \
+    -e "s|\${SIPHON_STREAM}|${SIPHON_STREAM}|g" \
+    -e "s|\${SCHEMA_VERSION}|${SCHEMA_VERSION}|g" \
+    -e "s|\${RATE}|${RATE}|g" \
+    -e "s|\${DURATION}|${DURATION}|g" \
+    -e "s|\${QPS_LADDER}|${QPS_LADDER}|g" \
+    -e "s|\${STEP_DURATION}|${DURATION}|g" \
+  < "${BENCH_DIR}/manifests/phase-job.yaml" \
+  | $KC apply -n "${JOB_NS}" -f -
+
+# Stream logs.
+$KC wait -n "${JOB_NS}" "job/ra-phase-${PHASE}" \
+  --for=condition=ready --timeout=120s 2>/dev/null || true
+$KC logs -n "${JOB_NS}" "job/ra-phase-${PHASE}" -f --tail=1000 2>/dev/null &
+LOG_PID=$!
+
+if $KC wait -n "${JOB_NS}" "job/ra-phase-${PHASE}" \
+  --for=condition=complete --timeout=7200s 2>/dev/null; then
+  log "Phase ${PHASE} completed"
+else
+  log "Phase ${PHASE} failed"
+  $KC describe "job/ra-phase-${PHASE}" -n "${JOB_NS}" 2>/dev/null || true
+  kill "${LOG_PID}" 2>/dev/null || true
+  exit 1
+fi
+
+kill "${LOG_PID}" 2>/dev/null || true
 
 T_END=$(date -u +%s)
-log "Phase ${PHASE} end (${T_END}, elapsed $((T_END - T_START))s)"
-
+log "Phase ${PHASE} elapsed: $((T_END - T_START))s"
 echo "{\"phase\":\"${PHASE}\",\"t_start\":${T_START},\"t_end\":${T_END}}" >> "${RUN_DIR}/phases.jsonl"
 
-"${BENCH_DIR}/scripts/snapshot-ch.sh" "${PHASE}" "${T_START}" "${T_END}" || true
+# Copy results from the pod (if any were written).
+POD=$($KC get pods -n "${JOB_NS}" -l "job-name=ra-phase-${PHASE}" \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [[ -n "${POD}" ]]; then
+  $KC cp "${JOB_NS}/${POD}:/results/" "${RUN_DIR}/" 2>/dev/null || true
+fi
+
+# Clean up.
+$KC delete secret ra-phase-ch-auth -n "${JOB_NS}" --ignore-not-found=true 2>/dev/null

@@ -42,11 +42,24 @@ ra_bench_run:
   script:
     - source bench/scripts/labels-to-env.sh
     - bench/scripts/provision.sh
+    # Build the xtask bench image and push to the registry.
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - source bench/scripts/build-xtask-image.sh
     - |
       if [ -z "${RA_SKIP_IMPORT:-}" ]; then
         DUMP_PREFIX="${DUMP_PREFIX:-core-2026-06-25-1115}" bench/scripts/import-dump-job.sh
       fi
-    - bench/scripts/run-all-phases.sh
+    # Generate config files for the phase Jobs.
+    - |
+      RUN_DIR="bench/results/${RUN_ID}"
+      mkdir -p "${RUN_DIR}"
+      # Namespace IDs for P1 enrollment trigger.
+      echo "9970 1/9970/" > "${RUN_DIR}/namespace_ids.txt"
+      # Copy the dump manifest for replay-sdlc.
+      kubectl --context "$KCTX" exec -n "e2e-${RUN_ID}-clickhouse" statefulset/clickhouse -- \
+        clickhouse-client --query "SELECT name, total_rows FROM system.tables WHERE database = 'datalake' FORMAT TSV" \
+        > "${RUN_DIR}/manifest.tsv" 2>/dev/null || true
+    - XTASK_IMAGE="${XTASK_IMAGE}" bench/scripts/run-all-phases.sh
     - uv run bench/scoring/score.py "bench/results/${RUN_ID}" "${TIER:-small}"
     - uv run bench/scoring/report.py "bench/results/${RUN_ID}" "${TIER:-small}"
   after_script:
