@@ -117,7 +117,10 @@ fn sample_peak_rss_kib(stop: Arc<AtomicBool>, peak: Arc<AtomicU64>) {
     }
 }
 
+// Reports measurements rather than asserting, so it earns nothing as a CI gate. Run it
+// deliberately: cargo nextest run --run-ignored all -E 'test(parse_width)'
 #[test]
+#[ignore = "measurement instrument, not a gate"]
 fn parse_width_versus_extraction_latency() {
     let threads: usize = std::env::var("PARSE_THREADS")
         .ok()

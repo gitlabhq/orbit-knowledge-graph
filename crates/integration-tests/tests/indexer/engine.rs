@@ -708,7 +708,7 @@ fn contention_subscription(stream: &str, subject: &str) -> Subscription {
 struct ContendedHandler {
     stream: String,
     subject: String,
-    error: HandlerError,
+    as_backpressure: bool,
     failures: usize,
     seen: Arc<std::sync::atomic::AtomicUsize>,
     writer: Arc<ClickHouseWriter>,
@@ -718,24 +718,17 @@ impl ContendedHandler {
     fn new(
         stream: &str,
         subject: &str,
-        error: HandlerError,
+        as_backpressure: bool,
         failures: usize,
         writer: Arc<ClickHouseWriter>,
     ) -> Self {
         Self {
             stream: stream.into(),
             subject: subject.into(),
-            error,
+            as_backpressure,
             failures,
             seen: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             writer,
-        }
-    }
-
-    fn clone_error(&self) -> HandlerError {
-        match &self.error {
-            HandlerError::Backpressure(m) => HandlerError::Backpressure(m.clone()),
-            other => HandlerError::Processing(other.to_string()),
         }
     }
 }
@@ -757,7 +750,12 @@ impl Handler for ContendedHandler {
     ) -> Result<(), HandlerError> {
         let delivery = self.seen.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         if delivery < self.failures {
-            return Err(self.clone_error());
+            let reason = "no indexing lane within 50s".to_string();
+            return Err(if self.as_backpressure {
+                HandlerError::Backpressure(reason)
+            } else {
+                HandlerError::Processing(reason)
+            });
         }
         TestHandler {
             writer: self.writer.clone(),
@@ -787,13 +785,7 @@ async fn contention_reported_as_a_processing_failure_reaches_the_dlq() {
         .expect("stream creation");
     publish_test_event(&broker, &subscription).await;
 
-    let handler = ContendedHandler::new(
-        stream,
-        subject,
-        HandlerError::Processing("no indexing lane within 50s".into()),
-        3,
-        context.create_writer(),
-    );
+    let handler = ContendedHandler::new(stream, subject, false, 3, context.create_writer());
     let engine = create_engine(broker.clone(), Box::new(handler));
     run_engine_for(engine, Duration::from_secs(12)).await;
 
@@ -828,13 +820,7 @@ async fn contention_reported_as_backpressure_is_retried_until_it_lands() {
         .expect("stream creation");
     publish_test_event(&broker, &subscription).await;
 
-    let handler = ContendedHandler::new(
-        stream,
-        subject,
-        HandlerError::Backpressure("no indexing lane within 50s".into()),
-        3,
-        context.create_writer(),
-    );
+    let handler = ContendedHandler::new(stream, subject, true, 3, context.create_writer());
     let engine = create_engine(broker.clone(), Box::new(handler));
     run_engine_for(engine, Duration::from_secs(12)).await;
 
