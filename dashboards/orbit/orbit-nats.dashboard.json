@@ -172,16 +172,62 @@
          "type": "stat"
       },
       {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "File-storage saturation; GitLab.com pages at 80% of configured max.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "percentunit"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 0,
+            "y": 5
+         },
+         "id": 5,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "max(nats_varz_jetstream_stats_storage{cluster=~\"$cluster\"} / nats_varz_jetstream_config_max_storage{cluster=~\"$cluster\"})",
+               "legendFormat": "used",
+               "refId": "A"
+            }
+         ],
+         "title": "JetStream storage used",
+         "type": "stat"
+      },
+      {
          "collapsed": false,
          "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 5
+            "y": 9
          },
-         "id": 5,
+         "id": 6,
          "panels": [ ],
-         "title": "JetStream + varz",
+         "title": "Server (varz)",
          "type": "row"
       },
       {
@@ -205,9 +251,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 6
+            "y": 10
          },
-         "id": 6,
+         "id": 7,
          "options": {
             "legend": {
                "calcs": [
@@ -256,9 +302,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 6
+            "y": 10
          },
-         "id": 7,
+         "id": 8,
          "options": {
             "legend": {
                "calcs": [
@@ -307,9 +353,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 6
+            "y": 10
          },
-         "id": 8,
+         "id": 9,
          "options": {
             "legend": {
                "calcs": [
@@ -358,9 +404,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 14
+            "y": 18
          },
-         "id": 9,
+         "id": 10,
          "options": {
             "legend": {
                "calcs": [
@@ -393,7 +439,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "NATS slow-consumer count.",
+         "description": "NATS slow-consumer count (varz reports a current count, not a counter).",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -409,58 +455,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 14
-         },
-         "id": 10,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum(rate(nats_varz_slow_consumers{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
-               "refId": "A"
-            }
-         ],
-         "title": "nats_varz_slow_consumers — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Messages currently in each JetStream stream.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 14
+            "y": 18
          },
          "id": 11,
          "options": {
@@ -482,7 +477,594 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name) (nats_stream_total_messages{cluster=~\"$cluster\"})",
+               "expr": "sum(nats_varz_slow_consumers{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_slow_consumers",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Active client connections.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 18
+         },
+         "id": 12,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_connections{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_connections",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Active subscriptions.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 26
+         },
+         "id": 13,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_subscriptions{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_subscriptions",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Server CPU usage (varz).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 26
+         },
+         "id": 14,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_cpu{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_cpu",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Server memory usage bytes (varz).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 26
+         },
+         "id": 15,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_mem{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_mem",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "JetStream streams on the server.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 34
+         },
+         "id": 16,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_server_total_streams{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_server_total_streams",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "JetStream consumers on the server.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 34
+         },
+         "id": 17,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_server_total_consumers{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_server_total_consumers",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 42
+         },
+         "id": 18,
+         "panels": [ ],
+         "title": "JetStream capacity",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "JetStream file storage in use.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 43
+         },
+         "id": 19,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_jetstream_stats_storage{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_jetstream_stats_storage",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "JetStream memory storage in use.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 43
+         },
+         "id": 20,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_jetstream_stats_memory{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_jetstream_stats_memory",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Configured JetStream max file storage.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 43
+         },
+         "id": 21,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_jetstream_config_max_storage{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_jetstream_config_max_storage",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Configured JetStream max memory.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 51
+         },
+         "id": 22,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_varz_jetstream_config_max_memory{cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_varz_jetstream_config_max_memory",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 59
+         },
+         "id": 23,
+         "panels": [ ],
+         "title": "JetStream streams + consumers (leader replica)",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Messages currently in each JetStream stream.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 60
+         },
+         "id": 24,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stream_name) (nats_stream_total_messages{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
                "legendFormat": "{{stream_name}}",
                "refId": "A"
             }
@@ -510,10 +1092,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 22
+            "x": 8,
+            "y": 60
          },
-         "id": 12,
+         "id": 25,
          "options": {
             "legend": {
                "calcs": [
@@ -533,12 +1115,165 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name) (nats_stream_total_bytes{cluster=~\"$cluster\"})",
+               "expr": "sum by (stream_name) (nats_stream_total_bytes{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
                "legendFormat": "{{stream_name}}",
                "refId": "A"
             }
          ],
          "title": "nats_stream_total_bytes",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "First sequence retained in the stream.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 60
+         },
+         "id": 26,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stream_name) (nats_stream_first_seq{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{stream_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_stream_first_seq",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Last sequence written to the stream.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 68
+         },
+         "id": 27,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stream_name) (nats_stream_last_seq{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{stream_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_stream_last_seq",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Consumers attached to the stream.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 68
+         },
+         "id": 28,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stream_name) (nats_stream_consumer_count{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{stream_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_stream_consumer_count",
          "type": "timeseries"
       },
       {
@@ -561,10 +1296,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 22
+            "x": 16,
+            "y": 68
          },
-         "id": 13,
+         "id": 29,
          "options": {
             "legend": {
                "calcs": [
@@ -584,7 +1319,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_pending{cluster=~\"$cluster\"})",
+               "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_pending{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
                "legendFormat": "{{stream_name}} / {{consumer_name}}",
                "refId": "A"
             }
@@ -612,10 +1347,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 22
+            "x": 0,
+            "y": 76
          },
-         "id": 14,
+         "id": 30,
          "options": {
             "legend": {
                "calcs": [
@@ -635,7 +1370,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name, consumer_name) (rate(nats_consumer_num_redelivered{cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (stream_name, consumer_name) (rate(nats_consumer_num_redelivered{is_stream_leader=\"true\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{stream_name}} / {{consumer_name}}",
                "refId": "A"
             }
@@ -663,10 +1398,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 30
+            "x": 8,
+            "y": 76
          },
-         "id": 15,
+         "id": 31,
          "options": {
             "legend": {
                "calcs": [
@@ -686,12 +1421,165 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_ack_pending{cluster=~\"$cluster\"})",
+               "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_ack_pending{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
                "legendFormat": "{{stream_name}} / {{consumer_name}}",
                "refId": "A"
             }
          ],
          "title": "nats_consumer_num_ack_pending",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Pull requests waiting for messages.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 76
+         },
+         "id": 32,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_waiting{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{stream_name}} / {{consumer_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_consumer_num_waiting",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Last delivered consumer sequence.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 84
+         },
+         "id": 33,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stream_name, consumer_name) (nats_consumer_delivered_consumer_seq{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{stream_name}} / {{consumer_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_consumer_delivered_consumer_seq",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Seconds since the last delivery to the consumer.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 84
+         },
+         "id": 34,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stream_name, consumer_name) (nats_consumer_last_delivery_seconds{is_stream_leader=\"true\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{stream_name}} / {{consumer_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_consumer_last_delivery_seconds",
          "type": "timeseries"
       }
    ],

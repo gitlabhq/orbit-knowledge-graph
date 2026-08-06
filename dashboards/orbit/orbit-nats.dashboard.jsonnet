@@ -14,8 +14,13 @@ local items =
     o.stat('Slow consumers', 'Count of slow consumers reported by varz.',
       o.target('sum(nats_varz_slow_consumers{%s})' % o.NATS_SEL, 'count', 'ORBIT_DS'),
       'short', 8),
+    o.stat('JetStream storage used', 'File-storage saturation; GitLab.com pages at 80% of configured max.',
+      o.target('max(nats_varz_jetstream_stats_storage{%s} / nats_varz_jetstream_config_max_storage{%s})' % [o.NATS_SEL, o.NATS_SEL], 'used', 'ORBIT_DS'),
+      'percentunit', 8),
   ]
-  + o.externalSection('JetStream + varz', ext.NATS_METRICS, 'ORBIT_DS', o.NATS_SEL);
+  + o.externalSection('Server (varz)', ext.NATS_METRICS, 'ORBIT_DS', o.NATS_SEL)
+  + o.externalSection('JetStream capacity', ext.NATS_JETSTREAM_CAPACITY, 'ORBIT_DS', o.NATS_SEL)
+  + o.externalSection('JetStream streams + consumers (leader replica)', ext.NATS_JETSTREAM_STREAMS, 'ORBIT_DS', 'is_stream_leader="true"' + (if o.NATS_SEL == '' then '' else ', ' + o.NATS_SEL));
 
 o.dashboard(
   'orbit-nats',

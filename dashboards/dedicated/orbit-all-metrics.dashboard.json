@@ -7789,12 +7789,1089 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (app_id, container) (rate(siphon_operations_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
-               "legendFormat": "{{app_id}} / {{container}}",
+               "expr": "sum by (app_id, phase, schema, table, operation) (rate(siphon_operations_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{phase}} / {{schema}} / {{table}} / {{operation}}",
                "refId": "A"
             }
          ],
          "title": "siphon_operations_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Initial-snapshot rows emitted.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 416
+         },
+         "id": 152,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, phase, schema, table, operation) (rate(siphon_snapshot_operations_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{phase}} / {{schema}} / {{table}} / {{operation}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_snapshot_operations_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rows buffered before flush.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 416
+         },
+         "id": 153,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, phase, schema, table) (rate(siphon_buffer_size_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{phase}} / {{schema}} / {{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_buffer_size_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Events spilled to object storage because they exceed the NATS payload cap.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 424
+         },
+         "id": 154,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, stream) (rate(siphon_oversized_events_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_oversized_events_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "NATS publish retries from the producer.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 424
+         },
+         "id": 155,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, stream) (rate(siphon_nats_publish_retries_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_nats_publish_retries_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Logical-replication rows skipped by table filters.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 424
+         },
+         "id": 156,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table) (rate(siphon_lr_filtered_skipped_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_lr_filtered_skipped_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Failures writing snapshot progress markers.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 432
+         },
+         "id": 157,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, status) (rate(siphon_snapshot_status_write_failures_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{status}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_snapshot_status_write_failures_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "1 while the initial snapshot is administratively paused.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 432
+         },
+         "id": 158,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id) (siphon_snapshot_paused{namespace=\"siphon\", cluster=~\".*\"})",
+               "legendFormat": "{{app_id}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_snapshot_paused",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Row-batch serialization latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 432
+         },
+         "id": 159,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id, schema, table, stream) (rate(siphon_serialization_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id, schema, table, stream) (rate(siphon_serialization_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id, schema, table, stream) (rate(siphon_serialization_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_serialization_duration_ms — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Row-batch serialization latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 440
+         },
+         "id": 160,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, stream) (rate(siphon_serialization_duration_ms_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_serialization_duration_ms — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Package compression latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 440
+         },
+         "id": 161,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id, schema, table, stream) (rate(siphon_compression_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id, schema, table, stream) (rate(siphon_compression_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id, schema, table, stream) (rate(siphon_compression_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_compression_duration_ms — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Package compression latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 440
+         },
+         "id": 162,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, stream) (rate(siphon_compression_duration_ms_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_compression_duration_ms — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time spent publishing a package to NATS.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 448
+         },
+         "id": 163,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id, schema, table, stream) (rate(siphon_queueing_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id, schema, table, stream) (rate(siphon_queueing_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id, schema, table, stream) (rate(siphon_queueing_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_queueing_duration_ms — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time spent publishing a package to NATS.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 448
+         },
+         "id": 164,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, stream) (rate(siphon_queueing_duration_ms_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_queueing_duration_ms — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Buffer flush latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 448
+         },
+         "id": 165,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id) (rate(siphon_flush_buffer_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id) (rate(siphon_flush_buffer_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id) (rate(siphon_flush_buffer_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_flush_buffer_duration_ms — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Buffer flush latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 456
+         },
+         "id": 166,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id) (rate(siphon_flush_buffer_duration_ms_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_flush_buffer_duration_ms — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Serialized package size.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "bytes"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 456
+         },
+         "id": 167,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id, schema, table, stream) (rate(siphon_serialized_package_size_bytes_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id, schema, table, stream) (rate(siphon_serialized_package_size_bytes_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id, schema, table, stream) (rate(siphon_serialized_package_size_bytes_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_serialized_package_size_bytes — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Serialized package size.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 456
+         },
+         "id": 168,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, stream) (rate(siphon_serialized_package_size_bytes_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_serialized_package_size_bytes — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Compressed package size on the wire.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "bytes"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 464
+         },
+         "id": 169,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id, schema, table, stream) (rate(siphon_compressed_package_size_bytes_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id, schema, table, stream) (rate(siphon_compressed_package_size_bytes_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id, schema, table, stream) (rate(siphon_compressed_package_size_bytes_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_compressed_package_size_bytes — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Compressed package size on the wire.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 464
+         },
+         "id": 170,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, schema, table, stream) (rate(siphon_compressed_package_size_bytes_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{schema}} / {{table}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_compressed_package_size_bytes — observation rate",
          "type": "timeseries"
       },
       {
@@ -7803,9 +8880,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 424
+            "y": 472
          },
-         "id": 152,
+         "id": 171,
          "panels": [ ],
          "title": "Siphon ClickHouse consumers",
          "type": "row"
@@ -7831,9 +8908,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 425
+            "y": 473
          },
-         "id": 153,
+         "id": 172,
          "options": {
             "legend": {
                "calcs": [
@@ -7853,12 +8930,867 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (product_app_id) (rate(siphon_clickhouse_consumer_number_of_events{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
-               "legendFormat": "{{product_app_id}}",
+               "expr": "sum by (producer_app_id, app_id, stream) (rate(siphon_clickhouse_consumer_number_of_events{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{stream}}",
                "refId": "A"
             }
          ],
          "title": "siphon_clickhouse_consumer_number_of_events — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Batches written to ClickHouse.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 473
+         },
+         "id": 173,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, stream) (rate(siphon_clickhouse_consumer_number_of_batches{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_number_of_batches — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Data lag; source=data is true end-to-end lag, source=heartbeat measures freshness only.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 473
+         },
+         "id": 174,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, stream_identifier, schema, table, source) (siphon_data_lag_ms{namespace=\"siphon\", cluster=~\".*\"})",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{stream_identifier}} / {{schema}} / {{table}} / {{source}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_data_lag_ms",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time a message spent in NATS before the consumer fetched it.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 481
+         },
+         "id": 175,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, producer_app_id, app_id, stream_identifier) (rate(siphon_nats_transit_time_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{producer_app_id}} / {{app_id}} / {{stream_identifier}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, producer_app_id, app_id, stream_identifier) (rate(siphon_nats_transit_time_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{producer_app_id}} / {{app_id}} / {{stream_identifier}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, producer_app_id, app_id, stream_identifier) (rate(siphon_nats_transit_time_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{producer_app_id}} / {{app_id}} / {{stream_identifier}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_nats_transit_time_ms — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time a message spent in NATS before the consumer fetched it.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 481
+         },
+         "id": 176,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, stream_identifier) (rate(siphon_nats_transit_time_ms_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{stream_identifier}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_nats_transit_time_ms — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "ClickHouse query latency from the consumer.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 481
+         },
+         "id": 177,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_ch_query_duration_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_ch_query_duration_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_ch_query_duration_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_ch_query_duration — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "ClickHouse query latency from the consumer.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 489
+         },
+         "id": 178,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_ch_query_duration_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_ch_query_duration — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rows written to ClickHouse.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 489
+         },
+         "id": 179,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_ch_row_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_ch_row_count — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Batch retries after ClickHouse errors.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 489
+         },
+         "id": 180,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_batch_retry_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_batch_retry_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Adaptive batch sizes in use.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 497
+         },
+         "id": 181,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_adaptive_batch_size_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_adaptive_batch_size_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_adaptive_batch_size_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_adaptive_batch_size — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Adaptive batch sizes in use.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 497
+         },
+         "id": 182,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, query_type, table_name) (rate(siphon_clickhouse_consumer_adaptive_batch_size_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{query_type}} / {{table_name}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_adaptive_batch_size — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Events in reconciliation refresh packages.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 497
+         },
+         "id": 183,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (producer_app_id, app_id, source_stream, target_stream) (rate(siphon_clickhouse_consumer_refresh_package_events{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{producer_app_id}} / {{app_id}} / {{source_stream}} / {{target_stream}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_refresh_package_events — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Package decompression latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 505
+         },
+         "id": 184,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id, stream_identifier) (rate(siphon_decompression_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}} / {{stream_identifier}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id, stream_identifier) (rate(siphon_decompression_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}} / {{stream_identifier}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id, stream_identifier) (rate(siphon_decompression_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}} / {{stream_identifier}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_decompression_duration_ms — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Package decompression latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 505
+         },
+         "id": 185,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, stream_identifier) (rate(siphon_decompression_duration_ms_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{stream_identifier}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_decompression_duration_ms — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Package deserialization latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 505
+         },
+         "id": 186,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, app_id, stream_identifier) (rate(siphon_deserialization_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p50 {{app_id}} / {{stream_identifier}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, app_id, stream_identifier) (rate(siphon_deserialization_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p95 {{app_id}} / {{stream_identifier}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, app_id, stream_identifier) (rate(siphon_deserialization_duration_ms_bucket{namespace=\"siphon\", cluster=~\".*\"}[5m])))",
+               "legendFormat": "p99 {{app_id}} / {{stream_identifier}}",
+               "refId": "C"
+            }
+         ],
+         "title": "siphon_deserialization_duration_ms — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Package deserialization latency.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 513
+         },
+         "id": 187,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, stream_identifier) (rate(siphon_deserialization_duration_ms_count{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{stream_identifier}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_deserialization_duration_ms — observation rate",
          "type": "timeseries"
       },
       {
@@ -7867,9 +9799,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 433
+            "y": 521
          },
-         "id": 154,
+         "id": 188,
          "panels": [ ],
          "title": "NATS JetStream + varz",
          "type": "row"
@@ -7895,9 +9827,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 434
+            "y": 522
          },
-         "id": 155,
+         "id": 189,
          "options": {
             "legend": {
                "calcs": [
@@ -7946,9 +9878,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 434
+            "y": 522
          },
-         "id": 156,
+         "id": 190,
          "options": {
             "legend": {
                "calcs": [
@@ -7997,9 +9929,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 434
+            "y": 522
          },
-         "id": 157,
+         "id": 191,
          "options": {
             "legend": {
                "calcs": [
@@ -8048,9 +9980,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 442
+            "y": 530
          },
-         "id": 158,
+         "id": 192,
          "options": {
             "legend": {
                "calcs": [
@@ -8083,7 +10015,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "NATS slow-consumer count.",
+         "description": "NATS slow-consumer count (varz reports a current count, not a counter).",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8099,9 +10031,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 442
+            "y": 530
          },
-         "id": 159,
+         "id": 193,
          "options": {
             "legend": {
                "calcs": [
@@ -8121,12 +10053,12 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(rate(nats_varz_slow_consumers{cluster=~\".*\"}[5m]))",
+               "expr": "sum(nats_varz_slow_consumers{cluster=~\".*\"})",
                "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
-         "title": "nats_varz_slow_consumers — rate/s",
+         "title": "nats_varz_slow_consumers",
          "type": "timeseries"
       },
       {
@@ -8134,7 +10066,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Messages currently in each JetStream stream.",
+         "description": "Active client connections.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8150,9 +10082,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 442
+            "y": 530
          },
-         "id": 160,
+         "id": 194,
          "options": {
             "legend": {
                "calcs": [
@@ -8172,12 +10104,12 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name) (nats_stream_total_messages{cluster=~\".*\"})",
-               "legendFormat": "{{stream_name}}",
+               "expr": "sum(nats_varz_connections{cluster=~\".*\"})",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
-         "title": "nats_stream_total_messages",
+         "title": "nats_varz_connections",
          "type": "timeseries"
       },
       {
@@ -8185,7 +10117,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Bytes currently in each JetStream stream.",
+         "description": "Active subscriptions.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8194,16 +10126,16 @@
                   "lineInterpolation": "smooth",
                   "showPoints": "auto"
                },
-               "unit": "bytes"
+               "unit": "short"
             }
          },
          "gridPos": {
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 450
+            "y": 538
          },
-         "id": 161,
+         "id": 195,
          "options": {
             "legend": {
                "calcs": [
@@ -8223,12 +10155,12 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name) (nats_stream_total_bytes{cluster=~\".*\"})",
-               "legendFormat": "{{stream_name}}",
+               "expr": "sum(nats_varz_subscriptions{cluster=~\".*\"})",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
-         "title": "nats_stream_total_bytes",
+         "title": "nats_varz_subscriptions",
          "type": "timeseries"
       },
       {
@@ -8236,7 +10168,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Messages pending per JetStream consumer.",
+         "description": "Server CPU usage (varz).",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8252,9 +10184,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 450
+            "y": 538
          },
-         "id": 162,
+         "id": 196,
          "options": {
             "legend": {
                "calcs": [
@@ -8274,12 +10206,12 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_pending{cluster=~\".*\"})",
-               "legendFormat": "{{stream_name}} / {{consumer_name}}",
+               "expr": "sum(nats_varz_cpu{cluster=~\".*\"})",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
-         "title": "nats_consumer_num_pending",
+         "title": "nats_varz_cpu",
          "type": "timeseries"
       },
       {
@@ -8287,7 +10219,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Redelivered messages per consumer.",
+         "description": "Server memory usage bytes (varz).",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8303,9 +10235,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 450
+            "y": 538
          },
-         "id": 163,
+         "id": 197,
          "options": {
             "legend": {
                "calcs": [
@@ -8325,12 +10257,12 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name, consumer_name) (rate(nats_consumer_num_redelivered{cluster=~\".*\"}[5m]))",
-               "legendFormat": "{{stream_name}} / {{consumer_name}}",
+               "expr": "sum(nats_varz_mem{cluster=~\".*\"})",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
-         "title": "nats_consumer_num_redelivered — rate/s",
+         "title": "nats_varz_mem",
          "type": "timeseries"
       },
       {
@@ -8338,7 +10270,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Messages awaiting ack per consumer.",
+         "description": "JetStream streams on the server.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8354,9 +10286,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 458
+            "y": 546
          },
-         "id": 164,
+         "id": 198,
          "options": {
             "legend": {
                "calcs": [
@@ -8376,12 +10308,63 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (stream_name, consumer_name) (nats_consumer_num_ack_pending{cluster=~\".*\"})",
-               "legendFormat": "{{stream_name}} / {{consumer_name}}",
+               "expr": "sum(nats_server_total_streams{cluster=~\".*\"})",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
-         "title": "nats_consumer_num_ack_pending",
+         "title": "nats_server_total_streams",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "JetStream consumers on the server.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 546
+         },
+         "id": 199,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(nats_server_total_consumers{cluster=~\".*\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "nats_server_total_consumers",
          "type": "timeseries"
       },
       {
@@ -8390,9 +10373,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 466
+            "y": 554
          },
-         "id": 165,
+         "id": 200,
          "panels": [ ],
          "title": "Rails KG request path",
          "type": "row"
@@ -8418,9 +10401,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 467
+            "y": 555
          },
-         "id": 166,
+         "id": 201,
          "options": {
             "legend": {
                "calcs": [
@@ -8487,9 +10470,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 467
+            "y": 555
          },
-         "id": 167,
+         "id": 202,
          "options": {
             "legend": {
                "calcs": [
@@ -8538,9 +10521,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 467
+            "y": 555
          },
-         "id": 168,
+         "id": 203,
          "options": {
             "legend": {
                "calcs": [
@@ -8589,9 +10572,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 475
+            "y": 563
          },
-         "id": 169,
+         "id": 204,
          "options": {
             "legend": {
                "calcs": [
@@ -8658,9 +10641,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 475
+            "y": 563
          },
-         "id": 170,
+         "id": 205,
          "options": {
             "legend": {
                "calcs": [
@@ -8709,9 +10692,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 475
+            "y": 563
          },
-         "id": 171,
+         "id": 206,
          "options": {
             "legend": {
                "calcs": [
@@ -8778,9 +10761,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 483
+            "y": 571
          },
-         "id": 172,
+         "id": 207,
          "options": {
             "legend": {
                "calcs": [
@@ -8829,9 +10812,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 483
+            "y": 571
          },
-         "id": 173,
+         "id": 208,
          "options": {
             "legend": {
                "calcs": [
@@ -8898,9 +10881,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 483
+            "y": 571
          },
-         "id": 174,
+         "id": 209,
          "options": {
             "legend": {
                "calcs": [
@@ -8949,9 +10932,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 491
+            "y": 579
          },
-         "id": 175,
+         "id": 210,
          "options": {
             "legend": {
                "calcs": [
@@ -9018,9 +11001,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 491
+            "y": 579
          },
-         "id": 176,
+         "id": 211,
          "options": {
             "legend": {
                "calcs": [
@@ -9069,9 +11052,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 491
+            "y": 579
          },
-         "id": 177,
+         "id": 212,
          "options": {
             "legend": {
                "calcs": [
@@ -9138,9 +11121,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 499
+            "y": 587
          },
-         "id": 178,
+         "id": 213,
          "options": {
             "legend": {
                "calcs": [
@@ -9174,9 +11157,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 507
+            "y": 595
          },
-         "id": 179,
+         "id": 214,
          "panels": [ ],
          "title": "Rails KG traversal compaction",
          "type": "row"
@@ -9202,9 +11185,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 508
+            "y": 596
          },
-         "id": 180,
+         "id": 215,
          "options": {
             "legend": {
                "calcs": [
@@ -9271,9 +11254,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 508
+            "y": 596
          },
-         "id": 181,
+         "id": 216,
          "options": {
             "legend": {
                "calcs": [
@@ -9322,9 +11305,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 508
+            "y": 596
          },
-         "id": 182,
+         "id": 217,
          "options": {
             "legend": {
                "calcs": [
@@ -9391,9 +11374,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 516
+            "y": 604
          },
-         "id": 183,
+         "id": 218,
          "options": {
             "legend": {
                "calcs": [
@@ -9442,9 +11425,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 516
+            "y": 604
          },
-         "id": 184,
+         "id": 219,
          "options": {
             "legend": {
                "calcs": [
@@ -9493,9 +11476,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 516
+            "y": 604
          },
-         "id": 185,
+         "id": 220,
          "options": {
             "legend": {
                "calcs": [
