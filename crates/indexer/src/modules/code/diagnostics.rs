@@ -6,6 +6,7 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use code_graph::v2::FileReason;
+use ontology::{Ontology, OntologyError};
 use thiserror::Error;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
@@ -103,6 +104,31 @@ pub struct ClickHouseDiagnosticsStore {
 impl ClickHouseDiagnosticsStore {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
         Self { client }
+    }
+
+    /// Fail loudly at startup if the tables this store writes to are not
+    /// declared as unversioned auxiliary tables in the ontology. The names are
+    /// hardcoded here and in `schema.yaml`; without this check a rename there
+    /// would silently break inserts, and because diagnostics writes are
+    /// best-effort the failure would never surface.
+    pub fn validate_ontology(ontology: &Ontology) -> Result<(), OntologyError> {
+        for name in [BRANCH_EVENTS_TABLE, FILE_EVENTS_TABLE] {
+            let table = ontology
+                .auxiliary_tables()
+                .iter()
+                .find(|t| t.name == name)
+                .ok_or_else(|| {
+                    OntologyError::Validation(format!(
+                        "diagnostics table '{name}' is not declared in auxiliary_tables"
+                    ))
+                })?;
+            if table.versioned {
+                return Err(OntologyError::Validation(format!(
+                    "diagnostics table '{name}' must be unversioned so its history outlives re-indexes"
+                )));
+            }
+        }
+        Ok(())
     }
 
     fn file_events_schema() -> Schema {
@@ -254,6 +280,13 @@ mod tests {
         assert_eq!(BranchFailReason::Timeout.as_str(), "timeout");
         assert_eq!(BranchFailReason::Transient.as_str(), "transient");
         assert_eq!(BranchFailReason::Permanent.as_str(), "permanent");
+    }
+
+    #[test]
+    fn validate_ontology_accepts_the_embedded_ontology() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        ClickHouseDiagnosticsStore::validate_ontology(&ontology)
+            .expect("diagnostics tables must be declared as unversioned auxiliary tables");
     }
 
     #[test]

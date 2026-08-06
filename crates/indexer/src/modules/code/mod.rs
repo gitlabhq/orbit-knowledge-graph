@@ -87,6 +87,7 @@ pub async fn register_handlers(
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
     let checkpoint_store: Arc<dyn checkpoint::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
+    ClickHouseDiagnosticsStore::validate_ontology(ontology).map_err(HandlerInitError::new)?;
     let diagnostics_store: Arc<dyn DiagnosticsStore> =
         Arc::new(ClickHouseDiagnosticsStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
