@@ -49,7 +49,7 @@ case "$archive" in
         (cd "$work" && zip -qr "$archive_abs" .)
         ;;
     *)
-        tar -czvf "$archive_abs" -C "$work" .
+        (cd "$work" && tar -czvf "$archive_abs" -- *)
         ;;
 esac
 
