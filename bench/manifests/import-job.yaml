@@ -65,7 +65,9 @@ spec:
                 t=$(basename "${sf}" .schema.sql)
 
                 ddl=$(rewrite_ddl "${sf}")
-                ch datalake "DROP TABLE IF EXISTS ${t}" || true
+                # CREATE IF NOT EXISTS: additive, never drops existing data.
+                # DROP only on explicit schema migration (not here).
+                ddl=$(echo "${ddl}" | sed 's/^CREATE TABLE /CREATE TABLE IF NOT EXISTS /')
                 if ! ch datalake "${ddl}"; then
                   echo "  SKIP: ${t} (DDL failed)"
                   continue
