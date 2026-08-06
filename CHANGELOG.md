@@ -1,3 +1,11 @@
+## [0.95.3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.2...v0.95.3) (2026-08-06)
+
+### Fixes
+
+* **indexer:** calibrate the worker memory budget to observed code-pool peaks ([4396725](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4396725bde32fd039176bb52e43a450d475c5f6d)) by Jean-Gabriel Doyon
+* **indexer:** let the dead letter queue keep repeat failures per subject ([5ad6d08](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5ad6d08f9d8e29f7b8884795a1d139c4febdf3d4)) by Jean-Gabriel Doyon
+* **orbit-local:** record code indexing failures instead of dropping them ([85442f7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85442f751ec4f63dd638fcc801ddd5848863412c)) by Michael Usachenko
+
 ## [0.95.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.95.1...v0.95.2) (2026-08-05)
 
 ### Fixes
