@@ -81,9 +81,21 @@ allowlisting policies can authorize it by publisher:
    ```
 
    The output must match the hash in the `.sha256` file.
-1. Extract the archive and move `orbit.exe` to a directory on your `PATH`.
+1. Extract the archive and move `orbit.exe` to a user-scope directory, for example
+   `%LOCALAPPDATA%\Programs\orbit`, the same default the installer uses.
+1. If that directory is not already on your `PATH`, add it for your user:
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("PATH", "$env:LOCALAPPDATA\Programs\orbit;$([Environment]::GetEnvironmentVariable('PATH', 'User'))", "User")
+   ```
 
 No administrator rights are required.
+
+Open a new terminal, then verify:
+
+```shell
+orbit help
+```
 
 {{< /tab >}}
 
