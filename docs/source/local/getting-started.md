@@ -67,6 +67,24 @@ Open a new terminal, then verify:
 orbit help
 ```
 
+If your endpoint policy restricts remote script execution, you can install
+without running any script. The Windows release archive contains a single
+self-contained `orbit.exe`, signed by GitLab Inc., so application
+allowlisting policies can authorize it by publisher:
+
+1. From the [latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases),
+   download `orbit-local-windows-x86_64.zip` and its `.sha256` file.
+1. Verify the checksum:
+
+   ```powershell
+   (Get-FileHash .\orbit-local-windows-x86_64.zip -Algorithm SHA256).Hash
+   ```
+
+   The output must match the hash in the `.sha256` file.
+1. Extract the archive and move `orbit.exe` to a directory on your `PATH`.
+
+No administrator rights are required.
+
 {{< /tab >}}
 
 {{< tab title="npm" >}}
