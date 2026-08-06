@@ -59,20 +59,21 @@ spec:
                 [ -f "${schema_file}" ] || continue
                 table=$(basename "${schema_file}" .schema.sql)
 
-                ddl=$(sed \
-                  -e 's/SharedReplacingMergeTree([^)]*)//g' \
-                  -e 's/SharedMergeTree([^)]*)//g' \
-                  -e 's/`[a-z_]*`\.`/`/g' \
+                # DDL rewrite from clickhouse-datalake-dumps bin/import.sh
+                ddl=$(sed -E \
+                  -e 's/CREATE TABLE [A-Za-z0-9_]+\./CREATE TABLE /' \
+                  -e "s/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree\('[^']*', *'[^']*'/\1MergeTree(/" \
+                  -e 's/Shared(Replacing|Aggregating|Summing|Collapsing|VersionedCollapsing)?MergeTree/\1MergeTree/' \
+                  -e 's/MergeTree\(, */MergeTree(/' \
                   "${schema_file}")
-                if echo "${ddl}" | grep -q "ENGINE = ()"; then
-                  ddl=$(echo "${ddl}" | sed 's/ENGINE = ()/ENGINE = ReplacingMergeTree()/g')
-                fi
 
                 ch staging "DROP TABLE IF EXISTS ${table}" || true
+                ch datalake "DROP TABLE IF EXISTS ${table}" || true
                 if ! ch staging "${ddl}"; then
-                  echo "  WARNING: DDL failed for ${table}, skipping"
+                  echo "  WARNING: DDL failed for ${table} in staging, skipping"
                   continue
                 fi
+                ch datalake "${ddl}" || echo "  WARNING: DDL failed for ${table} in datalake"
 
                 parts=0
                 for part_file in ${WORK}/datalake/${table}.part*.Native.gz; do
