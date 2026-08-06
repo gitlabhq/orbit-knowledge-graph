@@ -14,6 +14,28 @@ use crate::error::{NatsError, map_connect_error};
 use crate::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
 use gkg_server_config::NatsConfiguration;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubjectDedup {
+    CollapseDuplicates,
+    KeepAll,
+}
+
+impl SubjectDedup {
+    fn max_messages_per_subject(self) -> i64 {
+        match self {
+            Self::CollapseDuplicates => 1,
+            Self::KeepAll => -1,
+        }
+    }
+
+    fn discard_new_per_subject(self) -> bool {
+        match self {
+            Self::CollapseDuplicates => true,
+            Self::KeepAll => false,
+        }
+    }
+}
+
 pub struct NatsClient {
     client: async_nats::Client,
     jetstream: Context,
@@ -89,6 +111,7 @@ impl NatsClient {
         stream_name: &str,
         subjects: Vec<String>,
         max_age: Option<Duration>,
+        dedup: SubjectDedup,
     ) -> Result<Stream, NatsError> {
         let stream_config = async_nats::jetstream::stream::Config {
             name: stream_name.to_string(),
@@ -97,11 +120,11 @@ impl NatsClient {
             max_age: max_age.unwrap_or(self.config.stream_max_age().unwrap_or_default()),
             max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
             max_messages: self.config.stream_max_messages.unwrap_or(-1),
-            max_messages_per_subject: 1,
+            max_messages_per_subject: dedup.max_messages_per_subject(),
             storage: async_nats::jetstream::stream::StorageType::File,
             retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
             discard: async_nats::jetstream::stream::DiscardPolicy::New,
-            discard_new_per_subject: true,
+            discard_new_per_subject: dedup.discard_new_per_subject(),
             ..Default::default()
         };
 
@@ -308,5 +331,36 @@ impl NatsClient {
             bucket: bucket.to_string(),
             message: e.to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collapsing_duplicates_holds_one_message_per_subject() {
+        assert_eq!(
+            SubjectDedup::CollapseDuplicates.max_messages_per_subject(),
+            1
+        );
+        assert!(SubjectDedup::CollapseDuplicates.discard_new_per_subject());
+    }
+
+    #[test]
+    fn keeping_all_lifts_the_per_subject_cap() {
+        assert_eq!(SubjectDedup::KeepAll.max_messages_per_subject(), -1);
+        assert!(!SubjectDedup::KeepAll.discard_new_per_subject());
+    }
+
+    #[test]
+    fn per_subject_discard_is_only_paired_with_a_positive_cap() {
+        for dedup in [SubjectDedup::CollapseDuplicates, SubjectDedup::KeepAll] {
+            assert_eq!(
+                dedup.discard_new_per_subject(),
+                dedup.max_messages_per_subject() > 0,
+                "{dedup:?} would be rejected by JetStream"
+            );
+        }
     }
 }

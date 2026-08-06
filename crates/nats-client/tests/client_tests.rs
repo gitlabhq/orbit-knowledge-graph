@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use gkg_server_config::NatsConfiguration;
-use nats_client::NatsClient;
 use nats_client::kv_types::{KvBucketConfig, KvPutOptions, KvPutResult};
+use nats_client::{NatsClient, SubjectDedup};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -143,12 +143,22 @@ async fn create_or_update_stream_max_age_override_isolates_dlq() {
     let client = NatsClient::connect(&cfg).await.expect("connect");
 
     client
-        .create_or_update_stream("test_workqueue", vec!["wq.>".to_string()], None)
+        .create_or_update_stream(
+            "test_workqueue",
+            vec!["wq.>".to_string()],
+            None,
+            SubjectDedup::CollapseDuplicates,
+        )
         .await
         .expect("workqueue stream create");
 
     client
-        .create_or_update_stream("test_dlq", vec!["dlq.>".to_string()], Some(Duration::ZERO))
+        .create_or_update_stream(
+            "test_dlq",
+            vec!["dlq.>".to_string()],
+            Some(Duration::ZERO),
+            SubjectDedup::KeepAll,
+        )
         .await
         .expect("dlq stream create");
 
@@ -161,18 +171,21 @@ async fn create_or_update_stream_max_age_override_isolates_dlq() {
         .get_stream("test_workqueue")
         .await
         .expect("workqueue stream exists");
-    let wq_max_age = wq.info().await.expect("workqueue info").config.max_age;
+    let wq_config = wq.info().await.expect("workqueue info").config.clone();
     assert_eq!(
-        wq_max_age,
+        wq_config.max_age,
         Duration::from_secs(60),
         "workqueue stream must inherit configured stream_max_age",
     );
+    assert_eq!(wq_config.max_messages_per_subject, 1);
 
     let mut dlq = js.get_stream("test_dlq").await.expect("dlq stream exists");
-    let dlq_max_age = dlq.info().await.expect("dlq info").config.max_age;
+    let dlq_config = dlq.info().await.expect("dlq info").config.clone();
     assert_eq!(
-        dlq_max_age,
+        dlq_config.max_age,
         Duration::ZERO,
         "dlq stream must pin max_age=0 regardless of configured stream_max_age",
     );
+    assert_eq!(dlq_config.max_messages_per_subject, -1);
+    assert!(!dlq_config.discard_new_per_subject);
 }

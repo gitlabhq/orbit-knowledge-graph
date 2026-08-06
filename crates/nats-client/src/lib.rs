@@ -7,7 +7,7 @@ pub mod kv_types;
 pub mod testkit;
 
 pub use circuit_breaking::CircuitBreakingNatsClient;
-pub use client::NatsClient;
+pub use client::{NatsClient, SubjectDedup};
 pub use error::NatsError;
 pub use kv_services::{KvServices, KvServicesImpl};
 pub use kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
