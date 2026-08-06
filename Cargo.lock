@@ -14879,6 +14879,7 @@ dependencies = [
  "anyhow",
  "arrow 58.3.0",
  "async-nats",
+ "bytes",
  "chrono",
  "clap",
  "clickhouse",
@@ -14887,15 +14888,16 @@ dependencies = [
  "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
- "indexer",
  "ontology",
  "parquet 58.3.0",
+ "prost 0.14.4",
  "query-engine",
  "rand 0.10.2",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "serde_yaml",
+ "siphon-proto",
  "sqlformat",
  "tabled",
  "tempfile",
@@ -14903,6 +14905,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "zstd",
 ]
 
 [[package]]

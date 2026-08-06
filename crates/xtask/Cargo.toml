@@ -47,8 +47,11 @@ gkg-server-config = { path = "../gkg-server-config" }
 ontology = { path = "../ontology" }
 schemars = { workspace = true }
 clickhouse = { workspace = true }
+bytes = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
-indexer = { path = "../indexer" }
+prost = { workspace = true }
+siphon-proto = { workspace = true }
+zstd = "0.13.3"
 gkg-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }
 tempfile = { workspace = true }
