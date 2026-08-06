@@ -106,11 +106,7 @@ impl ClickHouseDiagnosticsStore {
         Self { client }
     }
 
-    /// Fail loudly at startup if the tables this store writes to are not
-    /// declared as unversioned auxiliary tables in the ontology. The names are
-    /// hardcoded here and in `schema.yaml`; without this check a rename there
-    /// would silently break inserts, and because diagnostics writes are
-    /// best-effort the failure would never surface.
+    /// Best-effort diagnostics writes hide a silent table-name drift, so assert the ontology declares these tables (established load-time-validation pattern).
     pub fn validate_ontology(ontology: &Ontology) -> Result<(), OntologyError> {
         for name in [BRANCH_EVENTS_TABLE, FILE_EVENTS_TABLE] {
             let table = ontology
