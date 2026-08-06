@@ -26,6 +26,8 @@ spec:
               value: "${DUMP_PREFIX}"
             - name: BUCKET
               value: "gs://gkg-datalake-dumps"
+            - name: GCE_METADATA_HOST
+              value: "169.254.169.254"
           command: ["/bin/bash", "-euo", "pipefail", "-c"]
           args:
             - |
@@ -46,7 +48,7 @@ spec:
               mkdir -p "${WORK}/datalake"
 
               echo "==> Downloading datalake from ${BUCKET}/${DUMP_PREFIX}/datalake/"
-              gcloud storage rsync "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/datalake/" --recursive
+              gsutil -m rsync -r "${BUCKET}/${DUMP_PREFIX}/datalake/" "${WORK}/datalake/"
 
               echo "==> Creating databases"
               ch "" "CREATE DATABASE IF NOT EXISTS staging"
