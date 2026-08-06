@@ -63,8 +63,7 @@ fn median(mut v: Vec<Duration>) -> Duration {
     v[v.len() / 2]
 }
 
-#[tokio::test]
-async fn a_concurrent_parse_stretches_extraction_through_the_handler() {
+async fn slowdown_at_parse_width(worker_threads: usize) -> f64 {
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
         *integration_testkit::GRAPH_SCHEMA_SQL,
@@ -85,6 +84,7 @@ async fn a_concurrent_parse_stretches_extraction_through_the_handler() {
         &clickhouse,
         CodeIndexingPipelineConfig {
             job_timeout_secs: 0,
+            worker_threads,
             ..Default::default()
         },
     );
@@ -121,12 +121,26 @@ async fn a_concurrent_parse_stretches_extraction_through_the_handler() {
     let loaded_median = median(loaded).as_secs_f64();
     let slowdown = loaded_median / idle_median.max(1e-9);
     println!(
-        "victim indexing median: idle={idle_median:.2}s loaded={loaded_median:.2}s slowdown={slowdown:.2}x"
+        "worker_threads={worker_threads}: idle={idle_median:.2}s loaded={loaded_median:.2}s slowdown={slowdown:.2}x"
     );
+    slowdown
+}
 
+#[tokio::test]
+async fn a_concurrent_parse_stretches_extraction_through_the_handler() {
+    let slowdown = slowdown_at_parse_width(0).await;
     assert!(
         slowdown > MIN_SLOWDOWN,
-        "a concurrent parse must measurably stretch extraction; idle={idle_median:.2}s \
-         loaded={loaded_median:.2}s slowdown={slowdown:.2}x"
+        "a parse using every core must measurably stretch extraction, got {slowdown:.2}x"
+    );
+}
+
+#[tokio::test]
+async fn narrowing_the_parse_relieves_extraction() {
+    let wide = slowdown_at_parse_width(0).await;
+    let narrow = slowdown_at_parse_width(4).await;
+    assert!(
+        narrow < wide,
+        "narrowing the parse must leave extraction less starved; wide={wide:.2}x narrow={narrow:.2}x"
     );
 }
