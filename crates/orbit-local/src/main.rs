@@ -452,6 +452,7 @@ pub(crate) fn index_collect(
             Err(e) => {
                 tracing::error!("skipping {}: {e:#}", repo_path.display());
                 failed += 1;
+                workspace::record_git_info_failure(&db_path, repo_path, &e.to_string());
                 continue;
             }
         };
@@ -512,6 +513,15 @@ pub(crate) fn index_collect(
         anyhow::bail!("{failed} of {} repositories failed to index", repos.len());
     }
     Ok(outputs)
+}
+
+fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> Option<String> {
+    let fatal_count = errors.iter().filter(|e| e.fatal).count();
+    let first = errors.iter().find(|e| e.fatal)?;
+    Some(format!(
+        "code indexing failed during {}: {} ({fatal_count} fatal pipeline error(s))",
+        first.stage, first.error
+    ))
 }
 
 fn index_repo(
@@ -588,11 +598,13 @@ fn index_repo(
         on_batch,
     );
 
-    if !v2_result.errors.is_empty() {
-        for err in &v2_result.errors {
-            tracing::warn!("pipeline error: {} ({})", err.error, err.file_path);
-        }
+    for err in &v2_result.errors {
+        tracing::warn!(stage = err.stage, error = %err.error, file = %err.file_path, "pipeline error");
     }
+    if let Some(reason) = fatal_pipeline_reason(&v2_result.errors) {
+        anyhow::bail!(reason);
+    }
+
     let client =
         duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
     workspace::set_status(
@@ -603,10 +615,6 @@ fn index_repo(
         None,
         Some(git),
     )?;
-
-    for err in &v2_result.errors {
-        tracing::warn!(stage = err.stage, error = %err.error, "task-level pipeline error");
-    }
 
     Ok(IndexRunResult {
         total_processing_time: start_time.elapsed(),
@@ -709,5 +717,47 @@ fn build_index_output(
         },
         database_path: result.database_path.clone(),
         detailed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fatal_pipeline_reason;
+    use code_graph::v2::pipeline::PipelineError;
+
+    fn err(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {
+        PipelineError {
+            file_path: String::new(),
+            error: msg.to_string(),
+            stage,
+            fatal,
+        }
+    }
+
+    #[test]
+    fn no_errors_is_not_fatal() {
+        assert!(fatal_pipeline_reason(&[]).is_none());
+    }
+
+    #[test]
+    fn non_fatal_errors_do_not_bail() {
+        let errors = [
+            err("parse", "bad syntax", false),
+            err("walk", "skip", false),
+        ];
+        assert!(fatal_pipeline_reason(&errors).is_none());
+    }
+
+    #[test]
+    fn a_fatal_error_bails_with_first_reason_and_count() {
+        let errors = [
+            err("parse", "recoverable", false),
+            err("sink_write", "DuckDB write failed", true),
+            err("conversion", "arrow overflow", true),
+        ];
+        let reason = fatal_pipeline_reason(&errors).expect("fatal must bail");
+        assert!(reason.contains("sink_write"), "{reason}");
+        assert!(reason.contains("DuckDB write failed"), "{reason}");
+        assert!(reason.contains("2 fatal"), "{reason}");
     }
 }

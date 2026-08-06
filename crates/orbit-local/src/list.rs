@@ -13,7 +13,8 @@ const MANIFEST_QUERY: &str = "SELECT \
        branch, \
        commit_sha, \
        CAST(status AS VARCHAR) AS status, \
-       CAST(last_indexed_at AS VARCHAR) AS last_indexed_at \
+       CAST(last_indexed_at AS VARCHAR) AS last_indexed_at, \
+       error_message \
      FROM _orbit_manifest \
      ORDER BY _orbit_manifest.last_indexed_at DESC NULLS LAST, repo_path";
 
@@ -153,6 +154,29 @@ mod tests {
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("/tmp/repo-a") && s.contains("/tmp/repo-b"));
         assert!(s.contains("repo_path") && s.contains("indexed"));
+    }
+
+    #[test]
+    fn surfaces_error_message_for_failed_repos() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db = tmp.path().join("graph.duckdb");
+        let client = duckdb_client::DuckDbClient::open(&db).unwrap();
+        client.initialize_schema(LOCAL_DDL).unwrap();
+        client
+            .execute(
+                "INSERT INTO _orbit_manifest \
+                   (repo_path, project_id, branch, commit_sha, status, error_message) \
+                 VALUES ('/tmp/broke', 1, 'main', 'ccc', 'error'::repo_status, 'failed to walk repository files')",
+                &[],
+            )
+            .unwrap();
+
+        let mut out = Vec::new();
+        run_to(Format::Json, &db, &mut out).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
+        assert_eq!(v[0]["status"], "error");
+        assert_eq!(v[0]["error_message"], "failed to walk repository files");
     }
 
     #[test]
