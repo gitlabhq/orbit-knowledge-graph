@@ -692,3 +692,160 @@ async fn permanent_drop_error_drops_without_dlq() {
         "DLQ should be empty"
     );
 }
+
+/// Mirrors the code pipeline's job-timeout policy: two attempts, then a dead letter.
+fn contention_subscription(stream: &str, subject: &str) -> Subscription {
+    Subscription::new(stream, subject).with_config(&SubscriptionConfig {
+        max_attempts: Some(2),
+        retry_interval_secs: Some(1),
+        dead_letter_on_exhaustion: Some(true),
+        ..Default::default()
+    })
+}
+
+/// Reports the first `failures` deliveries as `error`, then writes the event through.
+/// Models a code repository that cannot get an indexing lane for a while and then does.
+struct ContendedHandler {
+    stream: String,
+    subject: String,
+    error: HandlerError,
+    failures: usize,
+    seen: Arc<std::sync::atomic::AtomicUsize>,
+    writer: Arc<ClickHouseWriter>,
+}
+
+impl ContendedHandler {
+    fn new(
+        stream: &str,
+        subject: &str,
+        error: HandlerError,
+        failures: usize,
+        writer: Arc<ClickHouseWriter>,
+    ) -> Self {
+        Self {
+            stream: stream.into(),
+            subject: subject.into(),
+            error,
+            failures,
+            seen: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            writer,
+        }
+    }
+
+    fn clone_error(&self) -> HandlerError {
+        match &self.error {
+            HandlerError::Backpressure(m) => HandlerError::Backpressure(m.clone()),
+            other => HandlerError::Processing(other.to_string()),
+        }
+    }
+}
+
+#[async_trait]
+impl Handler for ContendedHandler {
+    fn name(&self) -> &str {
+        "contended-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        contention_subscription(&self.stream, &self.subject)
+    }
+
+    async fn handle(
+        &self,
+        _context: HandlerContext,
+        message: Envelope,
+    ) -> Result<(), HandlerError> {
+        let delivery = self.seen.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        if delivery < self.failures {
+            return Err(self.clone_error());
+        }
+        TestHandler {
+            writer: self.writer.clone(),
+        }
+        .handle(_context, message)
+        .await
+    }
+}
+
+#[tokio::test]
+async fn contention_reported_as_a_processing_failure_reaches_the_dlq() {
+    let context = TestContext::new().await;
+    let stream = "contention_processing_stream";
+    let subject = "contention_processing.events";
+    let subscription = contention_subscription(stream, subject);
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("contention-processing-consumer".into()),
+            ..Default::default()
+        })
+        .await;
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+    publish_test_event(&broker, &subscription).await;
+
+    let handler = ContendedHandler::new(
+        stream,
+        subject,
+        HandlerError::Processing("no indexing lane within 50s".into()),
+        3,
+        context.create_writer(),
+    );
+    let engine = create_engine(broker.clone(), Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(12)).await;
+
+    assert!(
+        dlq_message_count(&context.nats_url).await >= 1,
+        "contention spent its attempts and the repository was discarded"
+    );
+    assert_eq!(
+        context.query_count().await,
+        0,
+        "the repository was never indexed"
+    );
+}
+
+#[tokio::test]
+async fn contention_reported_as_backpressure_is_retried_until_it_lands() {
+    let context = TestContext::new().await;
+    let stream = "contention_backpressure_stream";
+    let subject = "contention_backpressure.events";
+    let subscription = contention_subscription(stream, subject);
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("contention-backpressure-consumer".into()),
+            ..Default::default()
+        })
+        .await;
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+    publish_test_event(&broker, &subscription).await;
+
+    let handler = ContendedHandler::new(
+        stream,
+        subject,
+        HandlerError::Backpressure("no indexing lane within 50s".into()),
+        3,
+        context.create_writer(),
+    );
+    let engine = create_engine(broker.clone(), Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(12)).await;
+
+    assert_eq!(
+        dlq_message_count(&context.nats_url).await,
+        0,
+        "contention must never discard a repository"
+    );
+    assert_eq!(
+        context.query_count().await,
+        1,
+        "the repository was indexed once a lane freed up"
+    );
+}
