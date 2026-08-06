@@ -123,3 +123,22 @@ async fn the_bounded_config_lets_the_same_repository_land() {
         "a checkpoint is what stops the sweep from re-dispatching it"
     );
 }
+
+#[tokio::test]
+async fn a_repository_over_the_byte_cap_is_checkpointed_instead_of_overrunning() {
+    let (ok, checkpointed) = index_once(CodeIndexingPipelineConfig {
+        job_timeout_secs: BUDGET_SECS,
+        max_total_bytes: 1_000_000,
+        ..Default::default()
+    })
+    .await;
+
+    assert!(
+        ok,
+        "crossing the byte cap aborts extraction early, which is a terminal outcome rather than a failure"
+    );
+    assert!(
+        checkpointed,
+        "the checkpoint is what stops the sweep re-dispatching a repository too big to extract"
+    );
+}

@@ -65,10 +65,16 @@ impl CodeIndexingDeps {
         let metrics = CodeMetrics::new();
 
         let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
+        // Honour the caps the caller asked for; 0 keeps the "unlimited" default that tests
+        // which do not care about extraction limits rely on.
+        let max_file_size = match pipeline_config.max_file_size_bytes {
+            0 => u64::MAX,
+            n => n,
+        };
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             cache_dir.path().to_path_buf(),
-            u64::MAX,
-            0,
+            max_file_size,
+            pipeline_config.max_total_bytes,
             metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
