@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
@@ -18,6 +18,9 @@ use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
+
+/// Share of the job budget spendable on queueing; the rest is reserved for fetch and parse.
+const LANE_WAIT_BUDGET_PERCENT: u32 = 20;
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -206,6 +209,11 @@ impl CodeIndexingPipeline {
         self.pipeline_config.job_timeout()
     }
 
+    fn lane_wait_budget(&self) -> Option<Duration> {
+        self.job_timeout()
+            .map(|budget| budget * LANE_WAIT_BUDGET_PERCENT / 100)
+    }
+
     /// Flush all buffered writes and wait until every project they made durable has been
     /// stale-cleaned and checkpointed. For tests and shutdown; steady state relies on the
     /// size/age flush and the per-project commit tokens.
@@ -326,7 +334,7 @@ impl CodeIndexingPipeline {
         } else {
             &self.big_indexing_slots
         };
-        let _indexing_slot = acquire(lane, "indexing").await?;
+        let _indexing_slot = acquire_within(lane, "indexing", self.lane_wait_budget()).await?;
 
         context.progress.notify_in_progress().await;
 
@@ -664,6 +672,24 @@ fn sem(n: usize) -> Option<Arc<Semaphore>> {
     (n > 0).then(|| Arc::new(Semaphore::new(n)))
 }
 
+/// A full lane says nothing about the project, so giving up requeues instead of failing the job.
+async fn acquire_within(
+    slots: &Option<Arc<Semaphore>>,
+    name: &str,
+    budget: Option<Duration>,
+) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
+    let Some(budget) = budget else {
+        return acquire(slots, name).await;
+    };
+    match tokio::time::timeout(budget, acquire(slots, name)).await {
+        Ok(result) => result,
+        Err(_) => Err(HandlerError::Backpressure(format!(
+            "no {name} slot within {}s",
+            budget.as_secs()
+        ))),
+    }
+}
+
 async fn acquire(
     slots: &Option<Arc<Semaphore>>,
     name: &str,
@@ -840,5 +866,45 @@ mod tests {
                 .is_none(),
             "an abandoned sentinel must not checkpoint; the sweep re-indexes the project",
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn saturated_lane_yields_backpressure_once_the_budget_lapses() {
+        let slots = sem(1);
+        let _held = acquire(&slots, "indexing").await.unwrap();
+
+        let error = acquire_within(&slots, "indexing", Some(Duration::from_secs(50)))
+            .await
+            .expect_err("a saturated lane must not hand out a permit");
+
+        assert_eq!(error.error_kind(), "backpressure");
+        assert!(!error.is_permanent());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lane_permit_is_returned_when_one_is_free() {
+        let slots = sem(1);
+
+        let permit = acquire_within(&slots, "indexing", Some(Duration::from_secs(50)))
+            .await
+            .unwrap();
+
+        assert!(permit.is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_absent_budget_waits_for_the_lane_instead_of_bouncing() {
+        let slots = sem(1);
+        let held = acquire(&slots, "indexing").await.unwrap();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            drop(held);
+        });
+
+        let permit = acquire_within(&slots, "indexing", None)
+            .await
+            .expect("an unbounded wait must outlast any delay");
+
+        assert!(permit.is_some());
     }
 }
