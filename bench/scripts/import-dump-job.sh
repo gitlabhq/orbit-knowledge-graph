@@ -29,6 +29,8 @@ $KC create secret generic ra-import-ch-auth \
 
 log "Submitting import job (dump=${DUMP_PREFIX}, ch_ns=${CH_NAMESPACE})"
 
+$KC delete job ra-import-dump -n "${JOB_NS}" --ignore-not-found=true 2>/dev/null
+
 sed -e "s/\${CH_NAMESPACE}/${CH_NAMESPACE}/g" \
     -e "s/\${DUMP_PREFIX}/${DUMP_PREFIX}/g" \
   < "${BENCH_DIR}/manifests/import-job.yaml" \
