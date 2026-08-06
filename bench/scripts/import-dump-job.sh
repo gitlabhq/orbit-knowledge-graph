@@ -8,7 +8,11 @@ source "${BENCH_DIR}/scripts/lib.sh"
 
 : "${DUMP_PREFIX:=core-2026-06-25-1115}"
 CH_NAMESPACE="e2e-${RUN_ID}-clickhouse"
-JOB_NS="${CH_NAMESPACE}"
+# Run the Job in the fixed ra-bench-infra namespace where the WI-bound
+# KSA already exists (IAM propagation needs ~60s; pre-creating avoids races).
+JOB_NS="ra-bench-infra"
+
+$KC create ns "${JOB_NS}" 2>/dev/null || true
 
 # Read the CH default password and store it in a Secret (not in the Job spec).
 CH_PASSWORD=$($KC get statefulset clickhouse -n "${CH_NAMESPACE}" \
@@ -22,12 +26,6 @@ $KC create secret generic ra-import-ch-auth \
   -n "${JOB_NS}" \
   --from-literal=password="${CH_PASSWORD}" \
   --dry-run=client -o yaml | $KC apply -f -
-
-# KSA with Workload Identity binding for GCS read access.
-COMPUTE_SA="1079327125344-compute@developer.gserviceaccount.com"
-$KC create serviceaccount ra-import-sa -n "${JOB_NS}" 2>/dev/null || true
-$KC annotate serviceaccount ra-import-sa -n "${JOB_NS}" \
-  "iam.gke.io/gcp-service-account=${COMPUTE_SA}" --overwrite 2>/dev/null
 
 log "Submitting import job (dump=${DUMP_PREFIX}, ch_ns=${CH_NAMESPACE})"
 
