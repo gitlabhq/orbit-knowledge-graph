@@ -101,24 +101,21 @@ impl DatalakeChangeDetector {
             "combined change detection query failed; retrying one branch per source table"
         );
 
-        let mut branch_queries = Vec::with_capacity(self.query.branches.len());
-        for branch in &self.query.branches {
-            branch_queries.push(async move {
+        let mut stream = futures::stream::iter(0..self.query.branches.len())
+            .map(|index| async move {
+                let branch = &self.query.branches[index];
                 let batches = self
                     .datalake
                     .fetch_change_batches(&branch.sql, lower, upper)
                     .await;
                 (branch, batches)
-            });
-        }
-        let results: Vec<_> = futures::stream::iter(branch_queries)
-            .buffer_unordered(BRANCH_FALLBACK_CONCURRENCY)
-            .collect()
-            .await;
+            })
+            .buffer_unordered(BRANCH_FALLBACK_CONCURRENCY);
 
         let mut batches = Vec::new();
         let mut failed = 0usize;
-        for (branch, result) in results {
+
+        while let Some((branch, result)) = stream.next().await {
             match result {
                 Ok(branch_batches) => batches.extend(branch_batches),
                 Err(err) => {
@@ -140,6 +137,7 @@ impl DatalakeChangeDetector {
                 "all {failed} change detection branches failed; combined query error: {combined_err}"
             )));
         }
+
         Ok(batches)
     }
 }
