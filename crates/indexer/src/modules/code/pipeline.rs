@@ -226,8 +226,6 @@ impl CodeIndexer {
         Ok(())
     }
 
-    /// A project with no content ends the job here, checkpointed so the sweep stops
-    /// re-dispatching it.
     pub async fn fetch_repository(
         &self,
         request: &IndexingRequest,
