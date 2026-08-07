@@ -51,17 +51,9 @@ enum Fetched {
     EmptyRepository,
 }
 
-/// Why [`CodeIndexer::index_project`] gave up, classified so the caller can map policy
-/// (retries, attempts, logging) without the mechanics leaking upward.
 pub enum IndexError {
-    /// Fetch and parse together exceeded the shared work budget.
-    BudgetExceeded {
-        budget: Duration,
-    },
-    /// No indexing lane freed up within the allowed wait.
-    NoLane {
-        waited: Duration,
-    },
+    BudgetExceeded { budget: Duration },
+    NoLane { waited: Duration },
     Failed(HandlerError),
 }
 
