@@ -11,7 +11,7 @@ allowed-tools: get_repository_file
 
 ## When to use
 
-Before writing or editing any file under `docs/` in this repository.
+Before writing or editing any public facing documentation under `docs/` in this repository.
 
 ## Steps
 
