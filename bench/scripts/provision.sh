@@ -89,20 +89,25 @@ export E2E_EXTRA_VALUES="/tmp/ra-${RUN_ID}-tier-values.yaml"
 log "Importing datalake dump"
 "${BENCH_DIR}/scripts/import-dump-job.sh"
 
-# --- 7. Reset checkpoints so the dispatcher re-indexes from epoch ---
-log "Resetting dispatcher checkpoints"
+# --- 7. Reset dispatcher checkpoints to epoch so it re-indexes all dump data ---
+# The dump preserves original _siphon_watermark timestamps. Without this
+# the dispatcher's cursor starts at now() and never sees the old data.
+log "Resetting dispatcher checkpoints to epoch"
 CKPT=$($KC exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASSWORD}" -d gkg \
   --query "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%_checkpoint' AND name NOT LIKE '%code_indexing%' LIMIT 1" 2>/dev/null)
 if [[ -n "${CKPT}" ]]; then
   $KC exec -n "${CH_NS}" clickhouse-0 -- \
-    clickhouse-client --password "${CH_PASSWORD}" -d gkg \
-    --query "TRUNCATE TABLE ${CKPT}"
-  log "  Truncated ${CKPT}"
+    clickhouse-client --password "${CH_PASSWORD}" -d gkg --multiquery \
+    --query "TRUNCATE TABLE ${CKPT};
+      INSERT INTO ${CKPT} (key, watermark) VALUES
+        ('dispatch.sdlc.namespace.changes', '1970-01-01 00:00:00'),
+        ('dispatch.sdlc.namespace.sweep', '1970-01-01 00:00:00')"
+  log "  Set ${CKPT} to epoch"
 fi
-$KC rollout restart -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher
+$KC rollout restart -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher deploy/gkg-indexer-default
 $KC rollout status -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher --timeout=120s
-log "  Dispatcher restarted, will re-index all data"
+log "  Dispatcher and indexer restarted"
 
 # --- 8. Validate ---
 log "Running validation gate"
