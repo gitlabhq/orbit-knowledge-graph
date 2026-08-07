@@ -65,8 +65,7 @@ impl CodeIndexingDeps {
         let metrics = CodeMetrics::new();
 
         let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
-        // Honour the caps the caller asked for; 0 keeps the "unlimited" default that tests
-        // which do not care about extraction limits rely on.
+        // 0 keeps the unlimited default that tests without extraction caps rely on.
         let max_file_size = match pipeline_config.max_file_size_bytes {
             0 => u64::MAX,
             n => n,

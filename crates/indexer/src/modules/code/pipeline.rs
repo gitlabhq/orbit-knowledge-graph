@@ -28,7 +28,7 @@ pub struct IndexingRequest {
     pub had_prior_checkpoint: bool,
 }
 
-/// Terminal outcome of `CodeIndexer::index_project`.
+/// Terminal outcome of `CodeIndexer::index_fetched`.
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
     Indexed,
@@ -45,8 +45,7 @@ impl IndexOutcome {
     }
 }
 
-/// What [`CodeIndexer::fetch_repository`] settled: bytes on disk to index, or a
-/// terminal empty repository it has already checkpointed.
+/// Bytes on disk to index, or a terminal empty repository that is already checkpointed.
 pub enum Fetched {
     Repository(CachedRepository),
     EmptyRepository,
@@ -227,8 +226,8 @@ impl CodeIndexer {
         Ok(())
     }
 
-    /// Downloads and extracts the repository. Ends the job itself when the project turns out
-    /// to have no content, checkpointing it so the sweep stops re-dispatching it.
+    /// A project with no content ends the job here, checkpointed so the sweep stops
+    /// re-dispatching it.
     pub async fn fetch_repository(
         &self,
         request: &IndexingRequest,
@@ -309,9 +308,6 @@ impl CodeIndexer {
         Ok(Fetched::Repository(repository))
     }
 
-    /// Queues for an indexing slot sized to the repository. Held by the caller for the index,
-    /// and waited for outside the job's wall-clock budget since a full pod is not the
-    /// repository's fault.
     pub async fn acquire_indexing_lane(
         &self,
         repository: &CachedRepository,
@@ -330,8 +326,7 @@ impl CodeIndexer {
         permit
     }
 
-    /// Parses the fetched repository and streams it to the sink. Requires the lane permit from
-    /// [`Self::acquire_indexing_lane`] to still be held.
+    /// Requires the permit from [`Self::acquire_indexing_lane`] to still be held.
     pub async fn index_fetched(
         &self,
         context: &HandlerContext,
@@ -543,9 +538,7 @@ impl CodeIndexer {
         let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
-        // Carry the project span onto the blocking thread so every code-graph line is
-        // attributable; without it a family event cannot be tied to a repository, and
-        // concurrent families make its start and end impossible to pair.
+        // Family log lines carry no project of their own; the span must follow the thread.
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| {

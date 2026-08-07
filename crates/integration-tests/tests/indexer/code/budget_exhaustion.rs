@@ -1,11 +1,6 @@
-//! A repository whose parse cannot finish inside the job budget times out and is never
-//! checkpointed, so the sweep re-dispatches it every tick forever. Batches that flushed
-//! before the abort still land, so it is left partially present and outside stale-data
-//! management rather than absent.
-//!
-//! The repository is deliberately few-files-but-expensive-to-parse. `max_files` is applied
-//! after extraction, so it can only rescue a repository whose *parse* is what overruns;
-//! one that cannot even be extracted in time is unaffected by it.
+//! An uncheckpointed overrun is re-dispatched by the sweep every tick forever, with any
+//! batches that flushed before the abort left behind outside stale-data management.
+//! `max_files` applies after extraction, so it only rescues a parse-bound repository.
 
 use gkg_server_config::CodeIndexingPipelineConfig;
 use indexer::handler::Handler;
@@ -20,8 +15,7 @@ const TRAVERSAL_PATH: &str = "1/4242/";
 const BRANCH: &str = "main";
 const FILE_COUNT: usize = 10_000;
 const METHODS_PER_FILE: usize = 80;
-// Generous enough that extracting the repository fits on slow CI hardware, while the
-// unbounded parse of the same repository still overruns it by a wide margin.
+// Extraction fits on slow CI hardware; the unbounded parse still overruns by a wide margin.
 const BUDGET_SECS: u64 = 60;
 
 fn backfill_envelope() -> Envelope {
@@ -90,8 +84,7 @@ async fn index_once(pipeline_config: CodeIndexingPipelineConfig) -> (bool, bool)
 
 #[tokio::test]
 async fn a_repository_whose_parse_overruns_the_budget_never_checkpoints() {
-    // One parse thread makes the overrun independent of the host's speed: on a fast machine
-    // the default width finishes this repository inside the budget and the test inverts.
+    // One parse thread keeps the overrun true on fast hosts, where the default width fits.
     let (ok, checkpointed) = index_once(CodeIndexingPipelineConfig {
         job_timeout_secs: BUDGET_SECS,
         worker_threads: 1,

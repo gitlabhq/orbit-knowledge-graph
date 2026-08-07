@@ -40,9 +40,7 @@ const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     dead_letter: true,
 };
 
-/// The job's wall-clock budget for work. Fetch and parse draw from one pot, so their total
-/// is bounded even though they are timed separately; queueing for an indexing lane runs
-/// outside it on purpose.
+/// One budget shared by every timed phase; queueing for a lane deliberately runs outside it.
 struct WorkClock {
     total: Option<Duration>,
     remaining: Duration,
@@ -315,9 +313,8 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
-    /// Queue for an indexing lane for at most the slack the project lock leaves over the work
-    /// budget. The lock is taken once and never renewed, so work plus queueing must stay
-    /// inside its TTL; a pod still full past that is backpressure, not a job failure.
+    /// The project lock is taken once and never renewed, so work plus queueing must stay
+    /// inside its TTL; a pod still full past that slack is backpressure, not a job failure.
     async fn acquire_lane_within_lock_slack(
         &self,
         repository: &CachedRepository,
@@ -402,9 +399,7 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so
-        // nothing commits. Fetch and parse share one work budget; the lane wait sits between
-        // them, off the clock, bounded instead by the slack the project lock leaves.
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
         let mut clock = WorkClock::new(self.pipeline.job_timeout());
 
@@ -421,8 +416,7 @@ impl CodeIndexingTaskHandler {
         let result = match fetched {
             Ok(Fetched::EmptyRepository) => Ok(IndexOutcome::EmptyRepository),
             Ok(Fetched::Repository(repository)) => {
-                // The fetch may have spent most of the budget and the lane wait can add the
-                // whole lock slack, which together reach ack_wait; refresh the delivery first.
+                // Fetch plus the full lane slack can reach ack_wait; refresh the delivery first.
                 context.progress.notify_in_progress().await;
                 let _lane = self.acquire_lane_within_lock_slack(&repository).await?;
                 clock
