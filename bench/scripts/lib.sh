@@ -7,7 +7,7 @@ E2E_DIR="${REPO_ROOT}/e2e"
 
 : "${RUN_ID:=ra-$(date +%s)}"
 : "${TIER:=small}"
-: "${KCTX:=gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness}"
+: "${KCTX:?must be set (e.g. gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_ra-bench-smoke)}"
 
 export RUN_ID TIER KCTX BENCH_DIR REPO_ROOT E2E_DIR
 

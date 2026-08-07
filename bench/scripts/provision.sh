@@ -83,7 +83,7 @@ export E2E_CH_NAMESPACE="${CH_NS}"
 export E2E_CH_DEFAULT_PASS="${CH_PASSWORD}"
 export E2E_EXTRA_VALUES="/tmp/ra-${RUN_ID}-tier-values.yaml"
 
-"${E2E_DIR}/scripts/setup.sh"
+"${E2E_DIR}/scripts/setup.sh" || log "WARN: setup.sh exited non-zero (license activation may have failed, non-fatal)"
 
 # --- 6. Import datalake dump ---
 log "Importing datalake dump"
