@@ -46,6 +46,10 @@ pub enum HandlerError {
     #[error("processing failed: {0}")]
     Processing(String),
 
+    /// Never got capacity to run; redelivered without spending an attempt or dead-lettering.
+    #[error("backpressure: {0}")]
+    Backpressure(String),
+
     /// A deterministic failure that will never succeed on retry.
     #[error("permanent failure: {message}")]
     Permanent {
@@ -67,6 +71,7 @@ impl HandlerError {
     pub fn error_kind(&self) -> &'static str {
         match self {
             HandlerError::Processing(_) => "processing",
+            HandlerError::Backpressure(_) => "backpressure",
             HandlerError::Permanent { .. } => "permanent",
             HandlerError::Deserialization(_) => "deserialization",
         }

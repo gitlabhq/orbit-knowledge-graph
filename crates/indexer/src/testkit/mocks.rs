@@ -238,6 +238,7 @@ impl Handler for MockHandler {
                     Err(HandlerError::Processing(error.to_string()))
                 }
                 HandlerError::Processing(msg) => Err(HandlerError::Processing(msg.clone())),
+                HandlerError::Backpressure(msg) => Err(HandlerError::Backpressure(msg.clone())),
             };
         }
 

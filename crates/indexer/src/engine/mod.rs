@@ -283,6 +283,7 @@ impl Engine {
 enum HandlerTaskOutcome {
     Ok,
     RetryRequested,
+    Backpressure,
     TransientError(String),
     Exhausted(String),
     Dropped(String),
@@ -390,7 +391,7 @@ async fn process_message(
     );
 }
 
-/// Precedence: Exhausted > Dropped > RetryRequested > TransientError > Success.
+/// Precedence: Exhausted > Dropped > RetryRequested > Backpressure > TransientError > Success.
 /// Retry policy (max_attempts, retry_interval) is read from the subscription,
 /// not from individual handlers.
 async fn run_handlers(
@@ -445,6 +446,16 @@ async fn run_handlers(
                 .metrics
                 .record_handler_error(handler.name(), error.error_kind());
 
+            if let HandlerError::Backpressure(reason) = &error {
+                info!(
+                    handler = handler.name(),
+                    subject = %envelope.subject,
+                    reason,
+                    "no capacity for this message; redelivering without counting an attempt"
+                );
+                return HandlerTaskOutcome::Backpressure;
+            }
+
             if error.is_permanent() {
                 let action = match &error {
                     HandlerError::Permanent { action, .. } => *action,
@@ -472,6 +483,7 @@ async fn run_handlers(
     let mut exhausted_error: Option<String> = None;
     let mut dropped_error: Option<String> = None;
     let mut has_retry_requested = false;
+    let mut has_backpressure = false;
     let mut transient_error: Option<String> = None;
 
     while let Some(result) = tasks.join_next().await {
@@ -479,6 +491,9 @@ async fn run_handlers(
             Ok(HandlerTaskOutcome::Ok) => {}
             Ok(HandlerTaskOutcome::RetryRequested) => {
                 has_retry_requested = true;
+            }
+            Ok(HandlerTaskOutcome::Backpressure) => {
+                has_backpressure = true;
             }
             Ok(HandlerTaskOutcome::TransientError(error)) => {
                 transient_error.get_or_insert(error);
@@ -507,6 +522,12 @@ async fn run_handlers(
     }
     if has_retry_requested {
         return HandlersOutcome::Failed { retry_delay: None };
+    }
+    // Skips the `should_redeliver` check below: contention must not spend an attempt.
+    if has_backpressure {
+        return HandlersOutcome::Failed {
+            retry_delay: subscription.retry_interval(),
+        };
     }
     if let Some(error) = transient_error {
         return match subscription.retry_policy() {
@@ -572,6 +593,36 @@ mod tests {
             });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(5))),
+            "expected Failed with 5s delay, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn backpressure_at_retry_limit_still_retries_instead_of_exhausting() {
+        let handler = MockHandler::new("stream", "subject").with_error(HandlerError::Backpressure(
+            "no indexing lane within 50s".into(),
+        ));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
         let runtime = test_runtime(&EngineConfiguration::default());
         let outcome = run_handlers(
             &handlers,
