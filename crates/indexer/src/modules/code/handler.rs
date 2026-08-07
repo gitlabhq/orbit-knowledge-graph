@@ -1,6 +1,8 @@
+use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+use tokio::sync::OwnedSemaphorePermit;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -11,7 +13,8 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
+use super::pipeline::{CodeIndexingPipeline, Fetched, IndexOutcome, IndexingRequest};
+use super::repository::cache::CachedRepository;
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
@@ -37,12 +40,57 @@ const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     dead_letter: true,
 };
 
-/// Reads the queue time once, at budget expiry, so a job still waiting for a lane at that
-/// point is forgiven nothing and cancelled; redelivery covers it.
-async fn work_deadline(budget: Duration, grace: Duration, lane_wait: Arc<AtomicU64>) {
-    tokio::time::sleep(budget).await;
-    let queued = Duration::from_millis(lane_wait.load(Ordering::Relaxed));
-    tokio::time::sleep(queued.min(grace)).await;
+/// The job's wall-clock budget for work. Fetch and parse draw from one pot, so their total
+/// is bounded even though they are timed separately; queueing for an indexing lane runs
+/// outside it on purpose.
+struct WorkClock {
+    total: Option<Duration>,
+    remaining: Duration,
+}
+
+impl WorkClock {
+    fn new(budget: Option<Duration>) -> Self {
+        Self {
+            total: budget,
+            remaining: budget.unwrap_or(Duration::ZERO),
+        }
+    }
+
+    async fn run<T>(
+        &mut self,
+        phase: impl Future<Output = Result<T, HandlerError>>,
+        cancel: &CancellationToken,
+        attempt: u32,
+        project_id: i64,
+        branch: &str,
+    ) -> Result<T, HandlerError> {
+        let Some(total) = self.total else {
+            return phase.await;
+        };
+        let started = tokio::time::Instant::now();
+        match tokio::time::timeout(self.remaining, phase).await {
+            Ok(result) => {
+                self.remaining = self.remaining.saturating_sub(started.elapsed());
+                result
+            }
+            Err(_) => {
+                cancel.cancel();
+                warn!(
+                    project_id,
+                    branch = %branch,
+                    budget_secs = total.as_secs(),
+                    "code indexing job exceeded its work budget"
+                );
+                Err(JOB_TIMEOUT_RETRY.global_failure(
+                    attempt,
+                    format!(
+                        "code indexing job exceeded the {}s work budget",
+                        total.as_secs()
+                    ),
+                ))
+            }
+        }
+    }
 }
 
 fn project_lock_key(project_id: i64, branch: &str) -> String {
@@ -267,9 +315,39 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
+    /// Queue for an indexing lane for at most the slack the project lock leaves over the work
+    /// budget. The lock is taken once and never renewed, so work plus queueing must stay
+    /// inside its TTL; a pod still full past that is backpressure, not a job failure.
+    async fn acquire_lane_within_lock_slack(
+        &self,
+        repository: &CachedRepository,
+    ) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
+        let Some(budget) = self.pipeline.job_timeout() else {
+            return self.pipeline.acquire_indexing_lane(repository).await;
+        };
+        let cap = self.lock_ttl.saturating_sub(budget);
+        match tokio::time::timeout(cap, self.pipeline.acquire_indexing_lane(repository)).await {
+            Ok(permit) => permit,
+            Err(_) => Err(HandlerError::Backpressure(format!(
+                "no indexing lane within {}s",
+                cap.as_secs()
+            ))),
+        }
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
+    )]
+    #[tracing::instrument(
+        name = "code_indexing_project",
+        skip_all,
+        fields(
+            project_id = request.project_id,
+            namespace_id,
+            traversal_path = %request.traversal_path,
+            branch = %branch,
+        )
     )]
     async fn index_with_lock(
         &self,
@@ -281,6 +359,16 @@ impl CodeIndexingTaskHandler {
         attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
+        let Some(namespace_id) =
+            gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
+        else {
+            return Err(HandlerError::Processing(format!(
+                "traversal_path {:?} has no namespace_id",
+                request.traversal_path
+            )));
+        };
+        tracing::Span::current().record("namespace_id", namespace_id);
+
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
@@ -314,45 +402,46 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
+        // On timeout: cancel so the detached parse bails, and drop the future before its flush so
+        // nothing commits. Fetch and parse share one work budget; the lane wait sits between
+        // them, off the clock, bounded instead by the slack the project lock leaves.
         let cancel = CancellationToken::new();
-        let lane_wait = Arc::new(AtomicU64::new(0));
-        let work = self.pipeline.index_project(
-            context,
-            &indexing_request,
-            observer,
-            cancel.clone(),
-            Arc::clone(&lane_wait),
-        );
-        let result = match self.pipeline.job_timeout() {
-            Some(timeout) => {
-                // The project lock is taken once for the whole job and never renewed, so the
-                // budget plus any queue time forgiven has to stay inside its TTL; past it a
-                // lapsed lock lets the sweep dispatch a project that is still being indexed.
-                let grace = self.lock_ttl.saturating_sub(timeout);
-                let deadline = work_deadline(timeout, grace, lane_wait);
-                tokio::select! {
-                    biased;
-                    result = work => result,
-                    () = deadline => {
-                        cancel.cancel();
-                        warn!(
-                            project_id,
-                            branch = %branch,
-                            timeout_secs = timeout.as_secs(),
-                            "code indexing job exceeded wall-clock timeout"
-                        );
-                        Err(JOB_TIMEOUT_RETRY.global_failure(
-                            attempt,
-                            format!(
-                                "code indexing job exceeded the {}s timeout",
-                                timeout.as_secs()
-                            ),
-                        ))
-                    }
-                }
+        let mut clock = WorkClock::new(self.pipeline.job_timeout());
+
+        let fetched = clock
+            .run(
+                self.pipeline.fetch_repository(&indexing_request),
+                &cancel,
+                attempt,
+                project_id,
+                branch,
+            )
+            .await;
+
+        let result = match fetched {
+            Ok(Fetched::EmptyRepository) => Ok(IndexOutcome::EmptyRepository),
+            Ok(Fetched::Repository(repository)) => {
+                // The fetch may have spent most of the budget and the lane wait can add the
+                // whole lock slack, which together reach ack_wait; refresh the delivery first.
+                context.progress.notify_in_progress().await;
+                let _lane = self.acquire_lane_within_lock_slack(&repository).await?;
+                clock
+                    .run(
+                        self.pipeline.index_fetched(
+                            context,
+                            &indexing_request,
+                            &repository,
+                            observer,
+                            cancel.clone(),
+                        ),
+                        &cancel,
+                        attempt,
+                        project_id,
+                        branch,
+                    )
+                    .await
             }
-            None => work.await,
+            Err(e) => Err(e),
         };
 
         let result = result.map(|outcome| outcome.metric_label());
@@ -754,18 +843,41 @@ mod tests {
         assert_eq!(subscription.subject, expected.subject);
     }
 
+    async fn work_for(secs: u64) -> Result<(), HandlerError> {
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+        Ok(())
+    }
+
     #[tokio::test(start_paused = true)]
-    async fn queue_time_is_given_back_up_to_the_grace() {
-        for (queued_secs, expected_secs) in [(0, 250), (30, 280), (50, 300), (120, 300)] {
-            let lane_wait = Arc::new(AtomicU64::new(queued_secs * 1_000));
-            let started = tokio::time::Instant::now();
-            work_deadline(Duration::from_secs(250), Duration::from_secs(50), lane_wait).await;
-            assert_eq!(
-                started.elapsed().as_secs(),
-                expected_secs,
-                "queueing {queued_secs}s must extend the deadline by at most the grace"
-            );
-        }
+    async fn phases_share_one_work_budget() {
+        let cancel = CancellationToken::new();
+        let mut clock = WorkClock::new(Some(Duration::from_secs(250)));
+
+        let started = tokio::time::Instant::now();
+        clock
+            .run(work_for(100), &cancel, 1, 7, "main")
+            .await
+            .expect("first phase fits");
+        let second = clock.run(work_for(200), &cancel, 1, 7, "main").await;
+
+        assert!(second.is_err(), "100s + 200s must overrun a 250s budget");
+        assert!(cancel.is_cancelled());
+        assert_eq!(
+            started.elapsed().as_secs(),
+            250,
+            "the second phase gets only what the first left"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_disabled_budget_never_times_out() {
+        let cancel = CancellationToken::new();
+        let mut clock = WorkClock::new(None);
+        clock
+            .run(work_for(10_000), &cancel, 1, 7, "main")
+            .await
+            .expect("no budget means no deadline");
+        assert!(!cancel.is_cancelled());
     }
 
     #[test]

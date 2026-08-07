@@ -45,6 +45,13 @@ impl IndexOutcome {
     }
 }
 
+/// What [`CodeIndexingPipeline::fetch_repository`] settled: bytes on disk to index, or a
+/// terminal empty repository it has already checkpointed.
+pub enum Fetched {
+    Repository(CachedRepository),
+    EmptyRepository,
+}
+
 /// Tracks one project's buffered rows across every table they span. The pipeline holds a +1
 /// sentinel and increments `remaining` per submitted batch; the writer decrements via
 /// [`FlushToken`] as each part lands. Whichever decrement reaches zero finalizes the project:
@@ -220,39 +227,19 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
-    /// `lane_wait` receives milliseconds spent queued for an indexing lane.
-    #[tracing::instrument(
-        name = "code_indexing_project",
-        skip_all,
-        fields(
-            project_id = request.project_id,
-            namespace_id,
-            traversal_path = %request.traversal_path,
-            branch = %request.branch,
-        )
-    )]
-    pub async fn index_project(
+    /// Downloads and extracts the repository. Ends the job itself when the project turns out
+    /// to have no content, checkpointing it so the sweep stops re-dispatching it.
+    pub async fn fetch_repository(
         &self,
-        context: &HandlerContext,
         request: &IndexingRequest,
-        observer: &mut dyn IndexingObserver,
-        cancel: CancellationToken,
-        lane_wait: Arc<AtomicU64>,
-    ) -> Result<IndexOutcome, HandlerError> {
-        let Some(namespace_id) =
-            gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
-        else {
-            return Err(HandlerError::Processing(format!(
-                "traversal_path {:?} has no namespace_id",
-                request.traversal_path
-            )));
-        };
-        tracing::Span::current().record("namespace_id", namespace_id);
-
+    ) -> Result<Fetched, HandlerError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
+        let fetch_queued = Instant::now();
         let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
+        self.metrics
+            .record_slot_wait("fetch_slot_wait", fetch_queued.elapsed());
 
         let fetch_start = Instant::now();
         let repository = match self
@@ -302,7 +289,7 @@ impl CodeIndexingPipeline {
                     .await
                     .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
                     .record_error_stage(&self.metrics, "checkpoint")?;
-                return Ok(IndexOutcome::EmptyRepository);
+                return Ok(Fetched::EmptyRepository);
             }
             Err(ResolveError::Other(err)) => {
                 self.metrics.record_stage_error("repository_fetch");
@@ -316,11 +303,19 @@ impl CodeIndexingPipeline {
             "repository extraction completed"
         );
 
-        // Release fetch slot before waiting for the indexing slot. This is
-        // the pipelining point: freeing the fetch slot lets another handler
-        // start its Gitaly download while we wait for an indexing slot.
+        // Release the fetch slot before the caller queues for an indexing slot. This is the
+        // pipelining point: freeing it lets another handler start its Gitaly download.
         drop(_fetch_slot);
+        Ok(Fetched::Repository(repository))
+    }
 
+    /// Queues for an indexing slot sized to the repository. Held by the caller for the index,
+    /// and waited for outside the job's wall-clock budget since a full pod is not the
+    /// repository's fault.
+    pub async fn acquire_indexing_lane(
+        &self,
+        repository: &CachedRepository,
+    ) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
         let parseable = code_graph::v2::inventory::parseable_file_count(&repository.file_inventory);
         let lane = if parseable <= self.small_repo_max_files {
@@ -329,14 +324,27 @@ impl CodeIndexingPipeline {
             &self.big_indexing_slots
         };
         let queued = Instant::now();
-        let _indexing_slot = acquire(lane, "indexing").await?;
-        lane_wait.store(queued.elapsed().as_millis() as u64, Ordering::Relaxed);
+        let permit = acquire(lane, "indexing").await;
+        self.metrics
+            .record_slot_wait("indexing_lane_wait", queued.elapsed());
+        permit
+    }
 
+    /// Parses the fetched repository and streams it to the sink. Requires the lane permit from
+    /// [`Self::acquire_indexing_lane`] to still be held.
+    pub async fn index_fetched(
+        &self,
+        context: &HandlerContext,
+        request: &IndexingRequest,
+        repository: &CachedRepository,
+        observer: &mut dyn IndexingObserver,
+        cancel: CancellationToken,
+    ) -> Result<IndexOutcome, HandlerError> {
         context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
         let indexing_result = self
-            .run_indexing(context, request, &repository, indexed_at, observer, cancel)
+            .run_indexing(context, request, repository, indexed_at, observer, cancel)
             .await;
 
         // `repository` owns a TempDir that removes the extraction tree on drop, so it is reclaimed
@@ -535,16 +543,22 @@ impl CodeIndexingPipeline {
         let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
+        // Carry the project span onto the blocking thread so every code-graph line is
+        // attributable; without it a family event cannot be tied to a repository, and
+        // concurrent families make its start and end impossible to pair.
+        let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
-            Pipeline::run_with_tracer(
-                &repo_dir,
-                file_inventory,
-                config,
-                &stream_reasons,
-                tracer,
-                converter,
-                on_batch,
-            )
+            span.in_scope(|| {
+                Pipeline::run_with_tracer(
+                    &repo_dir,
+                    file_inventory,
+                    config,
+                    &stream_reasons,
+                    tracer,
+                    converter,
+                    on_batch,
+                )
+            })
         })
         .await;
         let result = match parsed {

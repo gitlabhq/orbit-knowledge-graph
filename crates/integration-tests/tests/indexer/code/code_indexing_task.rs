@@ -1503,14 +1503,27 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
     let cancel = code_graph::v2::CancellationToken::new();
     cancel.cancel();
     let mut observer = indexer::observer::NoOpObserver;
+    let fetched = deps
+        .pipeline
+        .fetch_repository(&request)
+        .await
+        .expect("fetch must succeed");
+    let indexer::modules::code::Fetched::Repository(repository) = fetched else {
+        panic!("expected a repository");
+    };
+    let _lane = deps
+        .pipeline
+        .acquire_indexing_lane(&repository)
+        .await
+        .expect("lane");
     let result = deps
         .pipeline
-        .index_project(
+        .index_fetched(
             &handler_context(),
             &request,
+            &repository,
             &mut observer,
             cancel,
-            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         )
         .await;
     assert!(

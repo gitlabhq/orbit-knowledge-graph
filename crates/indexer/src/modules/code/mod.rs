@@ -27,7 +27,7 @@ use repository::RepositoryResolver;
 
 pub use checkpoint::ClickHouseCodeCheckpointStore;
 pub use handler::CodeIndexingTaskHandler;
-pub use pipeline::{CodeIndexingPipeline, IndexingRequest};
+pub use pipeline::{CodeIndexingPipeline, Fetched, IndexingRequest};
 pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
     RepositoryService, RepositoryServiceError,
