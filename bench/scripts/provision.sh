@@ -32,7 +32,7 @@ SETUP_SQL=$(sed \
   -e "s/\${GKG_WRITER_PASSWORD}/${E2E_CH_GRAPH_PASS}/g" \
   -e "s/\${GKG_READER_PASSWORD}/${E2E_CH_GRAPH_READ_PASS}/g" \
   -e "s/\${GKG_SIPHON_READER_PASSWORD}/${E2E_CH_DATALAKE_PASS}/g" \
-  "${GKG_ROOT}/config/clickhouse-setup.sql")
+  "${REPO_ROOT}/config/clickhouse-setup.sql")
 
 $KC exec -n "${CH_NS}" clickhouse-0 -- \
   clickhouse-client --password "${CH_PASSWORD}" --multiquery --query "
@@ -54,6 +54,7 @@ log "Rendering tier overlay"
 log "Deploying e2e stack"
 CH_HOST="clickhouse.${CH_NS}.svc.cluster.local"
 
+export E2E_SHA="${RUN_ID}"
 export E2E_CH_HOST="${CH_HOST}"
 export E2E_CH_NAMESPACE="${CH_NS}"
 export E2E_CH_DEFAULT_PASS="${CH_PASSWORD}"
