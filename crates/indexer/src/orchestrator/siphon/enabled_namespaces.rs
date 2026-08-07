@@ -23,7 +23,7 @@ const NAMESPACE_PATHS_TABLE: &str = "namespace_traversal_paths";
 pub struct EnabledNamespacesRoute {
     namespace_indexing: NamespaceIndexingDispatch,
     code_backfill: Arc<CodeBackfill>,
-    path_lookup: Arc<dyn NamespacePathLookup>,
+    datalake: ArrowClickHouseClient,
 }
 
 impl EnabledNamespacesRoute {
@@ -35,52 +35,59 @@ impl EnabledNamespacesRoute {
         Self {
             namespace_indexing,
             code_backfill,
-            path_lookup: Arc::new(datalake),
+            datalake,
         }
     }
+}
 
-    /// Fills in traversal paths the CDC events did not carry. Real Siphon
-    /// events never carry one — `knowledge_graph_enabled_namespaces` has no
-    /// such column in Postgres — so before this lookup existed every
-    /// enrollment event was skipped and namespaces waited for the hourly
-    /// sweep. Namespaces whose path is not resolvable yet (their namespaces
-    /// row has not replicated) are skipped with a warning; the sweep remains
-    /// the backstop for those.
-    async fn resolve_paths(
+#[async_trait]
+impl Route for EnabledNamespacesRoute {
+    fn source_table(&self) -> &str {
+        subjects::KNOWLEDGE_GRAPH_ENABLED_NAMESPACES
+    }
+
+    async fn dispatch(
         &self,
-        extracted: Vec<(i64, Option<String>)>,
-    ) -> Result<Vec<(i64, String)>, TaskError> {
+        ctx: &CdcContext,
+        events: &[LogicalReplicationEvents],
+    ) -> Result<RouteOutcome, TaskError> {
+        let extracted = extract_enabled_namespaces(events);
         let unresolved: Vec<i64> = extracted
             .iter()
             .filter_map(|(id, path)| path.is_none().then_some(*id))
             .collect();
-
         let looked_up = if unresolved.is_empty() {
             HashMap::new()
         } else {
-            self.path_lookup.paths_for(&unresolved).await?
+            lookup_paths(&self.datalake, &unresolved).await?
         };
+        let enabled = merge_paths(extracted, &looked_up);
 
-        Ok(extracted
-            .into_iter()
-            .filter_map(|(id, path)| {
-                let path = path.or_else(|| looked_up.get(&id).cloned());
-                if path.is_none() {
-                    warn!(
-                        root_namespace_id = id,
-                        "enabled namespace has no resolvable traversal path yet; \
-                         the namespace sweep will pick it up"
-                    );
-                }
-                Some((id, path?))
+        let sdlc_requests: Vec<NamespaceDispatchRequest> = enabled
+            .iter()
+            .map(|(namespace_id, traversal_path)| NamespaceDispatchRequest {
+                namespace_id: *namespace_id,
+                traversal_path: traversal_path.clone(),
+                targets: Vec::new(),
             })
-            .collect())
+            .collect();
+        let sdlc = self
+            .namespace_indexing
+            .dispatch_for_namespaces(&sdlc_requests, chrono::Utc::now(), ctx.campaign_id.clone())
+            .await?;
+        let code = self
+            .code_backfill
+            .dispatch_for_namespaces(&enabled, ctx.dispatch_id)
+            .await?;
+        Ok(RouteOutcome {
+            dispatched: sdlc.dispatched + code.dispatched,
+            skipped: sdlc.skipped + code.skipped,
+        })
     }
 }
 
 /// Pulls (namespace_id, traversal_path) from insert/snapshot/update CDC events
-/// on the enabled-namespaces table. The path is `None` when the event does not
-/// carry a usable `traversal_path` column.
+/// on the enabled-namespaces table.
 fn extract_enabled_namespaces(events: &[LogicalReplicationEvents]) -> Vec<(i64, Option<String>)> {
     let mut rows: Vec<(i64, Option<String>)> = Vec::new();
 
@@ -115,81 +122,51 @@ fn extract_enabled_namespaces(events: &[LogicalReplicationEvents]) -> Vec<(i64, 
     }
 
     rows.sort();
-    rows.dedup_by_key(|(id, _)| *id);
+    rows.dedup();
     rows
 }
 
-#[async_trait]
-impl Route for EnabledNamespacesRoute {
-    fn source_table(&self) -> &str {
-        subjects::KNOWLEDGE_GRAPH_ENABLED_NAMESPACES
-    }
-
-    async fn dispatch(
-        &self,
-        ctx: &CdcContext,
-        events: &[LogicalReplicationEvents],
-    ) -> Result<RouteOutcome, TaskError> {
-        let enabled = self
-            .resolve_paths(extract_enabled_namespaces(events))
-            .await?;
-        let sdlc_requests: Vec<NamespaceDispatchRequest> = enabled
-            .iter()
-            .map(|(namespace_id, traversal_path)| NamespaceDispatchRequest {
-                namespace_id: *namespace_id,
-                traversal_path: traversal_path.clone(),
-                targets: Vec::new(),
-            })
-            .collect();
-        let sdlc = self
-            .namespace_indexing
-            .dispatch_for_namespaces(&sdlc_requests, chrono::Utc::now(), ctx.campaign_id.clone())
-            .await?;
-        let code = self
-            .code_backfill
-            .dispatch_for_namespaces(&enabled, ctx.dispatch_id)
-            .await?;
-        Ok(RouteOutcome {
-            dispatched: sdlc.dispatched + code.dispatched,
-            skipped: sdlc.skipped + code.skipped,
+fn merge_paths(
+    extracted: Vec<(i64, Option<String>)>,
+    looked_up: &HashMap<i64, String>,
+) -> Vec<(i64, String)> {
+    extracted
+        .into_iter()
+        .filter_map(|(id, path)| {
+            let path = path.or_else(|| looked_up.get(&id).cloned());
+            if path.is_none() {
+                warn!(
+                    root_namespace_id = id,
+                    "enabled namespace has no resolvable traversal path yet; \
+                     the namespace sweep will pick it up"
+                );
+            }
+            Some((id, path?))
         })
-    }
+        .collect()
 }
 
-#[async_trait]
-pub(crate) trait NamespacePathLookup: Send + Sync {
-    async fn paths_for(&self, namespace_ids: &[i64]) -> Result<HashMap<i64, String>, TaskError>;
-}
+async fn lookup_paths(
+    datalake: &ArrowClickHouseClient,
+    namespace_ids: &[i64],
+) -> Result<HashMap<i64, String>, TaskError> {
+    let sql = format!(
+        "SELECT id, argMax(traversal_path, version) AS traversal_path \
+         FROM {NAMESPACE_PATHS_TABLE} \
+         WHERE id IN {{ids:Array(Int64)}} \
+         GROUP BY id \
+         HAVING argMax(deleted, version) = false"
+    );
 
-#[async_trait]
-impl NamespacePathLookup for ArrowClickHouseClient {
-    async fn paths_for(&self, namespace_ids: &[i64]) -> Result<HashMap<i64, String>, TaskError> {
-        // Reads the dictionary's source table instead of the dictionary: during
-        // the enrollment race a dictionary miss is negatively cached for up to
-        // its LIFETIME, while the table sees the namespaces row the moment the
-        // materialized view commits it.
-        let ids = namespace_ids
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
-            "SELECT id, argMax(traversal_path, version) AS traversal_path \
-             FROM {NAMESPACE_PATHS_TABLE} \
-             WHERE id IN ({ids}) \
-             GROUP BY id \
-             HAVING argMax(deleted, version) = false"
-        );
-
-        let batches = self
-            .query(&sql)
-            .fetch_arrow()
-            .await
-            .map_err(TaskError::new)?;
-        let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
-        let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
-        Ok(ids.into_iter().zip(paths).collect())
-    }
+    let batches = datalake
+        .query(&sql)
+        .param("ids", namespace_ids.to_vec())
+        .fetch_arrow()
+        .await
+        .map_err(TaskError::new)?;
+    let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
+    let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
+    Ok(ids.into_iter().zip(paths).collect())
 }
 
 #[cfg(test)]
@@ -215,50 +192,6 @@ mod tests {
         let payload =
             build_replication_events_for_table("knowledge_graph_enabled_namespaces", events);
         decode_logical_replication_events(&payload).unwrap()
-    }
-
-    struct StubLookup {
-        paths: HashMap<i64, String>,
-    }
-
-    #[async_trait]
-    impl NamespacePathLookup for StubLookup {
-        async fn paths_for(
-            &self,
-            namespace_ids: &[i64],
-        ) -> Result<HashMap<i64, String>, TaskError> {
-            Ok(namespace_ids
-                .iter()
-                .filter_map(|id| self.paths.get(id).map(|path| (*id, path.clone())))
-                .collect())
-        }
-    }
-
-    fn route_with_lookup(paths: HashMap<i64, String>) -> EnabledNamespacesRoute {
-        let empty = &std::collections::HashMap::new();
-        let dead_client = ArrowClickHouseClient::new(
-            "http://localhost:0",
-            "default",
-            "default",
-            None,
-            empty,
-            empty,
-        );
-        EnabledNamespacesRoute {
-            namespace_indexing: NamespaceIndexingDispatch::new(Arc::new(
-                crate::testkit::MockNatsServices::new(),
-            )),
-            code_backfill: Arc::new(CodeBackfill::new(
-                Arc::new(crate::testkit::MockNatsServices::new()),
-                dead_client.clone(),
-                dead_client,
-                crate::orchestrator::scheduled::ScheduledTaskMetrics::with_meter(
-                    &crate::testkit::test_meter(),
-                ),
-                Arc::new(crate::campaign::CampaignState::new()),
-            )),
-            path_lookup: Arc::new(StubLookup { paths }),
-        }
     }
 
     #[test]
@@ -297,6 +230,16 @@ mod tests {
         let rows = extract_enabled_namespaces(std::slice::from_ref(&decoded));
 
         assert_eq!(rows, vec![(100, None)]);
+    }
+
+    #[test]
+    fn mixed_batches_for_one_namespace_keep_both_rows() {
+        let pathless = decode(vec![namespace_enabled_without_path(100).build()]);
+        let pathed = decode(vec![namespace_enabled_columns(100).build()]);
+
+        let rows = extract_enabled_namespaces(&[pathless, pathed]);
+
+        assert_eq!(rows, vec![(100, None), (100, Some("1/100/".to_string()))]);
     }
 
     #[test]
@@ -340,14 +283,14 @@ mod tests {
         assert!(extract_enabled_namespaces(&[]).is_empty());
     }
 
-    #[tokio::test]
-    async fn pathless_rows_resolve_through_the_lookup() {
-        let route = route_with_lookup(HashMap::from([(100, "1/100/".to_string())]));
+    #[test]
+    fn pathless_rows_resolve_through_the_lookup() {
+        let looked_up = HashMap::from([(100, "1/100/".to_string())]);
 
-        let resolved = route
-            .resolve_paths(vec![(100, None), (200, Some("1/200/".to_string()))])
-            .await
-            .unwrap();
+        let resolved = merge_paths(
+            vec![(100, None), (200, Some("1/200/".to_string()))],
+            &looked_up,
+        );
 
         assert_eq!(
             resolved,
@@ -355,23 +298,16 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn unresolvable_rows_are_dropped() {
-        let route = route_with_lookup(HashMap::new());
-
-        let resolved = route.resolve_paths(vec![(100, None)]).await.unwrap();
-
-        assert!(resolved.is_empty());
+    #[test]
+    fn unresolvable_rows_are_dropped() {
+        assert!(merge_paths(vec![(100, None)], &HashMap::new()).is_empty());
     }
 
-    #[tokio::test]
-    async fn event_provided_path_wins_over_the_lookup() {
-        let route = route_with_lookup(HashMap::from([(100, "1/999/".to_string())]));
+    #[test]
+    fn event_provided_path_wins_over_the_lookup() {
+        let looked_up = HashMap::from([(100, "1/999/".to_string())]);
 
-        let resolved = route
-            .resolve_paths(vec![(100, Some("1/100/".to_string()))])
-            .await
-            .unwrap();
+        let resolved = merge_paths(vec![(100, Some("1/100/".to_string()))], &looked_up);
 
         assert_eq!(resolved, vec![(100, "1/100/".to_string())]);
     }

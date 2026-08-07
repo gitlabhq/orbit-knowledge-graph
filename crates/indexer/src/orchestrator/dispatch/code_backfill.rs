@@ -10,7 +10,7 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
-use super::enabled_namespaces::enabled_namespaces_sql;
+use super::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -139,14 +139,10 @@ impl CodeBackfill {
         Ok(ids.into_iter().collect())
     }
 
-    /// Returns (root_namespace_id, traversal_path) for every currently-enabled
-    /// namespace, with the path re-resolved through the traversal-path
-    /// dictionary so enrollment rows stored with a stale '0/' path stay
-    /// dispatchable (see `dispatch::enabled_namespaces`).
     pub async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, String)>, TaskError> {
         let batches = self
             .datalake
-            .query(enabled_namespaces_sql())
+            .query(resolved_enabled_namespaces_sql())
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -314,14 +310,6 @@ mod tests {
             test_metrics(),
             Arc::new(CampaignState::new()),
         )
-    }
-
-    #[test]
-    fn enabled_namespaces_query_rejects_unresolvable_paths() {
-        assert!(
-            enabled_namespaces_sql().contains("match(traversal_path, '^[0-9]+/[0-9]+/')"),
-            "a '' or '0/' path would prefix-match every project during backfill"
-        );
     }
 
     #[tokio::test]

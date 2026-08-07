@@ -12,7 +12,7 @@ use tracing::{error, warn};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::NamespaceDispatchRequest;
-use crate::orchestrator::dispatch::enabled_namespaces::enabled_namespaces_sql;
+use crate::orchestrator::dispatch::enabled_namespaces::resolved_enabled_namespaces_sql;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 
 const BRANCH_FALLBACK_CONCURRENCY: usize = 4;
@@ -239,7 +239,7 @@ fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
         .join("\nUNION ALL\n");
 
     CHANGE_QUERY_SQL
-        .replace("{{enabled_namespaces}}", enabled_namespaces_sql())
+        .replace("{{enabled_namespaces}}", resolved_enabled_namespaces_sql())
         .replace("{{branches}}", &branches)
 }
 
@@ -278,15 +278,11 @@ pub(super) trait EnabledNamespaceReader: Send + Sync {
 
 pub(super) struct DatalakeEnabledNamespaceReader {
     datalake: ArrowClickHouseClient,
-    sql: String,
 }
 
 impl DatalakeEnabledNamespaceReader {
     pub(super) fn new(datalake: ArrowClickHouseClient) -> Self {
-        Self {
-            datalake,
-            sql: enabled_namespaces_sql().to_string(),
-        }
+        Self { datalake }
     }
 }
 
@@ -295,7 +291,7 @@ impl EnabledNamespaceReader for DatalakeEnabledNamespaceReader {
     async fn enabled_namespaces(&self) -> Result<Vec<NamespaceDispatchRequest>, TaskError> {
         let batches = self
             .datalake
-            .query(&self.sql)
+            .query(resolved_enabled_namespaces_sql())
             .fetch_arrow()
             .await
             .map_err(TaskError::new)?;
@@ -453,22 +449,12 @@ mod tests {
     #[test]
     fn change_query_filters_enabled_namespaces() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
-        assert!(query.combined_sql.contains(ENABLED_NAMESPACE_TABLE));
-        assert!(query.combined_sql.contains("WHERE is_deleted = false"));
         assert!(query.combined_sql.contains("INNER JOIN enabled"));
         assert!(
             query
                 .combined_sql
                 .contains("SELECT DISTINCT enabled.root_namespace_id")
         );
-    }
-
-    #[test]
-    fn change_query_resolves_enabled_paths_at_query_time() {
-        let query = NamespaceChangeQuery::new([column_source("work_items")]);
-        assert!(query.combined_sql.contains(
-            "dictGetOrDefault('namespace_traversal_paths_dict', 'traversal_path', toUInt64(root_namespace_id), stored_traversal_path)"
-        ));
     }
 
     #[test]
@@ -521,7 +507,7 @@ mod tests {
 SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
-            enabled = enabled_namespaces_sql()
+            enabled = resolved_enabled_namespaces_sql()
         );
         assert_eq!(query.combined_sql, expected);
     }

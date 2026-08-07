@@ -1,34 +1,18 @@
-//! The enabled-namespace set shared by every dispatch surface that reads
-//! `siphon_knowledge_graph_enabled_namespaces`.
-
 use std::sync::LazyLock;
 
 use gkg_utils::traversal_path::TOP_LEVEL_PREFIX_REGEX;
-use ontology::{Ontology, PathResolution};
 
 pub const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
 
-const NAMESPACE_PATH_SOURCE_TABLE: &str = "siphon_namespaces";
+const NAMESPACE_PATH_DICTIONARY: &str = "namespace_traversal_paths_dict";
 
-/// The stored `traversal_path` is a ClickHouse insert-time DEFAULT
-/// (dictGetOrDefault with a '0/' fallback). When Siphon replicates the
-/// enrollment row before the namespace row, the stored value stays '0/'
-/// forever and every dispatch filter drops it — the namespace never indexes.
-/// Re-resolving through the dictionary at query time (stored value as
-/// fallback) makes such rows dispatchable as soon as the dictionary catches
-/// up. The argMax dedup exists because the stored path is part of the
-/// ReplacingMergeTree key: one enrollment can leave rows under several path
-/// keys, and only the latest state per Postgres row may count — without it,
-/// unenrolled namespaces keep dispatching until their tombstone merges.
-static ENABLED_NAMESPACES_SQL: LazyLock<String> = LazyLock::new(|| {
-    let ontology = Ontology::load_embedded().expect("embedded ontology is build-time validated");
-    let dictionary = namespace_path_dictionary(&ontology);
+static RESOLVED_ENABLED_NAMESPACES_SQL: LazyLock<String> = LazyLock::new(|| {
     let watermark = ontology::siphon_watermark_column();
     let deleted = ontology::siphon_deleted_column();
     format!(
         "SELECT DISTINCT \
 root_namespace_id, \
-dictGetOrDefault('{dictionary}', 'traversal_path', toUInt64(root_namespace_id), stored_traversal_path) AS traversal_path \
+dictGetOrDefault('{NAMESPACE_PATH_DICTIONARY}', 'traversal_path', toUInt64(root_namespace_id), stored_traversal_path) AS traversal_path \
 FROM ( \
 SELECT root_namespace_id, id, \
 argMax(traversal_path, {watermark}) AS stored_traversal_path, \
@@ -41,49 +25,43 @@ AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')"
     )
 });
 
-pub fn enabled_namespaces_sql() -> &'static str {
-    &ENABLED_NAMESPACES_SQL
-}
-
-fn namespace_path_dictionary(ontology: &Ontology) -> String {
-    ontology
-        .reindex_sources()
-        .into_iter()
-        .find_map(|source| match source.traversal_path {
-            PathResolution::Dictionary { dictionary, .. }
-                if source.table == NAMESPACE_PATH_SOURCE_TABLE =>
-            {
-                Some(dictionary)
-            }
-            _ => None,
-        })
-        .expect("ontology declares a traversal-path dictionary for siphon_namespaces")
+pub fn resolved_enabled_namespaces_sql() -> &'static str {
+    &RESOLVED_ENABLED_NAMESPACES_SQL
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ontology::{Ontology, PathResolution};
 
     #[test]
-    fn dictionary_name_comes_from_the_ontology() {
+    fn dictionary_const_matches_the_ontology_declaration() {
         let ontology = Ontology::load_embedded().unwrap();
-        assert_eq!(
-            namespace_path_dictionary(&ontology),
-            "namespace_traversal_paths_dict"
-        );
+        let declared = ontology
+            .reindex_sources()
+            .into_iter()
+            .find_map(|source| match source.traversal_path {
+                PathResolution::Dictionary { dictionary, .. }
+                    if source.table == "siphon_namespaces" =>
+                {
+                    Some(dictionary)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(NAMESPACE_PATH_DICTIONARY, declared);
     }
 
     #[test]
     fn sql_resolves_path_through_the_dictionary_with_stored_fallback() {
-        let sql = enabled_namespaces_sql();
-        assert!(sql.contains(
+        assert!(resolved_enabled_namespaces_sql().contains(
             "dictGetOrDefault('namespace_traversal_paths_dict', 'traversal_path', toUInt64(root_namespace_id), stored_traversal_path)"
         ));
     }
 
     #[test]
     fn sql_keeps_only_the_latest_state_per_enrollment_row() {
-        let sql = enabled_namespaces_sql();
+        let sql = resolved_enabled_namespaces_sql();
         assert!(sql.contains("argMax(traversal_path, _siphon_watermark)"));
         assert!(sql.contains("argMax(_siphon_deleted, _siphon_watermark)"));
         assert!(sql.contains("GROUP BY root_namespace_id, id"));
@@ -92,6 +70,9 @@ mod tests {
 
     #[test]
     fn sql_filters_to_top_level_paths() {
-        assert!(enabled_namespaces_sql().contains(TOP_LEVEL_PREFIX_REGEX));
+        assert!(
+            resolved_enabled_namespaces_sql().contains(TOP_LEVEL_PREFIX_REGEX),
+            "a '' or '0/' path would prefix-match every project during backfill"
+        );
     }
 }

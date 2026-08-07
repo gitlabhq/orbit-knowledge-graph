@@ -6,7 +6,6 @@ pub mod enabled_namespaces;
 pub mod namespace_indexing;
 
 pub use code_backfill::CodeBackfill;
-pub use enabled_namespaces::enabled_namespaces_sql;
 pub use namespace_indexing::{NamespaceDispatchRequest, NamespaceIndexingDispatch};
 
 #[derive(Default)]
