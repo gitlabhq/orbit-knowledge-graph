@@ -67,8 +67,12 @@ fi
 # Status messages go to stderr; only the PAT lands on stdout so the bash
 # capture below picks it up cleanly. Activation code is passed via ARGV so it
 # never appears in the pod's process list.
-PAT=$($KC exec -i -n "$NS_GITLAB" "$TOOLBOX" -c toolbox -- \
-  gitlab-rails runner -e production - "$ACTIVATION_CODE" <<'RUBY' | tail -1
+# Retry up to 3 times — rails-runner can fail on transient connectivity issues
+# when the webservice is still warming up.
+PAT=""
+for attempt in 1 2 3; do
+  PAT=$($KC exec -i -n "$NS_GITLAB" "$TOOLBOX" -c toolbox -- \
+    gitlab-rails runner -e production - "$ACTIVATION_CODE" <<'RUBY' | tail -1
 code = ARGV.first.to_s.strip
 abort 'missing activation code' if code.empty?
 
@@ -87,7 +91,6 @@ token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do
   t.scopes = %w[api read_api admin_mode]
   t.expires_at = 30.days.from_now
 end
-# Existing token's plaintext is unrecoverable; rotate if we got an old one.
 if token.token.nil?
   token.destroy!
   token = user.personal_access_tokens.create!(
@@ -98,10 +101,14 @@ if token.token.nil?
 end
 puts token.token
 RUBY
-)
+  ) || true
+  [[ -n "$PAT" && ${#PAT} -ge 20 ]] && break
+  log "  bootstrap attempt ${attempt} failed, retrying in 30s..."
+  sleep 30
+done
 
 if [[ -z "$PAT" || ${#PAT} -lt 20 ]]; then
-  echo "Failed to create root PAT (got: '$PAT')"
+  echo "Failed to create root PAT after 3 attempts (got: '$PAT')"
   exit 1
 fi
 
