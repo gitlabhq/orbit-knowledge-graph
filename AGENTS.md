@@ -100,7 +100,7 @@ See [`crates/code-graph/AGENTS.md`](crates/code-graph/AGENTS.md).
 
 ## Public-facing documentation
 
-When writing public-facing docs, use the communication guidelines at https://gitlab.com/gitlab-org/gitlab/-/blob/master/.ai/principles/distilled/documentation.md.
+When writing public-facing docs, fetch and apply the canonical style guidelines using `get_repository_file` with `project_id: gitlab-org/gitlab`, `ref: master`, `file_path: .ai/principles/distilled/documentation.md`. Claude Code users: use the `fetch-doc-guidelines` skill instead.
 
 ## MR and issue descriptions and comments
 

@@ -1,6 +1,4 @@
 <!-- markdownlint-disable -->
 <!-- vale off -->
 
-When writing or editing documentation in this directory, follow the communication and style guidelines at:
-
-https://gitlab.com/gitlab-org/gitlab/-/blob/master/.ai/principles/distilled/documentation.md
+Before writing or editing any file in this directory, fetch and apply the canonical documentation style guidelines from the GitLab monolith using `get_repository_file` with `project_id: gitlab-org/gitlab`, `ref: master`, `file_path: .ai/principles/distilled/documentation.md`. Claude Code users: use the `fetch-doc-guidelines` skill instead.
