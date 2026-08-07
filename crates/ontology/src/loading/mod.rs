@@ -7,7 +7,7 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::entities::{DomainInfo, EdgeColumn};
+use crate::entities::{DomainInfo, EdgeColumn, EnumType};
 use crate::{Ontology, OntologyError};
 
 use derived::DerivedYaml;
@@ -352,7 +352,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     entry.property, entry.node
                 ))
             })?;
-        let enum_values = field.enum_values.clone();
+        // A string-typed enum column already holds the value, so the integer ordinals
+        // are not a usable mapping for it. Matches the node projection and the query
+        // normalizer, which both gate enum coercion on EnumType::Int.
+        let enum_values = match field.enum_type {
+            EnumType::Int => field.enum_values.clone(),
+            _ => None,
+        };
         let field_column = field
             .column_name()
             .map(str::to_string)
