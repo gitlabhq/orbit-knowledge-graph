@@ -60,25 +60,19 @@ pub fn c_declarator_name(def: &N<'_>) -> Option<String> {
 
 /// C++ declared name: verbatim (keeping any class qualifier that feeds an
 /// out-of-line member's FQN), but with a trailing conversion operator
-/// normalized to `operator <type>`.
-pub fn cpp_declarator_name(def: &N<'_>) -> Option<String> {
-    let node = declared_name_node(def)?;
-    declared_name_text(&node)
-}
-
-/// Text for a C++ declared-name node: verbatim, but with a trailing conversion
-/// operator normalized to `operator <type>` so its parameter list does not leak
-/// into the name.
+/// normalized to `operator <type>` so its parameter list does not leak into the
+/// name.
 ///
 /// The `operator_cast` is normalized at any qualifier depth because
 /// `qualified_identifier` is right-recursive: `S::I::operator int()` nests as
 /// `qualified_identifier(S, qualified_identifier(I, operator_cast))`.
-fn declared_name_text(node: &N<'_>) -> Option<String> {
+pub fn cpp_declarator_name(def: &N<'_>) -> Option<String> {
+    let node = declared_name_node(def)?;
     if node.kind().as_ref() == "operator_cast" {
-        return operator_cast_text(node);
+        return operator_cast_text(&node);
     }
     if node.kind().as_ref() == "qualified_identifier"
-        && let Some(op_cast) = trailing_operator_cast(node)
+        && let Some(op_cast) = trailing_operator_cast(&node)
         && let Some(op) = operator_cast_text(&op_cast)
     {
         let text = node.text();
@@ -119,7 +113,13 @@ fn function_parameter_list<'r>(node: &N<'r>) -> Option<N<'r>> {
     cur.child_of_kind("parameter_list")
 }
 
+/// One step down an `operator_cast`'s abstract declarator. `abstract_reference_declarator`
+/// carries no `declarator` field, so the fallback takes its first name-bearing
+/// child and must skip the same `NON_NAME_CHILDREN` the wrapper descent does
+/// (e.g. `operator int& /*c*/ ()`).
 fn descend_abstract_declarator<'r>(node: &N<'r>) -> Option<N<'r>> {
-    node.field("declarator")
-        .or_else(|| node.children().find(|c| c.is_named()))
+    node.field("declarator").or_else(|| {
+        node.children()
+            .find(|c| c.is_named() && !NON_NAME_CHILDREN.contains(&c.kind().as_ref()))
+    })
 }
