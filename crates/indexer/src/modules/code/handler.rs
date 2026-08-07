@@ -288,9 +288,6 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
-    /// The project lock is taken once and never renewed, so the wait is capped at whatever
-    /// lock time the work budget does not use; a pod still full past that is backpressure,
-    /// not a job failure.
     async fn acquire_lane_before_the_lock_lapses(
         &self,
         repository: &CachedRepository,
