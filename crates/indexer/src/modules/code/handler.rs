@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexingPipeline, Fetched, IndexOutcome, IndexingRequest};
+use super::pipeline::{CodeIndexer, Fetched, IndexOutcome, IndexingRequest};
 use super::repository::cache::CachedRepository;
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
@@ -100,7 +100,7 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
 }
 
 pub struct CodeIndexingTaskHandler {
-    pipeline: Arc<CodeIndexingPipeline>,
+    pipeline: Arc<CodeIndexer>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
@@ -120,7 +120,7 @@ impl CodeIndexingTaskHandler {
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
     )]
     pub fn new(
-        pipeline: Arc<CodeIndexingPipeline>,
+        pipeline: Arc<CodeIndexer>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
@@ -536,7 +536,7 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let pipeline = Arc::new(CodeIndexingPipeline::new(
+            let pipeline = Arc::new(CodeIndexer::new(
                 resolver,
                 crate::testkit::test_writer(),
                 Arc::clone(&checkpoint_store),

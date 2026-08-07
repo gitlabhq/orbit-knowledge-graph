@@ -16,7 +16,7 @@ use gitlab_client::GitlabClient;
 use gkg_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
-    ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
+    ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexer,
     CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
     config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
@@ -33,7 +33,7 @@ use std::collections::HashMap;
 const SIGNING_KEY: &[u8] = b"test-secret-that-is-long-enough!";
 
 pub struct CodeIndexingDeps {
-    pub pipeline: Arc<CodeIndexingPipeline>,
+    pub pipeline: Arc<CodeIndexer>,
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
@@ -81,7 +81,7 @@ impl CodeIndexingDeps {
             .expect("writer must build"),
         );
 
-        let pipeline = Arc::new(CodeIndexingPipeline::new(
+        let pipeline = Arc::new(CodeIndexer::new(
             resolver,
             writer,
             Arc::clone(&checkpoint_store) as _,
@@ -125,7 +125,7 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
         let config = CodeIndexingPipelineConfig::default();
-        let pipeline = Arc::new(CodeIndexingPipeline::new(
+        let pipeline = Arc::new(CodeIndexer::new(
             resolver,
             writer,
             Arc::clone(&self.checkpoint_store) as _,

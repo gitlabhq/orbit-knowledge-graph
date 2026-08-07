@@ -28,7 +28,7 @@ pub struct IndexingRequest {
     pub had_prior_checkpoint: bool,
 }
 
-/// Terminal outcome of `CodeIndexingPipeline::index_project`.
+/// Terminal outcome of `CodeIndexer::index_project`.
 pub enum IndexOutcome {
     /// Parsed and streamed to the sink, which checkpoints it after the flush lands.
     Indexed,
@@ -45,7 +45,7 @@ impl IndexOutcome {
     }
 }
 
-/// What [`CodeIndexingPipeline::fetch_repository`] settled: bytes on disk to index, or a
+/// What [`CodeIndexer::fetch_repository`] settled: bytes on disk to index, or a
 /// terminal empty repository it has already checkpointed.
 pub enum Fetched {
     Repository(CachedRepository),
@@ -132,7 +132,7 @@ impl Drop for ProjectCommit {
     }
 }
 
-pub struct CodeIndexingPipeline {
+pub struct CodeIndexer {
     resolver: RepositoryResolver,
     writer: BufferedWriter,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -149,7 +149,7 @@ pub struct CodeIndexingPipeline {
     big_indexing_slots: Option<Arc<Semaphore>>,
 }
 
-impl CodeIndexingPipeline {
+impl CodeIndexer {
     #[allow(
         clippy::too_many_arguments,
         reason = "pipeline constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
