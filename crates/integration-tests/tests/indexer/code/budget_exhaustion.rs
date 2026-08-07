@@ -90,8 +90,11 @@ async fn index_once(pipeline_config: CodeIndexingPipelineConfig) -> (bool, bool)
 
 #[tokio::test]
 async fn a_repository_whose_parse_overruns_the_budget_never_checkpoints() {
+    // One parse thread makes the overrun independent of the host's speed: on a fast machine
+    // the default width finishes this repository inside the budget and the test inverts.
     let (ok, checkpointed) = index_once(CodeIndexingPipelineConfig {
         job_timeout_secs: BUDGET_SECS,
+        worker_threads: 1,
         ..Default::default()
     })
     .await;
