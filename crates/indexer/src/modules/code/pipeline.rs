@@ -268,8 +268,8 @@ impl CodeIndexer {
         let budget = self.pipeline_config.job_timeout();
         let mut clock = WorkClock::new(budget);
 
+        // Dropping the timed-out fetch is what stops it; nothing in that phase polls the token.
         let Some(fetched) = clock.run(self.fetch_repository(request)).await else {
-            cancel.cancel();
             return Err(IndexError::BudgetExceeded {
                 budget: budget.unwrap_or_default(),
             });
