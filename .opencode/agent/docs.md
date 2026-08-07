@@ -1,5 +1,5 @@
 ---
-model: anthropic/claude-opus-5
+model: anthropic/claude-opus-4-8
 temperature: 0.2
 description: Documentation review agent
 ---

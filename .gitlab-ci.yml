@@ -69,7 +69,7 @@ include:
     inputs:
       automatic: manual
       labels_enabled: "false"
-      model: "anthropic/claude-opus-5"
+      model: "anthropic/claude-opus-4-8"
       variant: "high"
 
 stages:
@@ -1193,7 +1193,6 @@ ai:performance:
     action: access
   variables:
     AI_AGENT: performance
-    AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
     GOOGLE_CLOUD_LOCATION: "global"
     AI_REFS: "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
 
@@ -1213,7 +1212,6 @@ ai:security:
     action: access
   variables:
     AI_AGENT: security
-    AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
     GOOGLE_CLOUD_LOCATION: "global"
     AI_REFS: "https://gitlab.com/gitlab-org/gitlab.git,https://github.com/ClickHouse/clickhouse-docs.git,https://gitlab.com/gitlab-org/analytics-section/siphon.git"
 
@@ -1233,7 +1231,6 @@ ai:docs:
     action: access
   variables:
     AI_AGENT: docs
-    AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
     GOOGLE_CLOUD_LOCATION: "global"
 
 # E2E Stage
