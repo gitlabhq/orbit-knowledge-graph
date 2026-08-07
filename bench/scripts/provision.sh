@@ -89,7 +89,22 @@ export E2E_EXTRA_VALUES="/tmp/ra-${RUN_ID}-tier-values.yaml"
 log "Importing datalake dump"
 "${BENCH_DIR}/scripts/import-dump-job.sh"
 
-# --- 7. Validate ---
+# --- 7. Reset checkpoints so the dispatcher re-indexes from epoch ---
+log "Resetting dispatcher checkpoints"
+CKPT=$($KC exec -n "${CH_NS}" clickhouse-0 -- \
+  clickhouse-client --password "${CH_PASSWORD}" -d gkg \
+  --query "SELECT name FROM system.tables WHERE database='gkg' AND name LIKE '%_checkpoint' AND name NOT LIKE '%code_indexing%' LIMIT 1" 2>/dev/null)
+if [[ -n "${CKPT}" ]]; then
+  $KC exec -n "${CH_NS}" clickhouse-0 -- \
+    clickhouse-client --password "${CH_PASSWORD}" -d gkg \
+    --query "TRUNCATE TABLE ${CKPT}"
+  log "  Truncated ${CKPT}"
+fi
+$KC rollout restart -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher
+$KC rollout status -n "e2e-${RUN_ID}-gkg" deploy/gkg-dispatcher --timeout=120s
+log "  Dispatcher restarted, will re-index all data"
+
+# --- 8. Validate ---
 log "Running validation gate"
 "${BENCH_DIR}/scripts/validate.sh"
 
