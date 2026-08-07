@@ -1,5 +1,5 @@
 ---
-model: anthropic/claude-opus-5
+model: google-vertex-anthropic/claude-opus-4-6@default
 temperature: 0.1
 description: Security review agent
 ---
