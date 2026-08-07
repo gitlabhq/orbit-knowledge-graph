@@ -5,7 +5,7 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
 use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
@@ -220,6 +220,8 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
+    /// `lane_wait` records milliseconds queued for an indexing lane; left untouched when the
+    /// job ends before reaching one.
     #[tracing::instrument(
         name = "code_indexing_project",
         skip_all,
@@ -230,15 +232,13 @@ impl CodeIndexingPipeline {
             branch = %request.branch,
         )
     )]
-    /// `lane_wait` reports how long the indexing lane was queued for, so the caller can keep
-    /// that off the job's wall-clock budget. Never sent when the job ends before the lane.
     pub async fn index_project(
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
-        lane_wait: oneshot::Sender<std::time::Duration>,
+        lane_wait: Arc<AtomicU64>,
     ) -> Result<IndexOutcome, HandlerError> {
         let Some(namespace_id) =
             gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
@@ -331,7 +331,10 @@ impl CodeIndexingPipeline {
         };
         let queued = Instant::now();
         let _indexing_slot = acquire(lane, "indexing").await?;
-        let _ = lane_wait.send(queued.elapsed());
+        lane_wait.store(
+            u64::try_from(queued.elapsed().as_millis()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
 
         context.progress.notify_in_progress().await;
 

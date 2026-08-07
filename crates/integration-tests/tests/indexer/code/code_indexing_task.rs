@@ -1510,7 +1510,7 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
             &request,
             &mut observer,
             cancel,
-            tokio::sync::oneshot::channel().0,
+            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         )
         .await;
     assert!(

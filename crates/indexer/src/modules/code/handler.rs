@@ -1,7 +1,6 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-
-use tokio::sync::oneshot;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -38,20 +37,11 @@ const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     dead_letter: true,
 };
 
-/// Resolves once the job has had its full working budget, treating time spent queued for an
-/// indexing lane as not the job's to pay. Falls back to the plain budget when the job ends
-/// before it ever reaches a lane.
-async fn work_deadline(
-    budget: Duration,
-    grace: Duration,
-    lane_wait: oneshot::Receiver<Duration>,
-) -> () {
-    let started = tokio::time::Instant::now();
-    match tokio::time::timeout_at(started + budget, lane_wait).await {
-        Ok(Ok(queued)) => tokio::time::sleep_until(started + budget + queued.min(grace)).await,
-        Ok(Err(_)) => tokio::time::sleep_until(started + budget).await,
-        Err(_) => {}
-    }
+/// Resolves once the job has had its full working budget; lane-queue time is forgiven up to `grace`.
+async fn work_deadline(budget: Duration, grace: Duration, lane_wait: Arc<AtomicU64>) {
+    tokio::time::sleep(budget).await;
+    let queued = Duration::from_millis(lane_wait.load(Ordering::Relaxed));
+    tokio::time::sleep(queued.min(grace)).await;
 }
 
 fn project_lock_key(project_id: i64, branch: &str) -> String {
@@ -71,13 +61,6 @@ pub struct CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
-    /// How much queue time the job may be forgiven. The project lock is taken for `lock_ttl`
-    /// and never renewed, so budget plus grace has to stay inside it or a lapsed lock lets the
-    /// sweep dispatch the same project again while this one is still running.
-    fn lane_wait_grace(&self, budget: Duration) -> Duration {
-        self.lock_ttl.saturating_sub(budget)
-    }
-
     /// Flush buffered writes and wait until durable. For tests and shutdown.
     pub async fn flush(&self) -> Result<(), HandlerError> {
         self.pipeline.flush().await
@@ -332,18 +315,23 @@ impl CodeIndexingTaskHandler {
         };
         // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
-        let (lane_wait_tx, lane_wait_rx) = oneshot::channel();
+        let lane_wait = Arc::new(AtomicU64::new(0));
         let work = self.pipeline.index_project(
             context,
             &indexing_request,
             observer,
             cancel.clone(),
-            lane_wait_tx,
+            Arc::clone(&lane_wait),
         );
         let result = match self.pipeline.job_timeout() {
             Some(timeout) => {
-                let deadline = work_deadline(timeout, self.lane_wait_grace(timeout), lane_wait_rx);
+                // The project lock is taken once for the whole job and never renewed, so the
+                // budget plus any queue time forgiven has to stay inside its TTL; past it a
+                // lapsed lock lets the sweep dispatch a project that is still being indexed.
+                let grace = self.lock_ttl.saturating_sub(timeout);
+                let deadline = work_deadline(timeout, grace, lane_wait);
                 tokio::select! {
+                    biased;
                     result = work => result,
                     () = deadline => {
                         cancel.cancel();
@@ -767,45 +755,16 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn queue_time_is_given_back_up_to_the_grace() {
-        let budget = Duration::from_secs(250);
-        let grace = Duration::from_secs(50);
-
-        for (queued, expected) in [(30, 280), (50, 300), (120, 300)] {
-            let (tx, rx) = oneshot::channel();
+        for (queued_secs, expected_secs) in [(0, 250), (30, 280), (50, 300), (120, 300)] {
+            let lane_wait = Arc::new(AtomicU64::new(queued_secs * 1_000));
             let started = tokio::time::Instant::now();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                let _ = tx.send(Duration::from_secs(queued));
-            });
-            work_deadline(budget, grace, rx).await;
+            work_deadline(Duration::from_secs(250), Duration::from_secs(50), lane_wait).await;
             assert_eq!(
                 started.elapsed().as_secs(),
-                expected,
-                "queueing {queued}s must extend the deadline by at most the grace"
+                expected_secs,
+                "queueing {queued_secs}s must extend the deadline by at most the grace"
             );
         }
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_job_that_never_reaches_a_lane_keeps_the_plain_budget() {
-        let budget = Duration::from_secs(250);
-        let (tx, rx) = oneshot::channel::<Duration>();
-        drop(tx);
-        let started = tokio::time::Instant::now();
-        work_deadline(budget, Duration::from_secs(50), rx).await;
-        assert_eq!(started.elapsed().as_secs(), 250);
-    }
-
-    #[test]
-    fn grace_keeps_the_job_inside_the_project_lock() {
-        let lock_ttl = Duration::from_secs(300);
-        let budget = Duration::from_secs(250);
-        let grace = lock_ttl.saturating_sub(budget);
-        assert_eq!(grace, Duration::from_secs(50));
-        assert!(budget + grace <= lock_ttl);
-
-        // A budget at or past the lock leaves no room to forgive anything.
-        assert_eq!(lock_ttl.saturating_sub(lock_ttl), Duration::ZERO);
     }
 
     #[test]
