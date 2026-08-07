@@ -85,6 +85,28 @@ spec:
                 [ ${p} -gt 0 ] && echo "  ${t}: ${p} parts"
               done
 
+              echo "==> Creating stub tables for ontology-referenced tables not in the dump"
+              # The ontology's change-detection queries reference tables the
+              # core dump does not contain (CI, security, etc.). Empty stubs
+              # prevent the dispatcher from error-looping.
+              STUBS="siphon_ci_sources_pipelines siphon_ci_runners siphon_container_repositories
+                siphon_deployments siphon_environments siphon_events siphon_todos
+                siphon_award_emoji siphon_banned_users siphon_bulk_import_entities
+                siphon_ci_pipeline_metadata siphon_ci_runner_namespaces siphon_ci_runner_projects
+                siphon_deployment_merge_requests siphon_duo_workflows_workflows
+                siphon_group_audit_events siphon_internal_events siphon_issue_metrics
+                siphon_merge_request_context_commits"
+              for s in ${STUBS}; do
+                ch datalake "CREATE TABLE IF NOT EXISTS ${s} (
+                  id Int64,
+                  traversal_path String DEFAULT '',
+                  _siphon_watermark DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+                  _siphon_replicated_at DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC'),
+                  _siphon_deleted Bool DEFAULT false
+                ) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+                ORDER BY id" || true
+              done
+
               echo "==> Verifying row counts (no row data, counts only)"
               curl -s "${CH_URL}/?${CH_AUTH}&database=datalake" \
                 -d "SELECT name, total_rows FROM system.tables WHERE database='datalake' AND total_rows > 0 ORDER BY total_rows DESC FORMAT TSV" \
