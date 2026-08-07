@@ -98,6 +98,10 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 
 See [`crates/code-graph/AGENTS.md`](crates/code-graph/AGENTS.md).
 
+## Public-facing documentation
+
+When writing public-facing docs, use the communication guidelines at https://gitlab.com/gitlab-org/gitlab/-/blob/master/.ai/principles/distilled/documentation.md.
+
 ## MR and issue descriptions and comments
 
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
