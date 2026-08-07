@@ -54,40 +54,15 @@ impl WorkClock {
         }
     }
 
-    async fn run<T>(
-        &mut self,
-        phase: impl Future<Output = Result<T, HandlerError>>,
-        cancel: &CancellationToken,
-        attempt: u32,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<T, HandlerError> {
-        let Some(total) = self.total else {
-            return phase.await;
-        };
-        let started = tokio::time::Instant::now();
-        match tokio::time::timeout(self.remaining, phase).await {
-            Ok(result) => {
-                self.remaining = self.remaining.saturating_sub(started.elapsed());
-                result
-            }
-            Err(_) => {
-                cancel.cancel();
-                warn!(
-                    project_id,
-                    branch = %branch,
-                    budget_secs = total.as_secs(),
-                    "code indexing job exceeded its work budget"
-                );
-                Err(JOB_TIMEOUT_RETRY.global_failure(
-                    attempt,
-                    format!(
-                        "code indexing job exceeded the {}s work budget",
-                        total.as_secs()
-                    ),
-                ))
-            }
+    /// `None` when the budget ran out before the phase finished.
+    async fn run<T>(&mut self, phase: impl Future<Output = T>) -> Option<T> {
+        if self.total.is_none() {
+            return Some(phase.await);
         }
+        let started = tokio::time::Instant::now();
+        let result = tokio::time::timeout(self.remaining, phase).await.ok();
+        self.remaining = self.remaining.saturating_sub(started.elapsed());
+        result
     }
 }
 
@@ -313,9 +288,10 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
-    /// The project lock is taken once and never renewed, so work plus queueing must stay
-    /// inside its TTL; a pod still full past that slack is backpressure, not a job failure.
-    async fn acquire_lane_within_lock_slack(
+    /// The project lock is taken once and never renewed, so the wait is capped at whatever
+    /// lock time the work budget does not use; a pod still full past that is backpressure,
+    /// not a job failure.
+    async fn acquire_lane_before_the_lock_lapses(
         &self,
         repository: &CachedRepository,
     ) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
@@ -402,38 +378,44 @@ impl CodeIndexingTaskHandler {
         // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
         let mut clock = WorkClock::new(self.pipeline.job_timeout());
+        let overrun = || {
+            cancel.cancel();
+            let budget_secs = self.pipeline.job_timeout().unwrap_or_default().as_secs();
+            warn!(
+                project_id,
+                branch = %branch,
+                budget_secs,
+                "code indexing job exceeded its work budget"
+            );
+            JOB_TIMEOUT_RETRY.global_failure(
+                attempt,
+                format!("code indexing job exceeded the {budget_secs}s work budget"),
+            )
+        };
 
         let fetched = clock
-            .run(
-                self.pipeline.fetch_repository(&indexing_request),
-                &cancel,
-                attempt,
-                project_id,
-                branch,
-            )
-            .await;
+            .run(self.pipeline.fetch_repository(&indexing_request))
+            .await
+            .unwrap_or_else(|| Err(overrun()));
 
         let result = match fetched {
             Ok(Fetched::EmptyRepository) => Ok(IndexOutcome::EmptyRepository),
             Ok(Fetched::Repository(repository)) => {
-                // Fetch plus the full lane slack can reach ack_wait; refresh the delivery first.
+                // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
                 context.progress.notify_in_progress().await;
-                let _lane = self.acquire_lane_within_lock_slack(&repository).await?;
+                let _lane = self
+                    .acquire_lane_before_the_lock_lapses(&repository)
+                    .await?;
                 clock
-                    .run(
-                        self.pipeline.index_fetched(
-                            context,
-                            &indexing_request,
-                            &repository,
-                            observer,
-                            cancel.clone(),
-                        ),
-                        &cancel,
-                        attempt,
-                        project_id,
-                        branch,
-                    )
+                    .run(self.pipeline.index_fetched(
+                        context,
+                        &indexing_request,
+                        &repository,
+                        observer,
+                        cancel.clone(),
+                    ))
                     .await
+                    .unwrap_or_else(|| Err(overrun()))
             }
             Err(e) => Err(e),
         };
@@ -837,25 +819,20 @@ mod tests {
         assert_eq!(subscription.subject, expected.subject);
     }
 
-    async fn work_for(secs: u64) -> Result<(), HandlerError> {
+    async fn work_for(secs: u64) {
         tokio::time::sleep(Duration::from_secs(secs)).await;
-        Ok(())
     }
 
     #[tokio::test(start_paused = true)]
     async fn phases_share_one_work_budget() {
-        let cancel = CancellationToken::new();
         let mut clock = WorkClock::new(Some(Duration::from_secs(250)));
 
         let started = tokio::time::Instant::now();
-        clock
-            .run(work_for(100), &cancel, 1, 7, "main")
-            .await
-            .expect("first phase fits");
-        let second = clock.run(work_for(200), &cancel, 1, 7, "main").await;
-
-        assert!(second.is_err(), "100s + 200s must overrun a 250s budget");
-        assert!(cancel.is_cancelled());
+        assert!(clock.run(work_for(100)).await.is_some());
+        assert!(
+            clock.run(work_for(200)).await.is_none(),
+            "100s + 200s must overrun a 250s budget"
+        );
         assert_eq!(
             started.elapsed().as_secs(),
             250,
@@ -865,13 +842,8 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_disabled_budget_never_times_out() {
-        let cancel = CancellationToken::new();
         let mut clock = WorkClock::new(None);
-        clock
-            .run(work_for(10_000), &cancel, 1, 7, "main")
-            .await
-            .expect("no budget means no deadline");
-        assert!(!cancel.is_cancelled());
+        assert!(clock.run(work_for(10_000)).await.is_some());
     }
 
     #[test]
