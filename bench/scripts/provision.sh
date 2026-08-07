@@ -66,6 +66,11 @@ $KC exec -n "${CH_NS}" clickhouse-0 -- \
   "
 log "  Databases and users created (clean slate)"
 
+# Store the default password for the import job.
+$KC create secret generic ra-ch-credentials -n "${CH_NS}" \
+  --from-literal=default-password="${CH_PASSWORD}" \
+  --dry-run=client -o yaml | $KC apply -f -
+
 # --- 4. Render tier overlay ---
 log "Rendering tier overlay"
 "${BENCH_DIR}/scripts/render-tier.sh" > "/tmp/ra-${RUN_ID}-tier-values.yaml"
@@ -80,7 +85,11 @@ export E2E_EXTRA_VALUES="/tmp/ra-${RUN_ID}-tier-values.yaml"
 
 "${E2E_DIR}/scripts/setup.sh"
 
-# --- 6. Validate ---
+# --- 6. Import datalake dump ---
+log "Importing datalake dump"
+"${BENCH_DIR}/scripts/import-dump-job.sh"
+
+# --- 7. Validate ---
 log "Running validation gate"
 "${BENCH_DIR}/scripts/validate.sh"
 
