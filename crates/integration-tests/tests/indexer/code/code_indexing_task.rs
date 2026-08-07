@@ -1505,7 +1505,13 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
     let mut observer = indexer::observer::NoOpObserver;
     let result = deps
         .pipeline
-        .index_project(&handler_context(), &request, &mut observer, cancel)
+        .index_project(
+            &handler_context(),
+            &request,
+            &mut observer,
+            cancel,
+            tokio::sync::oneshot::channel().0,
+        )
         .await;
     assert!(
         matches!(result, Err(indexer::handler::HandlerError::Processing(_))),
