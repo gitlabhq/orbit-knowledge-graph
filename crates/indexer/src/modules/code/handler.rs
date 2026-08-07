@@ -1,8 +1,5 @@
-use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-
-use tokio::sync::OwnedSemaphorePermit;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -13,8 +10,7 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexer, Fetched, IndexOutcome, IndexingRequest};
-use super::repository::cache::CachedRepository;
+use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
@@ -39,32 +35,6 @@ const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     max_attempts: 2,
     dead_letter: true,
 };
-
-/// One budget shared by every timed phase; queueing for a lane deliberately runs outside it.
-struct WorkClock {
-    total: Option<Duration>,
-    remaining: Duration,
-}
-
-impl WorkClock {
-    fn new(budget: Option<Duration>) -> Self {
-        Self {
-            total: budget,
-            remaining: budget.unwrap_or(Duration::ZERO),
-        }
-    }
-
-    /// `None` when the budget ran out before the phase finished.
-    async fn run<T>(&mut self, phase: impl Future<Output = T>) -> Option<T> {
-        if self.total.is_none() {
-            return Some(phase.await);
-        }
-        let started = tokio::time::Instant::now();
-        let result = tokio::time::timeout(self.remaining, phase).await.ok();
-        self.remaining = self.remaining.saturating_sub(started.elapsed());
-        result
-    }
-}
 
 fn project_lock_key(project_id: i64, branch: &str) -> String {
     use base64::Engine;
@@ -288,23 +258,6 @@ impl CodeIndexingTaskHandler {
         result.map(|_| ())
     }
 
-    async fn acquire_lane_before_the_lock_lapses(
-        &self,
-        repository: &CachedRepository,
-    ) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
-        let Some(budget) = self.pipeline.job_timeout() else {
-            return self.pipeline.acquire_indexing_lane(repository).await;
-        };
-        let cap = self.lock_ttl.saturating_sub(budget);
-        match tokio::time::timeout(cap, self.pipeline.acquire_indexing_lane(repository)).await {
-            Ok(permit) => permit,
-            Err(_) => Err(HandlerError::Backpressure(format!(
-                "no indexing lane within {}s",
-                cap.as_secs()
-            ))),
-        }
-    }
-
     #[allow(
         clippy::too_many_arguments,
         reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
@@ -342,7 +295,7 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let _guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
+        let guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
         {
@@ -372,49 +325,33 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
-        let mut clock = WorkClock::new(self.pipeline.job_timeout());
-        let overrun = || {
-            cancel.cancel();
-            let budget_secs = self.pipeline.job_timeout().unwrap_or_default().as_secs();
-            warn!(
-                project_id,
-                branch = %branch,
-                budget_secs,
-                "code indexing job exceeded its work budget"
-            );
-            JOB_TIMEOUT_RETRY.global_failure(
-                attempt,
-                format!("code indexing job exceeded the {budget_secs}s work budget"),
-            )
-        };
-
-        let fetched = clock
-            .run(self.pipeline.fetch_repository(&indexing_request))
+        let result = match self
+            .pipeline
+            .index_project(context, &indexing_request, observer, cancel.clone(), &guard)
             .await
-            .unwrap_or_else(|| Err(overrun()));
-
-        let result = match fetched {
-            Ok(Fetched::EmptyRepository) => Ok(IndexOutcome::EmptyRepository),
-            Ok(Fetched::Repository(repository)) => {
-                // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
-                context.progress.notify_in_progress().await;
-                let _lane = self
-                    .acquire_lane_before_the_lock_lapses(&repository)
-                    .await?;
-                clock
-                    .run(self.pipeline.index_fetched(
-                        context,
-                        &indexing_request,
-                        &repository,
-                        observer,
-                        cancel.clone(),
-                    ))
-                    .await
-                    .unwrap_or_else(|| Err(overrun()))
+        {
+            Ok(outcome) => Ok(outcome),
+            Err(IndexError::BudgetExceeded { budget }) => {
+                warn!(
+                    project_id,
+                    branch = %branch,
+                    budget_secs = budget.as_secs(),
+                    "code indexing job exceeded its work budget"
+                );
+                Err(JOB_TIMEOUT_RETRY.global_failure(
+                    attempt,
+                    format!(
+                        "code indexing job exceeded the {}s work budget",
+                        budget.as_secs()
+                    ),
+                ))
             }
-            Err(e) => Err(e),
+            Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
+                "no indexing lane within {}s",
+                waited.as_secs()
+            ))),
+            Err(IndexError::Failed(e)) => Err(e),
         };
 
         let result = result.map(|outcome| outcome.metric_label());
@@ -814,33 +751,6 @@ mod tests {
         let expected = CodeIndexingTaskRequest::subscription();
         assert_eq!(subscription.stream, expected.stream);
         assert_eq!(subscription.subject, expected.subject);
-    }
-
-    async fn work_for(secs: u64) {
-        tokio::time::sleep(Duration::from_secs(secs)).await;
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn phases_share_one_work_budget() {
-        let mut clock = WorkClock::new(Some(Duration::from_secs(250)));
-
-        let started = tokio::time::Instant::now();
-        assert!(clock.run(work_for(100)).await.is_some());
-        assert!(
-            clock.run(work_for(200)).await.is_none(),
-            "100s + 200s must overrun a 250s budget"
-        );
-        assert_eq!(
-            started.elapsed().as_secs(),
-            250,
-            "the second phase gets only what the first left"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_disabled_budget_never_times_out() {
-        let mut clock = WorkClock::new(None);
-        assert!(clock.run(work_for(10_000)).await.is_some());
     }
 
     #[test]

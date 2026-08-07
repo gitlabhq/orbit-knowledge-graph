@@ -1,6 +1,7 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{CancellationToken, Pipeline, PipelineConfig};
@@ -17,6 +18,7 @@ use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
 use crate::handler::{HandlerContext, HandlerError};
+use crate::locking::LockGuard;
 use crate::observer::IndexingObserver;
 
 pub struct IndexingRequest {
@@ -46,9 +48,49 @@ impl IndexOutcome {
 }
 
 /// Bytes on disk to index, or a terminal empty repository that is already checkpointed.
-pub enum Fetched {
+enum Fetched {
     Repository(CachedRepository),
     EmptyRepository,
+}
+
+/// Why [`CodeIndexer::index_project`] gave up, classified so the caller can map policy
+/// (retries, attempts, logging) without the mechanics leaking upward.
+pub enum IndexError {
+    /// Fetch and parse together exceeded the shared work budget.
+    BudgetExceeded {
+        budget: Duration,
+    },
+    /// No indexing lane freed up within the allowed wait.
+    NoLane {
+        waited: Duration,
+    },
+    Failed(HandlerError),
+}
+
+/// One budget shared by every timed phase; queueing for a lane deliberately runs outside it.
+struct WorkClock {
+    total: Option<Duration>,
+    remaining: Duration,
+}
+
+impl WorkClock {
+    fn new(budget: Option<Duration>) -> Self {
+        Self {
+            total: budget,
+            remaining: budget.unwrap_or(Duration::ZERO),
+        }
+    }
+
+    /// `None` when the budget ran out before the phase finished.
+    async fn run<T>(&mut self, phase: impl Future<Output = T>) -> Option<T> {
+        if self.total.is_none() {
+            return Some(phase.await);
+        }
+        let started = tokio::time::Instant::now();
+        let result = tokio::time::timeout(self.remaining, phase).await.ok();
+        self.remaining = self.remaining.saturating_sub(started.elapsed());
+        result
+    }
 }
 
 /// Tracks one project's buffered rows across every table they span. The pipeline holds a +1
@@ -226,10 +268,64 @@ impl CodeIndexer {
         Ok(())
     }
 
-    pub async fn fetch_repository(
+    /// The one way a repository gets indexed: fetch, queue for a lane, parse. Fetch and
+    /// parse share the configured work budget; the lane wait runs outside it, bounded by
+    /// the time the held lock has left after the remaining work is provided for.
+    pub async fn index_project(
         &self,
+        context: &HandlerContext,
         request: &IndexingRequest,
-    ) -> Result<Fetched, HandlerError> {
+        observer: &mut dyn IndexingObserver,
+        cancel: CancellationToken,
+        lock: &LockGuard,
+    ) -> Result<IndexOutcome, IndexError> {
+        let budget = self.pipeline_config.job_timeout();
+        let mut clock = WorkClock::new(budget);
+
+        // On budget overrun: cancel so the detached parse bails; the timed-out future is
+        // already dropped, so nothing of it reaches a flush or a checkpoint.
+        let overrun = || IndexError::BudgetExceeded {
+            budget: budget.unwrap_or_default(),
+        };
+
+        let Some(fetched) = clock.run(self.fetch_repository(request)).await else {
+            cancel.cancel();
+            return Err(overrun());
+        };
+        let repository = match fetched.map_err(IndexError::Failed)? {
+            Fetched::EmptyRepository => return Ok(IndexOutcome::EmptyRepository),
+            Fetched::Repository(repository) => repository,
+        };
+
+        // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
+        context.progress.notify_in_progress().await;
+        let waited = lock.time_left().saturating_sub(clock.remaining);
+        let acquire = self.acquire_indexing_lane(&repository);
+        let lane = match tokio::time::timeout(waited, acquire).await {
+            Ok(permit) => permit.map_err(IndexError::Failed)?,
+            Err(_) => return Err(IndexError::NoLane { waited }),
+        };
+
+        let indexed = clock
+            .run(self.index_fetched(
+                context,
+                request,
+                &repository,
+                lane,
+                observer,
+                cancel.clone(),
+            ))
+            .await;
+        match indexed {
+            Some(result) => result.map_err(IndexError::Failed),
+            None => {
+                cancel.cancel();
+                Err(overrun())
+            }
+        }
+    }
+
+    async fn fetch_repository(&self, request: &IndexingRequest) -> Result<Fetched, HandlerError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
@@ -306,7 +402,7 @@ impl CodeIndexer {
         Ok(Fetched::Repository(repository))
     }
 
-    pub async fn acquire_indexing_lane(
+    async fn acquire_indexing_lane(
         &self,
         repository: &CachedRepository,
     ) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
@@ -324,12 +420,12 @@ impl CodeIndexer {
         permit
     }
 
-    /// Requires the permit from [`Self::acquire_indexing_lane`] to still be held.
-    pub async fn index_fetched(
+    async fn index_fetched(
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
         repository: &CachedRepository,
+        _lane: Option<OwnedSemaphorePermit>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
     ) -> Result<IndexOutcome, HandlerError> {
@@ -824,6 +920,33 @@ mod tests {
                 .is_none(),
             "a failed flush must leave the project un-checkpointed for re-indexing",
         );
+    }
+
+    async fn work_for(secs: u64) {
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn phases_share_one_work_budget() {
+        let mut clock = WorkClock::new(Some(Duration::from_secs(250)));
+
+        let started = tokio::time::Instant::now();
+        assert!(clock.run(work_for(100)).await.is_some());
+        assert!(
+            clock.run(work_for(200)).await.is_none(),
+            "100s + 200s must overrun a 250s budget"
+        );
+        assert_eq!(
+            started.elapsed().as_secs(),
+            250,
+            "the second phase gets only what the first left"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_disabled_budget_never_times_out() {
+        let mut clock = WorkClock::new(None);
+        assert!(clock.run(work_for(10_000)).await.is_some());
     }
 
     #[tokio::test]

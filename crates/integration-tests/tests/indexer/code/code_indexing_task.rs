@@ -1503,31 +1503,25 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
     let cancel = code_graph::v2::CancellationToken::new();
     cancel.cancel();
     let mut observer = indexer::observer::NoOpObserver;
-    let fetched = deps
-        .pipeline
-        .fetch_repository(&request)
-        .await
-        .expect("fetch must succeed");
-    let indexer::modules::code::Fetched::Repository(repository) = fetched else {
-        panic!("expected a repository");
-    };
-    let _lane = deps
-        .pipeline
-        .acquire_indexing_lane(&repository)
-        .await
-        .expect("lane");
+    let lock = indexer::locking::LockGuard::acquire(
+        Arc::new(MockLockService::new()),
+        "project.9911.cancelled",
+        std::time::Duration::from_secs(300),
+    )
+    .await
+    .expect("lock service")
+    .expect("lock free");
     let result = deps
         .pipeline
-        .index_fetched(
-            &handler_context(),
-            &request,
-            &repository,
-            &mut observer,
-            cancel,
-        )
+        .index_project(&handler_context(), &request, &mut observer, cancel, &lock)
         .await;
     assert!(
-        matches!(result, Err(indexer::handler::HandlerError::Processing(_))),
+        matches!(
+            result,
+            Err(indexer::modules::code::IndexError::Failed(
+                indexer::handler::HandlerError::Processing(_)
+            ))
+        ),
         "a cancelled run must fail with Processing so it is retried, not checkpointed"
     );
 
