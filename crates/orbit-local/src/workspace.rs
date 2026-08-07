@@ -166,14 +166,19 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let branch = repo
         .get_current_branch()
         .context("failed to get current branch")?;
-    let commit_sha = repo.get_current_commit_hash().or_else(|e| {
-        if repo_has_no_commits(&canonical) {
-            anyhow::bail!(
-                "{} has no commits yet. Make at least one commit before indexing.",
-                canonical.display()
-            );
-        }
-        Err(e).context("failed to get current commit hash")
+    // gitalisk surfaces an unborn `HEAD` as a raw `ambiguous argument 'HEAD'`
+    // git error, which reads as a bug rather than an empty repository (#658).
+    //
+    // Only a symbolic `HEAD` with no commit behind it reaches this arm, so the
+    // message needs no guard. `get_current_branch` resolves first and fails
+    // outright on a repository git will not read, and its detached-`HEAD`
+    // fallback (`rev-parse --short HEAD`, gitalisk v0.8.0
+    // `current_branch.rs:22`) only succeeds where `rev-parse HEAD` does.
+    let commit_sha = repo.get_current_commit_hash().map_err(|_| {
+        anyhow::anyhow!(
+            "{} has no commits yet. Make at least one commit before indexing.",
+            canonical.display()
+        )
     })?;
     let parent_repo_path = repo
         .parent_repo_path()
@@ -186,25 +191,6 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
         commit_sha,
         parent_repo_path,
     })
-}
-
-/// `HEAD` resolves to no commit on a freshly initialized repository, and
-/// gitalisk surfaces that as a raw `ambiguous argument 'HEAD'` git error,
-/// which reads as a bug rather than an empty repository (#658). Requiring
-/// `symbolic-ref` to still resolve distinguishes an unborn branch from a
-/// broken or detached HEAD, so corruption keeps its original error instead
-/// of being misreported as an empty repository.
-fn repo_has_no_commits(repo_path: &Path) -> bool {
-    let probe = |args: &[&str]| {
-        Command::new("git")
-            .args(args)
-            .current_dir(repo_path)
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false)
-    };
-    probe(&["symbolic-ref", "--quiet", "HEAD"])
-        && !probe(&["rev-parse", "--quiet", "--verify", "HEAD"])
 }
 
 /// Resolve the working-tree root of the repo containing `path`.
