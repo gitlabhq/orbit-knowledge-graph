@@ -36,7 +36,7 @@ pub struct NamespaceDispatcher {
 }
 
 impl NamespaceDispatcher {
-    pub fn new(
+    pub async fn new(
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
         checkpoint_store: Arc<dyn CheckpointStore>,
@@ -46,7 +46,7 @@ impl NamespaceDispatcher {
         ontology: &ontology::Ontology,
     ) -> Self {
         Self {
-            detector: Arc::new(DatalakeChangeDetector::new(datalake.clone(), ontology)),
+            detector: Arc::new(DatalakeChangeDetector::new(datalake.clone(), ontology).await),
             reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake)),
             publisher: NamespaceIndexingDispatch::new(nats),
             campaign,

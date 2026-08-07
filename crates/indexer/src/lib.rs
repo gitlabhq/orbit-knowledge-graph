@@ -343,17 +343,20 @@ pub async fn run_dispatcher(
             config.schedule.tasks.global.clone(),
             campaign.clone(),
         )),
-        Box::new(NamespaceDispatcher::new(
-            services.nats.clone(),
-            datalake,
-            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
-            ))),
-            metrics.clone(),
-            config.schedule.tasks.namespace.clone(),
-            campaign.clone(),
-            ontology,
-        )),
+        Box::new(
+            NamespaceDispatcher::new(
+                services.nats.clone(),
+                datalake,
+                Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
+                    config.graph.build_client(),
+                ))),
+                metrics.clone(),
+                config.schedule.tasks.namespace.clone(),
+                campaign.clone(),
+                ontology,
+            )
+            .await,
+        ),
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(

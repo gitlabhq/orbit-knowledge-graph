@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -46,11 +46,44 @@ pub(super) struct DatalakeChangeDetector {
 }
 
 impl DatalakeChangeDetector {
-    pub(super) fn new(datalake: ArrowClickHouseClient, ontology: &ontology::Ontology) -> Self {
-        Self {
-            datalake,
-            query: NamespaceChangeQuery::from_ontology(ontology),
-        }
+    pub(super) async fn new(
+        datalake: ArrowClickHouseClient,
+        ontology: &ontology::Ontology,
+    ) -> Self {
+        let existing_tables = Self::existing_tables(&datalake).await;
+        let all_sources = ontology.reindex_sources();
+        let query = match existing_tables {
+            Ok(tables) => NamespaceChangeQuery::new(all_sources.into_iter().filter(|s| {
+                let exists = tables.contains(s.table.as_str());
+                if !exists {
+                    tracing::warn!(
+                        table = %s.table,
+                        target = %s.target,
+                        "skipping reindex source: table does not exist in datalake"
+                    );
+                }
+                exists
+            })),
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "failed to query existing tables, using all reindex sources"
+                );
+                NamespaceChangeQuery::new(all_sources)
+            }
+        };
+
+        Self { datalake, query }
+    }
+
+    async fn existing_tables(
+        datalake: &ArrowClickHouseClient,
+    ) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let batches = datalake
+            .query_arrow("SELECT name FROM system.tables WHERE database = currentDatabase()")
+            .await?;
+        let names = String::extract_column(&batches, 0)?;
+        Ok(names.into_iter().collect())
     }
 }
 
@@ -105,10 +138,6 @@ struct NamespaceChangeQuery {
 }
 
 impl NamespaceChangeQuery {
-    fn from_ontology(ontology: &ontology::Ontology) -> Self {
-        Self::new(ontology.reindex_sources())
-    }
-
     fn new(reindex_sources: impl IntoIterator<Item = ReindexSource>) -> Self {
         Self {
             sql: render_change_query(&reindex_sources.into_iter().collect()),

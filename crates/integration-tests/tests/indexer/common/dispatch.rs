@@ -97,7 +97,8 @@ async fn run_namespace_dispatcher(ctx: &TestContext, nats_url: &str) -> Vec<Disp
         NamespaceDispatcherConfig::default(),
         Arc::new(indexer::campaign::CampaignState::new()),
         &ontology,
-    );
+    )
+    .await;
 
     dispatcher.run().await.unwrap();
 
