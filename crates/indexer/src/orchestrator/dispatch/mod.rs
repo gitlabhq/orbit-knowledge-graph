@@ -2,9 +2,11 @@
 //! to enumerate namespaces/projects and publish indexing work to NATS.
 
 pub mod code_backfill;
+pub mod enabled_namespaces;
 pub mod namespace_indexing;
 
 pub use code_backfill::CodeBackfill;
+pub use enabled_namespaces::enabled_namespaces_sql;
 pub use namespace_indexing::{NamespaceDispatchRequest, NamespaceIndexingDispatch};
 
 #[derive(Default)]

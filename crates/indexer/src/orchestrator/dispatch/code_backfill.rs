@@ -3,7 +3,6 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::time::Instant;
 
 use rand::seq::SliceRandom;
@@ -11,6 +10,7 @@ use tracing::{debug, info};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
+use super::enabled_namespaces::enabled_namespaces_sql;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -36,15 +36,6 @@ FROM project_namespace_traversal_paths
 WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
-
-static ENABLED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
-    let del = ontology::siphon_deleted_column();
-    format!(
-        "SELECT root_namespace_id, traversal_path \
-         FROM siphon_knowledge_graph_enabled_namespaces \
-         WHERE {del} = false AND traversal_path != ''"
-    )
-});
 
 pub struct PendingProject {
     pub project_id: i64,
@@ -149,13 +140,13 @@ impl CodeBackfill {
     }
 
     /// Returns (root_namespace_id, traversal_path) for every currently-enabled
-    /// namespace. Reads `traversal_path` from the enabled namespaces table
-    /// directly (gitlab-org/gitlab!232941); the prior implementation joined
-    /// `namespace_traversal_paths` per namespace.
+    /// namespace, with the path re-resolved through the traversal-path
+    /// dictionary so enrollment rows stored with a stale '0/' path stay
+    /// dispatchable (see `dispatch::enabled_namespaces`).
     pub async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, String)>, TaskError> {
         let batches = self
             .datalake
-            .query(&ENABLED_NAMESPACES_QUERY)
+            .query(enabled_namespaces_sql())
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -326,13 +317,10 @@ mod tests {
     }
 
     #[test]
-    fn enabled_namespaces_query_filters_deleted_and_pulls_path() {
-        assert!(ENABLED_NAMESPACES_QUERY.contains("_siphon_deleted = false"));
-        assert!(ENABLED_NAMESPACES_QUERY.contains("traversal_path"));
+    fn enabled_namespaces_query_rejects_unresolvable_paths() {
         assert!(
-            ENABLED_NAMESPACES_QUERY.contains("traversal_path != ''"),
-            "must skip rows where the dictionary-backed default hasn't \
-             populated yet — empty path would prefix-match every project"
+            enabled_namespaces_sql().contains("match(traversal_path, '^[0-9]+/[0-9]+/')"),
+            "a '' or '0/' path would prefix-match every project during backfill"
         );
     }
 

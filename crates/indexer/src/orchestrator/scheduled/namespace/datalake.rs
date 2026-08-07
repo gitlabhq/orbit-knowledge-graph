@@ -12,17 +12,14 @@ use tracing::{error, warn};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::NamespaceDispatchRequest;
+use crate::orchestrator::dispatch::enabled_namespaces::enabled_namespaces_sql;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
-
-const ENABLED_NAMESPACE_TABLE: &str = "siphon_knowledge_graph_enabled_namespaces";
 
 const BRANCH_FALLBACK_CONCURRENCY: usize = 4;
 
 const CHANGE_QUERY_SQL: &str = r#"WITH
   enabled AS (
-    SELECT DISTINCT root_namespace_id, traversal_path
-    FROM {{enabled_namespace_table}}
-    WHERE {{deleted_column}} = false AND traversal_path != ''
+    {{enabled_namespaces}}
   ),
   changed AS (
 {{branches}}
@@ -242,8 +239,7 @@ fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
         .join("\nUNION ALL\n");
 
     CHANGE_QUERY_SQL
-        .replace("{{enabled_namespace_table}}", ENABLED_NAMESPACE_TABLE)
-        .replace("{{deleted_column}}", ontology::siphon_deleted_column())
+        .replace("{{enabled_namespaces}}", enabled_namespaces_sql())
         .replace("{{branches}}", &branches)
 }
 
@@ -289,12 +285,7 @@ impl DatalakeEnabledNamespaceReader {
     pub(super) fn new(datalake: ArrowClickHouseClient) -> Self {
         Self {
             datalake,
-            sql: format!(
-                "SELECT root_namespace_id, traversal_path \
-                 FROM {ENABLED_NAMESPACE_TABLE} \
-                 WHERE {deleted} = false AND match(traversal_path, '{TOP_LEVEL_PREFIX_REGEX}')",
-                deleted = ontology::siphon_deleted_column()
-            ),
+            sql: enabled_namespaces_sql().to_string(),
         }
     }
 }
@@ -332,6 +323,7 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
 
     use super::*;
+    use crate::orchestrator::dispatch::enabled_namespaces::ENABLED_NAMESPACE_TABLE;
 
     fn column_source(table: &str) -> ReindexSource {
         ReindexSource {
@@ -462,14 +454,21 @@ mod tests {
     fn change_query_filters_enabled_namespaces() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
         assert!(query.combined_sql.contains(ENABLED_NAMESPACE_TABLE));
-        assert!(query.combined_sql.contains("_siphon_deleted = false"));
-        assert!(query.combined_sql.contains("traversal_path != ''"));
+        assert!(query.combined_sql.contains("WHERE is_deleted = false"));
         assert!(query.combined_sql.contains("INNER JOIN enabled"));
         assert!(
             query
                 .combined_sql
                 .contains("SELECT DISTINCT enabled.root_namespace_id")
         );
+    }
+
+    #[test]
+    fn change_query_resolves_enabled_paths_at_query_time() {
+        let query = NamespaceChangeQuery::new([column_source("work_items")]);
+        assert!(query.combined_sql.contains(
+            "dictGetOrDefault('namespace_traversal_paths_dict', 'traversal_path', toUInt64(root_namespace_id), stored_traversal_path)"
+        ));
     }
 
     #[test]
@@ -507,25 +506,24 @@ mod tests {
     fn change_query_renders_expected_sql_shape() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
 
-        assert_eq!(
-            query.combined_sql,
+        let expected = format!(
             r#"WITH
   enabled AS (
-    SELECT DISTINCT root_namespace_id, traversal_path
-    FROM siphon_knowledge_graph_enabled_namespaces
-    WHERE _siphon_deleted = false AND traversal_path != ''
+    {enabled}
   ),
   changed AS (
     SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target
     FROM work_items
-    WHERE _siphon_watermark > {lower:String}
-      AND _siphon_watermark <= {upper:String}
+    WHERE _siphon_watermark > {{lower:String}}
+      AND _siphon_watermark <= {{upper:String}}
       AND match(traversal_path, '^[0-9]+/[0-9]+/')
   )
 SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
-INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#
+INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#,
+            enabled = enabled_namespaces_sql()
         );
+        assert_eq!(query.combined_sql, expected);
     }
 
     #[test]
