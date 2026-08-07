@@ -37,7 +37,8 @@ const JOB_TIMEOUT_RETRY: RetryPolicy = RetryPolicy {
     dead_letter: true,
 };
 
-/// Resolves once the job has had its full working budget; lane-queue time is forgiven up to `grace`.
+/// Reads the queue time once, at budget expiry, so a job still waiting for a lane at that
+/// point is forgiven nothing and cancelled; redelivery covers it.
 async fn work_deadline(budget: Duration, grace: Duration, lane_wait: Arc<AtomicU64>) {
     tokio::time::sleep(budget).await;
     let queued = Duration::from_millis(lane_wait.load(Ordering::Relaxed));

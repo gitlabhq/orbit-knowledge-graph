@@ -220,8 +220,7 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
-    /// `lane_wait` records milliseconds queued for an indexing lane; left untouched when the
-    /// job ends before reaching one.
+    /// `lane_wait` receives milliseconds spent queued for an indexing lane.
     #[tracing::instrument(
         name = "code_indexing_project",
         skip_all,
@@ -331,10 +330,7 @@ impl CodeIndexingPipeline {
         };
         let queued = Instant::now();
         let _indexing_slot = acquire(lane, "indexing").await?;
-        lane_wait.store(
-            u64::try_from(queued.elapsed().as_millis()).unwrap_or(u64::MAX),
-            Ordering::Relaxed,
-        );
+        lane_wait.store(queued.elapsed().as_millis() as u64, Ordering::Relaxed);
 
         context.progress.notify_in_progress().await;
 
