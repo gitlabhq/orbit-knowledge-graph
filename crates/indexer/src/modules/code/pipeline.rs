@@ -536,7 +536,6 @@ impl CodeIndexer {
         let repo_dir = repository.path().to_path_buf();
         let file_inventory = repository.file_inventory.clone();
         let stream_reasons = repository.stream_reasons.clone();
-        // Family log lines carry no project of their own; the span must follow the thread.
         let span = tracing::Span::current();
         let parsed = tokio::task::spawn_blocking(move || {
             span.in_scope(|| {
