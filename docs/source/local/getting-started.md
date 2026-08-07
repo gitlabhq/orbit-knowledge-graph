@@ -80,9 +80,27 @@ allowlisting policies can authorize it by publisher:
    (Get-FileHash .\orbit-local-windows-x86_64.zip -Algorithm SHA256).Hash
    ```
 
-   The output must match the hash in the `.sha256` file.
-1. Extract the archive and move `orbit.exe` to a user-scope directory, for example
-   `%LOCALAPPDATA%\Programs\orbit`, the same default the installer uses.
+   The output must match the hash in the `.sha256` file. The comparison is not
+   case-sensitive: `Get-FileHash` returns uppercase and the `.sha256` file
+   stores lowercase.
+1. Clear the Mark of the Web. A browser attaches it to the download, extraction
+   carries it to `orbit.exe`, and the first run can then raise a SmartScreen
+   prompt or be blocked by policy:
+
+   ```powershell
+   Unblock-File .\orbit-local-windows-x86_64.zip
+   ```
+
+1. Extract the archive, create the target directory, then move `orbit.exe` into
+   it. This example uses `$env:LOCALAPPDATA\Programs\orbit`, the same default
+   the installer uses:
+
+   ```powershell
+   Expand-Archive -Path .\orbit-local-windows-x86_64.zip -DestinationPath .
+   New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Programs\orbit"
+   Move-Item .\orbit.exe "$env:LOCALAPPDATA\Programs\orbit\orbit.exe"
+   ```
+
 1. If that directory is not already on your `PATH`, add it for your user:
 
    ```powershell
