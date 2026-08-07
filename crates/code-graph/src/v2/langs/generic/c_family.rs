@@ -53,7 +53,6 @@ fn declared_name_node<'r>(def: &N<'r>) -> Option<N<'r>> {
     descend_declarator_name(&def.field("declarator")?)
 }
 
-/// C declared name: the bare declarator text, verbatim.
 pub fn c_declarator_name(def: &N<'_>) -> Option<String> {
     Some(declared_name_node(def)?.text().to_string())
 }
@@ -94,13 +93,21 @@ fn trailing_operator_cast<'r>(node: &N<'r>) -> Option<N<'r>> {
 
 /// `operator_cast` → `operator <type>`, keeping pointer/reference/cv decorations
 /// (`operator const char*`) but dropping the function declarator (`() const`).
-/// The type is the text up to the operator's own `parameter_list`, so a type
-/// that embeds its own (`operator std::function<void(int)>`) is preserved.
+/// The type ends at the last non-comment token before the operator's own
+/// `parameter_list`, so a type that embeds its own params
+/// (`operator std::function<void(int)>`) is preserved while a comment between
+/// the type and the `()` (`operator int& /*c*/ ()`) does not leak into the name.
 fn operator_cast_text(node: &N<'_>) -> Option<String> {
     let params = function_parameter_list(node)?;
+    let base = node.range().start;
+    let type_end = node
+        .dfs()
+        .filter(|n| n.kind().as_ref() != "comment" && n.range().end <= params.range().start)
+        .map(|n| n.range().end)
+        .max()
+        .unwrap_or(params.range().start);
     let text = node.text();
-    let end = params.range().start - node.range().start;
-    Some(text[..end].trim_end().to_string())
+    Some(text[..type_end - base].trim_end().to_string())
 }
 
 /// The `parameter_list` of the `abstract_function_declarator` reached by

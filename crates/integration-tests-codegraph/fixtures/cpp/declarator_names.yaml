@@ -29,6 +29,7 @@ fixtures:
       };
       Ptr::operator int() const { return 0; }
       S::I::operator int() const { return 0; }
+      Widget::operator int& /*c*/ () { return r; }
 
 tests:
   - name: "Plain and storage-qualifier-prefixed functions keep the bare name"
@@ -140,3 +141,12 @@ tests:
       - { row_count: 2 }
       - { row: { name: "Ptr::operator int", fqn: "conversions::Ptr::operator int" } }
       - { row: { name: "S::I::operator int", fqn: "conversions::S::I::operator int" } }
+
+  - name: "Comment before the parameter list does not leak into a conversion operator name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.name STARTS WITH 'Widget::operator'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Widget::operator int&", fqn: "conversions::Widget::operator int&" } }
