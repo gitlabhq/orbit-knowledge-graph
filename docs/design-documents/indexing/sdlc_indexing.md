@@ -169,16 +169,10 @@ If the table is not present, the indexer assumes that no namespaces have access 
 SELECT * FROM knowledge_graph_enabled_namespaces;
 ```
 
-The replicated table stores a `traversal_path` column computed by a ClickHouse
-insert-time DEFAULT (a dictionary lookup that falls back to `0/` when the
-namespace has not replicated yet), so the stored value can be permanently
-stale. Every dispatch surface that reads this table therefore re-resolves the
-path through `namespace_traversal_paths_dict` at query time, using the stored
-value only as a fallback, and keeps only the latest row state per enrollment
-(`argMax` over the watermark). Enrollment CDC events carry no traversal path
-on the wire either; the enabled-namespaces CDC route resolves the path from
-`namespace_traversal_paths` when the event omits it, and namespaces that
-cannot be resolved yet are picked up by the periodic namespace sweep.
+The stored `traversal_path` can be permanently wrong (a replication race bakes
+in `0/`), so every reader re-resolves it at query time. Enrollment CDC events
+never carry a path; the route looks it up in `namespace_traversal_paths`, and
+the sweep catches whatever is not resolvable yet.
 
 ##### NATS JetStream and KV orchestration
 
