@@ -240,7 +240,12 @@ fn is_git_repo(path: &Path) -> bool {
 
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
-    if ws.index_repositories().is_err() {
+    if let Err(e) = ws.index_repositories() {
+        // Discovery failing and finding nothing are indistinguishable to the
+        // caller, which then reports no repository found for a path that may
+        // be correct. Log so the difference is at least diagnosable.
+        let path = workspace_path.display();
+        tracing::warn!("repository discovery failed in {path}: {e}");
         return vec![];
     }
     ws.get_repositories()
