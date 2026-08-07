@@ -257,9 +257,6 @@ impl CodeIndexer {
         Ok(())
     }
 
-    /// The one way a repository gets indexed: fetch, queue for a lane, parse. Fetch and
-    /// parse share the configured work budget; the lane wait runs outside it, bounded by
-    /// the time the held lock has left after the remaining work is provided for.
     pub async fn index_project(
         &self,
         context: &HandlerContext,
@@ -304,8 +301,7 @@ impl CodeIndexer {
         match indexed {
             Some(result) => result.map_err(IndexError::Failed),
             None => {
-                // Dropping the timed-out future leaves the blocking parse running; the cancel
-                // makes it bail per file.
+                // The blocking parse outlives the dropped future; cancel makes it bail.
                 cancel.cancel();
                 Err(IndexError::BudgetExceeded {
                     budget: budget.unwrap_or_default(),
