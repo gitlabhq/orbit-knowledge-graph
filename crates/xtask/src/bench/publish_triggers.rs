@@ -2,10 +2,10 @@ use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
 use super::siphon_wire::{
     build_replication_events_for_table, code_indexing_task_columns, enabled_namespace_columns,
 };
+use anyhow::{Context, Result, bail};
 
 #[derive(clap::Args)]
 pub struct Args {

@@ -10,10 +10,11 @@ CH_NS="ra-clickhouse"
 CH_PASSWORD=$(openssl rand -base64 24)
 
 log "Deploying standalone ClickHouse"
-sed -e "s/\${CH_STORAGE}/$(tier '.clickhouse.storage')/g" \
-    -e "s/\${CH_CPU}/$(tier '.clickhouse.cpu')/g" \
-    -e "s/\${CH_MEMORY}/$(tier '.clickhouse.memory')/g" \
-    -e "s/\${CH_PASSWORD}/${CH_PASSWORD}/g" \
+# Use | as sed delimiter to avoid conflicts with base64 chars (+, /, =).
+sed -e "s|\${CH_STORAGE}|$(tier '.clickhouse.storage')|g" \
+    -e "s|\${CH_CPU}|$(tier '.clickhouse.cpu')|g" \
+    -e "s|\${CH_MEMORY}|$(tier '.clickhouse.memory')|g" \
+    -e "s|\${CH_PASSWORD}|${CH_PASSWORD}|g" \
   < "${BENCH_DIR}/manifests/standalone-ch.yaml" \
   | $KC apply -f -
 
