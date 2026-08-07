@@ -69,7 +69,7 @@ include:
     inputs:
       automatic: manual
       labels_enabled: "false"
-      model: "anthropic/claude-opus-5"
+      model: "anthropic/claude-opus-4-8"
       variant: "high"
 
 stages:
