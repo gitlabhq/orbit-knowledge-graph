@@ -50,69 +50,6 @@ pub(crate) fn dir_of(path: &str) -> &str {
     }
 }
 
-/// Byte lengths of every prefix the scalar `rfind(sep)` scope climb probes, in
-/// the same order it visits them: the full string, then each separator start
-/// found right-to-left. Reproduces `rfind`'s non-overlapping backward match so
-/// the probe-key sequence is byte-identical to the `current.rfind(sep)` loop.
-///
-/// Lazy on purpose: a def that resolves at the outermost scope stops the caller
-/// after the full-FQN probe, so no backward scan runs, while still scanning each
-/// level at most once.
-fn climb_prefix_ends<'a>(fqn: &'a str, sep: &'a str) -> impl Iterator<Item = usize> + 'a {
-    let hay = fqn.as_bytes();
-    let starts = SeparatorStarts {
-        hay,
-        sep: sep.as_bytes(),
-        limit: hay.len(),
-    };
-    std::iter::once(fqn.len()).chain(starts)
-}
-
-/// Rightmost start of `sep` whose match fits within `hay[..end]`, or `None`.
-/// Scans first-byte candidates right-to-left and verifies the full separator,
-/// so a lone first byte (e.g. a single `:` for `::`) is skipped. `width == 1`
-/// degenerates to `memrchr`: `pos + 1 <= end` always holds and the one-byte
-/// equality is trivially true, so the dot separator matches `memrchr_iter`.
-fn rightmost_fit(hay: &[u8], sep: &[u8], end: usize) -> Option<usize> {
-    let width = sep.len();
-    let mut search_end = end;
-    loop {
-        let pos = memchr::memrchr(sep[0], &hay[..search_end])?;
-        if pos + width <= end && &hay[pos..pos + width] == sep {
-            return Some(pos);
-        }
-        if pos == 0 {
-            return None;
-        }
-        search_end = pos;
-    }
-}
-
-/// Separator starts right-to-left, non-overlapping (a match consumes its own
-/// width), matching repeated `rfind(sep)` + truncate-to-match-start. `limit` is
-/// the truncation bound: advancing it to each confirmed `pos` prevents the next
-/// match from overlapping, so `a::::b` yields `3, 1` (prefixes `a::`, `a`), not
-/// `3, 2, 1`.
-struct SeparatorStarts<'a> {
-    hay: &'a [u8],
-    sep: &'a [u8],
-    limit: usize,
-}
-
-impl Iterator for SeparatorStarts<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<usize> {
-        // Guards `rightmost_fit`'s `sep[0]`; an empty separator has no starts.
-        if self.sep.is_empty() {
-            return None;
-        }
-        let pos = rightmost_fit(self.hay, self.sep, self.limit)?;
-        self.limit = pos;
-        Some(pos)
-    }
-}
-
 pub(crate) struct ImportResolver<'a> {
     pub graph: &'a CodeGraph,
     pub file_node: NodeIndex,
@@ -300,17 +237,12 @@ impl<'a> ImportResolver<'a> {
         for &did in &def_ids {
             let def = &self.graph.defs[did.0 as usize];
             let fqn_str = self.graph.str(def.fqn);
-            // The `{sep}{name}` suffix is invariant across the climb, so append
-            // it to the shrinking prefix.
-            for prefix_len in climb_prefix_ends(fqn_str, sep) {
-                let prefix = &fqn_str[..prefix_len];
-                let key = {
-                    self.scratch.clear();
-                    self.scratch.push_str(prefix);
-                    self.scratch.push_str(sep);
-                    self.scratch.push_str(name);
-                    self.scratch.as_str()
-                };
+            for prefix in crate::utils::fqn_scopes(fqn_str, sep) {
+                self.scratch.clear();
+                self.scratch.push_str(prefix);
+                self.scratch.push_str(sep);
+                self.scratch.push_str(name);
+                let key = self.scratch.as_str();
                 let matches = self
                     .graph
                     .indexes
@@ -512,133 +444,7 @@ impl<'a> ImportResolver<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{climb_prefix_ends, dir_of};
-
-    /// The exact prefixes the pre-rewrite `current.rfind(sep)` climb probed.
-    fn rfind_climb_prefixes<'a>(fqn: &'a str, sep: &str) -> Vec<&'a str> {
-        let mut out = Vec::new();
-        let mut current = fqn;
-        loop {
-            out.push(current);
-            match current.rfind(sep) {
-                Some(pos) => current = &current[..pos],
-                None => break,
-            }
-        }
-        out
-    }
-
-    fn new_climb_prefixes<'a>(fqn: &'a str, sep: &str) -> Vec<&'a str> {
-        climb_prefix_ends(fqn, sep).map(|end| &fqn[..end]).collect()
-    }
-
-    fn assert_climb_matches(fqn: &str, sep: &str) {
-        assert_eq!(
-            new_climb_prefixes(fqn, sep),
-            rfind_climb_prefixes(fqn, sep),
-            "climb mismatch for fqn={fqn:?} sep={sep:?}"
-        );
-    }
-
-    #[test]
-    fn climb_matches_rfind_dot_separator() {
-        for fqn in [
-            "",
-            "pkg",
-            "pkg.Type",
-            "a.b.c.d",
-            "a..b",
-            ".leading",
-            "trailing.",
-            "..",
-            "net.http.Client.Do",
-        ] {
-            assert_climb_matches(fqn, ".");
-        }
-    }
-
-    #[test]
-    fn climb_matches_rfind_colon_separator() {
-        for fqn in [
-            "",
-            "crate",
-            "crate::mod::Type",
-            "a::b::c::d",
-            "std::collections::HashMap",
-            "lone:colon",
-            "trailing::",
-            "::leading",
-        ] {
-            assert_climb_matches(fqn, "::");
-        }
-    }
-
-    #[test]
-    fn climb_matches_rfind_adjacent_colon_separators() {
-        // rfind climbs `a::::b` -> `a::` -> `a` (starts 3 then 1), never 3,2,1.
-        assert_eq!(
-            new_climb_prefixes("a::::b", "::"),
-            vec!["a::::b", "a::", "a"]
-        );
-        for fqn in ["a::::b", "a:::b", "::::", ":::", "a::::::b", "x::::y::::z"] {
-            assert_climb_matches(fqn, "::");
-        }
-    }
-
-    /// Mirrors the production probe-key build in `scope_fqn_walk`:
-    /// `push_str(prefix)` then `push_str(sep)` then `push_str(name)` per level.
-    fn composed_probe_keys(fqn: &str, sep: &str, name: &str) -> Vec<String> {
-        climb_prefix_ends(fqn, sep)
-            .map(|end| {
-                let mut key = String::new();
-                key.push_str(&fqn[..end]);
-                key.push_str(sep);
-                key.push_str(name);
-                key
-            })
-            .collect()
-    }
-
-    #[test]
-    fn composed_probe_keys_dot_separator() {
-        assert_eq!(
-            composed_probe_keys("net.http.Client", ".", "Do"),
-            ["net.http.Client.Do", "net.http.Do", "net.Do"]
-        );
-    }
-
-    #[test]
-    fn composed_probe_keys_colon_separator() {
-        assert_eq!(
-            composed_probe_keys("std::collections::HashMap", "::", "new"),
-            [
-                "std::collections::HashMap::new",
-                "std::collections::new",
-                "std::new",
-            ]
-        );
-    }
-
-    #[test]
-    fn climb_matches_rfind_exhaustive_small_alphabet() {
-        // Brute force every string over {a, :, .} up to length 8 against both
-        // separators; the `:`-dense inputs stress overlapping `::` matches.
-        fn recurse(buf: &mut String, remaining: usize) {
-            if !buf.is_empty() {
-                assert_climb_matches(buf, ".");
-                assert_climb_matches(buf, "::");
-            }
-            if remaining == 0 {
-                return;
-            }
-            for c in ['a', ':', '.'] {
-                buf.push(c);
-                recurse(buf, remaining - 1);
-                buf.pop();
-            }
-        }
-        recurse(&mut String::new(), 8);
-    }
+    use super::dir_of;
 
     #[test]
     fn dir_of_nested_path() {
