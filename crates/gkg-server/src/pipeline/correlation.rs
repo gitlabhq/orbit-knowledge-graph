@@ -1,4 +1,31 @@
-//! Tags each ClickHouse query with the request correlation ID: a per-stage `query_id` (sanitized-or-ULID prefix) and the raw ID in `log_comment`.
+//! Tags each ClickHouse query with the request correlation ID. Sub-queries carry
+//! a per-stage `query_id` and a lightweight `gkg;<kind>;correlation_id=<id>`
+//! comment; the base query additionally carries an attribution payload
+//! (`gkg;<base64(json)>`) so retention can recover who ran which query with which
+//! compiler and schema version.
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD_NO_PAD;
+use serde::Serialize;
+
+const PAYLOAD_VERSION: u32 = 1;
+const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
+
+#[derive(Serialize)]
+struct AttributionPayload<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    correlation_id: Option<String>,
+    user_id: u64,
+    query: &'a str,
+    versions: Versions,
+}
+
+#[derive(Serialize)]
+struct Versions {
+    payload: u32,
+    dsl: String,
+    schema: u32,
+}
 
 pub(crate) fn query_id(stage: &str) -> String {
     let prefix = labkit::correlation::current()
@@ -16,6 +43,23 @@ pub(crate) fn log_comment(suffix: Option<&str>) -> String {
         Some(id) => format!("{head};correlation_id={id}"),
         None => head,
     }
+}
+
+/// Base-query `log_comment`: the `gkg` prefix plus a base64 attribution payload
+/// carrying correlation ID, user, DSL query, and the compiler/schema versions.
+pub(crate) fn log_comment_base(user_id: u64, query_json: &str) -> String {
+    let payload = AttributionPayload {
+        correlation_id: labkit::correlation::current(),
+        user_id,
+        query: query_json,
+        versions: Versions {
+            payload: PAYLOAD_VERSION,
+            dsl: QUERY_DSL_VERSION.trim().to_string(),
+            schema: *indexer::schema::version::SCHEMA_VERSION,
+        },
+    };
+    let json = serde_json::to_vec(&payload).unwrap_or_default();
+    format!("gkg;{}", STANDARD_NO_PAD.encode(json))
 }
 
 fn sanitize(id: &str) -> Option<String> {
@@ -101,5 +145,36 @@ mod tests {
             with_correlation("req-abc-123", || log_comment(Some("hydration:static"))),
             "gkg;hydration:static;correlation_id=req-abc-123"
         );
+    }
+
+    fn decode_base_payload(comment: &str) -> serde_json::Value {
+        let b64 = comment.strip_prefix("gkg;").expect("gkg-prefixed payload");
+        let json = STANDARD_NO_PAD.decode(b64).expect("valid base64");
+        serde_json::from_slice(&json).expect("valid json")
+    }
+
+    #[test]
+    fn base_payload_carries_attribution_and_versions() {
+        let comment = with_correlation("req-abc-123", || {
+            log_comment_base(42, r#"{"query_type":"traversal"}"#)
+        });
+        let p = decode_base_payload(&comment);
+
+        assert_eq!(p["correlation_id"], "req-abc-123");
+        assert_eq!(p["user_id"], 42);
+        assert_eq!(p["query"], r#"{"query_type":"traversal"}"#);
+        assert_eq!(p["versions"]["payload"], PAYLOAD_VERSION);
+        assert_eq!(p["versions"]["dsl"], QUERY_DSL_VERSION.trim());
+        assert_eq!(
+            p["versions"]["schema"],
+            *indexer::schema::version::SCHEMA_VERSION
+        );
+    }
+
+    #[test]
+    fn base_payload_omits_correlation_when_absent() {
+        let p = decode_base_payload(&log_comment_base(1, "{}"));
+        assert!(p.get("correlation_id").is_none());
+        assert_eq!(p["user_id"], 1);
     }
 }
