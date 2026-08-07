@@ -25,6 +25,8 @@ use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 pub const CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.changes";
 pub const SWEEP_CHECKPOINT_KEY: &str = "dispatch.sdlc.namespace.sweep";
 
+pub(super) const TASK_NAME: &str = "dispatch.sdlc.namespace";
+
 pub struct NamespaceDispatcher {
     detector: Arc<dyn NamespaceChangeDetector>,
     reader: Arc<dyn EnabledNamespaceReader>,
@@ -46,7 +48,11 @@ impl NamespaceDispatcher {
         ontology: &ontology::Ontology,
     ) -> Self {
         Self {
-            detector: Arc::new(DatalakeChangeDetector::new(datalake.clone(), ontology)),
+            detector: Arc::new(DatalakeChangeDetector::new(
+                datalake.clone(),
+                ontology,
+                metrics.clone(),
+            )),
             reader: Arc::new(DatalakeEnabledNamespaceReader::new(datalake)),
             publisher: NamespaceIndexingDispatch::new(nats),
             campaign,
@@ -80,7 +86,7 @@ impl NamespaceDispatcher {
 #[async_trait]
 impl ScheduledTask for NamespaceDispatcher {
     fn name(&self) -> &str {
-        "dispatch.sdlc.namespace"
+        TASK_NAME
     }
 
     fn schedule(&self) -> &ScheduleConfiguration {
