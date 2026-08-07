@@ -199,6 +199,14 @@ impl CodeMetrics {
         }
     }
 
+    /// Queue time is off the work budget, so without this a starved pod is invisible.
+    pub(in crate::modules::code) fn record_slot_wait(&self, slot: &'static str, elapsed: Duration) {
+        self.pipeline_phase_duration.record(
+            elapsed.as_secs_f64(),
+            &[KeyValue::new(code::labels::PHASE, slot)],
+        );
+    }
+
     pub(in crate::modules::code) fn record_fetch_duration(&self, elapsed: Duration) {
         self.repository_fetch_duration
             .record(elapsed.as_secs_f64(), &[]);

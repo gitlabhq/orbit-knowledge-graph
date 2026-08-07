@@ -1503,12 +1503,25 @@ async fn cancelled_run_that_finishes_writes_no_checkpoint() {
     let cancel = code_graph::v2::CancellationToken::new();
     cancel.cancel();
     let mut observer = indexer::observer::NoOpObserver;
+    let lock = indexer::locking::LockGuard::acquire(
+        Arc::new(MockLockService::new()),
+        "project.9911.cancelled",
+        std::time::Duration::from_secs(300),
+    )
+    .await
+    .expect("lock service")
+    .expect("lock free");
     let result = deps
         .pipeline
-        .index_project(&handler_context(), &request, &mut observer, cancel)
+        .index_project(&handler_context(), &request, &mut observer, cancel, &lock)
         .await;
     assert!(
-        matches!(result, Err(indexer::handler::HandlerError::Processing(_))),
+        matches!(
+            result,
+            Err(indexer::modules::code::IndexError::Failed(
+                indexer::handler::HandlerError::Processing(_)
+            ))
+        ),
         "a cancelled run must fail with Processing so it is retried, not checkpointed"
     );
 

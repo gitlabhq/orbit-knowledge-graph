@@ -25,6 +25,7 @@ pub trait LockService: Send + Sync {
 pub struct LockGuard {
     service: Option<Arc<dyn LockService>>,
     key: String,
+    expires_at: tokio::time::Instant,
 }
 
 impl LockGuard {
@@ -37,10 +38,17 @@ impl LockGuard {
             Ok(Some(Self {
                 service: Some(service),
                 key: key.to_string(),
+                expires_at: tokio::time::Instant::now() + ttl,
             }))
         } else {
             Ok(None)
         }
+    }
+
+    /// Time left before the lock lapses on its own; nothing ever renews it.
+    pub fn time_left(&self) -> Duration {
+        self.expires_at
+            .saturating_duration_since(tokio::time::Instant::now())
     }
 
     pub async fn release(mut self) -> Result<(), LockError> {

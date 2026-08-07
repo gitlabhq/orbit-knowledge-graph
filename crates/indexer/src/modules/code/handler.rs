@@ -10,7 +10,7 @@ use tracing::{debug, info, warn};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
-use super::pipeline::{CodeIndexingPipeline, IndexingRequest};
+use super::pipeline::{CodeIndexer, IndexError, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::analytics::IndexingAnalytics;
 
@@ -43,7 +43,7 @@ fn project_lock_key(project_id: i64, branch: &str) -> String {
 }
 
 pub struct CodeIndexingTaskHandler {
-    pipeline: Arc<CodeIndexingPipeline>,
+    pipeline: Arc<CodeIndexer>,
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
@@ -63,7 +63,7 @@ impl CodeIndexingTaskHandler {
         reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
     )]
     pub fn new(
-        pipeline: Arc<CodeIndexingPipeline>,
+        pipeline: Arc<CodeIndexer>,
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
@@ -262,6 +262,16 @@ impl CodeIndexingTaskHandler {
         clippy::too_many_arguments,
         reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
     )]
+    #[tracing::instrument(
+        name = "code_indexing_project",
+        skip_all,
+        fields(
+            project_id = request.project_id,
+            namespace_id,
+            traversal_path = %request.traversal_path,
+            branch = %branch,
+        )
+    )]
     async fn index_with_lock(
         &self,
         context: &HandlerContext,
@@ -272,10 +282,20 @@ impl CodeIndexingTaskHandler {
         attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<&'static str>, HandlerError> {
+        let Some(namespace_id) =
+            gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
+        else {
+            return Err(HandlerError::Processing(format!(
+                "traversal_path {:?} has no namespace_id",
+                request.traversal_path
+            )));
+        };
+        tracing::Span::current().record("namespace_id", namespace_id);
+
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let _guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
+        let guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
         {
@@ -305,32 +325,33 @@ impl CodeIndexingTaskHandler {
             commit_sha: request.commit_sha.clone(),
             had_prior_checkpoint,
         };
-        // On timeout: cancel so the detached parse bails, and drop the future before its flush so nothing commits.
         let cancel = CancellationToken::new();
-        let work =
-            self.pipeline
-                .index_project(context, &indexing_request, observer, cancel.clone());
-        let result = match self.pipeline.job_timeout() {
-            Some(timeout) => match tokio::time::timeout(timeout, work).await {
-                Ok(result) => result,
-                Err(_) => {
-                    cancel.cancel();
-                    warn!(
-                        project_id,
-                        branch = %branch,
-                        timeout_secs = timeout.as_secs(),
-                        "code indexing job exceeded wall-clock timeout"
-                    );
-                    Err(JOB_TIMEOUT_RETRY.global_failure(
-                        attempt,
-                        format!(
-                            "code indexing job exceeded the {}s timeout",
-                            timeout.as_secs()
-                        ),
-                    ))
-                }
-            },
-            None => work.await,
+        let result = match self
+            .pipeline
+            .index_project(context, &indexing_request, observer, cancel.clone(), &guard)
+            .await
+        {
+            Ok(outcome) => Ok(outcome),
+            Err(IndexError::BudgetExceeded { budget }) => {
+                warn!(
+                    project_id,
+                    branch = %branch,
+                    budget_secs = budget.as_secs(),
+                    "code indexing job exceeded its work budget"
+                );
+                Err(JOB_TIMEOUT_RETRY.global_failure(
+                    attempt,
+                    format!(
+                        "code indexing job exceeded the {}s work budget",
+                        budget.as_secs()
+                    ),
+                ))
+            }
+            Err(IndexError::NoLane { waited }) => Err(HandlerError::Backpressure(format!(
+                "no indexing lane within {}s",
+                waited.as_secs()
+            ))),
+            Err(IndexError::Failed(e)) => Err(e),
         };
 
         let result = result.map(|outcome| outcome.metric_label());
@@ -425,7 +446,7 @@ mod tests {
                 ));
             let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
-            let pipeline = Arc::new(CodeIndexingPipeline::new(
+            let pipeline = Arc::new(CodeIndexer::new(
                 resolver,
                 crate::testkit::test_writer(),
                 Arc::clone(&checkpoint_store),
