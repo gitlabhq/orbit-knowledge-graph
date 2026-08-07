@@ -1,0 +1,88 @@
+# Gate label: orbit::bench
+# All three jobs are real runner jobs with logs, in their own stage.
+
+.ra-bench-base:
+  stage: ra-bench
+  tags:
+    - saas-linux-medium-amd64
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
+  variables:
+    RUN_ID: "ra-${CI_PIPELINE_ID}"
+    KCTX: gitlab-org/orbit/knowledge-graph:ra-bench-agent
+    KUBECTL_VERSION: "1.35.2"
+    HELM_VERSION: "3.20.0"
+    HELMFILE_VERSION: "1.4.2"
+    RA_SKIP_POOL: "1"
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /\borbit::bench\b/
+      when: never
+    - when: on_success
+  before_script:
+    - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX"
+
+ra_bench_prepare:
+  extends: .ra-bench-base
+  needs: []
+  script:
+    - source bench/scripts/labels-to-env.sh
+    - echo "Cluster access verified"
+    - kubectl get nodes
+
+ra_bench_run:
+  extends: .ra-bench-base
+  timeout: 3h
+  needs: [ra_bench_prepare]
+  services:
+    - name: docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - source bench/scripts/labels-to-env.sh
+    - bench/scripts/provision.sh
+    # Build the xtask bench image and push to the registry.
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - source bench/scripts/build-xtask-image.sh
+    - |
+      if [ -z "${RA_SKIP_IMPORT:-}" ]; then
+        DUMP_PREFIX="${DUMP_PREFIX:-core-2026-06-25-1115}" bench/scripts/import-dump-job.sh
+      fi
+    # Generate config files for the phase Jobs.
+    - |
+      RUN_DIR="bench/results/${RUN_ID}"
+      mkdir -p "${RUN_DIR}"
+      # Namespace IDs for P1 enrollment trigger.
+      echo "9970 1/9970/" > "${RUN_DIR}/namespace_ids.txt"
+      # Copy the dump manifest for replay-sdlc.
+      kubectl --context "$KCTX" exec -n "e2e-${RUN_ID}-clickhouse" statefulset/clickhouse -- \
+        clickhouse-client --query "SELECT name, total_rows FROM system.tables WHERE database = 'datalake' FORMAT TSV" \
+        > "${RUN_DIR}/manifest.tsv" 2>/dev/null || true
+    - XTASK_IMAGE="${XTASK_IMAGE}" bench/scripts/run-all-phases.sh
+    - uv run bench/scoring/score.py "bench/results/${RUN_ID}" "${TIER:-small}"
+    - uv run bench/scoring/report.py "bench/results/${RUN_ID}" "${TIER:-small}"
+  after_script:
+    - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX" || true
+    - bench/scripts/teardown.sh || true
+  artifacts:
+    paths:
+      - bench/results/*/report.md
+      - bench/results/*/slo_results.json
+      - bench/results/*/phases.jsonl
+    when: always
+    expire_in: 30 days
+
+ra_bench_cleanup:
+  extends: .ra-bench-base
+  needs:
+    - job: ra_bench_run
+      artifacts: false
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /\borbit::bench\b/
+      when: never
+    - when: always
+  script:
+    - source bench/scripts/labels-to-env.sh
+    - bench/scripts/teardown.sh

@@ -1,0 +1,19 @@
+# PII/secret columns scrubbed at import time (staging -> datalake copy).
+# "null" columns are replaced with empty strings.
+# "hash" columns are replaced with sipHash64(value).
+# The import Job enforces this; the indexer does not need text content
+# to build the graph (edges, node properties, traversal paths).
+scrub:
+  siphon_users:
+    "null": [email, name]
+    hash: [username]
+  siphon_notes:
+    "null": [note]
+  siphon_merge_request_diffs:
+    "null": [st_diffs]
+  siphon_merge_request_diff_files:
+    "null": [diff, external_diff_offset, external_diff_size]
+  merge_requests:
+    "null": [title, description]
+  work_items:
+    "null": [title, description]
