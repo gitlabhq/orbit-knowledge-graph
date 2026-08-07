@@ -1,0 +1,22 @@
+description: A reindex source table missing traversal_path loses only its own change signal;
+  changes from healthy tables still dispatch, deduped across branches.
+
+seed:
+  checkpoint:
+    - { key: dispatch.sdlc.namespace.changes, watermark: "2024-01-19 00:00:00.000000", cursor_values: "null" }
+    - { key: dispatch.sdlc.namespace.sweep, watermark: { sql: "now64(6)" }, cursor_values: "null" }
+  siphon_knowledge_graph_enabled_namespaces:
+    - { id: 1, root_namespace_id: 100, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  merge_requests:
+    - { id: 2000, target_branch: main, source_branch: feature, title: MR 2000, description: "", target_project_id: 1, iid: 2000, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+  siphon_approvals:
+    - { id: 3000, merge_request_id: 2000, user_id: 1, project_id: 1, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+
+dispatch: namespace
+
+expect:
+  dispatched:
+    - kind: namespace
+      count: 1
+      rows:
+        - { namespace: 100, traversal_path: "1/100/", targets: [APPROVED, Commit, MergeRequest] }
