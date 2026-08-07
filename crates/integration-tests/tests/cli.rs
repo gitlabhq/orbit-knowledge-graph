@@ -671,6 +671,11 @@ fn mcp_bad_sql_is_recoverable_tool_error() {
 fn mcp_index_on_non_git_path_is_recoverable_tool_error() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let not_a_repo = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        not_a_repo.path().join("a.go"),
+        "package main\nfunc Alpha() {}\n",
+    )
+    .unwrap();
 
     let resps = mcp_roundtrip(
         data_dir.path(),
